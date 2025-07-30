@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+redis
+celery
+aiofiles
+pillow
+opencv-python
+python-multipart
+ollama

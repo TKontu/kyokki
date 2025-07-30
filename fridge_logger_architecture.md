@@ -169,22 +169,6 @@ services:
     image: redis:7-alpine
     volumes:
       - redis_data:/data
-
-  ollama:
-    image: ollama/ollama:latest
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_HOST=0.0.0.0:11434
-    ports:
-      - "11434:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu] # If GPU available
 ```
 
 ### Network Configuration
@@ -196,7 +180,8 @@ services:
   - 80/443: Web interface (iPad)
   - 8000: API (internal)
   - 5432: PostgreSQL (internal)
-  - 11434: Ollama (internal)
+  - 192.168.0.247:11434: Ollama (external)
+  - 192.168.0.136:11434: Ollama (external, redundancy)
 
 ### iPad-Specific Configuration
 
