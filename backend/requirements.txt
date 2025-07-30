@@ -1,11 +1,13 @@
 fastapi
 uvicorn[standard]
 sqlalchemy
-psycopg2-binary
+asyncpg
 redis
 celery
 aiofiles
 pillow
-opencv-python
+opencv-python-headless
 python-multipart
 ollama
+python-dotenv
+pydantic-settings
