@@ -14,7 +14,7 @@ A self-hosted refrigerator content management system running on homelab infrastr
 - **Styling**: Tailwind CSS optimized for iPad viewport
 - **State Management**: React Query + Zustand
 - **Camera**: WebRTC APIs for photo capture
-- **Deployment**: Static files served by Python backend
+- **Deployment**: Standalone Next.js application running in a Node.js container.
 
 **iPad-Specific Optimizations:**
 
@@ -33,7 +33,6 @@ A self-hosted refrigerator content management system running on homelab infrastr
 - **Image Processing**: Pillow + OpenCV for preprocessing
 - **Database ORM**: SQLAlchemy with async support
 - **Background Tasks**: Celery with Redis
-- **Static Files**: Serve React build directly
 
 **Key Features:**
 
@@ -84,22 +83,24 @@ async def analyze_product_image(image_path: str):
 **Schema Design:**
 
 ```sql
--- Core tables optimized for homelab
-items (
+-- Core table for items
+CREATE TABLE items (
   id UUID PRIMARY KEY,
   product_name VARCHAR(255),
-  brand VARCHAR(255),
+  category VARCHAR(255),
   expiry_date DATE,
-  status item_status DEFAULT 'unopened',
+  status VARCHAR(50) DEFAULT 'unopened',
   confidence_score FLOAT,
   image_path VARCHAR(500),
-  date_added TIMESTAMP DEFAULT NOW(),
-  date_modified TIMESTAMP DEFAULT NOW(),
+  date_added TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  date_modified TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   is_deleted BOOLEAN DEFAULT FALSE,
-  deleted_at TIMESTAMP NULL,
+  deleted_at TIMESTAMP WITH TIME ZONE,
   manual_override BOOLEAN DEFAULT FALSE
 );
 
+-- The following tables are planned for future phases
+/*
 products_database (
   id UUID PRIMARY KEY,
   product_name VARCHAR(255),
@@ -119,21 +120,20 @@ processing_queue (
   processed_at TIMESTAMP NULL,
   error_message TEXT NULL
 );
+*/
 ```
 
 ### 5. Storage Layer (Local NAS/Storage)
 
-**Image Storage Structure:**
+**Image Storage Structure (inside container):**
 
 ```
-/data/fridge-logger/
+/app/data/
 ├── images/
 │   ├── raw/          # Original uploaded images
 │   ├── processed/    # Preprocessed for AI
 │   └── thumbnails/   # UI thumbnails
-├── models/           # Ollama model cache
-├── backups/          # Database backups
-└── logs/            # Application logs
+└── logs/             # Application logs
 ```
 
 ## Homelab Deployment Architecture
@@ -149,26 +149,51 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-      - ./config:/app/config
+    env_file:
+      - .env
     depends_on:
       - postgres
       - redis
-      - ollama
+
+  celery-worker:
+    build: ./backend
+    command: celery -A app.core.celery_app worker -l info
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - postgres
+      - fridge-logger-api
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - fridge-logger-api
 
   postgres:
     image: postgres:15
     environment:
       POSTGRES_DB: fridge_logger
       POSTGRES_USER: fridge_user
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./backups:/backups
+    env_file:
+      - .env
 
   redis:
     image: redis:7-alpine
     volumes:
       - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
 ```
 
 ### Network Configuration

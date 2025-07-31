@@ -24,6 +24,13 @@ services:
       - postgres
       - fridge-logger-api
 
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - fridge-logger-api
+
   postgres:
     image: postgres:15
     environment:
