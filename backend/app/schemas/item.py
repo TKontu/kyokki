@@ -14,6 +14,7 @@ class ItemBase(BaseModel):
 class ItemCreate(ItemBase):
     product_name: str
     image_path: str
+    category: Optional[str] = None
 
 # Properties to receive on item update
 class ItemUpdate(ItemBase):
@@ -27,7 +28,7 @@ class ItemInDBBase(ItemBase):
     image_path: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 # Properties to return to client
 class Item(ItemInDBBase):

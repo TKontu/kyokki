@@ -26,19 +26,19 @@
 - [ ] **Database Setup**
 
   - [x] Deploy PostgreSQL container with Docker Compose
-  - [ ] Create database schema and migrations with SQLAlchemy
-  - [ ] Set up connection pooling and async support
+  - [x] Create database schema and migrations with SQLAlchemy
+  - [x] Set up connection pooling and async support
   - [ ] Configure automated backup scripts
   - [ ] Create database seeding scripts for products
-  - [ ] Set up Redis for background task queue
+  - [x] Set up Redis for background task queue
 
 - [ ] **Python Backend Core**
-  - [ ] Initialize FastAPI project structure
-  - [ ] Set up async SQLAlchemy models and database connection
-  - [ ] Configure environment variables and secrets management
-  - [ ] Implement basic health check endpoints
+  - [x] Initialize FastAPI project structure
+  - [x] Set up async SQLAlchemy models and database connection
+  - [x] Configure environment variables and secrets management
+  - [x] Implement basic health check endpoints
   - [ ] Set up structured logging
-  - [ ] Create Docker container for backend service
+  - [x] Create Docker container for backend service
 
 ### Week 3: AI Integration & Image Processing
 
@@ -64,11 +64,11 @@
 - [ ] **REST API Endpoints**
 
   - [ ] POST /api/items/analyze - Upload and analyze images
-  - [ ] GET /api/items - Retrieve items sorted by expiry
+  - [x] GET /api/items - Retrieve items sorted by expiry
   - [ ] PUT /api/items/:id - Update item details
   - [ ] DELETE /api/items/:id - Soft delete with undo capability
   - [ ] POST /api/items/:id/restore - Restore deleted items
-  - [ ] GET /api/health - System health and status
+  - [x] GET /api/health - System health and status
 
 - [ ] **WebSocket Integration**
   - [ ] Set up WebSocket connections for real-time updates
