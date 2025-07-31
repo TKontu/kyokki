@@ -9,12 +9,12 @@ class ItemBase(BaseModel):
     category: Optional[str] = None
     expiry_date: Optional[date] = None
     status: Optional[str] = 'unopened'
+    confidence_score: Optional[float] = None
 
 # Properties to receive on item creation
 class ItemCreate(ItemBase):
     product_name: str
     image_path: str
-    category: Optional[str] = None
 
 # Properties to receive on item update
 class ItemUpdate(ItemBase):
