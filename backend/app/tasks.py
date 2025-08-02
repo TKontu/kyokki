@@ -1,20 +1,33 @@
 import asyncio
 import json
+import redis.asyncio as redis
 from datetime import datetime
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
+
 from app.core.celery_app import celery_app
 from app.services.ollama import ollama_service
-from app.services.websockets import manager
-from app.db.session import AsyncSessionLocal
 from app import crud, schemas
-from app.schemas.item import Item  # Import the specific schema for serialization
+from app.schemas.item import Item
+from app.core.config import settings
 
 @celery_app.task(acks_late=True)
 def analyze_image_task(image_path: str):
     """
-    Celery task to analyze an image, save the result, and broadcast an update.
+    Celery task to analyze an image, save the result, and publish an update to Redis.
+    This task creates its own database engine to avoid event loop conflicts with Celery.
     """
     async def main():
-        async with AsyncSessionLocal() as db:
+        # Create a new database engine and session for this task's event loop
+        engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+        TaskSessionLocal = sessionmaker(
+            autocommit=False, autoflush=False, bind=engine, class_=AsyncSession
+        )
+
+        # Initialize Redis client
+        redis_client = redis.from_url(f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}")
+
+        async with TaskSessionLocal() as db:
             # Analyze the image
             analysis_result = await ollama_service.analyze_image(image_path)
             
@@ -25,7 +38,6 @@ def analyze_image_task(image_path: str):
                 try:
                     expiry_date_obj = datetime.strptime(expiry_date_str, "%Y-%m-%d").date()
                 except (ValueError, TypeError):
-                    # Handle cases where the date is invalid or not a string
                     expiry_date_obj = None
 
             # Create the item in the database
@@ -41,10 +53,16 @@ def analyze_image_task(image_path: str):
             # Serialize the new item to a Pydantic model and then to JSON
             item_data = Item.from_orm(new_item).json()
             
-            # Broadcast the new item data
-            await manager.broadcast(item_data)
+            # Publish the new item data to the 'item_updates' channel
+            await redis_client.publish("item_updates", item_data)
+
+        # Close connections
+        await redis_client.close()
+        await engine.dispose()
 
     # Run the async main function
     asyncio.run(main())
     
     return {"status": "complete", "image_path": image_path}
+
+

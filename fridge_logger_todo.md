@@ -18,8 +18,6 @@
   - [x] Download and test Qwen2-VL-7B model
   - [x] Configure Ollama service settings
   - [x] Test model inference with sample images
-  - [ ] Set up model preloading scripts
-  - [ ] Configure GPU acceleration (if available)
 
 ### Week 2: Database & Backend Foundation
 
@@ -89,6 +87,15 @@
   - [x] Configure API client with homelab endpoint
   - [ ] Implement authentication (if needed)
   - [x] Create responsive layout for iPad
+
+  - [] **Technical Debt & Refactoring**
+
+  - [ ] **Decouple Celery Worker from API with Redis Pub/Sub**
+    - [ ] **Goal:** Eliminate `asyncio` event loop errors and create a more robust architecture.
+    - [ ] **Celery Task (`tasks.py`):** Modify the `analyze_image_task` to publish the new item's JSON data to a Redis "item_updates" channel instead of calling the WebSocket manager directly.
+    - [ ] **FastAPI App (`main.py`):** Implement a `lifespan` event handler to start a background task on application startup.
+    - [ ] **Background Task:** The new task will subscribe to the "item_updates" Redis channel.
+    - [ ] **WebSocket Manager (`websockets.py`):** When the background task receives a message from Redis, it will use the existing `manager.broadcast()` method to send the data to all connected clients from the correct event loop.
 
 - [ ] **PWA Configuration**
   - [ ] Create app manifest for home screen installation
@@ -199,7 +206,6 @@
 
 - [ ] **Performance Optimization**
 
-  - [ ] Optimize Ollama model loading and inference
   - [ ] Implement intelligent caching strategies
   - [ ] Optimize database queries and indexing
   - [ ] Reduce image processing latency
@@ -231,7 +237,6 @@
   - [ ] Document API endpoints and WebSocket events
   - [ ] Build troubleshooting and maintenance guide
   - [ ] Create backup and recovery procedures
-  - [ ] Document Ollama model management
 
 ## Phase 4: Advanced Features (Weeks 13-16)
 
@@ -274,14 +279,6 @@
   - [ ] Build notification systems (push, email)
   - [ ] Add calendar integration for meal planning
   - [ ] Create family sharing capabilities
-
-## Technical Debt & Refactoring
-- [ ] **Decouple Celery Worker from API with Redis Pub/Sub**
-  - [ ] **Goal:** Eliminate `asyncio` event loop errors and create a more robust architecture.
-  - [ ] **Celery Task (`tasks.py`):** Modify the `analyze_image_task` to publish the new item's JSON data to a Redis "item_updates" channel instead of calling the WebSocket manager directly.
-  - [ ] **FastAPI App (`main.py`):** Implement a `lifespan` event handler to start a background task on application startup.
-  - [ ] **Background Task:** The new task will subscribe to the "item_updates" Redis channel.
-  - [ ] **WebSocket Manager (`websockets.py`):** When the background task receives a message from Redis, it will use the existing `manager.broadcast()` method to send the data to all connected clients from the correct event loop.
 
 ## Maintenance & Operations
 
