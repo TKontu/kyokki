@@ -1,3 +1,4 @@
-from sqlalchemy.orm import declarative_base
-
-Base = declarative_base()
+# Import all the models, so that Base has them registered before being
+# imported by other modules
+from .base_class import Base
+from app.models.item import Item

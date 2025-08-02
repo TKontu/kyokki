@@ -33,14 +33,19 @@ export function ItemList() {
     return differenceInDays(parseISO(a.expiry_date), parseISO(b.expiry_date));
   });
 
-  if (isLoading) return <p>Loading items...</p>;
-  if (isError) return <p>Error: {error.message}</p>;
-
-  return (
-    <div className="bg-white rounded-lg shadow-md">
-      <h2 className="text-xl font-bold p-4">Current Items</h2>
+  const renderContent = () => {
+    if (isLoading) {
+      return <p className="p-4 text-gray-500">Loading items...</p>;
+    }
+    if (isError) {
+      return <p className="p-4 text-red-500">Error: {error.message}</p>;
+    }
+    if (!sortedData || sortedData.length === 0) {
+      return <p className="p-4 text-gray-500">No items found. Add one to get started!</p>;
+    }
+    return (
       <ul>
-        {sortedData?.map((item) => (
+        {sortedData.map((item) => (
           <li key={item.id} className="flex items-center p-4 border-t">
             <div className="flex-grow">
               <p className="font-bold">{item.product_name}</p>
@@ -59,6 +64,13 @@ export function ItemList() {
           </li>
         ))}
       </ul>
+    );
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow-md">
+      <h2 className="text-xl font-bold p-4">Current Items</h2>
+      {renderContent()}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime
 from app.core.celery_app import celery_app
 from app.services.ollama import ollama_service
 from app.services.websockets import manager
@@ -17,11 +18,21 @@ def analyze_image_task(image_path: str):
             # Analyze the image
             analysis_result = await ollama_service.analyze_image(image_path)
             
+            # Convert expiry_date string to date object
+            expiry_date_str = analysis_result.get("expiry_date")
+            expiry_date_obj = None
+            if expiry_date_str:
+                try:
+                    expiry_date_obj = datetime.strptime(expiry_date_str, "%Y-%m-%d").date()
+                except (ValueError, TypeError):
+                    # Handle cases where the date is invalid or not a string
+                    expiry_date_obj = None
+
             # Create the item in the database
             item_in = schemas.ItemCreate(
                 product_name=analysis_result.get("product_name"),
                 category=analysis_result.get("category"),
-                expiry_date=analysis_result.get("expiry_date"),
+                expiry_date=expiry_date_obj,
                 confidence_score=analysis_result.get("confidence_score"),
                 image_path=image_path
             )

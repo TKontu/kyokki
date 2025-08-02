@@ -4,26 +4,26 @@
 
 ### Week 1: Homelab Environment Setup
 
-- [ ] **Infrastructure Preparation**
+- [x] **Infrastructure Preparation**
 
   - [x] Set up Docker and Docker Compose on homelab server
   - [x] Create project directory structure on homelab
   - [x] Configure network settings and port allocations
   - [ ] Set up SSL certificates (self-signed or local CA)
   - [ ] Configure reverse proxy (Nginx/Traefik) for iPad access
-  - [ ] Test basic network connectivity from iPad
+  - [x] Test basic network connectivity from iPad
 
-- [ ] **Ollama Installation & Model Setup**
+- [x] **Ollama Installation & Model Setup**
   - [x] Install Ollama on homelab server
   - [x] Download and test Qwen2-VL-7B model
   - [x] Configure Ollama service settings
   - [x] Test model inference with sample images
   - [ ] Set up model preloading scripts
-  - [x] Configure GPU acceleration (if available)
+  - [ ] Configure GPU acceleration (if available)
 
 ### Week 2: Database & Backend Foundation
 
-- [ ] **Database Setup**
+- [x] **Database Setup**
 
   - [x] Deploy PostgreSQL container with Docker Compose
   - [x] Create database schema and migrations with SQLAlchemy
@@ -32,7 +32,7 @@
   - [ ] Create database seeding scripts for products
   - [x] Set up Redis for background task queue
 
-- [ ] **Python Backend Core**
+- [x] **Python Backend Core**
   - [x] Initialize FastAPI project structure
   - [x] Set up async SQLAlchemy models and database connection
   - [x] Configure environment variables and secrets management
@@ -52,12 +52,12 @@
   - [x] Implement error handling and retries
 
 - [x] **Image Processing Pipeline**
-  - [x] Set up image preprocessing (resize, enhance, format conversion)
+  - [ ] Set up image preprocessing (resize, enhance, format conversion)
   - [x] Create async file upload handling
   - [x] Implement image storage organization
-  - [x] Add thumbnail generation
+  - [ ] Add thumbnail generation
   - [x] Build background processing queue with Celery
-  - [x] Create batch processing capabilities
+  - [ ] Create batch processing capabilities
 
 ### Week 4: Core API Development
 
@@ -121,10 +121,10 @@
 
 - [x] **Item List & Display**
 
-  - [ ] Create item list sorted by expiry date
-  - [ ] Implement color-coded expiry warnings
+  - [x] Create item list sorted by expiry date
+  - [x] Implement color-coded expiry warnings
   - [x] Add touch-optimized item cards
-  - [ ] Create status indicators (unopened/opened)
+  - [x] Create status indicators (unopened/opened)
   - [ ] Build search and filter functionality
   - [ ] Add infinite scrolling for large lists
 
@@ -274,6 +274,14 @@
   - [ ] Build notification systems (push, email)
   - [ ] Add calendar integration for meal planning
   - [ ] Create family sharing capabilities
+
+## Technical Debt & Refactoring
+- [ ] **Decouple Celery Worker from API with Redis Pub/Sub**
+  - [ ] **Goal:** Eliminate `asyncio` event loop errors and create a more robust architecture.
+  - [ ] **Celery Task (`tasks.py`):** Modify the `analyze_image_task` to publish the new item's JSON data to a Redis "item_updates" channel instead of calling the WebSocket manager directly.
+  - [ ] **FastAPI App (`main.py`):** Implement a `lifespan` event handler to start a background task on application startup.
+  - [ ] **Background Task:** The new task will subscribe to the "item_updates" Redis channel.
+  - [ ] **WebSocket Manager (`websockets.py`):** When the background task receives a message from Redis, it will use the existing `manager.broadcast()` method to send the data to all connected clients from the correct event loop.
 
 ## Maintenance & Operations
 

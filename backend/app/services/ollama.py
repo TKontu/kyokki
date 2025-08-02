@@ -4,9 +4,6 @@ import re
 from app.core.config import settings
 
 class OllamaService:
-    def __init__(self):
-        self.client = ollama.AsyncClient(host=settings.OLLAMA_HOST)
-
     async def analyze_image(self, image_path: str) -> dict:
         """
         Analyzes a food product image to identify product name, category,
@@ -18,6 +15,7 @@ class OllamaService:
         Returns:
             A dictionary containing the analysis results.
         """
+        client = ollama.AsyncClient(host=settings.OLLAMA_HOST)
         prompt = (
             "Analyze the attached image of a food product. "
             "Identify the following information: "
@@ -29,8 +27,8 @@ class OllamaService:
         )
         
         try:
-            response = await self.client.chat(
-                model='qwen2-vl:7b',
+            response = await client.chat(
+                model='qwen2.5vl:7b',
                 messages=[{
                     'role': 'user',
                     'content': prompt,

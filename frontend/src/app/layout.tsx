@@ -10,6 +10,10 @@ export const metadata: Metadata = {
   description: "Log your fridge contents with AI",
 };
 
+import { WsStatusIndicator } from "@/components/WsStatusIndicator";
+
+// ... (rest of the file)
+
 export default function RootLayout({
   children,
 }: {
@@ -20,6 +24,7 @@ export default function RootLayout({
       <body className={`${inter.className} bg-gray-50 text-gray-900`}>
         <Providers>
           <main className="container mx-auto p-4">{children}</main>
+          <WsStatusIndicator />
         </Providers>
       </body>
     </html>

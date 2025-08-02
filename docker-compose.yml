@@ -5,9 +5,10 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/app/data
-      - ./config:/app/config
     env_file:
-      - .env
+      - .env.api
+    networks:
+      - fridge_net
     depends_on:
       - postgres
       - redis
@@ -15,39 +16,51 @@ services:
   celery-worker:
     build: ./backend
     command: celery -A app.core.celery_app worker -l info
+    networks:
+      - fridge_net
     volumes:
       - ./data:/app/data
     env_file:
-      - .env
+      - .env.worker
     depends_on:
       - redis
       - postgres
-      - fridge-logger-api
 
   frontend:
     build: ./frontend
     ports:
       - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api
+    networks:
+      - fridge_net
     depends_on:
       - fridge-logger-api
 
   postgres:
     image: postgres:15
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_DB: fridge_logger
       POSTGRES_USER: fridge_user
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backups:/backups
-    env_file:
-      - .env
+    networks:
+      - fridge_net
 
   redis:
     image: redis:7-alpine
-    volumes:
-      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - fridge_net
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  fridge_net:
+    driver: bridge
