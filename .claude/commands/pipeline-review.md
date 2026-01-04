@@ -2,6 +2,28 @@
 
 Review an endpoint's pipeline end-to-end. Argument: endpoint path (e.g., "/users/{id}" or "POST /orders").
 
+## Context
+
+```bash
+# Find route files
+find . -name "*.py" -path "*/routes/*" -o -name "*.py" -path "*/api/*" | head -10
+```
+
+```bash
+# Find service files
+find . -name "*.py" -path "*/services/*" -o -name "*service*.py" | head -10
+```
+
+```bash
+# Find dependency patterns
+grep -r "Depends(" --include="*.py" -l | head -10
+```
+
+```bash
+# Project structure
+find . -type f -name "*.py" | grep -E "(route|service|repo|model|schema)" | head -20
+```
+
 ## Instructions
 
 Trace the full request lifecycle through every layer:
@@ -38,28 +60,22 @@ Trace the full request lifecycle through every layer:
 
 ## Output
 
-Create `endpoint_{name}_review.md` with:
+Create `endpoint_{name}_review.md`:
 
 ```markdown
 # Pipeline Review: {endpoint}
 
-## Summary
-[1-2 sentence overview of findings]
+## Flow
+route.py:fn → dependency.py:dep → service.py:method → repo.py:query
 
-## Pipeline Trace
-[Mermaid flowchart or numbered steps showing the flow]
+## Critical (must fix)
+- [ ] path/file.py:123 - Issue description
 
-## Findings
+## Important (should fix)
+- [ ] path/file.py:456 - Issue description
 
-### Critical (must fix)
-- [ ] File:line - Description
-
-### Important (should fix)
-- [ ] File:line - Description
-
-### Minor (nice to fix)
-- [ ] File:line - Description
-
-## Recommendations
-[Prioritized action items]
+## Minor
+- [ ] path/file.py:789 - Issue description
 ```
+
+Keep it concise. Only document actual findings, not "all looks good" items.
