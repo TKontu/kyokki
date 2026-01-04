@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .services.websockets import manager
 from .core.config import settings
 from .core.logging import setup_logging, get_logger
-# from .api.router import api_router  # TODO: Create API router
+from .api.router import api_router
 # from .middleware.logging import LoggingMiddleware  # TODO: Create if needed
 
 async def redis_listener(app: FastAPI):
@@ -77,8 +77,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# TODO: Uncomment when API router is created
-# app.include_router(api_router, prefix="/api")
+app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 def read_root():
