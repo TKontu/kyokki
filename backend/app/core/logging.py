@@ -50,9 +50,16 @@ class JSONFormatter(logging.Formatter):
 def setup_logging():
     """Setup structured logging configuration"""
 
-    # Create logs directory if it doesn't exist
-    log_dir = Path("/app/logs")
-    log_dir.mkdir(exist_ok=True)
+    # Get project root and create logs directory
+    # Check if running in Docker (path /app exists) or locally
+    if Path("/app").exists():
+        log_dir = Path("/app/logs")
+    else:
+        # Local development: use project root / logs
+        project_root = Path(__file__).parent.parent.parent.parent
+        log_dir = project_root / "logs"
+
+    log_dir.mkdir(exist_ok=True, parents=True)
 
     logging_config = {
         "version": 1,
@@ -76,7 +83,7 @@ def setup_logging():
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": "INFO",
                 "formatter": "json",
-                "filename": "/app/logs/app.log",
+                "filename": str(log_dir / "app.log"),
                 "maxBytes": 10485760,  # 10MB
                 "backupCount": 5,
             },
@@ -84,7 +91,7 @@ def setup_logging():
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": "ERROR",
                 "formatter": "json",
-                "filename": "/app/logs/error.log",
+                "filename": str(log_dir / "error.log"),
                 "maxBytes": 10485760,  # 10MB
                 "backupCount": 5,
             },
