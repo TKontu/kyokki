@@ -1,0 +1,85 @@
+services:
+  # TODO: Replace with Traefik for proper SSL/routing (per architecture docs)
+  # nginx:
+  #   build: ./nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./ssl/kyokki.crt:/etc/ssl/certs/kyokki.crt:ro
+  #     - ./ssl/kyokki.key:/etc/ssl/private/kyokki.key:ro
+  #     - backup_data:/app/backups
+  #   networks:
+  #     - kyokki_net
+  #   depends_on:
+  #     - frontend
+  #     - kyokki-api
+
+  kyokki-api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    networks:
+      - kyokki_net
+    depends_on:
+      - postgres
+      - redis
+
+  celery-worker:
+    build: ./backend
+    command: celery -A app.core.celery_app worker -l info
+    networks:
+      - kyokki_net
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - postgres
+
+  # TODO: Uncomment when frontend is ready
+  # frontend:
+  #   build: ./frontend
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api
+  #   networks:
+  #     - kyokki_net
+  #   depends_on:
+  #     - kyokki-api
+
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: kyokki
+      POSTGRES_USER: kyokki_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - kyokki_net
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - kyokki_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  backup_data:
+
+networks:
+  kyokki_net:
+    driver: bridge

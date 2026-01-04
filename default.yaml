@@ -1,0 +1,199 @@
+llm:
+  provider: ${LLM_PROVIDER:-openai}
+  model: ${LLM_MODEL:-gemma3-12b-awq}
+  context_length: ${LLM_CONTEXT_LENGTH:-128000}
+  temperature: ${LLM_TEMPERATURE:-0.1}
+  rate_limit: ${LLM_RATE_LIMIT:-999}
+  # Task timeout limits (prevents worker exhaustion)
+  task_timeout_seconds: ${LLM_TASK_TIMEOUT:-14400}  # 2 hours soft timeout for LLM tasks (was 300)
+  task_hard_limit_seconds: ${LLM_TASK_HARD_LIMIT:-15600}  # 2 hours hard kill timeout (was 360)
+  # HTTP client timeout and retry settings (critical for high server load / queue depths)
+  http_timeout_seconds: ${LLM_HTTP_TIMEOUT:-900}  # 15 minutes HTTP timeout (handles 95+ queued requests)
+  max_retries: ${LLM_MAX_RETRIES:-5}  # Retry attempts for failed requests
+  retry_backoff_min: ${LLM_RETRY_BACKOFF_MIN:-2}  # Min retry backoff (seconds)
+  retry_backoff_max: ${LLM_RETRY_BACKOFF_MAX:-60}  # Max retry backoff (seconds)
+  # Legacy circuit_breaker config (not currently used in code)
+  circuit_breaker:
+    failure_threshold: ${LLM_CIRCUIT_BREAKER_THRESHOLD:-5}
+    failure_window: ${LLM_CIRCUIT_BREAKER_WINDOW:-60}
+    open_duration: ${LLM_CIRCUIT_BREAKER_DURATION:-30}
+  openai:
+    base_url: ${OPENAI_BASE_URL:-http://192.168.0.247:9003/v1}
+    embedding_base_url: ${OPENAI_EMBEDDING_BASE_URL:-http://192.168.0.136:9003/v1}  # Separate embedding server (optional - defaults to base_url if not set)
+    api_key: ${OPENAI_API_KEY:-ollama}  # Use environment variable or default to "ollama" for local setups
+    rate_limit: ${OPENAI_RATE_LIMIT:-999}
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY:-}  # Load from environment variable, empty if not set
+    rate_limit: ${ANTHROPIC_RATE_LIMIT:-15}
+
+# Shared Redis cache configuration (used by both Vector RAG and GraphRAG)
+cache:
+  enabled: ${CACHE_ENABLED:-true}
+  ttl_seconds: ${CACHE_TTL:-3600}
+  max_size_mb: ${CACHE_MAX_SIZE_MB:-500}
+  redis_host: ${REDIS_HOST:-redis}
+  redis_port: ${REDIS_PORT:-6379}
+  redis_db: ${REDIS_DB:-0}
+  warmup_collections: []  # GraphRAG-specific: Collections to pre-load on startup
+
+document_processing:
+  chunk_size: ${DOC_CHUNK_SIZE:-800}  # ~200 tokens (matches RAG chunk size for consistency)
+  overlap: ${DOC_CHUNK_OVERLAP:-80}
+  max_file_size: ${DOC_MAX_FILE_SIZE:-300MB}
+  supported_formats: ["pdf", "epub", "mobi"]
+
+  # PDF processor selection: "mineru" or "traditional" (auto-fallback on failure)
+  primary_pdf_processor: ${DOC_PRIMARY_PDF_PROCESSOR:-mineru}
+
+  # Type-aware chunking (Phase 1 - NEW)
+  # When enabled: uses element-based chunking with corruption filtering, statistical heuristics, and specialized chunkers
+  # When disabled: uses traditional text-based chunking (backward compatible)
+  # Default: false (can enable after testing)
+  use_type_aware_chunking: ${DOC_USE_TYPE_AWARE_CHUNKING:-true}
+
+  # MinerU OCR settings
+  mineru:
+    # API type: "selfhosted" for FastAPI or "commercial" for async task API
+    api_type: ${MINERU_API_TYPE:-selfhosted}
+
+    # Common settings for both API types
+    base_url: ${MINERU_BASE_URL:-http://192.168.0.136:8000}
+    timeout: ${MINERU_TIMEOUT:-null}  # Disabled - no timeout for MinerU processing
+    enable_formula: ${MINERU_ENABLE_FORMULA:-false}
+    enable_table: ${MINERU_ENABLE_TABLE:-true}
+    language: ${MINERU_LANGUAGE:-en}
+
+    # Backend selection for selfhosted API / model version for commercial API
+    # - "pipeline": OCR + Layout detection pipeline (faster, 2-10s per document)
+    # - "vlm": Vision-Language Model (better for complex layouts, first request slow 30-60s)
+    # Note: When using selfhosted API, ensure Docker Compose profile matches this setting:
+    #   - model_version: "pipeline" → docker compose --profile pipeline up -d
+    #   - model_version: "vlm" → docker compose --profile vlm up -d
+    model_version: ${MINERU_MODEL_VERSION:-pipeline}
+
+    # Debug output settings (for troubleshooting extraction issues)
+    # When enabled, saves MinerU raw outputs (markdown, JSON, images) to disk
+    # WARNING: Can consume significant disk space - only enable for debugging
+    save_outputs: ${MINERU_SAVE_OUTPUTS:-true}
+    output_directory: ${MINERU_OUTPUT_DIR:-/home/appuser/app/mineru_outputs}
+
+    # Element-level type preservation (EXPERIMENTAL - Phase 1 of structure utilization)
+    # When true: preserves MinerU element boundaries (one TextElement per content_list item)
+    # When false: concatenates all elements per page (current behavior, backward compatible)
+    # Default: false (safe, preserves existing behavior)
+    # UPDATED: Enabled to support element filtering and semantic type detection
+    use_element_level_types: ${MINERU_USE_ELEMENT_LEVEL_TYPES:-true}
+
+    # Element filtering (EXPERIMENTAL - Phase 2, requires use_element_level_types=true)
+    # When true: filters out TOC/LOF elements before chunking (prevents oversized chunks)
+    # When false: all elements pass through to chunking (backward compatible)
+    # Default: false (safe, preserves existing behavior)
+    # UPDATED: Enabled after improving detection to handle MinerU inline formats
+    enable_element_filtering: ${MINERU_ENABLE_ELEMENT_FILTERING:-true}
+
+    # Commercial API specific settings (used when api_type="commercial")
+    api_token: ${MINERU_API_TOKEN:-}
+    poll_interval: ${MINERU_POLL_INTERVAL:-10}
+    max_retries: ${MINERU_MAX_RETRIES:-3}
+    shared_folder_path: ${MINERU_SHARED_FOLDER_PATH:-/shared/uploads}
+    shared_folder_url_prefix: ${MINERU_SHARED_FOLDER_URL_PREFIX:-file:///shared/uploads}
+
+output:
+  default_format: ${OUTPUT_DEFAULT_FORMAT:-json}
+  output_directory: ${OUTPUT_DIRECTORY:-./results}
+  include_metadata: ${OUTPUT_INCLUDE_METADATA:-true}
+  max_concurrent_jobs: ${OUTPUT_MAX_CONCURRENT_JOBS:-5}
+
+logging:
+  level: ${LOG_LEVEL:-INFO}
+  # Component-specific log levels (overrides for specific loggers)
+  # Useful for seeing progress at INFO while keeping root at WARNING
+  component_levels:
+
+    # Celery task logging (all variants)
+    celery: INFO                             # General Celery
+    celery.app: INFO                         # Celery app
+    celery.app.trace: INFO                   # Task execution traces
+    celery.worker: INFO                      # Worker logs
+    celery.worker.strategy: INFO             # Worker strategy
+    celery.worker.consumer: INFO             # Task consumer
+    billiard: INFO                           # Celery's process pool
+
+    # HTTP client libraries (all variants)
+    httpx: INFO                              # HTTP client library
+    httpcore: INFO                           # HTTP core
+    httpcore.connection: INFO                # HTTP connections
+    httpcore.http11: INFO                    # HTTP/1.1 protocol
+    urllib3: INFO                            # Fallback HTTP library
+    urllib3.connectionpool: INFO             # Connection pooling
+
+    # API server logging
+    uvicorn: INFO                               # Server lifecycle (startup, shutdown)
+    uvicorn.access: INFO                        # Access logs (HTTP requests/responses)
+    uvicorn.error: INFO                      # Error logs
+
+    # NOTE: Important warnings (like filtered elements) will still appear
+    # since they use WARNING level, which is above DEBUG/INFO
+
+paths:
+  uploads: ${UPLOADS_DIR:-/home/appuser/app/uploads}
+  prompts: ${PROMPTS_DIR:-/home/appuser/app/prompts}
+  input: ${INPUT_DIR:-/home/appuser/app/input}
+  output: ${OUTPUT_DIR:-/home/appuser/app/output}
+
+prompts:
+  directory: "${PROMPTS_DIR:-/home/appuser/app/prompts}/templates"
+
+api:
+  host: ${API_HOST:-0.0.0.0}
+  port: ${API_PORT:-8000}
+  cors_origins: ["http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:3000", "http://127.0.0.1:8080"]  # Restrict to local development by default
+  # cors_origins: ["*"]  # Uncomment this line and comment the above for unrestricted access
+  rate_limit: ${API_RATE_LIMIT:-9999}
+  authentication:
+    enabled: ${API_AUTH_ENABLED:-false}
+    api_key: ${API_KEY:-}
+  # HTTP client timeout configuration for CLI
+  request_timeout_connect: ${API_TIMEOUT_CONNECT:-30}      # Connection timeout in seconds
+  request_timeout_read: ${API_TIMEOUT_READ:-null}       # Read timeout in seconds (null = no timeout)
+
+storage:
+  type: ${STORAGE_TYPE:-postgres}
+  connection_string: "postgresql://${DB_USER:-user}:${DB_PASSWORD:-password}@${DB_HOST:-localhost}:${DB_PORT:-5432}/${DB_NAME:-fileintel}"
+  cache_ttl: ${STORAGE_CACHE_TTL:-3600}
+  redis_host: ${STORAGE_REDIS_HOST:-localhost}
+  # Connection pool settings (must fit within PostgreSQL max_connections)
+  # With concurrency=6: base pool = 6×10=60, max burst = 6×30=180
+  # PostgreSQL max_connections should be 200-300 to allow headroom
+  pool_size: ${STORAGE_POOL_SIZE:-10}  # Base connections per worker
+  max_overflow: ${STORAGE_MAX_OVERFLOW:-20}  # Additional burst capacity per worker
+  pool_timeout: ${STORAGE_POOL_TIMEOUT:-300}  # Increased from 30 to allow more wait time
+
+celery:
+  # Task timeout limits - configurable for large batch processing
+  task_soft_time_limit: ${CELERY_TASK_SOFT_TIME_LIMIT:-null}  # Soft limit in seconds (null = no limit)
+  task_time_limit: ${CELERY_TASK_TIME_LIMIT:-null}       # Hard limit in seconds (null = no limit)
+
+  # Broker visibility timeout (CRITICAL for long-running tasks)
+  # Redis default is 3600s (1 hour) - tasks longer than this get re-queued
+  # Set in celery_config.py to 432000s (5 days) to support 96-hour GraphRAG indexing
+  # If you modify task time limits, ensure broker_transport_options.visibility_timeout
+  # in celery_config.py is greater than your longest task
+
+  # Worker pool restart settings (prevents fork bomb)
+  worker_pool_restarts: ${CELERY_WORKER_POOL_RESTARTS:-true}  # Allow pool restarts
+  worker_pool_restart_timeout: ${CELERY_WORKER_POOL_RESTART_TIMEOUT:-120}  # Timeout for worker to send UP message (seconds)
+  worker_max_tasks_per_child: null  # null = never restart workers (prevents SIGKILL death spiral)
+
+cli:
+  # CLI task wait timeout
+  task_wait_timeout: ${CLI_TASK_WAIT_TIMEOUT:-null}  # Wait timeout in seconds (null = no limit)
+
+batch_processing:
+  directory_input: ${INPUT_DIR:-/home/appuser/app/input}
+  directory_output: ${OUTPUT_DIR:-/home/appuser/app/output}
+  default_format: ${BATCH_DEFAULT_FORMAT:-json}
+  # Batch size limits (security - prevent DoS)
+  max_upload_batch_size: ${BATCH_MAX_UPLOAD_SIZE:-50}  # Maximum files per batch upload
+  max_file_size_mb: ${BATCH_MAX_FILE_SIZE_MB:-100}       # Maximum individual file size in MB
+  max_processing_batch_size: ${BATCH_MAX_PROCESSING_SIZE:-20}  # Maximum collections per batch process
