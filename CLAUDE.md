@@ -25,18 +25,33 @@ ruff check . --fix              # Lint + autofix
 ruff format .                   # Format code
 mypy src/                       # Type checking
 
-# Running
-python -m <package_name>        # Run as module
-uvicorn app.main:app --reload   # FastAPI
-flask run --debug               # Flask
+# Running (FastAPI)
+uvicorn app.main:app --reload              # Dev server
+uvicorn app.main:app --host 0.0.0.0 --port 8000  # Production
+```
+
+## Ruff Configuration
+
+```toml
+# pyproject.toml
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
+ignore = ["E501"]  # Line length handled by formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
 ```
 
 ## Code Style Conventions
 
 ### General Rules
 - Follow PEP 8, enforced via Ruff
-- Max line length: 88 characters (Black default)
-- Use type hints for all function signatures
+- Max line length: 88 characters
+- Type hints required for all function signatures
 - Prefer explicit imports over wildcard imports
 
 ### Naming
@@ -85,30 +100,47 @@ def fetch(ids: list[int]) -> dict[str, Any] | None: ...
 type UserMap = dict[str, list[User]]
 ```
 
-## API & Content Design
+## FastAPI Patterns
 
-### Response Format
+### Router Structure
 ```python
-# Success response
-{
-    "data": { ... },
-    "meta": {"page": 1, "total": 100}
-}
+# app/api/routes/users.py
+from fastapi import APIRouter, Depends, HTTPException, status
 
-# Error response
-{
-    "error": {
-        "code": "VALIDATION_ERROR",
-        "message": "Human-readable message",
-        "details": [{"field": "email", "issue": "Invalid format"}]
-    }
-}
+router = APIRouter(prefix="/users", tags=["users"])
+
+@router.get("/{user_id}", response_model=UserResponse)
+async def get_user(user_id: int, service: UserService = Depends(get_user_service)) -> User:
+    if not (user := await service.get(user_id)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
 ```
 
-### CLI Output
-- Use `rich` for formatted terminal output
-- Errors to stderr: `console.print("[red]Error:[/red] message", stderr=True)`
-- Exit codes: 0 success, 1 general error, 2 usage error
+### Exception Handlers
+```python
+# app/main.py
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": exc.code, "message": exc.message}},
+    )
+```
+
+### Lifespan Events
+```python
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    await database.connect()
+    yield
+    # Shutdown
+    await database.disconnect()
+
+app = FastAPI(lifespan=lifespan)
+```
 
 ## State Management
 
@@ -194,25 +226,58 @@ def is_feature_enabled(user_id: str, rollout_pct: int) -> bool:
     return hash(user_id) % 100 < rollout_pct
 ```
 
-## Debugging
+## Pytest Patterns
 
+### Fixtures (conftest.py)
 ```python
-# Built-in debugger (Python 3.7+)
-breakpoint()  # Drops into pdb
+import pytest
+from httpx import AsyncClient, ASGITransport
+from app.main import app
 
-# Environment control
-PYTHONBREAKPOINT=0 python app.py        # Disable breakpoints
-PYTHONBREAKPOINT=ipdb.set_trace python  # Use ipdb instead
+@pytest.fixture
+async def client() -> AsyncGenerator[AsyncClient, None]:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
 
-# Debug logging
-import logging
-logging.basicConfig(level=logging.DEBUG)
+@pytest.fixture
+def user_factory() -> Callable[..., User]:
+    def _create(**overrides) -> User:
+        defaults = {"name": "Test User", "email": "test@example.com"}
+        return User(**(defaults | overrides))
+    return _create
 ```
 
-### Common Debug Patterns
-- Use `python -m pdb script.py` for post-mortem debugging
-- `pytest --pdb` drops into debugger on failures
-- `icecream` library for quick debug prints: `ic(variable)`
+### Test Structure
+```python
+# tests/test_users.py
+import pytest
+
+class TestGetUser:
+    async def test_returns_user_when_exists(self, client: AsyncClient) -> None:
+        response = await client.get("/users/1")
+        assert response.status_code == 200
+        assert response.json()["id"] == 1
+
+    async def test_returns_404_when_not_found(self, client: AsyncClient) -> None:
+        response = await client.get("/users/999")
+        assert response.status_code == 404
+```
+
+### Pytest Configuration
+```toml
+# pyproject.toml
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra -q"
+```
+
+## Debugging
+
+- `breakpoint()` drops into pdb
+- `pytest --pdb` debugs on test failure
+- `pytest -x` stops on first failure
+- `pytest --lf` runs last failed tests
 
 ## Pull Request Template
 
