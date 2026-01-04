@@ -17,7 +17,22 @@
       "Bash(git diff:*)",
       "Bash(git log:*)",
       "Bash(git branch:*)",
-      "Bash(git show:*)"
+      "Bash(git show:*)",
+      "Bash(alembic history:*)",
+      "Bash(alembic current:*)",
+      "Bash(alembic heads:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker images:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker inspect:*)",
+      "Bash(poetry show:*)",
+      "Bash(poetry env info:*)",
+      "Bash(uv pip list:*)",
+      "Bash(uv pip show:*)",
+      "Bash(celery inspect:*)",
+      "Bash(redis-cli INFO:*)",
+      "Bash(redis-cli KEYS:*)",
+      "Bash(redis-cli GET:*)"
     ],
     "deny": []
   }
