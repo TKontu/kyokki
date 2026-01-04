@@ -6,6 +6,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "ruff check --fix --quiet $CLAUDE_FILE_PATH || true"
+          },
+          {
+            "type": "command",
             "command": "ruff format --quiet $CLAUDE_FILE_PATH || true"
           }
         ]
