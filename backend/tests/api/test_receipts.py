@@ -4,14 +4,15 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from io import BytesIO
 from pathlib import Path
+import shutil
 
 from app.db.session import get_db
 from app.main import app
 
 
 @pytest.fixture
-async def test_db(db_session: AsyncSession) -> AsyncSession:
-    """Provide a test database session with dependency override."""
+async def test_db(db_session: AsyncSession):
+    """Provide a test database session with dependency override and cleanup test receipts."""
     # Override the dependency to use test database session
     async def override_get_db():
         try:
@@ -23,8 +24,14 @@ async def test_db(db_session: AsyncSession) -> AsyncSession:
 
     yield db_session
 
-    # Clean up override
+    # Clean up
     app.dependency_overrides.clear()
+
+    # Clean up test receipt files
+    receipts_dir = Path("data/receipts")
+    if receipts_dir.exists():
+        shutil.rmtree(receipts_dir)
+        receipts_dir.mkdir(parents=True, exist_ok=True)
 
 
 class TestUploadReceipt:

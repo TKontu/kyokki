@@ -13,13 +13,13 @@
 ### Database
 - [x] PostgreSQL schema (see ARCHITECTURE.md) — ✅ All 7 models complete
 - [x] Alembic migrations — ✅ Initial migration applied (c943e915cf61)
-- [ ] Seed data: categories with default expiry days
+- [x] Seed data: categories with default expiry days — ✅ 12 categories seeded
 
 ### Backend API
 - [x] FastAPI project structure — ✅ Complete with routing, config, logging
-- [ ] Inventory CRUD + consume endpoint
-- [ ] Products CRUD + barcode lookup
-- [ ] Receipt upload + status endpoints
+- [x] Inventory CRUD + consume endpoint — ✅ 6 endpoints, 21 tests (PR #4)
+- [x] Products CRUD + barcode lookup — ✅ 6 endpoints, 15 tests (PR #3)
+- [x] Receipt upload + status endpoints — ✅ 3 endpoints, 14 tests (PR #5)
 - [ ] WebSocket for real-time updates
 - [x] Health check — ✅ Implemented with tests
 
@@ -131,12 +131,26 @@
 
 **Merged**: PR #2 (efe2582) - 44 files, +2,125 lines
 
-### Sprint 2: API Development (NEXT)
-1. [ ] Category seed data script
-2. [ ] Product CRUD endpoints (search, create, barcode lookup)
-3. [ ] Inventory CRUD endpoints (list, add, update, delete, consume)
-4. [ ] Receipt upload endpoint (file storage only)
-5. [ ] API tests for all endpoints
+### ✅ Sprint 2: API Development (COMPLETE)
+1. [x] Category seed data script — ✅ 12 categories with shelf life defaults
+2. [x] Product CRUD endpoints (search, create, barcode lookup) — ✅ PR #3
+3. [x] Inventory CRUD endpoints (list, add, update, delete, consume) — ✅ PR #4
+4. [x] Receipt upload endpoint (file storage only) — ✅ PR #5
+5. [x] API tests for all endpoints — ✅ 69 API tests passing
+
+**Merged**:
+- PR #3 (dc10fe6) - Category + Product APIs
+- PR #4 (d302695) - Inventory API
+- PR #5 (1e0d564) - Receipt API
+
+**Stats**: 89 tests passing, 1,244+ lines added across Sprint 2
+
+### Sprint 3: Receipt Processing Pipeline (NEXT)
+1. [ ] MinerU OCR integration
+2. [ ] Store parsers: S-Group, K-Group, Lidl
+3. [ ] Fuzzy product matching (RapidFuzz)
+4. [ ] Celery tasks for async processing
+5. [ ] WebSocket status broadcasts
 
 ---
 

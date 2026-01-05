@@ -14,10 +14,18 @@
 - 11 passing tests (model CRUD)
 - Docker-first development workflow documented
 
-**📍 Next: Sprint 2 - API Development**
-- Create CRUD endpoints for all models
-- Implement receipt upload with file storage
-- Add comprehensive API tests
+**✅ Sprint 2 Complete** (Merged PRs #3, #4, #5)
+- Category API: 5 endpoints, 16 tests, seed data with 12 categories
+- Product API: 6 endpoints, 15 tests, barcode lookup & search
+- Inventory API: 6 endpoints, 21 tests, smart consumption tracking
+- Receipt API: 3 endpoints, 14 tests, file upload & storage
+- Total: 69 API tests passing, 89 total tests passing
+
+**📍 Next: Sprint 3 - Receipt Processing Pipeline**
+- MinerU OCR integration
+- Store parsers (S-Group, K-Group, Lidl)
+- Fuzzy product matching with RapidFuzz
+- Celery tasks for async processing
 
 ---
 
@@ -78,28 +86,40 @@ backend/
 - [x] Receipt — ✅ Complete with JSONB for OCR results
 - [x] ShoppingListItem — ✅ Complete with priority tracking
 - [x] Category — ✅ Model complete with ARRAY type
-- [ ] Category (seed data) — Data seeding not yet implemented
+- [x] Category (seed data) — ✅ 12 categories with shelf life defaults
 
 ### API Endpoints
 
-**Inventory**
-- [ ] `GET /api/inventory` — list with filters (context, category, expiring)
-- [ ] `POST /api/inventory` — add item
-- [ ] `PATCH /api/inventory/{id}` — update quantity/status
-- [ ] `DELETE /api/inventory/{id}` — remove
-- [ ] `POST /api/inventory/{id}/consume` — log consumption
-- [ ] `POST /api/inventory/reconcile` — batch sync recovery
+**Category** ✅
+- [x] `GET /api/categories` — list all categories
+- [x] `GET /api/categories/{id}` — get category by ID
+- [x] `POST /api/categories` — create category
+- [x] `PATCH /api/categories/{id}` — update category
+- [x] `DELETE /api/categories/{id}` — delete category
 
-**Products**
-- [ ] `GET /api/products` — search (fuzzy)
-- [ ] `POST /api/products` — create
-- [ ] `GET /api/products/barcode/{bc}` — lookup
+**Products** ✅
+- [x] `GET /api/products` — search (fuzzy)
+- [x] `POST /api/products` — create
+- [x] `GET /api/products/{id}` — get by ID
+- [x] `GET /api/products/barcode/{bc}` — barcode lookup
+- [x] `PATCH /api/products/{id}` — update
+- [x] `DELETE /api/products/{id}` — delete
 
-**Receipts**
-- [ ] `POST /api/receipts/scan` — upload image
+**Inventory** ✅
+- [x] `GET /api/inventory` — list with filters (context, category, expiring)
+- [x] `POST /api/inventory` — add item
+- [x] `GET /api/inventory/{id}` — get by ID
+- [x] `PATCH /api/inventory/{id}` — update quantity/status
+- [x] `DELETE /api/inventory/{id}` — remove
+- [x] `POST /api/inventory/{id}/consume` — log consumption with smart status transitions
+- [ ] `POST /api/inventory/reconcile` — batch sync recovery (Phase 3)
+
+**Receipts** ✅
+- [x] `POST /api/receipts/scan` — upload image/PDF with metadata
+- [x] `GET /api/receipts/{id}` — get receipt status + metadata
+- [x] `GET /api/receipts` — list receipts with filtering
 - [ ] `POST /api/receipts/batch` — upload multiple (Phase 2)
-- [ ] `GET /api/receipts/{id}` — status + results
-- [ ] `POST /api/receipts/{id}/confirm` — confirm items
+- [ ] `POST /api/receipts/{id}/confirm` — confirm extracted items (after OCR)
 
 ### Receipt Processing
 

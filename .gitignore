@@ -58,4 +58,7 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Data directory (receipts, uploads, etc.)
+data/
+
 samples/
