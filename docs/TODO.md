@@ -73,6 +73,13 @@
 - [ ] Mark purchased → optionally add to inventory
 - [ ] Urgent items always at top
 
+### Home Assistant Integration (REST API)
+- [ ] `GET /api/ha/status` — aggregated stats for HA sensors
+- [ ] `GET /api/ha/expiring` — list expiring items
+- [ ] `POST /api/ha/consume` — consume by name (voice assistant)
+- [ ] Documentation with HA config examples
+- [ ] See: [HOME_ASSISTANT_SPEC.md](./HOME_ASSISTANT_SPEC.md), [home_assistant_TODO.md](./home_assistant_TODO.md)
+
 ---
 
 ## Phase 3: Intelligence
@@ -104,6 +111,7 @@
 ---
 
 ## Phase 4: Future
+- [ ] Home Assistant HACS integration (native HA custom component)
 - [ ] Recipe integration
 - [ ] Meal planning
 - [ ] Multi-user support
