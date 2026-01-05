@@ -20,6 +20,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./backend:/app  # Mount entire backend for development
       - ./data:/app/data
       - ./logs:/app/logs
     env_file:
