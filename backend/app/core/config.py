@@ -1,6 +1,6 @@
 from pathlib import Path
 from pydantic_settings import BaseSettings
-from pydantic import computed_field
+from pydantic import computed_field, ConfigDict
 
 # Get project root directory (two levels up from this file: backend/app/core/config.py -> project root)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -43,8 +43,9 @@ class Settings(BaseSettings):
     # Fuzzy matching thresholds
     FUZZY_MATCH_THRESHOLD: int = 80  # Minimum score (0-100) for fuzzy match
 
-    class Config:
-        env_file = str(ENV_FILE)
-        env_file_encoding = 'utf-8'
+    model_config = ConfigDict(
+        env_file=str(ENV_FILE),
+        env_file_encoding='utf-8'
+    )
 
 settings = Settings()

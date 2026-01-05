@@ -11,17 +11,17 @@
 - [ ] Basic CI (lint, type check)
 
 ### Database
-- [ ] PostgreSQL schema (see ARCHITECTURE.md)
-- [ ] Alembic migrations
+- [x] PostgreSQL schema (see ARCHITECTURE.md) — ✅ All 7 models complete
+- [x] Alembic migrations — ✅ Initial migration applied (c943e915cf61)
 - [ ] Seed data: categories with default expiry days
 
 ### Backend API
-- [ ] FastAPI project structure
+- [x] FastAPI project structure — ✅ Complete with routing, config, logging
 - [ ] Inventory CRUD + consume endpoint
 - [ ] Products CRUD + barcode lookup
 - [ ] Receipt upload + status endpoints
 - [ ] WebSocket for real-time updates
-- [ ] Health check
+- [x] Health check — ✅ Implemented with tests
 
 ### Receipt Pipeline
 - [ ] MinerU OCR integration
@@ -114,12 +114,21 @@
 
 ## Current Sprint
 
-### Sprint 1: Infrastructure + Database
-1. [ ] Docker Compose with all services
-2. [ ] PostgreSQL schema + migrations
-3. [ ] FastAPI health endpoint
+### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
+1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
+2. [x] PostgreSQL schema + migrations — ✅ All 7 models + Alembic
+3. [x] FastAPI health endpoint — ✅ With tests
 4. [ ] MinerU OCR test call
 5. [ ] Traefik routing
+
+**Merged**: PR #2 (efe2582) - 44 files, +2,125 lines
+
+### Sprint 2: API Development (NEXT)
+1. [ ] Category seed data script
+2. [ ] Product CRUD endpoints (search, create, barcode lookup)
+3. [ ] Inventory CRUD endpoints (list, add, update, delete, consume)
+4. [ ] Receipt upload endpoint (file storage only)
+5. [ ] API tests for all endpoints
 
 ---
 
