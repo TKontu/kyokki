@@ -3,7 +3,7 @@
 ## 1. Vision & Design Principles
 
 ### Core Vision
-Self-hosted refrigerator inventory system that **reduces food waste** through intelligent automation. Primary input is receipt scanning — not manual entry.
+Self-hosted kitchen inventory system that **reduces food waste** through intelligent automation. Track everything from fresh produce to dry goods, seasonings to coffee filters. Primary input is receipt scanning — not manual entry.
 
 ### Design Principles
 - **Minimal Friction** — Receipt scan adds 10+ items. Single-tap consumption. Hardware scanner support.

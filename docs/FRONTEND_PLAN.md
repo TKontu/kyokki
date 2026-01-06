@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines the complete frontend architecture for the Fridge Logger PWA, designed specifically for an always-on iPad mounted in a kitchen.
+This document outlines the complete frontend architecture for the Kyokki PWA, designed specifically for an always-on iPad mounted in a kitchen.
 
 **Target:** iPad (landscape orientation, 10-11" screen, touch-optimized)
 **Stack:** Next.js 14, TypeScript, Tailwind CSS, Zustand, TanStack Query, PWA
@@ -709,9 +709,9 @@ export function useOffline() {
 
 ```json
 {
-  "name": "Fridge Logger",
-  "short_name": "Fridge",
-  "description": "Kitchen inventory management",
+  "name": "Kyokki",
+  "short_name": "Kyokki",
+  "description": "Kitchen inventory management - track all groceries, dry goods, and consumables",
   "start_url": "/",
   "display": "standalone",
   "orientation": "landscape",

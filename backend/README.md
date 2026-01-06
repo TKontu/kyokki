@@ -1,6 +1,6 @@
 # Kyokki Backend
 
-FastAPI backend for Kyokki refrigerator inventory system.
+FastAPI backend for Kyokki kitchen inventory system.
 
 ## Development Workflow
 
