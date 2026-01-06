@@ -6,7 +6,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.crud import receipt as crud_receipt
-from app.schemas.receipt import ReceiptResponse
+from app.schemas.receipt import (
+    ReceiptResponse,
+    ReceiptProcessingResponse,
+    ReceiptConfirmRequest,
+    ReceiptConfirmResponse,
+)
+from app.services.receipt_processing import ReceiptProcessingService
+from app.services.ocr_service import extract_text_from_receipt
+from app.services.llm_extractor import extract_products_from_receipt
+from app.models.product_master import ProductMaster
+from app.models.inventory_item import InventoryItem
+from sqlalchemy import select
+from datetime import timedelta
 
 
 router = APIRouter()
@@ -113,3 +125,135 @@ async def list_receipts(
         store_chain=store,
     )
     return receipts
+
+
+@router.post("/{receipt_id}/process", response_model=ReceiptProcessingResponse)
+async def process_receipt(
+    receipt_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> ReceiptProcessingResponse:
+    """Process a receipt through OCR → LLM extraction → product matching pipeline.
+
+    This endpoint triggers the full receipt processing workflow:
+    1. Extract text via OCR (pdfplumber for PDFs, MinerU for images)
+    2. Extract products via LLM (vLLM with structured output)
+    3. Match extracted products to canonical products using fuzzy matching
+    4. Update receipt record with results
+
+    Args:
+        receipt_id: Receipt UUID to process.
+        db: Database session.
+
+    Returns:
+        Processing result with extraction and matching statistics.
+
+    Raises:
+        HTTPException 404: If receipt not found.
+    """
+    # Get receipt
+    receipt = await crud_receipt.get_receipt(db, receipt_id)
+    if not receipt:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Receipt '{receipt_id}' not found",
+        )
+
+    # Process receipt
+    processing_service = ReceiptProcessingService(db)
+    result = await processing_service.process_receipt(receipt)
+
+    return ReceiptProcessingResponse(
+        success=result.success,
+        items_extracted=len(result.extraction.products) if result.extraction else 0,
+        items_matched=len(result.matched_products),
+        error=result.error,
+    )
+
+
+@router.post("/{receipt_id}/confirm", response_model=ReceiptConfirmResponse)
+async def confirm_receipt(
+    receipt_id: UUID,
+    confirm_request: ReceiptConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ReceiptConfirmResponse:
+    """Confirm extracted receipt items and create inventory.
+
+    This endpoint allows the user to review, edit, and confirm the items
+    extracted from a receipt. Confirmed items are then added to inventory
+    with calculated expiry dates.
+
+    Args:
+        receipt_id: Receipt UUID to confirm.
+        confirm_request: List of confirmed items to add to inventory.
+        db: Database session.
+
+    Returns:
+        Confirmation result with number of inventory items created.
+
+    Raises:
+        HTTPException 404: If receipt not found.
+        HTTPException 400: If product not found or validation fails.
+    """
+    # Get receipt
+    receipt = await crud_receipt.get_receipt(db, receipt_id)
+    if not receipt:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Receipt '{receipt_id}' not found",
+        )
+
+    try:
+        items_created = 0
+
+        for item in confirm_request.items:
+            # Validate product exists
+            stmt = select(ProductMaster).where(ProductMaster.id == item.product_id)
+            result = await db.execute(stmt)
+            product = result.scalar_one_or_none()
+
+            if not product:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Product '{item.product_id}' not found",
+                )
+
+            # Calculate expiry date
+            expiry_date = item.purchase_date + timedelta(days=product.default_shelf_life_days)
+
+            # Create inventory item
+            inventory_item = InventoryItem(
+                product_master_id=item.product_id,
+                receipt_id=receipt_id,
+                initial_quantity=item.quantity,
+                current_quantity=item.quantity,
+                unit=item.unit,
+                status="sealed",
+                purchase_date=item.purchase_date,
+                expiry_date=expiry_date,
+                expiry_source="calculated",
+                location="main_fridge",  # Default location
+            )
+
+            db.add(inventory_item)
+            items_created += 1
+
+        # Update receipt status
+        receipt.processing_status = "confirmed"
+        await db.commit()
+
+        return ReceiptConfirmResponse(
+            success=True,
+            items_created=items_created,
+            error=None,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        error_msg = f"Failed to confirm receipt: {str(e)}"
+        return ReceiptConfirmResponse(
+            success=False,
+            items_created=0,
+            error=error_msg,
+        )
