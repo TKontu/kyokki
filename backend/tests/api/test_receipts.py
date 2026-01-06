@@ -265,3 +265,95 @@ class TestListReceipts:
         receipts = response.json()
         assert len(receipts) == 2
         assert all(r["store_chain"] == "S-Market" for r in receipts)
+
+
+class TestProcessReceipt:
+    """Test POST /api/receipts/{id}/process endpoint."""
+
+    async def test_process_receipt_success(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        """POST /api/receipts/{id}/process should process receipt through OCR + LLM + matching."""
+        from unittest.mock import patch, AsyncMock
+        from app.parsers.base import ReceiptExtraction, ParsedProduct, StoreInfo
+
+        # Create a receipt
+        file_content = b"fake receipt image"
+        files = {"file": ("receipt.jpg", BytesIO(file_content), "image/jpeg")}
+        create_response = await client.post("/api/receipts/scan", files=files)
+        receipt_id = create_response.json()["id"]
+
+        # Mock OCR and LLM services
+        mock_ocr_text = "S-MARKET\nVALIO MILK 1L  2.49\nTOTAL  2.49"
+        mock_extraction = ReceiptExtraction(
+            store=StoreInfo(name="S-Market", chain="s-group"),
+            products=[
+                ParsedProduct(name="Valio Milk 1L", quantity=1.0, price=2.49)
+            ],
+            confidence=0.95,
+        )
+
+        with patch(
+            "app.services.receipt_processing.extract_text_from_receipt",
+            new_callable=AsyncMock,
+            return_value=mock_ocr_text,
+        ):
+            with patch(
+                "app.services.receipt_processing.extract_products_from_receipt",
+                new_callable=AsyncMock,
+                return_value=mock_extraction,
+            ):
+                response = await client.post(f"/api/receipts/{receipt_id}/process")
+
+                assert response.status_code == 200
+                result = response.json()
+                assert result["success"] is True
+                assert result["items_extracted"] == 1
+                # items_matched may be 0 if no matching products in DB
+
+    async def test_process_receipt_not_found(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        """POST /api/receipts/{id}/process should return 404 for non-existent receipt."""
+        fake_uuid = "00000000-0000-0000-0000-000000000000"
+        response = await client.post(f"/api/receipts/{fake_uuid}/process")
+
+        assert response.status_code == 404
+
+    async def test_process_receipt_updates_status(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        """POST /api/receipts/{id}/process should update receipt processing_status."""
+        from unittest.mock import patch, AsyncMock
+        from app.parsers.base import ReceiptExtraction, StoreInfo
+
+        # Create a receipt
+        file_content = b"fake receipt"
+        files = {"file": ("receipt.jpg", BytesIO(file_content), "image/jpeg")}
+        create_response = await client.post("/api/receipts/scan", files=files)
+        receipt_id = create_response.json()["id"]
+
+        mock_extraction = ReceiptExtraction(
+            store=StoreInfo(),
+            products=[],
+            confidence=0.9,
+        )
+
+        with patch(
+            "app.services.receipt_processing.extract_text_from_receipt",
+            new_callable=AsyncMock,
+            return_value="text",
+        ):
+            with patch(
+                "app.services.receipt_processing.extract_products_from_receipt",
+                new_callable=AsyncMock,
+                return_value=mock_extraction,
+            ):
+                await client.post(f"/api/receipts/{receipt_id}/process")
+
+                # Check receipt status was updated
+                get_response = await client.get(f"/api/receipts/{receipt_id}")
+                assert get_response.status_code == 200
+                receipt = get_response.json()
+                assert receipt["processing_status"] == "completed"
+                assert receipt["ocr_raw_text"] is not None

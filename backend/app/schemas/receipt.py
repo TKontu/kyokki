@@ -39,3 +39,35 @@ class ReceiptResponse(ReceiptBase):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ReceiptProcessingResponse(BaseModel):
+    """Schema for receipt processing result."""
+
+    success: bool = Field(..., description="Whether processing succeeded")
+    items_extracted: int = Field(0, description="Number of products extracted")
+    items_matched: int = Field(0, description="Number of products matched")
+    error: str | None = Field(None, description="Error message if processing failed")
+
+
+class ConfirmedItemCreate(BaseModel):
+    """Schema for a confirmed receipt item to add to inventory."""
+
+    product_id: UUID = Field(..., description="Product master ID")
+    quantity: float = Field(..., gt=0, description="Quantity to add")
+    unit: str = Field(..., description="Unit (pcs, kg, l, etc.)")
+    purchase_date: date = Field(..., description="Purchase date for expiry calculation")
+
+
+class ReceiptConfirmRequest(BaseModel):
+    """Schema for receipt confirmation request."""
+
+    items: list[ConfirmedItemCreate] = Field(..., description="Confirmed items to add to inventory")
+
+
+class ReceiptConfirmResponse(BaseModel):
+    """Schema for receipt confirmation response."""
+
+    success: bool = Field(..., description="Whether confirmation succeeded")
+    items_created: int = Field(0, description="Number of inventory items created")
+    error: str | None = Field(None, description="Error message if confirmation failed")
