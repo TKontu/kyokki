@@ -1,8 +1,8 @@
 """Integration tests for external service connections"""
 import pytest
 import httpx
+from sqlalchemy import text
 from app.core.config import settings
-from app.db.session import engine
 
 
 @pytest.mark.integration
@@ -10,17 +10,17 @@ from app.db.session import engine
 class TestDatabaseConnection:
     """Test PostgreSQL database connectivity"""
 
-    async def test_database_is_accessible(self) -> None:
+    async def test_database_is_accessible(self, db_engine) -> None:
         """Database should be accessible and respond to queries"""
-        async with engine.connect() as conn:
-            result = await conn.execute("SELECT 1;")
+        async with db_engine.connect() as conn:
+            result = await conn.execute(text("SELECT 1;"))
             row = result.fetchone()
             assert row[0] == 1
 
-    async def test_database_version(self) -> None:
+    async def test_database_version(self, db_engine) -> None:
         """Database should return version information"""
-        async with engine.connect() as conn:
-            result = await conn.execute("SELECT version();")
+        async with db_engine.connect() as conn:
+            result = await conn.execute(text("SELECT version();"))
             row = result.fetchone()
             assert "PostgreSQL" in row[0]
 
@@ -34,10 +34,11 @@ class TestMinerUConnection:
     async def test_mineru_is_accessible(self) -> None:
         """MinerU service should be accessible"""
         async with httpx.AsyncClient(timeout=5.0) as client:
-            # Try root endpoint since /health doesn't exist
-            response = await client.get(settings.MINERU_BASE_URL)
-            # Accept 200 or 404 (service is running)
-            assert response.status_code in [200, 404]
+            # Use the correct health check endpoint
+            response = await client.get(f"{settings.MINERU_BASE_URL}/api/v1/health")
+            assert response.status_code == 200
+            data = response.json()
+            assert data.get("status") == "healthy"
 
 
 @pytest.mark.integration

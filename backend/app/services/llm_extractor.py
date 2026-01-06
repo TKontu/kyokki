@@ -10,6 +10,47 @@ from app.parsers.base import ReceiptExtraction, ParsedProduct, StoreInfo
 
 logger = get_logger(__name__)
 
+
+def _extract_json_from_response(content: str) -> str:
+    """Extract JSON from LLM response that may include markdown or explanatory text.
+
+    Handles common formats:
+    - Pure JSON
+    - JSON wrapped in markdown code blocks (```json ... ```)
+    - JSON with explanatory text before/after
+
+    Args:
+        content: Raw LLM response content.
+
+    Returns:
+        Extracted JSON string.
+
+    Raises:
+        ValueError: If no valid JSON found in response.
+    """
+    import re
+
+    # Debug: Log first 200 chars of content
+    logger.debug(f"Raw LLM response (first 200 chars): {content[:200]}")
+
+    # Try to find JSON in markdown code block first
+    code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+    if code_block_match:
+        logger.debug("Found JSON in markdown code block")
+        return code_block_match.group(1)
+
+    # Try to find raw JSON object (starts with { and ends with })
+    # Use non-greedy pattern but capture full object including nested braces
+    json_match = re.search(r'\{[\s\S]*\}', content)
+    if json_match:
+        logger.debug("Found raw JSON object")
+        return json_match.group(0)
+
+    # If no JSON found, return original content and let Pydantic handle the error
+    logger.warning("No JSON pattern found in LLM response")
+    return content
+
+
 # Language-agnostic extraction prompt from adaptive parser spec
 EXTRACTION_PROMPT_TEMPLATE = """Analyze this grocery store receipt and extract the products.
 
@@ -39,10 +80,37 @@ Important:
 - Recognize quantity words in any language (pcs, KPL, Stk, st, szt, шт, 個, pièces)
 - Recognize weight/volume units (kg, g, l, ml, oz, lb)
 - Handle various decimal separators (. or ,)
-- Skip totals, tax lines, deposits, payment info regardless of language
+- Skip totals, tax lines, deposits, payment info, discounts (ALENNUS, NORM.), refunds regardless of language
 - Only extract actual food/grocery products
 
 Focus on extracting the products accurately. Be conservative - if you're not sure something is a product, skip it.
+
+OUTPUT INSTRUCTIONS:
+Return ONLY valid JSON with no explanations, no markdown formatting, no code blocks.
+Start your response directly with the opening brace {{.
+
+Use this exact JSON structure:
+{{
+  "store": {{
+    "name": "string or null",
+    "chain": "string or null",
+    "country": "string or null",
+    "language": "string or null",
+    "currency": "string or null"
+  }},
+  "products": [
+    {{
+      "name": "string (required)",
+      "name_en": "string or null",
+      "quantity": 1.0,
+      "weight_kg": "number or null",
+      "volume_l": "number or null",
+      "unit": "pcs",
+      "price": "number or null"
+    }}
+  ],
+  "confidence": 0.95
+}}
 """
 
 
@@ -69,7 +137,7 @@ async def extract_products_from_receipt(ocr_text: str) -> ReceiptExtraction:
         # Call vLLM with structured output (OpenAI-compatible API)
         logger.debug(f"Calling vLLM model: {settings.LLM_MODEL}")
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             headers = {
                 "Authorization": f"Bearer {settings.LLM_API_KEY}",
                 "Content-Type": "application/json",
@@ -79,14 +147,9 @@ async def extract_products_from_receipt(ocr_text: str) -> ReceiptExtraction:
                 "model": settings.LLM_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": settings.LLM_TEMPERATURE,
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "receipt_extraction",
-                        "schema": ReceiptExtraction.model_json_schema(),
-                        "strict": True
-                    }
-                }
+                "max_tokens": 16384,  # Increased for large receipts (context window: 40k)
+                # Note: response_format with json_schema causes thinking loops in vLLM
+                # The prompt itself instructs the model to output JSON
             }
 
             response = await client.post(
@@ -99,8 +162,11 @@ async def extract_products_from_receipt(ocr_text: str) -> ReceiptExtraction:
             data = response.json()
             content = data["choices"][0]["message"]["content"]
 
+            # Extract JSON from response (may be wrapped in markdown code blocks or text)
+            json_content = _extract_json_from_response(content)
+
             # Parse and validate response
-            result = ReceiptExtraction.model_validate_json(content)
+            result = ReceiptExtraction.model_validate_json(json_content)
 
             logger.info(
                 f"vLLM extraction complete: {len(result.products)} products, "
@@ -152,7 +218,7 @@ async def extract_with_store_hint(ocr_text: str, store_hint: str) -> ReceiptExtr
     logger.info(f"Extracting with store hint: {store_hint}")
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=300.0) as client:
             headers = {
                 "Authorization": f"Bearer {settings.LLM_API_KEY}",
                 "Content-Type": "application/json",
@@ -162,14 +228,9 @@ async def extract_with_store_hint(ocr_text: str, store_hint: str) -> ReceiptExtr
                 "model": settings.LLM_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": settings.LLM_TEMPERATURE,
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "receipt_extraction",
-                        "schema": ReceiptExtraction.model_json_schema(),
-                        "strict": True
-                    }
-                }
+                "max_tokens": 16384,  # Increased for large receipts (context window: 40k)
+                # Note: response_format with json_schema causes thinking loops in vLLM
+                # The prompt itself instructs the model to output JSON
             }
 
             response = await client.post(
@@ -182,7 +243,10 @@ async def extract_with_store_hint(ocr_text: str, store_hint: str) -> ReceiptExtr
             data = response.json()
             content = data["choices"][0]["message"]["content"]
 
-            result = ReceiptExtraction.model_validate_json(content)
+            # Extract JSON from response (may be wrapped in markdown code blocks or text)
+            json_content = _extract_json_from_response(content)
+
+            result = ReceiptExtraction.model_validate_json(json_content)
 
             logger.info(f"Extraction with hint complete: {len(result.products)} products")
 
