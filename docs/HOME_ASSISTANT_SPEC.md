@@ -2,7 +2,7 @@
 
 ## Overview
 
-Fridge Logger integrates with Home Assistant to enable smart home automations around food inventory. Users can receive expiry notifications, trigger voice commands, display inventory status on dashboards, and build custom automations.
+Kyokki integrates with Home Assistant to enable smart home automations around food inventory. Users can receive expiry notifications, trigger voice commands, display inventory status on dashboards, and build custom automations.
 
 ## Integration Approaches
 
@@ -153,7 +153,7 @@ Add item to shopping list (for voice assistant).
 ```yaml
 # configuration.yaml
 rest:
-  - resource: http://fridge-logger.local/api/ha/status
+  - resource: http://kyokki.local/api/ha/status
     scan_interval: 300  # 5 minutes
     sensor:
       - name: "Fridge Total Items"
@@ -201,13 +201,13 @@ rest:
 # configuration.yaml
 rest_command:
   fridge_consume_item:
-    url: http://fridge-logger.local/api/ha/consume
+    url: http://kyokki.local/api/ha/consume
     method: POST
     content_type: application/json
     payload: '{"name": "{{ name }}", "amount": "{{ amount }}"}'
     
   fridge_add_to_shopping:
-    url: http://fridge-logger.local/api/ha/shopping/add
+    url: http://kyokki.local/api/ha/shopping/add
     method: POST
     content_type: application/json
     payload: '{"name": "{{ name }}", "priority": "{{ priority | default(''normal'') }}"}'
@@ -237,8 +237,8 @@ automation:
           data:
             actions:
               - action: URI
-                title: "Open Fridge Logger"
-                uri: "http://fridge-logger.local"
+                title: "Open Kyokki"
+                uri: "http://kyokki.local"
 ```
 
 ### Voice Assistant Integration
@@ -305,7 +305,7 @@ automation:
     action:
       - service: shopping_list.add_item
         data:
-          name: "Check Fridge Logger for low stock items"
+          name: "Check Kyokki for low stock items"
 ```
 
 ---
@@ -317,64 +317,64 @@ automation:
 | Feature | Description |
 |---------|-------------|
 | **Config Flow** | UI-based setup (no YAML required) |
-| **Device** | Single "Fridge Logger" device with all entities |
+| **Device** | Single "Kyokki" device with all entities |
 | **Sensors** | Numeric sensors for counts |
 | **Binary Sensors** | Alert states |
-| **Services** | `fridge_logger.consume`, `fridge_logger.add_to_shopping` |
-| **Events** | `fridge_logger_item_expiring`, `fridge_logger_item_consumed` |
+| **Services** | `kyokki.consume`, `kyokki.add_to_shopping` |
+| **Events** | `kyokki_item_expiring`, `kyokki_item_consumed` |
 
 ### Entity Model
 
 ```
-Device: Fridge Logger
-├── sensor.fridge_logger_total_items
-├── sensor.fridge_logger_expiring_today
-├── sensor.fridge_logger_expiring_week
-├── sensor.fridge_logger_expired
-├── sensor.fridge_logger_low_stock
-├── binary_sensor.fridge_logger_has_expired
-├── binary_sensor.fridge_logger_has_expiring
-└── binary_sensor.fridge_logger_needs_shopping
+Device: Kyokki
+├── sensor.kyokki_total_items
+├── sensor.kyokki_expiring_today
+├── sensor.kyokki_expiring_week
+├── sensor.kyokki_expired
+├── sensor.kyokki_low_stock
+├── binary_sensor.kyokki_has_expired
+├── binary_sensor.kyokki_has_expiring
+└── binary_sensor.kyokki_needs_shopping
 ```
 
 ### Services
 
-**fridge_logger.consume**
+**kyokki.consume**
 ```yaml
-service: fridge_logger.consume
+service: kyokki.consume
 data:
   item: "milk"           # Name or ID
   amount: "half"         # quarter, half, three_quarters, all
 ```
 
-**fridge_logger.add_to_shopping**
+**kyokki.add_to_shopping**
 ```yaml
-service: fridge_logger.add_to_shopping
+service: kyokki.add_to_shopping
 data:
   item: "milk"
   priority: "urgent"     # urgent, normal, low
 ```
 
-**fridge_logger.refresh**
+**kyokki.refresh**
 ```yaml
-service: fridge_logger.refresh
+service: kyokki.refresh
 # Force refresh all sensors
 ```
 
 ### Events
 
-**fridge_logger_item_expiring**
+**kyokki_item_expiring**
 ```yaml
-event_type: fridge_logger_item_expiring
+event_type: kyokki_item_expiring
 data:
   item_id: "uuid"
   item_name: "Milk"
   days_until_expiry: 1
 ```
 
-**fridge_logger_item_low**
+**kyokki_item_low**
 ```yaml
-event_type: fridge_logger_item_low
+event_type: kyokki_item_low
 data:
   item_id: "uuid"
   item_name: "Eggs"
@@ -394,13 +394,13 @@ data:
 ### Recommended Setup
 
 ```yaml
-# Fridge Logger .env
+# Kyokki .env
 HA_API_ENABLED=true
 HA_API_KEY=your-secret-key  # Optional
 
 # Home Assistant configuration.yaml
 rest:
-  - resource: http://fridge-logger.local/api/ha/status
+  - resource: http://kyokki.local/api/ha/status
     headers:
       Authorization: "Bearer your-secret-key"
 ```

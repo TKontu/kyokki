@@ -9,10 +9,20 @@
 - Backend volume mounts for development
 - Environment variable configuration
 
+**✅ OCR Pipeline** (Sprint 3A Complete)
+- PDF text extraction with pdfplumber
+- MinerU OCR integration for images
+- File type routing implemented
+
+**✅ Receipt Extraction** (Sprint 3A Complete)
+- vLLM-based language-agnostic extraction
+- Replaces hardcoded store parsers with LLM approach
+- Works with any store/language
+
 **⏳ Pending**
 - Traefik SSL setup
-- OCR pipeline integration
-- Product matching implementation
+- Product matching implementation (RapidFuzz)
+- Celery task integration
 
 ---
 
@@ -64,83 +74,86 @@ services:
 
 ## OCR Pipeline
 
-### File Type Routing
+### ✅ File Type Routing (Sprint 3A Complete)
 PDFs (S-Group digital receipts) don't need OCR — extract text directly.
 
 ```python
-import pdfplumber
-
-def extract_text(file_path: str) -> str:
-    if file_path.endswith('.pdf'):
-        with pdfplumber.open(file_path) as pdf:
-            return '\n'.join(page.extract_text() for page in pdf.pages)
-    return mineru_ocr(file_path)  # Images need OCR
+# Implemented in app/services/ocr_service.py
+async def extract_text_from_receipt(file_path: str, mime_type: str) -> str:
+    if mime_type == "application/pdf":
+        return extract_text_from_pdf(file_path)  # pdfplumber
+    else:
+        return await extract_text_from_image(file_path)  # MinerU API
 ```
 
-- [ ] PDF text extraction (pdfplumber)
-- [ ] Image OCR (MinerU client)
-- [ ] File type routing
+- [x] PDF text extraction (pdfplumber) — ✅ `extract_text_from_pdf()`
+- [x] Image OCR (MinerU client) — ✅ `extract_text_from_image()`
+- [x] File type routing — ✅ Implemented with MIME type detection
 
-### MinerU Integration
+### ✅ MinerU Integration (Sprint 3A Complete)
 ```python
-class MinerUClient:
-    def __init__(self, host: str):
-        self.host = host
-    
-    async def extract_text(self, image_path: str) -> str:
-        # POST image to MinerU, return extracted text
-        pass
+# Implemented in app/services/ocr_service.py
+async def extract_text_from_image(file_path: str) -> str:
+    async with httpx.AsyncClient(timeout=settings.MINERU_TIMEOUT) as client:
+        response = await client.post(
+            f"{settings.MINERU_BASE_URL}/parse",
+            files={"file": ...},
+            data={"parse_method": "auto"}
+        )
+        return response.json()["content"]
 ```
 
-- [ ] MinerU client
-- [ ] Error handling + retry
+- [x] MinerU client — ✅ HTTP client with timeout configuration
+- [x] Error handling + retry — ✅ HTTPError handling
 
-### Store Parsers
+### ✅ Adaptive LLM Extraction (Sprint 3A Complete)
 
-**Detection**
+**Approach:** Instead of hardcoded store parsers, we use vLLM for language-agnostic extraction.
+
 ```python
-STORE_DETECTORS = {
-    'sgroup': ['S-KAUPAT', 'Prisma', 'S-market', 'HOK-ELANTO'],
-    'kgroup': ['K-market', 'K-Citymarket', 'K-Supermarket'],
-    'lidl': ['Lidl', 'lidl.fi'],
-}
+# Implemented in app/services/llm_extractor.py
+async def extract_products_from_receipt(ocr_text: str) -> ReceiptExtraction:
+    """Extract structured product data using vLLM."""
+    # Language-agnostic prompt that:
+    # - Identifies store, chain, country, language, currency
+    # - Extracts products with quantities, weights, volumes, prices
+    # - Skips totals, discounts, deposits automatically
+    # - Works with ANY language/store format
 ```
 
-**S-Group** (from actual receipt PDF)
-```
-KEVYTMAITOJUOMA LAKTON 1,28          ← Product + price
-0,386 KG 3,89 €/KG                   ← Weight (next line)
-3 KPL 1,88 €/KPL                     ← Quantity (next line)
-NORM. 5,64                           ← Skip
-ALENNUS -1,14                        ← Skip
-```
+**Benefits over hardcoded parsers:**
+- ✅ Works with any store (S-Group, K-Group, Lidl, international stores)
+- ✅ Language-agnostic (Finnish, English, German, Swedish, etc.)
+- ✅ Handles variations in receipt formats automatically
+- ✅ No maintenance needed for new store formats
+- ✅ Extracts store metadata (name, chain, country, language, currency)
 
-**K-Group** (from actual receipt photo)
-```
-Pilsner Urquell 4,4% 0,5l tlk    3,04
-Tolkkipantti 0,15                0,15    ← Skip (deposit)
-  1 KPL    0,15 €/KPL                    ← Quantity (indented)
-```
-
-**Lidl** (from actual e-kuitti)
-```
-Grillimaisteri bratwurst         3,29 B  ← Product + VAT code
-Lidl Plus -säästösi             -0,37    ← Discount → associate
-0,436 kg x 3,39 EUR/kg                   ← Weight (inline)
-  2 x 2,89    EUR                        ← Quantity (next line)
-```
-
-**Skip Patterns**
+**Pydantic Models:**
 ```python
-SKIP = [r'^YHTEENSÄ', r'[Tt]olkkipantti', r'^NORM\.', 
-        r'^ALENNUS', r'PLUSSA-ETU', r'^ALV', r'Kortti:']
+class ParsedProduct(BaseModel):
+    name: str              # Original language
+    name_en: str | None    # English translation
+    quantity: float
+    weight_kg: float | None
+    volume_l: float | None
+    unit: str              # pcs, kg, l, unit
+    price: float | None
+
+class StoreInfo(BaseModel):
+    name: str | None       # e.g., "Prisma Jyväskylä"
+    chain: str | None      # e.g., "s-group"
+    country: str | None    # ISO 3166-1 alpha-2
+    language: str | None   # ISO 639-1
+    currency: str | None   # ISO 4217
 ```
 
-- [ ] Base parser
-- [ ] S-Group parser
-- [ ] K-Group parser  
-- [ ] Lidl parser (handle discount association)
-- [ ] Tests with actual receipts
+- [x] LLM extraction client — ✅ vLLM with OpenAI-compatible API
+- [x] Language-agnostic prompt — ✅ Works with any language
+- [x] Store detection — ✅ Automatic from LLM output
+- [x] Product extraction — ✅ With quantities, weights, volumes
+- [x] Tests with actual receipts — ✅ Multi-language test suite
+
+**🔜 Future:** Template optimization for known stores (see adaptive_parser_TODO.md)
 
 ---
 
@@ -215,28 +228,29 @@ def parse_gs1(data: str) -> dict:
 
 ---
 
-## Ollama Fallback
+## ✅ vLLM Receipt Extraction (Sprint 3A Complete)
+
+**Replaced Ollama fallback with primary vLLM extraction.**
 
 ```python
-class OllamaClient:
-    async def identify_product(self, text: str) -> dict:
-        prompt = f"""
-        Receipt line: {text}
-        Identify: product name, category, typical shelf life days.
-        JSON format.
-        """
-        resp = await self.client.post(f"{self.host}/api/generate", json={
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False
-        })
-        return parse_json(resp.json()["response"])
+# Implemented in app/services/llm_extractor.py
+async def extract_products_from_receipt(ocr_text: str) -> ReceiptExtraction:
+    async with httpx.AsyncClient(timeout=300.0) as client:
+        response = await client.post(
+            f"{settings.LLM_BASE_URL}/chat/completions",
+            json={
+                "model": settings.LLM_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": settings.LLM_TEMPERATURE,
+                "max_tokens": 16384
+            }
+        )
 ```
 
-- [ ] Ollama client
-- [ ] Product identification prompt
-- [ ] Category inference
-- [ ] Error handling (timeout, parse failure)
+- [x] vLLM client — ✅ OpenAI-compatible API
+- [x] Receipt extraction prompt — ✅ Language-agnostic, structured output
+- [x] Store and product identification — ✅ Automatic extraction
+- [x] Error handling — ✅ HTTPError and validation errors
 
 ---
 
@@ -276,14 +290,18 @@ POSTGRES_HOST=postgres
 POSTGRES_PASSWORD=xxx
 REDIS_HOST=redis
 
-# OCR
-MINERU_HOST=http://192.168.0.xxx:8000
+# OCR (Sprint 3A - Implemented)
+MINERU_BASE_URL=http://192.168.0.xxx:8000
+MINERU_TIMEOUT=300.0
+MINERU_PARSE_METHOD=auto
 
-# AI
-OLLAMA_HOST=http://192.168.0.247:11434
-OLLAMA_MODEL=qwen2-vl:7b
+# vLLM (Sprint 3A - Implemented)
+LLM_BASE_URL=http://192.168.0.xxx:8000
+LLM_API_KEY=token-abc123
+LLM_MODEL=Qwen3-4B-Instruct
+LLM_TEMPERATURE=0.1
 
-# Matching
+# Matching (Pending - Sprint 3B)
 FUZZY_THRESHOLD=80
 OFF_CACHE_TTL_DAYS=30
 ```

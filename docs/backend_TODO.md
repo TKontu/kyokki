@@ -21,11 +21,19 @@
 - Receipt API: 3 endpoints, 14 tests, file upload & storage
 - Total: 69 API tests passing, 89 total tests passing
 
-**📍 Next: Sprint 3 - Receipt Processing Pipeline**
-- MinerU OCR integration
-- Store parsers (S-Group, K-Group, Lidl)
+**✅ Sprint 3A Complete** (Merged PRs #6, #7)
+- MinerU OCR integration (pdfplumber + MinerU API)
+- vLLM-based language-agnostic extraction (adaptive parser approach)
+- Pydantic models for structured receipt data
+- 27 comprehensive tests for OCR and LLM extraction
+- Documentation: ADAPTIVE_PARSER_SPEC.md, vLLM testing guides
+- Total: 117 tests passing, 1 skipped
+
+**📍 Next: Sprint 3B - Receipt Processing Integration**
 - Fuzzy product matching with RapidFuzz
-- Celery tasks for async processing
+- Celery tasks for async receipt processing
+- WebSocket status broadcasts
+- Integrate OCR + LLM extraction into Receipt API endpoint
 
 ---
 
@@ -54,13 +62,15 @@ backend/
 │   │   ├── inventory_service.py
 │   │   ├── receipt_service.py
 │   │   ├── matching_service.py
+│   │   ├── ocr_service.py        # ✅ MinerU + pdfplumber OCR
+│   │   ├── llm_extractor.py      # ✅ vLLM language-agnostic extraction
 │   │   ├── off_service.py        # Open Food Facts
 │   │   └── gs1_parser.py         # GS1 DataMatrix
 │   ├── parsers/
-│   │   ├── base.py
-│   │   ├── sgroup.py
-│   │   ├── kgroup.py
-│   │   └── lidl.py
+│   │   ├── base.py               # ✅ Pydantic models (ParsedProduct, StoreInfo)
+│   │   ├── detector.py           # Store detection (adaptive parser Phase 1)
+│   │   ├── template_engine.py    # Template parser (adaptive parser Phase 1)
+│   │   └── learner.py            # Template learning (adaptive parser Phase 2)
 │   └── tasks/
 │       ├── ocr_tasks.py
 │       └── stock_tasks.py
@@ -121,48 +131,47 @@ backend/
 - [ ] `POST /api/receipts/batch` — upload multiple (Phase 2)
 - [ ] `POST /api/receipts/{id}/confirm` — confirm extracted items (after OCR)
 
-### Receipt Processing
+### Receipt Processing (Adaptive Parser Approach)
 
-**File Type Routing**
-- [ ] PDF detection → pdfplumber text extraction (S-Group digital)
-- [ ] Image detection → MinerU OCR (physical receipts)
+**✅ Phase 1: OCR Integration (Sprint 3A Complete)**
+- [x] PDF detection → pdfplumber text extraction
+- [x] Image detection → MinerU OCR API
+- [x] Integration tests with real receipt samples
 
-**Store Parsers**
+**✅ Phase 2: LLM Extraction (Sprint 3A Complete)**
+- [x] vLLM integration via OpenAI-compatible API
+- [x] Language-agnostic extraction prompt
+- [x] Pydantic models for validation:
 ```python
-@dataclass
-class ParsedItem:
-    raw_text: str
-    product_name: str
+class ParsedProduct(BaseModel):
+    name: str                    # Original language
+    name_en: str | None          # English translation
     quantity: float = 1.0
-    unit: str = "pcs"           # pcs, kg, l
-    weight_kg: float | None = None
-    # price: float — deferred to future version
+    weight_kg: float | None      # For weight-based items
+    volume_l: float | None       # For volume-based items
+    unit: str = "pcs"            # pcs, kg, l, unit
+    price: float | None          # Optional price tracking
+
+class StoreInfo(BaseModel):
+    name: str | None             # Store name
+    chain: str | None            # Parent chain
+    country: str | None          # ISO 3166-1 alpha-2
+    language: str | None         # ISO 639-1
+    currency: str | None         # ISO 4217
 ```
 
-**S-Group Parser** (Prisma, S-market, Sale)
-- [ ] Detection: `S-KAUPAT`, `Prisma`, `S-market`, `HOK-ELANTO`
-- [ ] Product line: extract product name (price ignored for now)
-- [ ] Weight items: next line `X,XXX KG Y,YY €/KG` → extract weight
-- [ ] Multi-quantity: next line `X KPL Y,YY €/KPL` → extract quantity
-- [ ] Skip: `NORM.`, `ALENNUS`, `TOIMITUSMAKSU`, `VÄLISUMMA`
+**📍 Phase 3: Integration (Sprint 3B - Next)**
+- [ ] Fuzzy product matching with RapidFuzz (match to product_master)
+- [ ] Celery task for async processing
+- [ ] WebSocket status broadcasts
+- [ ] Wire into Receipt API endpoint
 
-**K-Group Parser** (K-market, K-Citymarket)
-- [ ] Detection: `K-market`, `K-Citymarket`, `K-Supermarket`
-- [ ] Product line: extract product name (mixed case)
-- [ ] Quantity: indented `X KPL` → extract quantity
-- [ ] Skip: `Tolkkipantti` (deposit), `PLUSSA-ETU`
-
-**Lidl Parser**
-- [ ] Detection: `Lidl`, `lidl.fi`
-- [ ] Product line: extract name (ignore VAT suffix A/B)
-- [ ] Skip discount lines: `Lidl Plus -säästösi`
-- [ ] Weight inline: `X,XXX kg x` → extract weight
-- [ ] Multi-quantity: next line `X x` → extract quantity
-
-**Common**
-- [ ] Skip patterns: `YHTEENSÄ`, `ALV`, `pantti`, `Kortti:`
-- [ ] Fuzzy matching (RapidFuzz)
-- [ ] Celery task orchestration
+**🔜 Phase 4: Template Optimization (Future - see adaptive_parser_TODO.md)**
+- [ ] Store detection from OCR text
+- [ ] Template parser engine for known stores (fast path)
+- [ ] LLM fallback for unknown stores
+- [ ] Template learning from confirmed extractions
+- [ ] Confidence tracking and re-learning
 
 ### WebSocket
 - [ ] Connection manager

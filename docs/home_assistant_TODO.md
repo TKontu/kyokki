@@ -78,9 +78,9 @@
 ### Repository Structure
 
 ```
-fridge-logger-ha/
+kyokki-ha/
 ├── custom_components/
-│   └── fridge_logger/
+│   └── kyokki/
 │       ├── __init__.py
 │       ├── manifest.json
 │       ├── config_flow.py
@@ -103,7 +103,7 @@ fridge-logger-ha/
 
 **Config Flow**
 - [ ] `config_flow.py` — UI-based configuration
-  - Step 1: Enter Fridge Logger URL
+  - Step 1: Enter Kyokki URL
   - Step 2: Optional API key
   - Validation: Test connection to `/api/ha/status`
 
@@ -115,27 +115,27 @@ fridge-logger-ha/
 
 **Sensors**
 - [ ] `sensor.py` — Numeric sensors
-  - `fridge_logger_total_items`
-  - `fridge_logger_expiring_today`
-  - `fridge_logger_expiring_week`
-  - `fridge_logger_expired`
-  - `fridge_logger_low_stock`
+  - `kyokki_total_items`
+  - `kyokki_expiring_today`
+  - `kyokki_expiring_week`
+  - `kyokki_expired`
+  - `kyokki_low_stock`
 
 **Binary Sensors**
 - [ ] `binary_sensor.py` — Alert states
-  - `fridge_logger_has_expired` (device_class: problem)
-  - `fridge_logger_has_expiring` (device_class: problem)
-  - `fridge_logger_needs_shopping`
+  - `kyokki_has_expired` (device_class: problem)
+  - `kyokki_has_expiring` (device_class: problem)
+  - `kyokki_needs_shopping`
 
 **Services**
 - [ ] `services.yaml` — Service definitions
 - [ ] Service handlers in `__init__.py`
-  - `fridge_logger.consume` — POST to `/api/ha/consume`
-  - `fridge_logger.add_to_shopping` — POST to `/api/ha/shopping/add`
-  - `fridge_logger.refresh` — Force coordinator update
+  - `kyokki.consume` — POST to `/api/ha/consume`
+  - `kyokki.add_to_shopping` — POST to `/api/ha/shopping/add`
+  - `kyokki.refresh` — Force coordinator update
 
 **Device**
-- [ ] Register as single device "Fridge Logger"
+- [ ] Register as single device "Kyokki"
 - [ ] Device info: name, manufacturer, model, sw_version
 
 **Translations**
@@ -164,7 +164,7 @@ fridge-logger-ha/
 ### Minimal Setup
 ```yaml
 rest:
-  - resource: http://fridge-logger.local/api/ha/status
+  - resource: http://kyokki.local/api/ha/status
     scan_interval: 300
     sensor:
       - name: "Fridge Expiring Today"
@@ -174,7 +174,7 @@ rest:
 ### Full Setup
 ```yaml
 rest:
-  - resource: http://fridge-logger.local/api/ha/status
+  - resource: http://kyokki.local/api/ha/status
     scan_interval: 300
     sensor:
       - name: "Fridge Total Items"
@@ -196,7 +196,7 @@ rest:
 
 rest_command:
   fridge_consume:
-    url: http://fridge-logger.local/api/ha/consume
+    url: http://kyokki.local/api/ha/consume
     method: POST
     content_type: application/json
     payload: '{"name": "{{ name }}", "amount": "{{ amount | default(''quarter'') }}"}'
@@ -229,7 +229,7 @@ automation:
 HA_API_KEY=your-secret-key
 
 # For future: callback to HA for events
-HA_WEBHOOK_URL=http://homeassistant.local:8123/api/webhook/fridge-logger
+HA_WEBHOOK_URL=http://homeassistant.local:8123/api/webhook/kyokki
 HA_WEBHOOK_SECRET=webhook-secret
 ```
 

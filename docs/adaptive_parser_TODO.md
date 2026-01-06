@@ -4,6 +4,26 @@
 
 ---
 
+## 🎯 Current Status
+
+**✅ Phase 1: LLM Fallback (COMPLETE - Sprint 3A)**
+- vLLM integration with language-agnostic extraction
+- Pydantic models for structured data validation
+- 27 comprehensive tests with multi-language support
+- Pure LLM approach working end-to-end
+
+**📍 Next: Sprint 3B Integration**
+- Wire LLM extraction into Receipt API
+- Add fuzzy matching to product_master
+- Async processing with Celery
+
+**🔜 Future: Template Optimization**
+- Store detection and template parser (Phase 1: Foundation)
+- Template learning from confirmed receipts (Phase 2)
+- Confidence tracking and optimization
+
+---
+
 ## Overview
 
 Replace hardcoded store parsers with adaptive system that:
@@ -11,6 +31,8 @@ Replace hardcoded store parsers with adaptive system that:
 2. Falls back to LLM for unknown stores
 3. Learns new templates from confirmed extractions
 4. **Works with any language/country** — no hardcoded Finnish assumptions
+
+**Current MVP Strategy:** Pure LLM approach first, optimize with templates later.
 
 ---
 
@@ -96,55 +118,50 @@ Replace hardcoded store parsers with adaptive system that:
 
 ---
 
-## Phase 1: LLM Fallback
+## ✅ Phase 1: LLM Fallback (COMPLETE - Sprint 3A)
 
 ### LLM Client
 
-- [ ] `llm_extract_products(text: str) -> LLMParseResult`
+- [x] `extract_products_from_receipt(text: str) -> ReceiptExtraction` — ✅ Implemented in `services/llm_extractor.py`
   ```python
-  @dataclass
-  class LLMParseResult:
-      store_name: str | None
-      store_chain: str | None
-      country: str | None        # ISO country code
-      language: str | None       # ISO language code
-      currency: str | None       # ISO currency code
-      products: list[ParsedItem]
-      confidence: float
-      raw_response: dict
+  class ReceiptExtraction(BaseModel):
+      store: StoreInfo               # Store name, chain, country, language, currency
+      products: list[ParsedProduct]  # Extracted products with quantities/weights
+      confidence: float              # Extraction confidence score
   ```
 
 ### Extraction Prompt (Language-Agnostic)
 
-- [ ] Design prompt that:
-  - Works with any language receipt
-  - Preserves original product names
-  - Identifies language, country, currency
-  - Recognizes quantity words in multiple languages
-  - Handles various decimal separators
-- [ ] Test with diverse receipts:
-  - Finnish (S-Group, K-Group, Lidl) ✓
-  - German (Aldi, Lidl DE, Rewe)
-  - US (Walmart, Whole Foods, Kroger)
-  - UK (Tesco, Sainsbury's)
-  - Other EU (Carrefour, Albert Heijn)
+- [x] Design prompt that:
+  - [x] Works with any language receipt — ✅ Language-agnostic extraction
+  - [x] Preserves original product names — ✅ `name` field in original language
+  - [x] Identifies language, country, currency — ✅ StoreInfo model
+  - [x] Recognizes quantity words in multiple languages — ✅ Handled in prompt
+  - [x] Handles various decimal separators — ✅ Handled in prompt
+- [x] Test with diverse receipts:
+  - [x] Finnish (S-Group, K-Group, Lidl) — ✅ Multi-language tests
+  - [ ] German (Aldi, Lidl DE, Rewe) — Not tested yet
+  - [ ] US (Walmart, Whole Foods, Kroger) — Not tested yet
+  - [ ] UK (Tesco, Sainsbury's) — Not tested yet
+  - [ ] Other EU (Carrefour, Albert Heijn) — Not tested yet
 
 ### Fallback Flow
 
-- [ ] Update `parse_receipt()`:
+- [ ] Update `parse_receipt()` with template-first approach:
   ```python
   async def parse_receipt(text: str) -> ParseResult:
       store = await detect_store(text)
-      
+
       if store and store.confidence > 0.7:
           return template_parse(text, store)
-      
+
       # LLM fallback
       result = await llm_extract_products(text)
       result.parse_method = 'llm'
       result.store_hint = store
       return result
   ```
+  **Note**: Currently using pure LLM approach. Template optimization deferred to Phase 1: Foundation.
 
 ---
 
