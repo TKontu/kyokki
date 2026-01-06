@@ -124,9 +124,10 @@ class TestExtractProductsFromReceipt:
 
             assert payload["model"] == settings.LLM_MODEL
             assert payload["temperature"] == settings.LLM_TEMPERATURE
-            assert "response_format" in payload
-            assert payload["response_format"]["type"] == "json_schema"
-            assert payload["response_format"]["json_schema"]["strict"] is True
+            assert payload["max_tokens"] == 16384
+            # Note: response_format is NOT included because it causes thinking loops in vLLM
+            # The prompt itself instructs the model to output JSON
+            assert "response_format" not in payload
 
     async def test_extraction_with_minimal_response(self):
         """Test extraction with minimal valid response (no store info)."""
@@ -262,9 +263,11 @@ class TestBuildPromptForStore:
         long_text = "X" * 5000
         prompt = build_prompt_for_store(long_text)
 
-        # Should contain truncated text
+        # Should contain truncated text (max 4000 chars)
         assert "X" * 4000 in prompt
-        assert len(prompt) < len(long_text) + 1000  # Prompt template overhead
+        # Prompt should be truncated: 4000 char text + ~2000 char template = ~6000 chars
+        assert len(prompt) < 7000  # Allow for template overhead
+        assert len(prompt) > 5000  # Should have text + template
 
 
 class TestExtractWithStoreHint:

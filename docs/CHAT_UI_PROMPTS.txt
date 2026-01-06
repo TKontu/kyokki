@@ -1,0 +1,360 @@
+================================================================================
+SIMPLE RECEIPT TEST (Should work - paste this into vLLM chat UI)
+================================================================================
+
+Analyze this grocery store receipt and extract the products.
+
+Receipt text:
+```
+PRISMA JYVÄSKYLÄ
+S-KAUPAT OY
+
+Maito 1 l                   1.49
+Ruisleipä                   2.95
+Juusto 400g                 4.50
+
+YHTEENSÄ                    8.94
+KORTTI                      8.94
+
+Kiitos käynnistä!
+```
+
+This receipt may be in any language. Extract each product with:
+- name: Product name as written (preserve original language)
+- name_en: English translation if not already English (optional)
+- quantity: Number of items (default 1)
+- weight_kg: Weight in kg if sold by weight (null otherwise)
+- volume_l: Volume in liters if applicable (null otherwise)
+- unit: "pcs", "kg", "l", or "unit"
+- price: Price in local currency (optional)
+
+Also identify:
+- store_name: The store name from the header
+- store_chain: Parent chain if identifiable
+- country: Country code (ISO 3166-1 alpha-2, e.g., "FI", "US", "DE")
+- language: Primary language of receipt (ISO 639-1, e.g., "fi", "en", "de")
+- currency: Currency code (ISO 4217, e.g., "EUR", "USD")
+
+Important:
+- Preserve original product names (don't translate the name field)
+- Recognize quantity words in any language (pcs, KPL, Stk, st, szt, шт, 個, pièces)
+- Recognize weight/volume units (kg, g, l, ml, oz, lb)
+- Handle various decimal separators (. or ,)
+- Skip totals, tax lines, deposits, payment info regardless of language
+- Only extract actual food/grocery products
+
+Focus on extracting the products accurately. Be conservative - if you're not sure something is a product, skip it.
+
+Output the result as valid JSON following this structure:
+{
+  "store": {
+    "name": "string or null",
+    "chain": "string or null",
+    "country": "string or null",
+    "language": "string or null",
+    "currency": "string or null"
+  },
+  "products": [
+    {
+      "name": "string (required)",
+      "name_en": "string or null",
+      "quantity": 1.0,
+      "weight_kg": "number or null",
+      "volume_l": "number or null",
+      "unit": "pcs",
+      "price": "number or null"
+    }
+  ],
+  "confidence": 0.95
+}
+
+
+================================================================================
+REAL RECEIPT TEST (Causes thinking loop - paste this into vLLM chat UI)
+================================================================================
+
+Analyze this grocery store receipt and extract the products.
+
+Receipt text:
+```
+S-KAUPAT
+Prisma ruoan verkkokauppa
+AEROLANKAARI 3
+01530 VANTAA
+HOK-ELANTO LIIKETOIMINTA OY
+1837957-3
+TILAUSNRO: 1089366829
+02.01.2026 11:40
+----------------------------------------
+KEVYTMAITOJUOMA LAKTON 1,28
+OMENASOSE 1,99
+MANGO KEITT/KENT/OSTEEN 1,50
+0,386 KG 3,89 €/KG
+COOP FETA JUUSTO PDO LAKTON 2,68
+GRANAATTIOMENA 1,17
+0,300 KG 3,89 €/KG
+CHEDDAR PUNAINEN 3,43
+TACO SAUCE MIETO LUOMU 1,99
+RANSKANKERMA 18% VÄHÄLAKT 0,75
+NACHO CHIPS 475G 2,99
+AMERIKAN PEKONI ORIGINAL 2,49
+KEISARINNA JUUSTO 6,72
+BARISTA KAURAJUOMA 4,50
+3 KPL 1,88 €/KPL
+NORM. 5,64
+ALENNUS -1,14
+KOMPOSTOINTIPUSSI PAPERI 6,70
+2 KPL 3,35 €/KPL
+COOP ROSKAPUSSI 30L 25KPL MUSTA 6,15
+3 KPL 2,05 €/KPL
+RUISPALAT OHUT HERKKU 4,90
+2 KPL 2,45 €/KPL
+TIKKUPERUNAT 2,84
+HAPANKAALI 4,39
+OLIIVIÖLJY EXTRAVIRGIN 6,29
+PORKKANA 1KG 5,45
+5 KPL 1,09 €/KPL
+OMENA GRANNY SMITH 3,80
+1,590 KG 2,39 €/KG
+PÄÄRYNÄ CONFERENCE I 1,01
+0,484 KG 2,09 €/KG
+PYYKKIETIKKA MARJAMETSÄ 11,38
+2 KPL 5,69 €/KPL
+NESTESAIPPUA OMENA 2,99
+DIPPI SWEET CHILI 1,58
+2 KPL 0,79 €/KPL
+SIENILIINA 2,38
+2 KPL 1,19 €/KPL
+KEITTIÖSUIHKE SITRUS 3,15
+YLEISPUHDISTUSSUIHKE 3,29
+GLÖGI TUMMA SOKEROIMATON 1L 2,00
+2 KPL 1,99 €/KPL
+NORM. 3,98
+ALENNUS -1,98
+TURKKILAINEN JOGURTTI 10% 1,38
+TUMMA RYPÄLE 500G 3,69
+PUNASIPULI 0,52
+0,330 KG 1,59 €/KG
+SYDÄNSALAATTI 200G 1,29
+TOMAATTIPYREE 0,59
+NAMIVITA MONIVITAMIINI 16,95
+KAURAJUOMA 5,64
+3 KPL 1,88 €/KPL
+LIME 2,21
+0,740 KG 2,99 €/KG
+KANAN FILEESUIKALE MTON 2,89
+MOZZARELLA JUUSTORASTE 150G 1,28
+PKARKEA VEHNÄJAUHO 1,28
+KERMAVIILI 12% VÄHÄLAKT 0,98
+2 KPL 0,49 €/KPL
+PERSILJA 1,29
+TOMAATTI SUOMI 4,59
+1,180 KG 3,89 €/KG
+ISOT KANANMUNAT VAPAA L15 3,77
+OIVARIINI NORMAALISUOLAINEN 4,27
+BANAANI 0,70
+0,370 KG 1,89 €/KG
+OMENA SUOMI 1,15
+0,384 KG 2,99 €/KG
+KIRSIKKATOMAATTI 250G 2,79
+MONIVITAMIINI APPELSIINI 1,19
+KURKKU 1,23
+0,325 KG 3,79 €/KG
+VERKKOK.PAKKAUSMATERIAALIMAKSU 2,55
+TOIMITUSMAKSU 11,90 11,90
+----------------------------------------
+VÄLISUMMA 173,92
+YHTEENSÄ 173,92
+BONUSTA KERRYTTÄVÄT OSTOKSET 173,92
+MAKSUTAPA Korttimaksu
+Kortti: Mastercard Credit
+************6568
+Veloitus: 173,92
+Autentisointi: FW88SHFFHDVXS9G3
+Viite: 1089366829
+Aika: 02.01.2026 11:41
+ALV VEROTON VERO VEROLLINEN
+25,5% 31,13 7,93 39,06
+13,5% 118,80 16,06 134,86
+YHT. 149,93 23,99 173,92
+```
+
+This receipt may be in any language. Extract each product with:
+- name: Product name as written (preserve original language)
+- name_en: English translation if not already English (optional)
+- quantity: Number of items (default 1)
+- weight_kg: Weight in kg if sold by weight (null otherwise)
+- volume_l: Volume in liters if applicable (null otherwise)
+- unit: "pcs", "kg", "l", or "unit"
+- price: Price in local currency (optional)
+
+Also identify:
+- store_name: The store name from the header
+- store_chain: Parent chain if identifiable
+- country: Country code (ISO 3166-1 alpha-2, e.g., "FI", "US", "DE")
+- language: Primary language of receipt (ISO 639-1, e.g., "fi", "en", "de")
+- currency: Currency code (ISO 4217, e.g., "EUR", "USD")
+
+Important:
+- Preserve original product names (don't translate the name field)
+- Recognize quantity words in any language (pcs, KPL, Stk, st, szt, шт, 個, pièces)
+- Recognize weight/volume units (kg, g, l, ml, oz, lb)
+- Handle various decimal separators (. or ,)
+- Skip totals, tax lines, deposits, payment info regardless of language
+- Only extract actual food/grocery products
+
+Focus on extracting the products accurately. Be conservative - if you're not sure something is a product, skip it.
+
+Output the result as valid JSON following this structure:
+{
+  "store": {
+    "name": "string or null",
+    "chain": "string or null",
+    "country": "string or null",
+    "language": "string or null",
+    "currency": "string or null"
+  },
+  "products": [
+    {
+      "name": "string (required)",
+      "name_en": "string or null",
+      "quantity": 1.0,
+      "weight_kg": "number or null",
+      "volume_l": "number or null",
+      "unit": "pcs",
+      "price": "number or null"
+    }
+  ],
+  "confidence": 0.95
+}
+
+
+================================================================================
+ALTERNATIVE PROMPT WITH EXPLICIT "NO THINKING" INSTRUCTION
+================================================================================
+
+You are a receipt parser. Your task is to extract product data from grocery receipts.
+
+CRITICAL INSTRUCTIONS:
+- Output ONLY valid JSON
+- Do NOT include any reasoning, thinking, explanations, or commentary
+- Do NOT show your work or thought process
+- Just parse the receipt and output the JSON directly
+
+Analyze this grocery store receipt and extract the products.
+
+Receipt text:
+```
+S-KAUPAT
+Prisma ruoan verkkokauppa
+AEROLANKAARI 3
+01530 VANTAA
+HOK-ELANTO LIIKETOIMINTA OY
+1837957-3
+TILAUSNRO: 1089366829
+02.01.2026 11:40
+----------------------------------------
+KEVYTMAITOJUOMA LAKTON 1,28
+OMENASOSE 1,99
+MANGO KEITT/KENT/OSTEEN 1,50
+0,386 KG 3,89 €/KG
+COOP FETA JUUSTO PDO LAKTON 2,68
+GRANAATTIOMENA 1,17
+0,300 KG 3,89 €/KG
+CHEDDAR PUNAINEN 3,43
+TACO SAUCE MIETO LUOMU 1,99
+RANSKANKERMA 18% VÄHÄLAKT 0,75
+NACHO CHIPS 475G 2,99
+AMERIKAN PEKONI ORIGINAL 2,49
+KEISARINNA JUUSTO 6,72
+BARISTA KAURAJUOMA 4,50
+3 KPL 1,88 €/KPL
+NORM. 5,64
+ALENNUS -1,14
+KOMPOSTOINTIPUSSI PAPERI 6,70
+2 KPL 3,35 €/KPL
+COOP ROSKAPUSSI 30L 25KPL MUSTA 6,15
+3 KPL 2,05 €/KPL
+RUISPALAT OHUT HERKKU 4,90
+2 KPL 2,45 €/KPL
+TIKKUPERUNAT 2,84
+HAPANKAALI 4,39
+OLIIVIÖLJY EXTRAVIRGIN 6,29
+PORKKANA 1KG 5,45
+5 KPL 1,09 €/KPL
+OMENA GRANNY SMITH 3,80
+1,590 KG 2,39 €/KG
+PÄÄRYNÄ CONFERENCE I 1,01
+0,484 KG 2,09 €/KG
+PYYKKIETIKKA MARJAMETSÄ 11,38
+2 KPL 5,69 €/KPL
+NESTESAIPPUA OMENA 2,99
+DIPPI SWEET CHILI 1,58
+2 KPL 0,79 €/KPL
+SIENILIINA 2,38
+2 KPL 1,19 €/KPL
+KEITTIÖSUIHKE SITRUS 3,15
+YLEISPUHDISTUSSUIHKE 3,29
+GLÖGI TUMMA SOKEROIMATON 1L 2,00
+2 KPL 1,99 €/KPL
+NORM. 3,98
+ALENNUS -1,98
+TURKKILAINEN JOGURTTI 10% 1,38
+TUMMA RYPÄLE 500G 3,69
+PUNASIPULI 0,52
+0,330 KG 1,59 €/KG
+SYDÄNSALAATTI 200G 1,29
+TOMAATTIPYREE 0,59
+NAMIVITA MONIVITAMIINI 16,95
+KAURAJUOMA 5,64
+3 KPL 1,88 €/KPL
+LIME 2,21
+0,740 KG 2,99 €/KG
+KANAN FILEESUIKALE MTON 2,89
+MOZZARELLA JUUSTORASTE 150G 1,28
+PKARKEA VEHNÄJAUHO 1,28
+KERMAVIILI 12% VÄHÄLAKT 0,98
+2 KPL 0,49 €/KPL
+PERSILJA 1,29
+TOMAATTI SUOMI 4,59
+1,180 KG 3,89 €/KG
+ISOT KANANMUNAT VAPAA L15 3,77
+OIVARIINI NORMAALISUOLAINEN 4,27
+BANAANI 0,70
+0,370 KG 1,89 €/KG
+OMENA SUOMI 1,15
+0,384 KG 2,99 €/KG
+KIRSIKKATOMAATTI 250G 2,79
+MONIVITAMIINI APPELSIINI 1,19
+KURKKU 1,23
+0,325 KG 3,79 €/KG
+VERKKOK.PAKKAUSMATERIAALIMAKSU 2,55
+TOIMITUSMAKSU 11,90 11,90
+----------------------------------------
+VÄLISUMMA 173,92
+YHTEENSÄ 173,92
+BONUSTA KERRYTTÄVÄT OSTOKSET 173,92
+```
+
+Extract each product with:
+- name: Product name as written (preserve original language)
+- name_en: English translation if not already English (optional)
+- quantity: Number of items (default 1)
+- weight_kg: Weight in kg if sold by weight (null otherwise)
+- volume_l: Volume in liters if applicable (null otherwise)
+- unit: "pcs", "kg", "l", or "unit"
+- price: Price in local currency (optional)
+
+Also identify store info: name, chain, country (ISO 3166-1), language (ISO 639-1), currency (ISO 4217)
+
+Skip: totals, tax lines, deposits, payment info
+Only extract: actual food/grocery products
+
+Output ONLY this JSON structure, nothing else:
+{
+  "store": {"name": null, "chain": null, "country": null, "language": null, "currency": null},
+  "products": [
+    {"name": "", "name_en": null, "quantity": 1.0, "weight_kg": null, "volume_l": null, "unit": "pcs", "price": null}
+  ],
+  "confidence": null
+}
