@@ -23,6 +23,7 @@ services:
       - ./backend:/app  # Mount entire backend for development
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./samples:/app/samples  # Mount samples for testing
     env_file:
       - .env
     networks:
@@ -38,6 +39,7 @@ services:
       - kyokki_net
     volumes:
       - ./data:/app/data
+      - ./samples:/app/samples  # Mount samples for testing
     env_file:
       - .env
     depends_on:

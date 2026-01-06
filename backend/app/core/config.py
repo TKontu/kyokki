@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     # LLM Service (OpenAI-compatible endpoint for Ollama/other providers)
     LLM_BASE_URL: str = "http://192.168.0.247:9003/v1"
     LLM_API_KEY: str = "ollama"  # Default for local Ollama
-    LLM_MODEL: str = "qwen2-vl"  # Vision model for receipt analysis fallback
+    LLM_MODEL: str = "qwen3-8B"  # Qwen3 8B model for receipt extraction
     LLM_TEMPERATURE: float = 0.1
 
     # Open Food Facts API
