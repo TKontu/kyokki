@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+
+  /* Layout */
+  --sidebar-width: 240px;
+  --action-bar-width: 80px;
+  --header-height: 64px;
+
+  /* Touch */
+  --touch-target: 44px;
+  --touch-target-lg: 56px;
+
+  /* Animation */
+  --transition-fast: 150ms;
+  --transition-normal: 300ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+  /* Prevent pull-to-refresh on iPad */
+  overscroll-behavior: none;
+}
+
+/* Prevent text selection on iPad (for UI elements) */
+.no-select {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Safe area for notched iPads */
+.safe-area-inset {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
