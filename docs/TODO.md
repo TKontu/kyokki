@@ -24,10 +24,11 @@
 - [x] Health check — ✅ Implemented with tests
 
 ### Receipt Pipeline
-- [ ] MinerU OCR integration
-- [ ] Store parsers: S-Group, K-Group, Lidl (use provided receipt samples)
+- [x] MinerU OCR integration — ✅ pdfplumber + MinerU API (Sprint 3A)
+- [x] Language-agnostic LLM extraction — ✅ vLLM with structured output (Sprint 3A)
 - [ ] Fuzzy product matching (RapidFuzz)
 - [ ] Celery task for async processing
+- [ ] WebSocket status broadcasts
 
 ### Frontend (iPad PWA)
 - [ ] Next.js 14 + PWA setup
@@ -145,12 +146,25 @@
 
 **Stats**: 89 tests passing, 1,244+ lines added across Sprint 2
 
-### Sprint 3: Receipt Processing Pipeline (NEXT)
-1. [ ] MinerU OCR integration
-2. [ ] Store parsers: S-Group, K-Group, Lidl
-3. [ ] Fuzzy product matching (RapidFuzz)
-4. [ ] Celery tasks for async processing
-5. [ ] WebSocket status broadcasts
+### ✅ Sprint 3A: OCR & LLM Extraction (COMPLETE)
+1. [x] MinerU OCR integration — ✅ pdfplumber + MinerU API
+2. [x] vLLM language-agnostic extraction — ✅ Replaces hardcoded store parsers
+3. [x] Pydantic models for structured data — ✅ ParsedProduct, StoreInfo, ReceiptExtraction
+4. [x] Comprehensive testing — ✅ 27 tests (multi-language support)
+5. [x] Documentation — ✅ ADAPTIVE_PARSER_SPEC.md, vLLM guides
+
+**Merged**:
+- PR #6 (880eee5) - OCR and LLM extraction implementation
+- PR #7 (9d79357) - Test fixes and documentation
+
+**Stats**: 117 tests passing, 1 skipped
+
+### Sprint 3B: Receipt Processing Integration (NEXT)
+1. [ ] Fuzzy product matching (RapidFuzz) — match extracted products to product_master
+2. [ ] Celery task for async receipt processing
+3. [ ] WebSocket status broadcasts for real-time updates
+4. [ ] Wire OCR + LLM extraction into Receipt API endpoint
+5. [ ] Add POST /api/receipts/{id}/confirm endpoint
 
 ---
 
