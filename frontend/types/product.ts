@@ -3,9 +3,10 @@
  * Mirror backend schema: /backend/app/schemas/product_master.py
  */
 
+import type { Unit } from './inventory'
+
 export type StorageType = 'refrigerator' | 'freezer' | 'pantry'
 export type UnitType = 'volume' | 'weight' | 'count' | 'unit'
-export type Unit = 'ml' | 'g' | 'pcs'
 
 export interface ProductMaster {
   id: string // UUID

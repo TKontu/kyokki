@@ -16,7 +16,7 @@ import type {
  * List inventory items with optional filters
  */
 export async function list(params?: InventoryListParams): Promise<InventoryItem[]> {
-  return apiClient.get<InventoryItem[]>('/inventory', params)
+  return apiClient.get<InventoryItem[]>('/inventory', params as Record<string, string | number | boolean | undefined>)
 }
 
 /**

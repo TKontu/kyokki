@@ -3,11 +3,20 @@
 import React, { useState } from 'react';
 import Button from '@/components/ui/Button';
 import Card, { CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/Card';
-import Badge, { ExpiryBadge, StatusBadge } from '@/components/ui/Badge';
+import Badge, { ExpiryBadge as BasicExpiryBadge, StatusBadge } from '@/components/ui/Badge';
 import Skeleton, { SkeletonInventoryItem, SkeletonCard } from '@/components/ui/Skeleton';
+import { ExpiryBadge } from '@/components/inventory/ExpiryBadge';
 
 export default function ComponentsDemo() {
   const [darkMode, setDarkMode] = useState(false);
+
+  // Calculate demo dates relative to today
+  const today = new Date();
+  const formatDate = (daysOffset: number) => {
+    const date = new Date(today);
+    date.setDate(date.getDate() + daysOffset);
+    return date.toISOString().split('T')[0];
+  };
 
   // Toggle dark mode on the html element
   React.useEffect(() => {
@@ -96,14 +105,14 @@ export default function ComponentsDemo() {
               </div>
 
               <div>
-                <h4 className="text-sm font-semibold mb-3 text-ui-text dark:text-ui-dark-text">Expiry Badges</h4>
+                <h4 className="text-sm font-semibold mb-3 text-ui-text dark:text-ui-dark-text">Expiry Badges (Basic)</h4>
                 <div className="flex flex-wrap gap-3">
-                  <ExpiryBadge daysUntilExpiry={-1} />
-                  <ExpiryBadge daysUntilExpiry={0} />
-                  <ExpiryBadge daysUntilExpiry={1} />
-                  <ExpiryBadge daysUntilExpiry={4} />
-                  <ExpiryBadge daysUntilExpiry={7} />
-                  <ExpiryBadge daysUntilExpiry={15} />
+                  <BasicExpiryBadge daysUntilExpiry={-1} />
+                  <BasicExpiryBadge daysUntilExpiry={0} />
+                  <BasicExpiryBadge daysUntilExpiry={1} />
+                  <BasicExpiryBadge daysUntilExpiry={4} />
+                  <BasicExpiryBadge daysUntilExpiry={7} />
+                  <BasicExpiryBadge daysUntilExpiry={15} />
                 </div>
               </div>
 
@@ -115,6 +124,81 @@ export default function ComponentsDemo() {
                   <StatusBadge status="partial" />
                   <StatusBadge status="empty" />
                   <StatusBadge status="discarded" />
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Enhanced Expiry Badge */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Enhanced Expiry Badge (Increment 1.3)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-6">
+              <div>
+                <h4 className="text-sm font-semibold mb-3 text-ui-text dark:text-ui-dark-text">
+                  Expiry Urgency Levels
+                </h4>
+                <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary mb-3">
+                  Color-coded badges with automatic formatting and warning icons
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <ExpiryBadge expiryDate={formatDate(-5)} />
+                  <ExpiryBadge expiryDate={formatDate(0)} />
+                  <ExpiryBadge expiryDate={formatDate(1)} />
+                  <ExpiryBadge expiryDate={formatDate(2)} />
+                  <ExpiryBadge expiryDate={formatDate(5)} />
+                  <ExpiryBadge expiryDate={formatDate(7)} />
+                  <ExpiryBadge expiryDate={formatDate(14)} />
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-semibold mb-3 text-ui-text dark:text-ui-dark-text">
+                  Scanned Dates (with 📅 icon)
+                </h4>
+                <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary mb-3">
+                  Dates from GS1 DataMatrix barcodes show calendar icon for accuracy
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <ExpiryBadge expiryDate={formatDate(-2)} expirySource="scanned" />
+                  <ExpiryBadge expiryDate={formatDate(0)} expirySource="scanned" />
+                  <ExpiryBadge expiryDate={formatDate(3)} expirySource="scanned" />
+                  <ExpiryBadge expiryDate={formatDate(7)} expirySource="scanned" />
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-semibold mb-3 text-ui-text dark:text-ui-dark-text">
+                  Color Coding Legend
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div className="flex items-center gap-2">
+                    <ExpiryBadge expiryDate={formatDate(-1)} />
+                    <span className="text-ui-text-secondary dark:text-ui-dark-text-secondary">
+                      Red: Expired (past dates)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <ExpiryBadge expiryDate={formatDate(0)} />
+                    <span className="text-ui-text-secondary dark:text-ui-dark-text-secondary">
+                      Orange: Today/Tomorrow
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <ExpiryBadge expiryDate={formatDate(2)} />
+                    <span className="text-ui-text-secondary dark:text-ui-dark-text-secondary">
+                      Yellow: Soon (2-3 days)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <ExpiryBadge expiryDate={formatDate(5)} />
+                    <span className="text-ui-text-secondary dark:text-ui-dark-text-secondary">
+                      Green: Fresh (4+ days)
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -191,7 +275,7 @@ export default function ComponentsDemo() {
             </p>
             <div className="mt-4 space-y-2 text-sm">
               <p className="text-ui-text dark:text-ui-dark-text">
-                <strong>Touch Targets:</strong> All interactive elements meet Apple's HIG minimum of 44px
+                <strong>Touch Targets:</strong> All interactive elements meet Apple&apos;s HIG minimum of 44px
               </p>
               <p className="text-ui-text dark:text-ui-dark-text">
                 <strong>Colors:</strong> Subtle, professional palette with good contrast
