@@ -30,7 +30,7 @@ export class APIClient {
       ? '?' +
         new URLSearchParams(
           Object.entries(options.params)
-            .filter(([_, v]) => v !== undefined)
+            .filter(([, v]) => v !== undefined)
             .map(([k, v]) => [k, String(v)])
         ).toString()
       : ''

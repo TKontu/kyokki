@@ -3,6 +3,7 @@ import { APIError, NetworkError, isAPIError, isNetworkError } from '../errors'
 
 // Mock global fetch
 const mockFetch = jest.fn()
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 global.fetch = mockFetch as any
 
 describe('APIClient', () => {
