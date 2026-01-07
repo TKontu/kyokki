@@ -1,17 +1,18 @@
 """Shopping list API endpoints."""
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
+from app.core.logging import get_logger
 from app.crud.shopping_list_item import shopping_list_item
+from app.db.session import get_db
 from app.schemas.shopping_list_item import (
     ShoppingListItemCreate,
-    ShoppingListItemUpdate,
     ShoppingListItemResponse,
+    ShoppingListItemUpdate,
 )
 from app.services.broadcast_helpers import broadcast_shopping_list_update
-from app.core.logging import get_logger
 
 router = APIRouter()
 logger = get_logger(__name__)

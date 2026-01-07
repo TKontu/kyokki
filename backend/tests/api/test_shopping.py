@@ -1,12 +1,13 @@
 """Tests for shopping list API endpoints."""
-import pytest
 from decimal import Decimal
 from uuid import UUID
+
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.shopping_list_item import ShoppingListItem
 from app.models.product_master import ProductMaster
+from app.models.shopping_list_item import ShoppingListItem
 
 
 @pytest.mark.asyncio
