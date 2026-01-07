@@ -20,15 +20,15 @@
 - [x] Inventory CRUD + consume endpoint — ✅ 6 endpoints, 21 tests (PR #4)
 - [x] Products CRUD + barcode lookup — ✅ 6 endpoints, 15 tests (PR #3)
 - [x] Receipt upload + status endpoints — ✅ 3 endpoints, 14 tests (PR #5)
-- [ ] WebSocket for real-time updates
+- [x] WebSocket for real-time updates — ✅ /api/ws endpoint with Redis pub/sub (Sprint 3B+)
 - [x] Health check — ✅ Implemented with tests
 
 ### Receipt Pipeline
 - [x] MinerU OCR integration — ✅ pdfplumber + MinerU API (Sprint 3A)
 - [x] Language-agnostic LLM extraction — ✅ vLLM with structured output (Sprint 3A)
-- [ ] Fuzzy product matching (RapidFuzz)
-- [ ] Celery task for async processing
-- [ ] WebSocket status broadcasts
+- [x] Fuzzy product matching (RapidFuzz) — ✅ WRatio scorer with confidence levels (Sprint 3B)
+- [ ] Celery task for async processing — Optional enhancement (currently synchronous)
+- [x] WebSocket status broadcasts — ✅ Receipt & inventory updates (Sprint 3B+)
 
 ### Frontend (iPad PWA)
 - [ ] Next.js 14 + PWA setup
@@ -159,12 +159,24 @@
 
 **Stats**: 117 tests passing, 1 skipped
 
-### Sprint 3B: Receipt Processing Integration (NEXT)
-1. [ ] Fuzzy product matching (RapidFuzz) — match extracted products to product_master
-2. [ ] Celery task for async receipt processing
-3. [ ] WebSocket status broadcasts for real-time updates
-4. [ ] Wire OCR + LLM extraction into Receipt API endpoint
-5. [ ] Add POST /api/receipts/{id}/confirm endpoint
+### ✅ Sprint 3B: Receipt Processing Integration (COMPLETE)
+1. [x] Fuzzy product matching (RapidFuzz) — match extracted products to product_master
+2. [x] Wire OCR + LLM extraction into Receipt API endpoint
+3. [x] Add POST /api/receipts/{id}/confirm endpoint
+4. [x] Receipt processing pipeline with status tracking
+
+**Merged**: PR #9 (79d7114) - Receipt processing integration
+
+### ✅ Sprint 3B+: WebSocket Real-Time Updates (COMPLETE)
+1. [x] WebSocket endpoint at /api/ws
+2. [x] ConnectionManager with error handling and auto-cleanup
+3. [x] Redis pub/sub message broadcasting
+4. [x] Receipt status broadcasts (processing/completed/failed/confirmed)
+5. [x] Inventory update broadcasts (created/updated/consumed/deleted)
+6. [x] Standardized JSON message format
+7. [x] Comprehensive tests (connection + integration)
+
+**Stats**: 4 new files, 7 modified files, ~650 lines added
 
 ---
 

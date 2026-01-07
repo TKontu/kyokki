@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from .endpoints import health, categories, products, inventory, receipts
+from .endpoints import health, categories, products, inventory, receipts, websockets
 
 api_router = APIRouter()
 
@@ -10,3 +10,4 @@ api_router.include_router(categories.router, prefix="/categories", tags=["catego
 api_router.include_router(products.router, prefix="/products", tags=["products"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(receipts.router, prefix="/receipts", tags=["receipts"])
+api_router.include_router(websockets.router, tags=["websockets"])

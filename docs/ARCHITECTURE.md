@@ -351,14 +351,187 @@ POST   /api/scanner/input          Process barcode input
 GET    /api/scanner/mode           Get current mode
 POST   /api/scanner/mode           Set mode (add/consume/lookup)
 
+# WebSocket (Real-Time Updates)
+WS     /api/ws                     Real-time broadcasts
+
 # System
 GET    /api/health                 Health check
-WS     /api/ws                     Real-time updates
 ```
 
 ---
 
-## 9. Technology Stack
+## 9. WebSocket Real-Time Updates
+
+### 9.1 Architecture
+The system uses **Redis Pub/Sub** with WebSocket broadcasting for real-time updates.
+
+```
+API Endpoint → Redis Publish → Redis Listener → ConnectionManager → WebSocket Clients
+```
+
+**Flow:**
+1. API endpoint makes a change (create inventory, process receipt)
+2. Publishes message to Redis `updates` channel
+3. Background Redis listener receives message
+4. ConnectionManager broadcasts to all connected WebSocket clients
+5. Clients filter messages by `type` and `entity_id`
+
+### 9.2 Connection
+Clients connect to the WebSocket endpoint:
+
+```javascript
+const ws = new WebSocket('ws://localhost:8000/api/ws');
+
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+
+  // Filter by message type
+  if (message.type === 'receipt_status') {
+    updateReceiptUI(message);
+  } else if (message.type === 'inventory_update') {
+    updateInventoryUI(message);
+  }
+};
+```
+
+### 9.3 Message Format
+All messages follow a standardized JSON structure:
+
+```json
+{
+  "type": "receipt_status" | "inventory_update",
+  "timestamp": "2026-01-06T12:34:56.789Z",
+  "entity_id": "uuid-of-entity",
+  "data": {
+    // Type-specific payload
+  }
+}
+```
+
+### 9.4 Receipt Status Messages
+Broadcast during receipt processing pipeline:
+
+```json
+{
+  "type": "receipt_status",
+  "timestamp": "2026-01-06T12:34:56.789Z",
+  "entity_id": "receipt-uuid",
+  "data": {
+    "receipt_id": "receipt-uuid",
+    "status": "processing" | "completed" | "failed" | "confirmed",
+    "items_extracted": 5,
+    "items_matched": 3,
+    "error": null | "error message"
+  }
+}
+```
+
+**Status Transitions:**
+1. `processing` - OCR → LLM → Matching pipeline started
+2. `completed` - All processing successful, items ready for review
+3. `failed` - Error occurred during processing
+4. `confirmed` - User confirmed items, inventory created
+
+### 9.5 Inventory Update Messages
+Broadcast for all inventory operations:
+
+```json
+{
+  "type": "inventory_update",
+  "timestamp": "2026-01-06T12:34:56.789Z",
+  "entity_id": "inventory-item-uuid",
+  "data": {
+    "inventory_item_id": "inventory-item-uuid",
+    "action": "created" | "updated" | "consumed" | "deleted",
+    "current_quantity": "750.00",
+    "status": "opened",
+    "product_name": "Milk 1L"
+  }
+}
+```
+
+**Actions:**
+- `created` - New inventory item added
+- `updated` - Item properties changed (status, location, etc.)
+- `consumed` - Item quantity reduced
+- `deleted` - Item removed from inventory
+
+### 9.6 Client-Side Filtering
+Since all clients receive all messages, implement client-side filtering:
+
+```javascript
+// Filter by entity ID (for specific receipt/item)
+if (message.entity_id === currentReceiptId) {
+  updateUI(message);
+}
+
+// Filter by message type
+if (message.type === 'inventory_update' && message.data.action === 'consumed') {
+  showNotification(`${message.data.product_name} consumed`);
+}
+```
+
+### 9.7 Error Handling
+The ConnectionManager automatically:
+- Removes disconnected clients
+- Handles send failures gracefully
+- Logs all connection events
+- Prevents broadcast failures from affecting HTTP responses
+
+**Reconnection Strategy (Client):**
+```javascript
+let ws;
+let reconnectAttempts = 0;
+const maxReconnectDelay = 30000; // 30 seconds
+
+function connect() {
+  ws = new WebSocket('ws://localhost:8000/api/ws');
+
+  ws.onopen = () => {
+    reconnectAttempts = 0;
+    console.log('WebSocket connected');
+  };
+
+  ws.onclose = () => {
+    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), maxReconnectDelay);
+    reconnectAttempts++;
+    setTimeout(connect, delay);
+  };
+}
+
+connect();
+```
+
+### 9.8 Use Cases
+
+**Receipt Processing Progress:**
+```
+User uploads receipt
+→ "processing" message (show spinner)
+→ "completed" message (show extracted items)
+→ User confirms
+→ "confirmed" message (show success, update inventory list)
+```
+
+**Real-Time Inventory Sync:**
+```
+User consumes milk on tablet
+→ "consumed" message
+→ iPad display updates immediately
+→ Shows new quantity and status
+```
+
+**Multi-Device Updates:**
+```
+Family member adds item via phone
+→ "created" message
+→ Kitchen iPad updates inventory list
+→ All devices stay in sync
+```
+
+---
+
+## 10. Technology Stack
 
 | Component | Technology |
 |-----------|------------|
@@ -366,14 +539,16 @@ WS     /api/ws                     Real-time updates
 | Backend | FastAPI, Python 3.11+ |
 | Database | PostgreSQL 15 |
 | Queue | Celery + Redis |
+| Real-Time | WebSocket + Redis Pub/Sub |
 | OCR | MinerU (existing homelab) |
+| LLM | vLLM with Qwen3-8B (homelab) |
 | Product DB | Open Food Facts API |
 | AI Fallback | Ollama (Qwen2-VL) |
 | Proxy | Traefik |
 
 ---
 
-## 10. Deployment
+## 11. Deployment
 
 Docker Compose with:
 - `traefik` — SSL, routing

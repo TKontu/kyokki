@@ -29,11 +29,23 @@
 - Documentation: ADAPTIVE_PARSER_SPEC.md, vLLM testing guides
 - Total: 117 tests passing, 1 skipped
 
-**📍 Next: Sprint 3B - Receipt Processing Integration**
+**✅ Sprint 3B Complete** (Merged PR #9)
 - Fuzzy product matching with RapidFuzz
-- Celery tasks for async receipt processing
-- WebSocket status broadcasts
-- Integrate OCR + LLM extraction into Receipt API endpoint
+- Receipt processing pipeline integration
+- Full OCR → LLM → Matching workflow
+
+**✅ Sprint 3B+ Complete** (WebSocket Real-Time Updates)
+- WebSocket endpoint at /api/ws
+- Receipt status broadcasts (processing/completed/failed/confirmed)
+- Inventory update broadcasts (created/updated/consumed/deleted)
+- Redis pub/sub integration
+- Comprehensive tests
+
+**📍 Next: Optional Enhancements or Phase 2 Features**
+- Celery tasks for async receipt processing (optional)
+- Open Food Facts integration
+- Hardware barcode scanner support
+- Shopping list API
 
 ---
 
@@ -174,9 +186,13 @@ class StoreInfo(BaseModel):
 - [ ] Confidence tracking and re-learning
 
 ### WebSocket
-- [ ] Connection manager
-- [ ] Broadcast inventory updates
-- [ ] Broadcast receipt processing status
+- [x] Connection manager — ✅ Enhanced with error handling and auto-cleanup
+- [x] Broadcast inventory updates — ✅ Created/updated/consumed/deleted actions
+- [x] Broadcast receipt processing status — ✅ Processing/completed/failed/confirmed
+- [x] Redis pub/sub integration — ✅ Single "updates" channel
+- [x] Standardized JSON message format — ✅ With type, timestamp, entity_id
+- [x] WebSocket endpoint /api/ws — ✅ Real-time connection management
+- [x] Comprehensive tests — ✅ Connection + integration tests
 
 ---
 
