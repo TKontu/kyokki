@@ -2,8 +2,9 @@
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, Dict, Literal
 from uuid import UUID
-from typing import Dict, Any, Literal
+
 import redis.asyncio as redis
 
 from app.core.config import settings
@@ -42,15 +43,15 @@ def _serialize_value(value: Any) -> Any:
 
 
 def _build_message(
-    message_type: Literal["receipt_status", "inventory_update"],
+    message_type: Literal["receipt_status", "inventory_update", "shopping_list_update"],
     entity_id: UUID,
     data: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Build standardized message structure.
 
     Args:
-        message_type: Type of message (receipt_status, inventory_update).
-        entity_id: UUID of the entity (receipt or inventory item).
+        message_type: Type of message (receipt_status, inventory_update, shopping_list_update).
+        entity_id: UUID of the entity (receipt, inventory item, or shopping list item).
         data: Type-specific payload data.
 
     Returns:
@@ -148,6 +149,42 @@ async def broadcast_inventory_update(
             "current_quantity": current_quantity,
             "status": status,
             "product_name": product_name
+        }
+    )
+    await publish_message(message)
+
+
+async def broadcast_shopping_list_update(
+    shopping_list_item_id: UUID,
+    action: Literal["created", "updated", "purchased", "deleted"],
+    name: str | None = None,
+    quantity: Decimal | None = None,
+    unit: str | None = None,
+    priority: str | None = None,
+    is_purchased: bool | None = None
+) -> None:
+    """Broadcast shopping list item update.
+
+    Args:
+        shopping_list_item_id: Shopping list item UUID.
+        action: Type of action performed.
+        name: Item name for display purposes.
+        quantity: Item quantity (if applicable).
+        unit: Item unit (if applicable).
+        priority: Item priority (if applicable).
+        is_purchased: Purchase status (if applicable).
+    """
+    message = _build_message(
+        message_type="shopping_list_update",
+        entity_id=shopping_list_item_id,
+        data={
+            "shopping_list_item_id": shopping_list_item_id,
+            "action": action,
+            "name": name,
+            "quantity": quantity,
+            "unit": unit,
+            "priority": priority,
+            "is_purchased": is_purchased
         }
     )
     await publish_message(message)
