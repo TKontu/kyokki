@@ -13,6 +13,7 @@ from app.models.receipt import Receipt
 from app.services.ocr_service import extract_text_from_receipt
 from app.services.llm_extractor import extract_products_from_receipt
 from app.services.matching_service import MatchingService, MatchResult
+from app.services.broadcast_helpers import broadcast_receipt_status
 from app.parsers.base import ReceiptExtraction
 from app.core.logging import get_logger
 
@@ -62,6 +63,12 @@ class ReceiptProcessingService:
             receipt.processing_status = "processing"
             await self.db.commit()
             logger.info(f"Starting processing for receipt {receipt.id}")
+
+            # Broadcast status update
+            await broadcast_receipt_status(
+                receipt_id=receipt.id,
+                status="processing"
+            )
 
             # Step 1: OCR text extraction
             logger.info(f"Extracting text from {receipt.image_path}")
@@ -114,6 +121,14 @@ class ReceiptProcessingService:
             await self.db.commit()
             await self.db.refresh(receipt)
 
+            # Broadcast completion status
+            await broadcast_receipt_status(
+                receipt_id=receipt.id,
+                status="completed",
+                items_extracted=receipt.items_extracted,
+                items_matched=receipt.items_matched
+            )
+
             logger.info(
                 f"Receipt {receipt.id} processing completed: "
                 f"{receipt.items_extracted} extracted, {receipt.items_matched} matched"
@@ -128,11 +143,19 @@ class ReceiptProcessingService:
             )
 
         except Exception as e:
+            error_msg = f"Receipt processing failed: {str(e)}"
+
             # Update status to failed
             receipt.processing_status = "failed"
             await self.db.commit()
 
-            error_msg = f"Receipt processing failed: {str(e)}"
+            # Broadcast failure status
+            await broadcast_receipt_status(
+                receipt_id=receipt.id,
+                status="failed",
+                error=error_msg
+            )
+
             logger.error(error_msg, exc_info=True)
 
             return ProcessingResult(

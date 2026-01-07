@@ -15,6 +15,7 @@ from app.schemas.receipt import (
 from app.services.receipt_processing import ReceiptProcessingService
 from app.services.ocr_service import extract_text_from_receipt
 from app.services.llm_extractor import extract_products_from_receipt
+from app.services.broadcast_helpers import broadcast_receipt_status
 from app.models.product_master import ProductMaster
 from app.models.inventory_item import InventoryItem
 from sqlalchemy import select
@@ -240,6 +241,14 @@ async def confirm_receipt(
         # Update receipt status
         receipt.processing_status = "confirmed"
         await db.commit()
+
+        # Broadcast confirmed status
+        await broadcast_receipt_status(
+            receipt_id=receipt.id,
+            status="confirmed",
+            items_extracted=receipt.items_extracted,
+            items_matched=items_created
+        )
 
         return ReceiptConfirmResponse(
             success=True,

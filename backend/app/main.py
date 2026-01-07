@@ -17,7 +17,7 @@ async def redis_listener(app: FastAPI):
     logger = get_logger("redis_listener")
     redis_client = redis.from_url(f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}")
     pubsub = redis_client.pubsub()
-    await pubsub.subscribe("item_updates")
+    await pubsub.subscribe("updates")
 
     logger.info("Redis listener started. Waiting for messages...")
     try:
@@ -39,9 +39,9 @@ async def redis_listener(app: FastAPI):
         logger.error(f"Redis listener error: {str(e)}", exc_info=True)
     finally:
         logger.info("Closing Redis listener.")
-        await pubsub.unsubscribe("item_updates")
-        await pubsub.close()
-        await redis_client.close()
+        await pubsub.unsubscribe("updates")
+        await pubsub.aclose()
+        await redis_client.aclose()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

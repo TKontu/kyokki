@@ -87,3 +87,13 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
             yield session
         finally:
             await session.rollback()
+
+
+@pytest.fixture
+def mock_redis_client():
+    """Mock Redis client for testing broadcasts."""
+    from unittest.mock import AsyncMock
+
+    mock_redis = AsyncMock()
+    mock_redis.publish = AsyncMock()
+    return mock_redis
