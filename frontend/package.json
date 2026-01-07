@@ -12,6 +12,8 @@
     "test:coverage": "jest --coverage"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.90.16",
+    "@tanstack/react-query-devtools": "^5.91.2",
     "next": "14.2.35",
     "react": "^18",
     "react-dom": "^18"
@@ -21,7 +23,7 @@
     "@testing-library/react": "^16.3.1",
     "@testing-library/user-event": "^14.6.1",
     "@types/jest": "^30.0.0",
-    "@types/node": "^20",
+    "@types/node": "^20.19.27",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "cross-fetch": "^4.1.0",
@@ -34,6 +36,7 @@
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
     "typescript": "^5",
+    "undici": "^7.18.2",
     "whatwg-fetch": "^3.6.20"
   }
 }
