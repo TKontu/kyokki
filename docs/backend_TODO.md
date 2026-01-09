@@ -198,11 +198,39 @@ class StoreInfo(BaseModel):
 
 ## Phase 2 Tasks
 
-### Open Food Facts
-- [ ] OFF API client
-- [ ] Barcode lookup
-- [ ] Response caching in product_master.off_data
-- [ ] Category mapping (OFF → system)
+### Open Food Facts ✅ (PR #16 - Merged)
+- [x] OFF API client (httpx AsyncClient)
+- [x] Barcode lookup with error handling
+- [x] Response caching in product_master.off_data (JSONB)
+- [x] Category mapping (12 system categories)
+- [x] Smart canonical name construction (brand + product + quantity)
+- [x] Automatic product creation/update from barcode
+- [x] Endpoint: `POST /api/products/enrich?barcode={barcode}`
+- [x] 17/17 unit tests passing
+
+### Universal Barcode Scanner API (NEW - See docs/SCANNER_ARCHITECTURE.md)
+**Backend-centric API supporting multiple input methods**
+
+#### Core Scanner API
+- [ ] `POST /api/scanner/scan` — Universal barcode processing
+  - Input: barcode, mode (optional), station_id (optional), quantity (optional)
+  - Integrates with OFF enrichment automatically
+  - Auto-creates products if not exist
+  - Returns product + inventory data
+  - WebSocket broadcasts for real-time feedback
+- [ ] `GET /api/scanner/mode` — Get current mode (global or per-station)
+- [ ] `POST /api/scanner/mode` — Set mode: add/consume/lookup
+- [ ] `GET /api/scanner/stations` — List active scanning stations
+- [ ] Mode state storage in Redis (scanner:mode:{station_id})
+- [ ] Station tracking (last_scan, scan_count, online status)
+- [ ] 15-20 comprehensive tests
+
+**Supported Input Methods:**
+1. iPad PWA camera scanning (QuaggaJS/ZXing) - Frontend Phase
+2. Raspberry Pi USB scanner stations - Deployment Phase
+3. Future: Direct USB scanner on compatible devices
+
+**See:** `docs/SCANNER_ARCHITECTURE.md` for complete specification
 
 ### GS1 DataMatrix Parser
 ```python
@@ -210,19 +238,18 @@ def parse_gs1(data: str) -> dict:
     # Parse AIs: (01) GTIN, (17) expiry, (10) batch, (310x) weight
     pass
 ```
-- [ ] AI extraction
+- [ ] AI extraction with regex patterns
 - [ ] Date parsing (YYMMDD → date)
-- [ ] Weight parsing
+- [ ] Weight parsing (310x format)
+- [ ] Integration with scanner API
+- [ ] Tests for common GS1 formats
 
-### Scanner Mode API
-- [ ] `GET /api/scanner/mode`
-- [ ] `POST /api/scanner/mode` — set add/consume/lookup
-- [ ] `POST /api/scanner/input` — process barcode
-
-### Shopping List
-- [ ] ShoppingListItem model
-- [ ] CRUD endpoints
-- [ ] Priority handling
+### Shopping List ✅ (PR #14 - Merged)
+- [x] ShoppingListItem model
+- [x] CRUD endpoints (8 total)
+- [x] Priority handling (urgent/normal/low)
+- [x] WebSocket broadcasts
+- [x] 25 comprehensive tests
 
 ### Multi-Receipt Batch
 - [ ] Batch ID grouping

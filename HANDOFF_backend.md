@@ -86,28 +86,67 @@
    - 25 comprehensive tests written
    - **Impact**: Closes the food waste prevention loop
 
-7. [ ] **Open Food Facts Integration** ⭐ HIGH VALUE
+7. [x] **Open Food Facts Integration** ⭐ HIGH VALUE ✅ (PR #16)
    - Barcode → product lookup
    - Auto-populate product master
    - Cache in `product_master.off_data`
+   - Endpoint: `POST /api/products/enrich?barcode={barcode}`
    - **Impact**: Dramatically reduces manual entry
+   - **Status**: Implementation complete, 17/17 unit tests passing
 
-8. [ ] **Hardware Barcode Scanner Support**
-   - Keyboard wedge detection
-   - Scanner mode API (add/consume/lookup)
-   - Fast inventory updates
-   - **Impact**: Makes adding/consuming items instant
+8. [ ] **Universal Barcode Scanner API** ⭐⭐ HIGH VALUE (2-3h)
+   - Backend-centric scanning API supporting multiple input methods:
+     - iPad PWA camera scanning (QuaggaJS/ZXing)
+     - Raspberry Pi USB scanner stations (keyboard wedge)
+     - Future: Direct USB scanner on iPad (if supported)
+   - Endpoints:
+     - `POST /api/scanner/scan` - Process barcode with mode (add/consume/lookup)
+     - `GET/POST /api/scanner/mode` - Get/set scanning mode (per-station or global)
+     - `GET /api/scanner/stations` - List active scanning stations
+   - Features:
+     - Integrates with OFF enrichment automatically
+     - Auto-creates products if not exist
+     - WebSocket broadcasts for real-time feedback
+     - Per-station mode state (Redis)
+   - **Impact**: Enables instant inventory updates from any device
+   - **Flexibility**: Same API serves iPad camera AND dedicated Pi stations
 
-9. [ ] **GS1 DataMatrix Parser**
-   - Extract real expiry dates from 2D barcodes
-   - Parse AI codes (GTIN, batch, weight)
-   - **Impact**: Accurate expiry dates vs. estimates
+9. [ ] **iPad PWA Camera Scanning** (1-2h)
+   - Frontend camera barcode scanning component
+   - QuaggaJS or ZXing integration
+   - Mode selector UI (add/consume/lookup)
+   - Visual feedback via WebSocket
+   - **Prerequisite**: Universal Scanner API (#8)
+   - **Impact**: iPad can scan without USB hardware
+
+10. [ ] **Raspberry Pi Scanning Station** (2-3h)
+    - Python service for dedicated USB scanner
+    - USB HID scanner reading (evdev)
+    - Offline queue (SQLite) with sync
+    - Systemd service (auto-start on boot)
+    - Optional: LCD display for feedback
+    - Optional: GPIO button for mode switching
+    - **Prerequisite**: Universal Scanner API (#8)
+    - **Impact**: Dedicated kitchen scanning station (~$50-80 hardware)
+    - **Hardware**: Pi 3B+, USB scanner, optional LCD
+
+11. [ ] **GS1 DataMatrix Parser** (2-3h)
+    - Extract real expiry dates from 2D barcodes
+    - Parse AI codes (GTIN, batch, weight)
+    - Integration with scanner API
+    - **Impact**: Accurate expiry dates vs. estimates
 
 #### **Phase 3: Optional Enhancements**
-10. [ ] **Celery Async Receipt Processing**
+12. [ ] **Celery Async Receipt Processing** (3-4h)
     - Non-blocking receipt uploads
     - Background task queue
     - **Impact**: Better UX for large receipts
+
+13. [ ] **Auto-Restock from Min Stock** (2-3h)
+    - Check stock levels after consumption
+    - Auto-add to shopping list when below min_stock_quantity
+    - Mark auto-generated items
+    - **Impact**: Automated replenishment
 
 ## Key Files
 
