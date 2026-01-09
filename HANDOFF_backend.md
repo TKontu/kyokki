@@ -29,11 +29,47 @@
 
 ## In Progress 🚧
 
-**Shopping List API** - Implementation complete, pending tests ✅
-- Created CRUD operations with filtering and priority sorting
-- Created 8 API endpoints with WebSocket broadcasts
-- Written 25 comprehensive tests
-- Database table already in migration (c943e915cf61)
+### Open Food Facts Integration (Current Session - TDD Approach) ✅
+**Status:** Implementation Complete - Integration tests require Docker
+
+Implemented comprehensive OFF API integration using Test-Driven Development:
+
+**Service Layer** (`backend/app/services/off_service.py` - 177 lines):
+- ✅ `fetch_product_from_off()` - Fetches product data from OFF API v2
+- ✅ `map_off_category_to_system()` - Maps OFF categories to 12 system categories
+- ✅ `enrich_product_from_off()` - Builds canonical name (brand + product + quantity)
+- ✅ Smart brand deduplication (prevents "Valio Valio Milk" duplication)
+- ✅ Custom exceptions: `OffProductNotFoundError`, `OffApiError`
+
+**API Endpoint** (`backend/app/api/endpoints/products.py`):
+- ✅ `POST /api/products/enrich?barcode={barcode}` - Create or update product from OFF
+- ✅ Returns 201 (created) or 200 (updated) based on existing product
+- ✅ Returns 404 if product not found in OFF database
+- ✅ Returns 503 if OFF API unavailable
+
+**CRUD Layer** (`backend/app/crud/product_master.py`):
+- ✅ `enrich_product_from_off_data()` - Create/update with sensible defaults
+- ✅ Auto storage_type mapping (dairy/meat → refrigerator, frozen → freezer, etc.)
+- ✅ Auto shelf_life from category defaults
+
+**Test Coverage** (22 tests total):
+- ✅ 17/17 unit tests passing (OFF service)
+- ⏸ 5/5 integration tests written (require Docker/PostgreSQL)
+
+**Category Mappings**:
+- dairy, meat, seafood, produce → refrigerator
+- frozen → freezer
+- bakery, snacks, condiments, grains, pantry → pantry
+- beverages → refrigerator
+
+**Files Created:**
+- `backend/app/services/off_service.py` (177 lines)
+- `backend/tests/services/test_off_service.py` (242 lines)
+
+**Files Modified:**
+- `backend/app/api/endpoints/products.py` +59 lines (enrich endpoint)
+- `backend/app/crud/product_master.py` +70 lines (enrich helper)
+- `backend/tests/api/test_products.py` +126 lines (5 integration tests)
 
 ## Next Steps
 
@@ -86,11 +122,13 @@
    - 25 comprehensive tests written
    - **Impact**: Closes the food waste prevention loop
 
-7. [ ] **Open Food Facts Integration** ⭐ HIGH VALUE
+7. [x] **Open Food Facts Integration** ⭐ HIGH VALUE ✅ (Current Session)
    - Barcode → product lookup
    - Auto-populate product master
    - Cache in `product_master.off_data`
+   - Endpoint: `POST /api/products/enrich?barcode={barcode}`
    - **Impact**: Dramatically reduces manual entry
+   - **Status**: Implementation complete, 17/17 unit tests passing
 
 8. [ ] **Hardware Barcode Scanner Support**
    - Keyboard wedge detection
