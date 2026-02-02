@@ -1,10 +1,11 @@
 """Tests for receipt confirmation endpoint."""
+from decimal import Decimal
+from io import BytesIO
+from uuid import uuid4
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from io import BytesIO
-from decimal import Decimal
-from uuid import uuid4
 
 from app.db.session import get_db
 from app.main import app

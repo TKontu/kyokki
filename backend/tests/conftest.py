@@ -1,13 +1,14 @@
-"""Shared pytest fixtures for all tests"""
-import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+"""Shared pytest fixtures for all tests."""
 from typing import AsyncGenerator
 
-from app.main import app
-from app.db.base_class import Base
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker
+
 from app.core.config import settings
+from app.db.base_class import Base
+from app.main import app
 
 
 @pytest.fixture

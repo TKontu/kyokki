@@ -1,8 +1,9 @@
 """Tests for Product CRUD API endpoints."""
+from uuid import UUID
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import UUID
 
 from app.db.seed_categories import seed_categories
 from app.db.session import get_db
@@ -369,7 +370,7 @@ class TestEnrichProduct:
         }
 
         with patch(
-            "app.services.off_service.enrich_product_from_off",
+            "app.api.endpoints.products.enrich_product_from_off",
             return_value=mock_enriched_data,
         ):
             response = await client.post(f"/api/products/enrich?barcode={barcode}")
@@ -414,7 +415,7 @@ class TestEnrichProduct:
         }
 
         with patch(
-            "app.services.off_service.enrich_product_from_off",
+            "app.api.endpoints.products.enrich_product_from_off",
             return_value=mock_enriched_data,
         ):
             response = await client.post(f"/api/products/enrich?barcode={barcode}")
@@ -436,7 +437,7 @@ class TestEnrichProduct:
         barcode = "0000000000000"
 
         with patch(
-            "app.services.off_service.enrich_product_from_off",
+            "app.api.endpoints.products.enrich_product_from_off",
             side_effect=OffProductNotFoundError(barcode),
         ):
             response = await client.post(f"/api/products/enrich?barcode={barcode}")
@@ -454,7 +455,7 @@ class TestEnrichProduct:
         barcode = "5901234123457"
 
         with patch(
-            "app.services.off_service.enrich_product_from_off",
+            "app.api.endpoints.products.enrich_product_from_off",
             side_effect=OffApiError("Network error"),
         ):
             response = await client.post(f"/api/products/enrich?barcode={barcode}")

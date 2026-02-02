@@ -1,8 +1,8 @@
 """CRUD operations for ProductMaster model."""
 from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
 from app.models.product_master import ProductMaster
 from app.schemas.product_master import ProductMasterCreate, ProductMasterUpdate

@@ -1,6 +1,7 @@
 """Service for Open Food Facts API integration."""
-import httpx
 from typing import Any
+
+import httpx
 
 # Base URL for Open Food Facts API
 OFF_API_BASE_URL = "https://world.openfoodfacts.org/api/v2"

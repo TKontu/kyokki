@@ -1,10 +1,11 @@
 """Tests for Inventory CRUD API endpoints."""
-import pytest
 from datetime import date, timedelta
 from decimal import Decimal
+from uuid import UUID
+
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import UUID
 
 from app.db.seed_categories import seed_categories
 from app.db.session import get_db
