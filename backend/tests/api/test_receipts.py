@@ -1,10 +1,11 @@
 """Tests for Receipt API endpoints."""
+import shutil
+from io import BytesIO
+from pathlib import Path
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from io import BytesIO
-from pathlib import Path
-import shutil
 
 from app.db.session import get_db
 from app.main import app

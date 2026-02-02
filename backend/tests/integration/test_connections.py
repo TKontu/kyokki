@@ -1,7 +1,8 @@
-"""Integration tests for external service connections"""
-import pytest
+"""Integration tests for external service connections."""
 import httpx
+import pytest
 from sqlalchemy import text
+
 from app.core.config import settings
 
 

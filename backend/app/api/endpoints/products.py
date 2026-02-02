@@ -1,15 +1,22 @@
 """API endpoints for Product CRUD operations."""
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
-from app.db.session import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.crud import product_master as crud_product
+from app.db.session import get_db
 from app.schemas.product_master import (
     ProductMasterCreate,
-    ProductMasterUpdate,
     ProductMasterResponse,
+    ProductMasterUpdate,
+)
+from app.services.off_service import (
+    OffApiError,
+    OffProductNotFoundError,
+    enrich_product_from_off,
 )
 
 
@@ -67,11 +74,11 @@ async def create_product(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Category '{product.category}' does not exist",
-            )
+            ) from e
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Database integrity error",
-        )
+        ) from e
 
 
 @router.patch("/{product_id}", response_model=ProductMasterResponse)
@@ -101,3 +108,59 @@ async def delete_product(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with ID '{product_id}' not found",
         )
+
+
+@router.post("/enrich")
+async def enrich_product(
+    barcode: str = Query(..., description="Product barcode to look up in Open Food Facts"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enrich product from Open Food Facts API.
+
+    If a product with the barcode already exists, it will be updated.
+    Otherwise, a new product will be created with data from OFF.
+
+    Returns:
+        - 201: Product created from OFF data
+        - 200: Existing product updated with OFF data
+        - 404: Product not found in Open Food Facts
+        - 503: Open Food Facts API unavailable
+    """
+    try:
+        # Fetch and enrich data from OFF
+        enriched_data = await enrich_product_from_off(barcode)
+
+        # Create or update product
+        product, created = await crud_product.enrich_product_from_off_data(
+            db, enriched_data
+        )
+
+        # Serialize response
+        response_data = ProductMasterResponse.model_validate(
+            product, from_attributes=True
+        ).model_dump(mode="json")
+
+        # Return appropriate status code
+        if created:
+            return JSONResponse(
+                content=response_data, status_code=status.HTTP_201_CREATED
+            )
+        else:
+            return JSONResponse(content=response_data, status_code=status.HTTP_200_OK)
+
+    except OffProductNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product {e.barcode} not found in Open Food Facts database",
+        ) from e
+    except OffApiError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Open Food Facts API unavailable: {str(e)}",
+        ) from e
+    except IntegrityError as e:
+        # Handle database integrity errors (e.g., invalid category)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Database integrity error: {str(e)}",
+        ) from e

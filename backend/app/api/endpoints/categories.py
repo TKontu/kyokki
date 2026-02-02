@@ -1,11 +1,11 @@
 """API endpoints for Category CRUD operations."""
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
 from app.crud import category as crud_category
-from app.schemas.category import CategoryCreate, CategoryUpdate, CategoryResponse
+from app.db.session import get_db
+from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
 
 
 router = APIRouter()
@@ -39,11 +39,11 @@ async def create_category(
     """Create a new category."""
     try:
         return await crud_category.create_category(db, category)
-    except IntegrityError:
+    except IntegrityError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Category with ID '{category.id}' already exists",
-        )
+        ) from e
 
 
 @router.patch("/{category_id}", response_model=CategoryResponse)

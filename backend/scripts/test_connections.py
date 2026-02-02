@@ -1,6 +1,8 @@
-"""Test script to verify external service connections"""
+"""Test script to verify external service connections."""
 import asyncio
+
 import httpx
+
 from app.core.config import settings
 from app.db.session import engine
 

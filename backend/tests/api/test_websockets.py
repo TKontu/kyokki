@@ -1,6 +1,7 @@
 """Tests for WebSocket real-time updates endpoint."""
-import pytest
 import json
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app

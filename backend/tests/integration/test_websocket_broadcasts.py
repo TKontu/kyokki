@@ -1,9 +1,10 @@
 """Integration tests for WebSocket broadcasts from API endpoints."""
-import pytest
 from datetime import date, timedelta
+from unittest.mock import AsyncMock
+
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from unittest.mock import AsyncMock
 
 from app.db.seed_categories import seed_categories
 

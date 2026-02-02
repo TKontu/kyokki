@@ -1,22 +1,23 @@
 """API endpoints for Inventory CRUD operations."""
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
-from app.db.session import get_db
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 from app.crud import inventory_item as crud_inventory
+from app.db.session import get_db
+from app.models.inventory_item import InventoryItem
+from app.models.product_master import ProductMaster
+from app.schemas.consume import ConsumeRequest
 from app.schemas.inventory_item import (
     InventoryItemCreate,
-    InventoryItemUpdate,
     InventoryItemResponse,
+    InventoryItemUpdate,
 )
-from app.schemas.consume import ConsumeRequest
 from app.services.broadcast_helpers import broadcast_inventory_update
-from app.models.product_master import ProductMaster
-from app.models.inventory_item import InventoryItem
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 
 router = APIRouter()
@@ -102,11 +103,11 @@ async def create_inventory_item(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Product with ID '{item.product_master_id}' does not exist",
-            )
+            ) from e
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Database integrity error",
-        )
+        ) from e
 
 
 @router.patch("/{item_id}", response_model=InventoryItemResponse)
@@ -200,4 +201,4 @@ async def consume_inventory_item(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e

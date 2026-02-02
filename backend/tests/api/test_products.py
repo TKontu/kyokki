@@ -1,8 +1,9 @@
 """Tests for Product CRUD API endpoints."""
+from uuid import UUID
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import UUID
 
 from app.db.seed_categories import seed_categories
 from app.db.session import get_db
@@ -344,3 +345,128 @@ class TestLookupByBarcode:
         response = await client.get("/api/products/barcode/9999999999999")
 
         assert response.status_code == 404
+
+
+class TestEnrichProduct:
+    """Test POST /api/products/enrich endpoint."""
+
+    async def test_enrich_creates_new_product_from_off(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """POST /api/products/enrich should create new product from OFF data."""
+        from unittest.mock import patch
+
+        barcode = "5901234123457"
+        mock_enriched_data = {
+            "canonical_name": "Valio Whole Milk 1L",
+            "category": "dairy",
+            "off_product_id": barcode,
+            "off_data": {
+                "product_name": "Valio Whole Milk",
+                "brands": "Valio",
+                "categories": "Dairy products",
+                "image_url": "https://example.com/milk.jpg",
+            },
+        }
+
+        with patch(
+            "app.api.endpoints.products.enrich_product_from_off",
+            return_value=mock_enriched_data,
+        ):
+            response = await client.post(f"/api/products/enrich?barcode={barcode}")
+
+            assert response.status_code == 201
+            product = response.json()
+            assert product["canonical_name"] == "Valio Whole Milk 1L"
+            assert product["category"] == "dairy"
+            assert product["off_product_id"] == barcode
+            assert product["off_data"] is not None
+            assert product["off_data"]["product_name"] == "Valio Whole Milk"
+
+    async def test_enrich_updates_existing_product(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """POST /api/products/enrich should update existing product with same barcode."""
+        from unittest.mock import patch
+
+        barcode = "5901234123457"
+
+        # Create existing product with this barcode
+        existing_product = {
+            "canonical_name": "Old Name",
+            "category": "pantry",
+            "storage_type": "pantry",
+            "default_shelf_life_days": 365,
+            "unit_type": "count",
+            "default_unit": "pcs",
+            "off_product_id": barcode,
+        }
+        create_response = await client.post("/api/products", json=existing_product)
+        created = create_response.json()
+
+        mock_enriched_data = {
+            "canonical_name": "Valio Whole Milk 1L",
+            "category": "dairy",
+            "off_product_id": barcode,
+            "off_data": {
+                "product_name": "Valio Whole Milk",
+                "brands": "Valio",
+            },
+        }
+
+        with patch(
+            "app.api.endpoints.products.enrich_product_from_off",
+            return_value=mock_enriched_data,
+        ):
+            response = await client.post(f"/api/products/enrich?barcode={barcode}")
+
+            assert response.status_code == 200
+            product = response.json()
+            assert product["id"] == created["id"]  # Same product
+            assert product["canonical_name"] == "Valio Whole Milk 1L"  # Updated
+            assert product["category"] == "dairy"  # Updated
+            assert product["off_data"] is not None
+
+    async def test_enrich_returns_404_when_not_found_in_off(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """POST /api/products/enrich should return 404 when product not in OFF."""
+        from unittest.mock import patch
+        from app.services.off_service import OffProductNotFoundError
+
+        barcode = "0000000000000"
+
+        with patch(
+            "app.api.endpoints.products.enrich_product_from_off",
+            side_effect=OffProductNotFoundError(barcode),
+        ):
+            response = await client.post(f"/api/products/enrich?barcode={barcode}")
+
+            assert response.status_code == 404
+            assert "not found in Open Food Facts" in response.json()["detail"]
+
+    async def test_enrich_returns_503_on_api_error(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """POST /api/products/enrich should return 503 when OFF API fails."""
+        from unittest.mock import patch
+        from app.services.off_service import OffApiError
+
+        barcode = "5901234123457"
+
+        with patch(
+            "app.api.endpoints.products.enrich_product_from_off",
+            side_effect=OffApiError("Network error"),
+        ):
+            response = await client.post(f"/api/products/enrich?barcode={barcode}")
+
+            assert response.status_code == 503
+            assert "Open Food Facts API unavailable" in response.json()["detail"]
+
+    async def test_enrich_requires_barcode_parameter(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """POST /api/products/enrich should require barcode parameter."""
+        response = await client.post("/api/products/enrich")
+
+        assert response.status_code == 422  # Validation error

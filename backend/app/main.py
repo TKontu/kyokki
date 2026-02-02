@@ -1,13 +1,14 @@
 import asyncio
-import redis.asyncio as redis
 from contextlib import asynccontextmanager
+
+import redis.asyncio as redis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .services.websockets import manager
-from .core.config import settings
-from .core.logging import setup_logging, get_logger
 from .api.router import api_router
+from .core.config import settings
+from .core.logging import get_logger, setup_logging
+from .services.websockets import manager
 # from .middleware.logging import LoggingMiddleware  # TODO: Create if needed
 
 async def redis_listener(app: FastAPI):

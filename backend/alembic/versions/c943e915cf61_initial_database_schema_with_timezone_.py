@@ -1,14 +1,14 @@
 """Initial database schema with timezone-aware datetimes
 
 Revision ID: c943e915cf61
-Revises: 
+Revises:
 Create Date: 2026-01-05 20:44:16.596363
 
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.

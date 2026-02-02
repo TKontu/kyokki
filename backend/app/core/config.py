@@ -1,6 +1,7 @@
 from pathlib import Path
+
+from pydantic import ConfigDict, computed_field
 from pydantic_settings import BaseSettings
-from pydantic import computed_field, ConfigDict
 
 # Get project root directory (two levels up from this file: backend/app/core/config.py -> project root)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent

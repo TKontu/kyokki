@@ -1,8 +1,8 @@
 """CRUD operations for ProductMaster model."""
 from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
 from app.models.product_master import ProductMaster
 from app.schemas.product_master import ProductMasterCreate, ProductMasterUpdate
@@ -131,3 +131,74 @@ async def delete_product(db: AsyncSession, product_id: UUID) -> bool:
     await db.delete(db_product)
     await db.commit()
     return True
+
+
+async def enrich_product_from_off_data(
+    db: AsyncSession, enriched_data: dict
+) -> tuple[ProductMaster, bool]:
+    """Create or update product from OFF enrichment data.
+
+    Args:
+        db: Database session.
+        enriched_data: Enriched data from OFF service containing:
+            - canonical_name, category, off_product_id, off_data
+
+    Returns:
+        Tuple of (product, created) where created is True if new, False if updated.
+    """
+    barcode = enriched_data["off_product_id"]
+
+    # Check if product with this barcode already exists
+    existing_product = await get_product_by_barcode(db, barcode)
+
+    if existing_product:
+        # Update existing product
+        existing_product.canonical_name = enriched_data["canonical_name"]
+        existing_product.category = enriched_data["category"]
+        existing_product.off_product_id = enriched_data["off_product_id"]
+        existing_product.off_data = enriched_data["off_data"]
+
+        await db.commit()
+        await db.refresh(existing_product)
+        return existing_product, False
+    else:
+        # Create new product with sensible defaults
+        # Use category defaults from seed data
+        from app.crud.category import get_category
+
+        category_defaults = await get_category(db, enriched_data["category"])
+
+        # Determine storage type based on category
+        storage_type_map = {
+            "dairy": "refrigerator",
+            "meat": "refrigerator",
+            "seafood": "refrigerator",
+            "produce": "refrigerator",
+            "frozen": "freezer",
+            "bakery": "pantry",
+            "beverages": "refrigerator",
+            "snacks": "pantry",
+            "condiments": "pantry",
+            "grains": "pantry",
+            "pantry": "pantry",
+        }
+
+        storage_type = storage_type_map.get(enriched_data["category"], "pantry")
+
+        new_product = ProductMaster(
+            canonical_name=enriched_data["canonical_name"],
+            category=enriched_data["category"],
+            storage_type=storage_type,
+            default_shelf_life_days=category_defaults.default_shelf_life_days
+            if category_defaults
+            else 365,
+            unit_type="unit",  # Default, can be updated later
+            default_unit="pcs",  # Default, can be updated later
+            off_product_id=enriched_data["off_product_id"],
+            off_data=enriched_data["off_data"],
+        )
+
+        db.add(new_product)
+        await db.commit()
+        await db.refresh(new_product)
+        return new_product, True
