@@ -1,5 +1,7 @@
 """Shared pytest fixtures for all tests."""
+from decimal import Decimal
 from typing import AsyncGenerator
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -9,6 +11,8 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from app.db.base_class import Base
 from app.main import app
+from app.models.category import Category
+from app.models.product_master import ProductMaster
 
 
 @pytest.fixture
@@ -44,14 +48,52 @@ def sample_receipt_data() -> dict:
 
 
 @pytest.fixture
-def sample_product() -> dict:
-    """Sample product data for testing"""
+def sample_product_data() -> dict:
+    """Sample product data dict for testing (non-database)."""
     return {
         "name": "Maito",
         "category": "dairy",
         "default_shelf_life_days": 7,
         "opened_shelf_life_days": 3
     }
+
+
+@pytest.fixture
+async def sample_category(db_session: AsyncSession) -> Category:
+    """Create sample category in database for tests."""
+    category = Category(
+        id="dairy",
+        display_name="Dairy",
+        icon="🥛",
+        default_shelf_life_days=7,
+        meal_contexts=["breakfast"],
+        sort_order=1,
+    )
+    db_session.add(category)
+    await db_session.commit()
+    await db_session.refresh(category)
+    return category
+
+
+@pytest.fixture
+async def sample_product(
+    db_session: AsyncSession, sample_category: Category
+) -> ProductMaster:
+    """Create sample product in database for tests."""
+    product = ProductMaster(
+        id=uuid4(),
+        canonical_name="Test Milk 1L",
+        category="dairy",
+        storage_type="refrigerator",
+        default_shelf_life_days=7,
+        unit_type="volume",
+        default_unit="ml",
+        default_quantity=Decimal("1000"),
+    )
+    db_session.add(product)
+    await db_session.commit()
+    await db_session.refresh(product)
+    return product
 
 
 @pytest.fixture(scope="function")
