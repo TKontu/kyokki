@@ -1,0 +1,94 @@
+services:
+  kyokki-api:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    ports:
+      - "17300:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - stack.env
+    environment:
+      - DEBUG=false
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_USER=kyokki_user
+      - POSTGRES_DB=kyokki
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    networks:
+      - kyokki_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  celery-worker:
+    build: ./backend
+    command: celery -A app.core.celery_app worker -l info --concurrency 2
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - stack.env
+    environment:
+      - DEBUG=false
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_USER=kyokki_user
+      - POSTGRES_DB=kyokki
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    networks:
+      - kyokki_net
+    depends_on:
+      - kyokki-api
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://192.168.0.1:17300/api
+    ports:
+      - "17301:3000"
+    networks:
+      - kyokki_net
+    depends_on:
+      - kyokki-api
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15
+    ports:
+      - "17302:5432"
+    environment:
+      POSTGRES_DB: kyokki
+      POSTGRES_USER: kyokki_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - kyokki_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kyokki_user -d kyokki"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "17303:6379"
+    networks:
+      - kyokki_net
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  kyokki_net:
+    driver: bridge
