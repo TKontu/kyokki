@@ -41,7 +41,7 @@ describe('QuantityBar', () => {
 
     it('should handle zero current quantity', () => {
       render(<QuantityBar current={0} initial={1000} unit="ml" />)
-      expect(screen.getByText(/0/)).toBeInTheDocument()
+      expect(screen.getByText(/0 \/ 1000/)).toBeInTheDocument()
     })
 
     it('should handle small quantities', () => {
