@@ -2,9 +2,8 @@ import json
 import logging
 import logging.config
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict
 
 from .config import settings
 
@@ -14,7 +13,7 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         log_entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -68,9 +67,7 @@ def setup_logging():
             "json": {
                 "()": JSONFormatter,
             },
-            "standard": {
-                "format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-            },
+            "standard": {"format": "%(asctime)s [%(levelname)s] %(name)s: %(message)s"},
         },
         "handlers": {
             "console": {
@@ -143,10 +140,11 @@ class LoggerMixin:
 # Performance logging decorator
 def log_performance(operation: str):
     """Decorator to log operation performance"""
+
     def decorator(func):
-        import time
-        import functools
         import asyncio
+        import functools
+        import time
 
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -157,12 +155,12 @@ def log_performance(operation: str):
                 result = await func(*args, **kwargs)
                 duration = (time.time() - start_time) * 1000
                 logger.info(
-                    f"Operation completed successfully",
+                    "Operation completed successfully",
                     extra={
                         "operation": operation,
                         "duration": duration,
-                        "status": "success"
-                    }
+                        "status": "success",
+                    },
                 )
                 return result
             except Exception as e:
@@ -173,8 +171,8 @@ def log_performance(operation: str):
                         "operation": operation,
                         "duration": duration,
                         "status": "error",
-                        "error": str(e)
-                    }
+                        "error": str(e),
+                    },
                 )
                 raise
 
@@ -187,12 +185,12 @@ def log_performance(operation: str):
                 result = func(*args, **kwargs)
                 duration = (time.time() - start_time) * 1000
                 logger.info(
-                    f"Operation completed successfully",
+                    "Operation completed successfully",
                     extra={
                         "operation": operation,
                         "duration": duration,
-                        "status": "success"
-                    }
+                        "status": "success",
+                    },
                 )
                 return result
             except Exception as e:
@@ -203,8 +201,8 @@ def log_performance(operation: str):
                         "operation": operation,
                         "duration": duration,
                         "status": "error",
-                        "error": str(e)
-                    }
+                        "error": str(e),
+                    },
                 )
                 raise
 

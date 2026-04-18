@@ -11,8 +11,12 @@ class StoreProductAliasBase(BaseModel):
     store_chain: str = Field(..., description="Store chain name")
     receipt_name: str = Field(..., description="Product name as it appears on receipt")
     barcode: str | None = Field(None, description="Product barcode (EAN-13, UPC, GTIN)")
-    confidence_score: float = Field(0.0, ge=0.0, le=1.0, description="Matching confidence score")
-    manually_verified: bool = Field(False, description="Whether mapping was manually verified")
+    confidence_score: float = Field(
+        0.0, ge=0.0, le=1.0, description="Matching confidence score"
+    )
+    manually_verified: bool = Field(
+        False, description="Whether mapping was manually verified"
+    )
 
 
 class StoreProductAliasCreate(StoreProductAliasBase):

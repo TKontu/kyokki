@@ -10,7 +10,9 @@ class ReceiptBase(BaseModel):
     store_chain: str | None = Field(None, description="Detected or manual store chain")
     purchase_date: date | None = Field(None, description="Purchase date")
     image_path: str = Field(..., description="Path to receipt image")
-    batch_id: UUID | None = Field(None, description="Batch ID for multi-receipt processing")
+    batch_id: UUID | None = Field(
+        None, description="Batch ID for multi-receipt processing"
+    )
 
 
 class ReceiptCreate(ReceiptBase):
@@ -24,7 +26,9 @@ class ReceiptUpdate(BaseModel):
 
     store_chain: str | None = None
     purchase_date: date | None = None
-    processing_status: str | None = Field(None, description="queued, processing, completed, failed")
+    processing_status: str | None = Field(
+        None, description="queued, processing, completed, failed"
+    )
 
 
 class ReceiptResponse(ReceiptBase):
@@ -62,7 +66,9 @@ class ConfirmedItemCreate(BaseModel):
 class ReceiptConfirmRequest(BaseModel):
     """Schema for receipt confirmation request."""
 
-    items: list[ConfirmedItemCreate] = Field(..., description="Confirmed items to add to inventory")
+    items: list[ConfirmedItemCreate] = Field(
+        ..., description="Confirmed items to add to inventory"
+    )
 
 
 class ReceiptConfirmResponse(BaseModel):

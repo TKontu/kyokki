@@ -1,5 +1,5 @@
 """Tests for health check endpoint"""
-import pytest
+
 from httpx import AsyncClient
 
 
@@ -16,7 +16,9 @@ class TestHealthEndpoint:
         response = await client.get("/api/health")
         assert response.json() == {"status": "ok"}
 
-    async def test_root_endpoint_returns_welcome_message(self, client: AsyncClient) -> None:
+    async def test_root_endpoint_returns_welcome_message(
+        self, client: AsyncClient
+    ) -> None:
         """Root endpoint should return welcome message"""
         response = await client.get("/")
         assert response.status_code == 200

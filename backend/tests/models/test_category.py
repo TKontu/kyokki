@@ -1,4 +1,5 @@
 """Tests for Category model."""
+
 import pytest
 from sqlalchemy import select
 
@@ -46,7 +47,9 @@ class TestCategoryModel:
         await db_session.commit()
 
         # Read category
-        result = await db_session.execute(select(Category).filter(Category.id == "meat"))
+        result = await db_session.execute(
+            select(Category).filter(Category.id == "meat")
+        )
         fetched_category = result.scalars().first()
 
         assert fetched_category is not None
@@ -94,7 +97,9 @@ class TestCategoryModel:
         await db_session.commit()
 
         # Verify deletion
-        result = await db_session.execute(select(Category).filter(Category.id == "frozen"))
+        result = await db_session.execute(
+            select(Category).filter(Category.id == "frozen")
+        )
         fetched_category = result.scalars().first()
 
         assert fetched_category is None
@@ -128,7 +133,9 @@ class TestCategoryModel:
         await db_session.commit()
 
         # List all categories
-        result = await db_session.execute(select(Category).order_by(Category.sort_order))
+        result = await db_session.execute(
+            select(Category).order_by(Category.sort_order)
+        )
         all_categories = result.scalars().all()
 
         assert len(all_categories) == 3

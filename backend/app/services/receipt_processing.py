@@ -6,16 +6,18 @@ Coordinates the full receipt processing pipeline:
 3. Fuzzy product matching (RapidFuzz)
 4. Database updates
 """
+
 from dataclasses import dataclass
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.models.receipt import Receipt
-from app.services.ocr_service import extract_text_from_receipt
+from app.parsers.base import ReceiptExtraction
+from app.services.broadcast_helpers import broadcast_receipt_status
 from app.services.llm_extractor import extract_products_from_receipt
 from app.services.matching_service import MatchingService, MatchResult
-from app.services.broadcast_helpers import broadcast_receipt_status
-from app.parsers.base import ReceiptExtraction
-from app.core.logging import get_logger
+from app.services.ocr_service import extract_text_from_receipt
 
 logger = get_logger(__name__)
 
@@ -65,10 +67,7 @@ class ReceiptProcessingService:
             logger.info(f"Starting processing for receipt {receipt.id}")
 
             # Broadcast status update
-            await broadcast_receipt_status(
-                receipt_id=receipt.id,
-                status="processing"
-            )
+            await broadcast_receipt_status(receipt_id=receipt.id, status="processing")
 
             # Step 1: OCR text extraction
             logger.info(f"Extracting text from {receipt.image_path}")
@@ -99,9 +98,7 @@ class ReceiptProcessingService:
                         f"score: {match_result.score:.1f})"
                     )
                 else:
-                    logger.warning(
-                        f"No match found for '{parsed_product.name}'"
-                    )
+                    logger.warning(f"No match found for '{parsed_product.name}'")
 
             # Step 4: Update receipt record
             receipt.processing_status = "completed"
@@ -126,7 +123,7 @@ class ReceiptProcessingService:
                 receipt_id=receipt.id,
                 status="completed",
                 items_extracted=receipt.items_extracted,
-                items_matched=receipt.items_matched
+                items_matched=receipt.items_matched,
             )
 
             logger.info(
@@ -151,9 +148,7 @@ class ReceiptProcessingService:
 
             # Broadcast failure status
             await broadcast_receipt_status(
-                receipt_id=receipt.id,
-                status="failed",
-                error=error_msg
+                receipt_id=receipt.id, status="failed", error=error_msg
             )
 
             logger.error(error_msg, exc_info=True)

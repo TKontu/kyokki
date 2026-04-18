@@ -1,12 +1,14 @@
 """Tests for OCR service."""
-import pytest
+
 from pathlib import Path
-from unittest.mock import Mock, patch, AsyncMock, mock_open
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from app.services.ocr_service import (
-    extract_text_from_receipt,
-    _extract_from_pdf,
     _extract_from_image,
+    _extract_from_pdf,
+    extract_text_from_receipt,
 )
 
 
@@ -124,11 +126,7 @@ class TestExtractFromImage:
 
         mock_response = Mock()
         mock_response.json.return_value = {
-            "results": {
-                "receipt.jpg": {
-                    "md_content": "Extracted text from MinerU"
-                }
-            }
+            "results": {"receipt.jpg": {"md_content": "Extracted text from MinerU"}}
         }
         mock_response.raise_for_status = Mock()
 
@@ -137,7 +135,9 @@ class TestExtractFromImage:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.ocr_service.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
             result = await _extract_from_image(img_file)
 
             assert result == "Extracted text from MinerU"
@@ -164,7 +164,9 @@ class TestExtractFromImage:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(return_value=mock_response)
 
-        with patch("app.services.ocr_service.httpx.AsyncClient", return_value=mock_client):
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
             result = await _extract_from_image(img_file)
 
             assert result == ""
@@ -182,9 +184,13 @@ class TestExtractFromImage:
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client.post = AsyncMock(side_effect=httpx.HTTPError("API Error"))
 
-        with patch("app.services.ocr_service.httpx.AsyncClient", return_value=mock_client):
-            with pytest.raises(httpx.HTTPError):
-                await _extract_from_image(img_file)
+        with (
+            patch(
+                "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+            ),
+            pytest.raises(httpx.HTTPError),
+        ):
+            await _extract_from_image(img_file)
 
 
 @pytest.mark.integration
@@ -204,7 +210,9 @@ class TestOCRWithRealSamples:
         # Should extract text successfully
         assert len(text) > 0
         # Should contain S-Group markers
-        assert any(marker in text.upper() for marker in ["PRISMA", "S-KAUPAT", "S-MARKET"])
+        assert any(
+            marker in text.upper() for marker in ["PRISMA", "S-KAUPAT", "S-MARKET"]
+        )
 
     @pytest.mark.skip(reason="Requires MinerU service running")
     async def test_extract_from_kesko_image(self):
@@ -223,4 +231,6 @@ class TestOCRWithRealSamples:
         # Should extract text successfully
         assert len(text) > 0
         # Should contain K-Group markers
-        assert any(marker in text.upper() for marker in ["K-MARKET", "K-CITYMARKET", "KESKO"])
+        assert any(
+            marker in text.upper() for marker in ["K-MARKET", "K-CITYMARKET", "KESKO"]
+        )

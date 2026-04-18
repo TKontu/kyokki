@@ -9,31 +9,37 @@ from .api.router import api_router
 from .core.config import settings
 from .core.logging import get_logger, setup_logging
 from .services.websockets import manager
+
 # from .middleware.logging import LoggingMiddleware  # TODO: Create if needed
+
 
 async def redis_listener(app: FastAPI):
     """
     Listens to a Redis channel and broadcasts messages to WebSocket clients.
     """
     logger = get_logger("redis_listener")
-    redis_client = redis.from_url(f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}")
+    redis_client = redis.from_url(
+        f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+    )
     pubsub = redis_client.pubsub()
     await pubsub.subscribe("updates")
 
     logger.info("Redis listener started. Waiting for messages...")
     try:
         while True:
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True, timeout=1.0
+            )
             if message and message.get("type") == "message":
                 logger.info(
                     "Received message from Redis",
                     extra={
                         "operation": "redis_message_received",
-                        "message_data": message['data'].decode('utf-8')
-                    }
+                        "message_data": message["data"].decode("utf-8"),
+                    },
                 )
                 await manager.broadcast(message["data"].decode("utf-8"))
-            await asyncio.sleep(0.1) # Short sleep to prevent high CPU usage
+            await asyncio.sleep(0.1)  # Short sleep to prevent high CPU usage
     except asyncio.CancelledError:
         logger.info("Redis listener cancelled.")
     except Exception as e:
@@ -43,6 +49,7 @@ async def redis_listener(app: FastAPI):
         await pubsub.unsubscribe("updates")
         await pubsub.aclose()
         await redis_client.aclose()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -60,6 +67,7 @@ async def lifespan(app: FastAPI):
     # Cancel the listener task and wait for it to finish
     listener_task.cancel()
     await listener_task
+
 
 app = FastAPI(title="Kyokki API", lifespan=lifespan)
 
@@ -80,7 +88,7 @@ app.add_middleware(
 
 app.include_router(api_router, prefix="/api")
 
+
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Kyokki API"}
-

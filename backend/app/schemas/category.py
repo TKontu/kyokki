@@ -7,8 +7,12 @@ class CategoryBase(BaseModel):
     id: str = Field(..., description="Category ID (e.g., 'dairy', 'meat', 'produce')")
     display_name: str = Field(..., description="Human-readable category name")
     icon: str | None = Field(None, description="Emoji icon for category")
-    default_shelf_life_days: int = Field(..., gt=0, description="Default shelf life in days")
-    meal_contexts: list[str] | None = Field(None, description="Meal contexts where this category is used")
+    default_shelf_life_days: int = Field(
+        ..., gt=0, description="Default shelf life in days"
+    )
+    meal_contexts: list[str] | None = Field(
+        None, description="Meal contexts where this category is used"
+    )
     sort_order: int = Field(0, description="Display sort order")
 
 

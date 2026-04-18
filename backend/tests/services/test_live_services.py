@@ -11,13 +11,18 @@ To run MinerU tests:
 To run all live service tests:
     pytest tests/services/test_live_services.py -m "requires_vllm or requires_mineru" -v
 """
-import pytest
+
 from pathlib import Path
 
-from app.services.llm_extractor import extract_products_from_receipt, extract_with_store_hint
-from app.services.ocr_service import extract_text_from_receipt
-from app.parsers.base import ReceiptExtraction
+import pytest
+
 from app.core.config import settings
+from app.parsers.base import ReceiptExtraction
+from app.services.llm_extractor import (
+    extract_products_from_receipt,
+    extract_with_store_hint,
+)
+from app.services.ocr_service import extract_text_from_receipt
 
 
 class TestLiveVLLMService:
@@ -54,7 +59,9 @@ class TestLiveVLLMService:
         print(f"\nExtracted store: {store_info.name}, chain: {store_info.chain}")
         print(f"Extracted {len(result.products)} products:")
         for i, product in enumerate(result.products, 1):
-            print(f"  {i}. {product.name} ({product.name_en}) - {product.quantity} {product.unit}")
+            print(
+                f"  {i}. {product.name} ({product.name_en}) - {product.quantity} {product.unit}"
+            )
 
     @pytest.mark.requires_vllm
     async def test_vllm_extraction_with_english_receipt(self):
@@ -100,17 +107,18 @@ class TestLiveVLLMService:
         assert len(result.products) >= 1
 
         store_info = result.get_store_info()
-        print(f"\nWith hint 'Prisma (S-Group)':")
+        print("\nWith hint 'Prisma (S-Group)':")
         print(f"Detected: {store_info.name}, chain: {store_info.chain}")
 
     @pytest.mark.requires_vllm
     async def test_vllm_model_configuration(self):
         """Verify vLLM is using the correct model (Qwen3-4B-Instruct)."""
-        import httpx
 
         # This test verifies the model name is correctly configured
         # Actual model verification would require vLLM API /models endpoint
-        assert settings.LLM_MODEL == "Qwen3-4B-Instruct", "Should be configured to use Qwen3-4B-Instruct"
+        assert settings.LLM_MODEL == "Qwen3-4B-Instruct", (
+            "Should be configured to use Qwen3-4B-Instruct"
+        )
         assert settings.LLM_BASE_URL == "http://192.168.0.247:9003/v1"
 
         print(f"\nConfigured model: {settings.LLM_MODEL}")
@@ -158,8 +166,9 @@ class TestLiveMinerUService:
 
         # Verify it looks like Finnish S-Group receipt
         text_upper = ocr_text.upper()
-        assert any(marker in text_upper for marker in ["PRISMA", "S-KAUPAT", "S-MARKET"]), \
-            "Should contain S-Group store markers"
+        assert any(
+            marker in text_upper for marker in ["PRISMA", "S-KAUPAT", "S-MARKET"]
+        ), "Should contain S-Group store markers"
 
         print(f"\nExtracted {len(ocr_text)} characters from PDF")
 
@@ -186,7 +195,9 @@ class TestLiveEndToEndPipeline:
 
         # Verify results
         assert isinstance(result, ReceiptExtraction)
-        assert len(result.products) >= 1, "Should extract at least one product from real receipt"
+        assert len(result.products) >= 1, (
+            "Should extract at least one product from real receipt"
+        )
 
         store_info = result.get_store_info()
         print(f"\nStore: {store_info.name}")

@@ -1,4 +1,5 @@
 """Test script to verify external service connections."""
+
 import asyncio
 
 import httpx
@@ -66,18 +67,18 @@ async def test_ollama():
 
 async def main():
     """Run all connection tests"""
-    print("="* 50)
+    print("=" * 50)
     print(" Kyokki Infrastructure Connection Tests")
-    print("="* 50)
+    print("=" * 50)
 
     results = {}
-    results['database'] = await test_database()
-    results['mineru'] = await test_mineru()
-    results['ollama'] = await test_ollama()
+    results["database"] = await test_database()
+    results["mineru"] = await test_mineru()
+    results["ollama"] = await test_ollama()
 
-    print("\n" + "="* 50)
+    print("\n" + "=" * 50)
     print(" Summary")
-    print("="* 50)
+    print("=" * 50)
     for service, status in results.items():
         symbol = "✅" if status else "❌"
         print(f"{symbol} {service.capitalize()}: {'Connected' if status else 'Failed'}")

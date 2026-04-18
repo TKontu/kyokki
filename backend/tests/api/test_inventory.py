@@ -1,6 +1,6 @@
 """Tests for Inventory CRUD API endpoints."""
+
 from datetime import date, timedelta
-from decimal import Decimal
 from uuid import UUID
 
 import pytest
@@ -15,6 +15,7 @@ from app.main import app
 @pytest.fixture
 async def seeded_db(db_session: AsyncSession) -> AsyncSession:
     """Provide a database session with seeded categories and override app dependency."""
+
     # Override the dependency to use test database session
     async def override_get_db():
         try:

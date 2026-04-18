@@ -1,4 +1,5 @@
 """Shopping list API endpoints."""
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -22,7 +23,9 @@ logger = get_logger(__name__)
 async def get_shopping_list(
     skip: int = Query(0, ge=0, description="Number of items to skip"),
     limit: int = Query(100, ge=1, le=500, description="Maximum items to return"),
-    priority: str | None = Query(None, description="Filter by priority: urgent, normal, low"),
+    priority: str | None = Query(
+        None, description="Filter by priority: urgent, normal, low"
+    ),
     include_purchased: bool = Query(False, description="Include purchased items"),
     db: AsyncSession = Depends(get_db),
 ):
@@ -83,7 +86,9 @@ async def get_shopping_item(
     return item
 
 
-@router.post("/", response_model=ShoppingListItemResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/", response_model=ShoppingListItemResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_shopping_item(
     item_in: ShoppingListItemCreate,
     db: AsyncSession = Depends(get_db),
@@ -178,7 +183,9 @@ async def update_shopping_item(
 @router.post("/{item_id}/purchase", response_model=ShoppingListItemResponse)
 async def mark_item_purchased(
     item_id: UUID,
-    purchased: bool = Query(True, description="Mark as purchased (true) or unpurchased (false)"),
+    purchased: bool = Query(
+        True, description="Mark as purchased (true) or unpurchased (false)"
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark a shopping list item as purchased or unpurchased.
@@ -191,7 +198,9 @@ async def mark_item_purchased(
         extra={"item_id": str(item_id), "purchased": purchased},
     )
 
-    item = await shopping_list_item.mark_purchased(db, item_id=item_id, purchased=purchased)
+    item = await shopping_list_item.mark_purchased(
+        db, item_id=item_id, purchased=purchased
+    )
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

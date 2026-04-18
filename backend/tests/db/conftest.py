@@ -1,11 +1,13 @@
 """Fixtures for database tests."""
+
+from collections.abc import AsyncGenerator
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from typing import AsyncGenerator
 
-from app.db.base_class import Base
 from app.core.config import settings
+from app.db.base_class import Base
 
 
 @pytest.fixture(scope="function")
@@ -33,9 +35,7 @@ async def db_engine():
 @pytest.fixture(scope="function")
 async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
     """Create async database session for testing."""
-    async_session = sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
+    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as session:
         try:

@@ -1,16 +1,18 @@
 """Pytest tests for LLM extractor service (vLLM integration)."""
-import json
-import pytest
-from unittest.mock import AsyncMock, patch
-import httpx
 
+import json
+from unittest.mock import AsyncMock, patch
+
+import httpx
+import pytest
+
+from app.core.config import settings
+from app.parsers.base import ReceiptExtraction
 from app.services.llm_extractor import (
+    build_prompt_for_store,
     extract_products_from_receipt,
     extract_with_store_hint,
-    build_prompt_for_store,
 )
-from app.parsers.base import ReceiptExtraction, ParsedProduct, StoreInfo
-from app.core.config import settings
 
 
 class TestExtractProductsFromReceipt:
@@ -29,40 +31,42 @@ class TestExtractProductsFromReceipt:
                     "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": json.dumps({
-                            "store": {
-                                "name": "Prisma Jyväskylä",
-                                "chain": "s-group",
-                                "country": "FI",
-                                "language": "fi",
-                                "currency": "EUR"
-                            },
-                            "products": [
-                                {
-                                    "name": "Maito",
-                                    "name_en": "Milk",
-                                    "quantity": 1.0,
-                                    "weight_kg": None,
-                                    "volume_l": 1.0,
-                                    "unit": "l",
-                                    "price": 1.49
+                        "content": json.dumps(
+                            {
+                                "store": {
+                                    "name": "Prisma Jyväskylä",
+                                    "chain": "s-group",
+                                    "country": "FI",
+                                    "language": "fi",
+                                    "currency": "EUR",
                                 },
-                                {
-                                    "name": "Leipä",
-                                    "name_en": "Bread",
-                                    "quantity": 1.0,
-                                    "weight_kg": None,
-                                    "volume_l": None,
-                                    "unit": "pcs",
-                                    "price": 2.95
-                                }
-                            ],
-                            "confidence": 0.95
-                        })
+                                "products": [
+                                    {
+                                        "name": "Maito",
+                                        "name_en": "Milk",
+                                        "quantity": 1.0,
+                                        "weight_kg": None,
+                                        "volume_l": 1.0,
+                                        "unit": "l",
+                                        "price": 1.49,
+                                    },
+                                    {
+                                        "name": "Leipä",
+                                        "name_en": "Bread",
+                                        "quantity": 1.0,
+                                        "weight_kg": None,
+                                        "volume_l": None,
+                                        "unit": "pcs",
+                                        "price": 2.95,
+                                    },
+                                ],
+                                "confidence": 0.95,
+                            }
+                        ),
                     },
-                    "finish_reason": "stop"
+                    "finish_reason": "stop",
                 }
-            ]
+            ],
         }
 
     @pytest.fixture
@@ -135,16 +139,14 @@ class TestExtractProductsFromReceipt:
             "choices": [
                 {
                     "message": {
-                        "content": json.dumps({
-                            "store": {},
-                            "products": [
-                                {
-                                    "name": "Product",
-                                    "quantity": 1.0,
-                                    "unit": "pcs"
-                                }
-                            ]
-                        })
+                        "content": json.dumps(
+                            {
+                                "store": {},
+                                "products": [
+                                    {"name": "Product", "quantity": 1.0, "unit": "pcs"}
+                                ],
+                            }
+                        )
                     }
                 }
             ]
@@ -177,7 +179,7 @@ class TestExtractProductsFromReceipt:
                 raise httpx.HTTPStatusError(
                     "500 Server Error",
                     request=mock_request,
-                    response=mock_error_response
+                    response=mock_error_response,
                 )
 
             mock_response = AsyncMock()
@@ -191,15 +193,7 @@ class TestExtractProductsFromReceipt:
 
     async def test_invalid_json_response(self, sample_ocr_text):
         """Test handling of invalid JSON in response."""
-        invalid_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": "not valid json"
-                    }
-                }
-            ]
-        }
+        invalid_response = {"choices": [{"message": {"content": "not valid json"}}]}
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_response = AsyncMock()
@@ -209,7 +203,7 @@ class TestExtractProductsFromReceipt:
             mock_post = AsyncMock(return_value=mock_response)
             mock_client.return_value.__aenter__.return_value.post = mock_post
 
-            with pytest.raises(Exception):  # Pydantic validation error
+            with pytest.raises(Exception):  # noqa: B017  # Pydantic validation error
                 await extract_products_from_receipt(sample_ocr_text)
 
     async def test_ocr_text_truncation(self):
@@ -219,7 +213,9 @@ class TestExtractProductsFromReceipt:
         with patch("httpx.AsyncClient") as mock_client:
             mock_response = AsyncMock()
             mock_response.json = lambda: {
-                "choices": [{"message": {"content": json.dumps({"store": {}, "products": []})}}]
+                "choices": [
+                    {"message": {"content": json.dumps({"store": {}, "products": []})}}
+                ]
             }
             mock_response.raise_for_status = lambda: None
 
@@ -280,22 +276,24 @@ class TestExtractWithStoreHint:
             "choices": [
                 {
                     "message": {
-                        "content": json.dumps({
-                            "store": {
-                                "name": "Prisma",
-                                "chain": "s-group",
-                                "country": "FI",
-                                "language": "fi",
-                                "currency": "EUR"
-                            },
-                            "products": [
-                                {
-                                    "name": "Test Product",
-                                    "quantity": 1.0,
-                                    "unit": "pcs"
-                                }
-                            ]
-                        })
+                        "content": json.dumps(
+                            {
+                                "store": {
+                                    "name": "Prisma",
+                                    "chain": "s-group",
+                                    "country": "FI",
+                                    "language": "fi",
+                                    "currency": "EUR",
+                                },
+                                "products": [
+                                    {
+                                        "name": "Test Product",
+                                        "quantity": 1.0,
+                                        "unit": "pcs",
+                                    }
+                                ],
+                            }
+                        )
                     }
                 }
             ]
@@ -337,7 +335,7 @@ class TestExtractWithStoreHint:
                 raise httpx.HTTPStatusError(
                     "503 Service Unavailable",
                     request=mock_request,
-                    response=mock_error_response
+                    response=mock_error_response,
                 )
 
             mock_response = AsyncMock()
@@ -353,29 +351,34 @@ class TestExtractWithStoreHint:
 class TestLanguageAgnosticExtraction:
     """Test language-agnostic extraction capabilities."""
 
-    @pytest.mark.parametrize("language,store_name,product_names", [
-        ("fi", "Prisma", ["Maito", "Leipä"]),
-        ("en", "Walmart", ["Milk", "Bread"]),
-        ("de", "LIDL", ["Milch", "Brot"]),
-        ("sv", "ICA", ["Mjölk", "Bröd"]),
-    ])
+    @pytest.mark.parametrize(
+        "language,store_name,product_names",
+        [
+            ("fi", "Prisma", ["Maito", "Leipä"]),
+            ("en", "Walmart", ["Milk", "Bread"]),
+            ("de", "LIDL", ["Milch", "Brot"]),
+            ("sv", "ICA", ["Mjölk", "Bröd"]),
+        ],
+    )
     async def test_multi_language_extraction(self, language, store_name, product_names):
         """Test extraction works with different languages."""
         mock_response = {
             "choices": [
                 {
                     "message": {
-                        "content": json.dumps({
-                            "store": {
-                                "name": store_name,
-                                "language": language,
-                                "country": "FI" if language == "fi" else "US"
-                            },
-                            "products": [
-                                {"name": name, "quantity": 1.0, "unit": "pcs"}
-                                for name in product_names
-                            ]
-                        })
+                        "content": json.dumps(
+                            {
+                                "store": {
+                                    "name": store_name,
+                                    "language": language,
+                                    "country": "FI" if language == "fi" else "US",
+                                },
+                                "products": [
+                                    {"name": name, "quantity": 1.0, "unit": "pcs"}
+                                    for name in product_names
+                                ],
+                            }
+                        )
                     }
                 }
             ]
@@ -406,16 +409,18 @@ class TestPydanticValidation:
             "choices": [
                 {
                     "message": {
-                        "content": json.dumps({
-                            "store": {},
-                            "products": [
-                                {
-                                    "name": "Product",
-                                    "quantity": -1.0,  # Invalid: negative quantity
-                                    "unit": "pcs"
-                                }
-                            ]
-                        })
+                        "content": json.dumps(
+                            {
+                                "store": {},
+                                "products": [
+                                    {
+                                        "name": "Product",
+                                        "quantity": -1.0,  # Invalid: negative quantity
+                                        "unit": "pcs",
+                                    }
+                                ],
+                            }
+                        )
                     }
                 }
             ]
@@ -429,7 +434,7 @@ class TestPydanticValidation:
             mock_post = AsyncMock(return_value=mock_response)
             mock_client.return_value.__aenter__.return_value.post = mock_post
 
-            with pytest.raises(Exception):  # Pydantic validation error
+            with pytest.raises(Exception):  # noqa: B017  # Pydantic validation error
                 await extract_products_from_receipt("OCR text")
 
     async def test_missing_required_fields(self):
@@ -438,16 +443,18 @@ class TestPydanticValidation:
             "choices": [
                 {
                     "message": {
-                        "content": json.dumps({
-                            "store": {},
-                            "products": [
-                                {
-                                    # Missing 'name' field
-                                    "quantity": 1.0,
-                                    "unit": "pcs"
-                                }
-                            ]
-                        })
+                        "content": json.dumps(
+                            {
+                                "store": {},
+                                "products": [
+                                    {
+                                        # Missing 'name' field
+                                        "quantity": 1.0,
+                                        "unit": "pcs",
+                                    }
+                                ],
+                            }
+                        )
                     }
                 }
             ]
@@ -461,5 +468,5 @@ class TestPydanticValidation:
             mock_post = AsyncMock(return_value=mock_response)
             mock_client.return_value.__aenter__.return_value.post = mock_post
 
-            with pytest.raises(Exception):  # Pydantic validation error
+            with pytest.raises(Exception):  # noqa: B017  # Pydantic validation error
                 await extract_products_from_receipt("OCR text")

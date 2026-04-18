@@ -8,7 +8,9 @@ from pydantic import BaseModel, Field
 class ShoppingListItemBase(BaseModel):
     """Base shopping list item schema with common fields."""
 
-    product_master_id: UUID | None = Field(None, description="Product master ID (null for free-text items)")
+    product_master_id: UUID | None = Field(
+        None, description="Product master ID (null for free-text items)"
+    )
     name: str = Field(..., description="Display name")
     quantity: Decimal = Field(..., gt=0, description="Quantity to purchase")
     unit: str = Field(..., description="Unit: ml, g, pcs, unit")

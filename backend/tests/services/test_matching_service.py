@@ -1,16 +1,18 @@
 """Pytest tests for product matching service (RapidFuzz fuzzy matching)."""
-import pytest
+
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.category import Category
+from app.models.product_master import ProductMaster
 from app.services.matching_service import (
+    MatchConfidence,
     MatchingService,
     MatchResult,
-    MatchConfidence,
 )
-from app.models.product_master import ProductMaster
-from app.models.category import Category
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class TestMatchingService:
@@ -155,7 +157,11 @@ class TestMatchingService:
         # Should match one of the milk products
         assert "Milk" in result.product.canonical_name
         # May score higher than LOW depending on the exact match
-        assert result.confidence in [MatchConfidence.LOW, MatchConfidence.MEDIUM, MatchConfidence.HIGH]
+        assert result.confidence in [
+            MatchConfidence.LOW,
+            MatchConfidence.MEDIUM,
+            MatchConfidence.HIGH,
+        ]
         assert result.score >= 50.0
 
     async def test_no_match_below_threshold(

@@ -1,4 +1,5 @@
 """API endpoints for Product CRUD operations."""
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -18,7 +19,6 @@ from app.services.off_service import (
     OffProductNotFoundError,
     enrich_product_from_off,
 )
-
 
 router = APIRouter()
 
@@ -61,7 +61,9 @@ async def get_product(
     return product
 
 
-@router.post("", response_model=ProductMasterResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=ProductMasterResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_product(
     product: ProductMasterCreate, db: AsyncSession = Depends(get_db)
 ) -> ProductMasterResponse:
@@ -98,9 +100,7 @@ async def update_product(
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_product(
-    product_id: UUID, db: AsyncSession = Depends(get_db)
-) -> None:
+async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
     """Delete a product."""
     deleted = await crud_product.delete_product(db, product_id)
     if not deleted:
@@ -112,7 +112,9 @@ async def delete_product(
 
 @router.post("/enrich")
 async def enrich_product(
-    barcode: str = Query(..., description="Product barcode to look up in Open Food Facts"),
+    barcode: str = Query(
+        ..., description="Product barcode to look up in Open Food Facts"
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Enrich product from Open Food Facts API.

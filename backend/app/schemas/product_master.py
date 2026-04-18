@@ -10,13 +10,21 @@ class ProductMasterBase(BaseModel):
 
     canonical_name: str = Field(..., description="Canonical product name")
     category: str = Field(..., description="Product category ID")
-    storage_type: str = Field(..., description="Storage type: refrigerator, freezer, pantry")
-    default_shelf_life_days: int = Field(..., gt=0, description="Default shelf life (unopened)")
-    opened_shelf_life_days: int | None = Field(None, gt=0, description="Shelf life after opening")
+    storage_type: str = Field(
+        ..., description="Storage type: refrigerator, freezer, pantry"
+    )
+    default_shelf_life_days: int = Field(
+        ..., gt=0, description="Default shelf life (unopened)"
+    )
+    opened_shelf_life_days: int | None = Field(
+        None, gt=0, description="Shelf life after opening"
+    )
     unit_type: str = Field(..., description="Unit type: volume, weight, count, unit")
     default_unit: str = Field(..., description="Default unit: ml, g, pcs")
     default_quantity: Decimal | None = Field(None, gt=0, description="Default quantity")
-    min_stock_quantity: Decimal | None = Field(None, ge=0, description="Minimum stock threshold")
+    min_stock_quantity: Decimal | None = Field(
+        None, ge=0, description="Minimum stock threshold"
+    )
     reorder_quantity: Decimal | None = Field(None, gt=0, description="Reorder quantity")
     off_product_id: str | None = Field(None, description="Open Food Facts product ID")
 

@@ -1,4 +1,5 @@
 """Tests for receipt confirmation endpoint."""
+
 from decimal import Decimal
 from io import BytesIO
 from uuid import uuid4
@@ -17,6 +18,7 @@ from app.models.receipt import Receipt
 @pytest.fixture
 async def test_db(db_session: AsyncSession):
     """Provide test database session with dependency override."""
+
     async def override_get_db():
         try:
             yield db_session
@@ -46,7 +48,9 @@ async def sample_category(test_db: AsyncSession) -> Category:
 
 
 @pytest.fixture
-async def sample_product(test_db: AsyncSession, sample_category: Category) -> ProductMaster:
+async def sample_product(
+    test_db: AsyncSession, sample_category: Category
+) -> ProductMaster:
     """Create sample product."""
     product = ProductMaster(
         id=uuid4(),
@@ -79,7 +83,6 @@ async def processed_receipt(
 
     # Manually update receipt to simulate processing
     from sqlalchemy import select
-    from app.models.receipt import Receipt
 
     stmt = select(Receipt).where(Receipt.id == receipt_id)
     result = await test_db.execute(stmt)
@@ -140,6 +143,7 @@ class TestConfirmReceipt:
 
         # Verify inventory was created
         from sqlalchemy import select
+
         from app.models.inventory_item import InventoryItem
 
         stmt = select(InventoryItem).where(InventoryItem.receipt_id == receipt_id)
@@ -296,9 +300,11 @@ class TestConfirmReceipt:
         assert response.status_code == 200
 
         # Verify expiry date was calculated
-        from sqlalchemy import select
-        from app.models.inventory_item import InventoryItem
         from datetime import date
+
+        from sqlalchemy import select
+
+        from app.models.inventory_item import InventoryItem
 
         stmt = select(InventoryItem).where(InventoryItem.receipt_id == receipt_id)
         db_result = await test_db.execute(stmt)

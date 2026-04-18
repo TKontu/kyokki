@@ -1,7 +1,9 @@
 """Tests for ProductMaster model."""
+
+from decimal import Decimal
+
 import pytest
 from sqlalchemy import select
-from decimal import Decimal
 
 from app.models.category import Category
 from app.models.product_master import ProductMaster

@@ -1,6 +1,14 @@
 from fastapi import APIRouter
 
-from .endpoints import health, categories, products, inventory, receipts, websockets, shopping
+from .endpoints import (
+    categories,
+    health,
+    inventory,
+    products,
+    receipts,
+    shopping,
+    websockets,
+)
 
 api_router = APIRouter()
 

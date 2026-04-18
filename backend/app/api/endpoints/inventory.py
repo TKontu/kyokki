@@ -1,4 +1,5 @@
 """API endpoints for Inventory CRUD operations."""
+
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,7 +20,6 @@ from app.schemas.inventory_item import (
 )
 from app.services.broadcast_helpers import broadcast_inventory_update
 
-
 router = APIRouter()
 
 
@@ -34,7 +34,7 @@ async def _get_product_name(db: AsyncSession, item) -> str | None:
         Product canonical name or None if not found.
     """
     try:
-        if hasattr(item, 'product_master') and item.product_master:
+        if hasattr(item, "product_master") and item.product_master:
             return item.product_master.canonical_name
         # Query if relationship not loaded
         result = await db.execute(
@@ -93,7 +93,7 @@ async def create_inventory_item(
             action="created",
             current_quantity=created_item.current_quantity,
             status=created_item.status,
-            product_name=product_name
+            product_name=product_name,
         )
 
         return created_item
@@ -131,7 +131,7 @@ async def update_inventory_item(
         action="updated",
         current_quantity=item.current_quantity,
         status=item.status,
-        product_name=product_name
+        product_name=product_name,
     )
 
     return item
@@ -159,13 +159,11 @@ async def delete_inventory_item(
     product_name = await _get_product_name(db, item)
 
     # Delete the item
-    deleted = await crud_inventory.delete_inventory_item(db, item_id)
+    await crud_inventory.delete_inventory_item(db, item_id)
 
     # Broadcast deletion
     await broadcast_inventory_update(
-        inventory_item_id=item_id,
-        action="deleted",
-        product_name=product_name
+        inventory_item_id=item_id, action="deleted", product_name=product_name
     )
 
 
@@ -193,7 +191,7 @@ async def consume_inventory_item(
             action="consumed",
             current_quantity=item.current_quantity,
             status=item.status,
-            product_name=product_name
+            product_name=product_name,
         )
 
         return item
