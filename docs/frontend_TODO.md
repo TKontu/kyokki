@@ -77,71 +77,62 @@ frontend/
 
 ## Phase 0: Foundation Setup (15h)
 
-### ✅ Increment 0.1: Project Initialization (4h)
-- [ ] Initialize Next.js 14 with App Router, TypeScript
-- [ ] Configure env: `NEXT_PUBLIC_API_URL=http://localhost:8000/api`
-- [ ] Create folder structure
-- [ ] Test: Dev server starts
+### ✅ Increment 0.1: Project Initialization (4h) — DONE (PR #8)
+- [x] Initialize Next.js 14 with App Router, TypeScript
+- [x] Configure env: `NEXT_PUBLIC_API_URL=http://localhost:8000/api`
+- [x] Create folder structure
 
-### ✅ Increment 0.2: Tailwind + Testing (4h)
-- [ ] Install Tailwind with iPad touch tokens (`min-h-touch: 44px`, `min-h-touch-lg: 56px`)
-- [ ] Configure Jest + React Testing Library
-- [ ] Create first smoke test
-- [ ] Test: `npm test` passes
+### ✅ Increment 0.2: Tailwind + Testing (4h) — DONE (PR #8)
+- [x] Install Tailwind with iPad touch tokens (`min-h-touch: 44px`, `min-h-touch-lg: 56px`)
+- [x] Configure Jest + React Testing Library
 
-### ✅ Increment 0.3: TypeScript Types (3h)
-- [ ] Mirror backend schemas: `InventoryItem`, `Product`, `Category`, `Receipt`, etc.
-- [ ] Add API types: `APIError`, `PaginatedResponse`
-- [ ] Test: Types compile, type guards tested
+### ✅ Increment 0.3: TypeScript Types (3h) — DONE (PR #8)
+- [x] Mirror backend schemas: `InventoryItem`, `Product`, `Category`, `Receipt`, etc.
+- [x] Add API types: `APIError`, `PaginatedResponse`
 
-### ✅ Increment 0.4: API Client Foundation (4h)
-- [ ] Create base fetch wrapper with error handling
-- [ ] Add APIError, NetworkError classes
-- [ ] Configure CORS and base URL
-- [ ] Test: Success/error cases with MSW (Mock Service Worker)
+### ✅ Increment 0.4: API Client Foundation (4h) — DONE (PR #8)
+- [x] Create base fetch wrapper with error handling
+- [x] Add APIError, NetworkError classes
+- [x] Note: Using `global.fetch` mocks instead of MSW (Node polyfill issues)
 
 ---
 
 ## Phase 1: Inventory Viewing (26h)
 
-### ✅ Increment 1.1: Base UI Components (6h)
-- [ ] `Button` (variants: primary/secondary/ghost/danger, sizes: sm/md/lg/xl)
-- [ ] `Card`, `Badge`, `Skeleton`
-- [ ] Test: All variants, touch targets ≥44px, accessibility
+### ✅ Increment 1.1: Base UI Components (6h) — DONE (PR #15)
+- [x] `Button` (variants: primary/secondary/ghost/danger, sizes: sm/md/lg/xl)
+- [x] `Card`, `Badge` (`StatusBadge`), `Skeleton`
+- [x] All variants tested, touch targets ≥44px
 
-### ✅ Increment 1.2: Inventory API Integration (4h)
-- [ ] Install TanStack Query
-- [ ] Create inventory API methods: `list()`, `get()`, `consume()`, etc.
-- [ ] Create `useInventory` hook with queries and mutations
-- [ ] Test: Mock API with MSW, optimistic updates
+### ✅ Increment 1.2: Inventory API Integration (4h) — DONE (PR #15)
+- [x] Install TanStack Query
+- [x] Inventory API methods + `useInventory` hook with queries and mutations
 
-### ✅ Increment 1.3: ExpiryBadge Component (3h)
-- [ ] Color logic: Red ≤1d, Orange 2-3d, Yellow 4-5d, Green >5d
-- [ ] Date utilities: `getDaysUntilExpiry()`, `formatExpiryDate()`
-- [ ] Test: All color states, edge cases
+### ✅ Increment 1.3: ExpiryBadge Component (3h) — DONE (PR #15)
+- [x] Color logic: Red ≤1d, Orange 2-3d, Yellow 4-5d, Green >5d
+- [x] Date utilities: `getDaysUntilExpiry()`, `formatExpiryDate()`
 
-### ✅ Increment 1.4: QuantityBar Component (3h)
-- [ ] Progress bar: current/initial quantity ratio
-- [ ] Gradient colors based on percentage
-- [ ] Display text label (e.g., "750 ml / 1000 ml")
-- [ ] Test: Percentages, colors, decimal rendering
+### ✅ Increment 1.4: QuantityBar Component (3h) — DONE (PR #18)
+- [x] Progress bar: current/initial quantity ratio, color-coded by %
+- [x] Display text label (e.g., "750 ml / 1000 ml"), compact mode
+- [x] 42 tests passing
 
-### ✅ Increment 1.5: InventoryItem Component (5h)
-- [ ] Compound component with subcomponents: Image, Name, Quantity, Expiry, Actions
-- [ ] Horizontal card layout
-- [ ] Click handler for selection
-- [ ] Test: Full data, missing fields, interactions
+### ✅ Increment 1.5: InventoryItemCard Component (5h) — DONE (PR #21)
+- [x] Card composing `ExpiryBadge` + `QuantityBar` + `StatusBadge`
+- [x] Props: `item`, `productName`, `productCategory?`, `onConsume?`, `onEdit?`
+- [x] Inactive state (empty/discarded) → opacity-60, consume disabled
+- [x] 30 tests passing
 
-### ✅ Increment 1.6: InventoryList Display (4h)
+### Increment 1.6: InventoryList Display (4h) — NEXT
 - [ ] Scrollable container using `useInventory` hook
 - [ ] Loading skeleton, error state, empty state
-- [ ] Render InventoryItem for each item
-- [ ] Test: All states with MSW
+- [ ] Render `InventoryItemCard` for each item
+- [ ] Test: All states
 
-### ✅ Increment 1.7: Main Page Integration (2h)
+### Increment 1.7: Main Page Integration (2h)
 - [ ] Update `/app/page.tsx` to render InventoryList
-- [ ] Basic header with title
-- [ ] Test: Integration test, manual smoke test with backend
+- [ ] Basic header
+- [ ] Manual smoke test with backend
 
 ---
 
@@ -458,4 +449,4 @@ frontend/
 
 ---
 
-**Progress**: 0/47 increments completed (~0% done)
+**Progress**: 9/47 increments completed (~19% done) — through Increment 1.5

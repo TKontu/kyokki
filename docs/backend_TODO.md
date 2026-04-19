@@ -41,11 +41,14 @@
 - Redis pub/sub integration
 - Comprehensive tests
 
-**📍 Next: Optional Enhancements or Phase 2 Features**
-- Celery tasks for async receipt processing (optional)
-- Open Food Facts integration
-- Hardware barcode scanner support
-- Shopping list API
+**✅ PR #20 + #21 Complete** (Universal Scanner API + 9 bug fixes)
+- Scanner API: `POST /api/scanner/scan`, mode management, station tracking
+- OFF unit parsing, UNIQUE constraint on off_product_id, CORS env config, Redis resilience
+
+**📍 Next: Phase 2 Remaining**
+- GS1 DataMatrix parser
+- Home Assistant integration
+- Celery async receipt processing (optional)
 
 ---
 
@@ -208,29 +211,16 @@ class StoreInfo(BaseModel):
 - [x] Endpoint: `POST /api/products/enrich?barcode={barcode}`
 - [x] 17/17 unit tests passing
 
-### Universal Barcode Scanner API (NEW - See docs/SCANNER_ARCHITECTURE.md)
-**Backend-centric API supporting multiple input methods**
+### Universal Barcode Scanner API ✅ (PR #20 + #21)
+- [x] `POST /api/scanner/scan` — add/consume/lookup modes, OFF enrichment, auto-create product
+- [x] `GET/POST /api/scanner/mode` — global or per-station mode via Redis
+- [x] `GET /api/scanner/stations` — active station list with scan count and online status
+- [x] station_id validation, Redis resilience (graceful fallback), consume capping feedback
+- [x] UNIQUE constraint on `off_product_id`, IntegrityError guard for concurrent scans
+- [x] CORS `ALLOWED_ORIGINS` configurable via env var
+- [x] 93 non-DB tests passing
 
-#### Core Scanner API
-- [ ] `POST /api/scanner/scan` — Universal barcode processing
-  - Input: barcode, mode (optional), station_id (optional), quantity (optional)
-  - Integrates with OFF enrichment automatically
-  - Auto-creates products if not exist
-  - Returns product + inventory data
-  - WebSocket broadcasts for real-time feedback
-- [ ] `GET /api/scanner/mode` — Get current mode (global or per-station)
-- [ ] `POST /api/scanner/mode` — Set mode: add/consume/lookup
-- [ ] `GET /api/scanner/stations` — List active scanning stations
-- [ ] Mode state storage in Redis (scanner:mode:{station_id})
-- [ ] Station tracking (last_scan, scan_count, online status)
-- [ ] 15-20 comprehensive tests
-
-**Supported Input Methods:**
-1. iPad PWA camera scanning (QuaggaJS/ZXing) - Frontend Phase
-2. Raspberry Pi USB scanner stations - Deployment Phase
-3. Future: Direct USB scanner on compatible devices
-
-**See:** `docs/SCANNER_ARCHITECTURE.md` for complete specification
+**See:** `docs/SCANNER_ARCHITECTURE.md`
 
 ### GS1 DataMatrix Parser
 ```python

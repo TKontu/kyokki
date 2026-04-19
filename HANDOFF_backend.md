@@ -1,262 +1,62 @@
-# Handoff: WebSocket Real-Time Updates - Testing & Production Ready
+# Handoff: Backend — Scanner API complete, pipeline bugs fixed
 
-## Completed ✅
+## Current State
 
-### WebSocket Implementation (Sprint 3B+)
-- **Full WebSocket real-time updates** successfully implemented and merged (PR #11)
-- **Redis pub/sub architecture** for scalable message broadcasting
-- **8 broadcast integration points** across Receipt and Inventory APIs:
-  - Receipt: `processing`, `completed`, `failed`, `confirmed`
-  - Inventory: `created`, `updated`, `consumed`, `deleted`
-- **Production-ready logging** - Fixed all structlog-style calls to standard Python logging
-- **Comprehensive testing** - 161/165 tests passing (97% pass rate)
-- **Documentation complete** - Added ARCHITECTURE.md Section 9 with WebSocket guide
+**Branch**: `main` (up to date, PR #21 merged)
+**Tests**: 93 non-DB tests passing; DB tests require PostgreSQL (not available in dev env)
 
-### Key Achievements
-1. Created `/api/ws` WebSocket endpoint with ConnectionManager
-2. Built `broadcast_helpers.py` - Message builders and Redis publisher
-3. Fixed deprecation warnings (`datetime.utcnow()`, `aclose()`)
-4. Added eager loading for product relationships in delete endpoint
-5. Installed `pytest-mock` in Docker for better async test mocking
+### All complete
+- Full CRUD API: categories, products, inventory, receipts, shopping list
+- Receipt processing pipeline: MinerU OCR → vLLM extraction → RapidFuzz matching
+- WebSocket real-time broadcasts (Redis pub/sub)
+- Open Food Facts integration (barcode → auto-create product)
+- Universal Scanner API: `POST /api/scanner/scan`, mode management, station tracking
+- Scanner pipeline fixes: CORS env config, Redis resilience, OFF unit parsing, UNIQUE constraint on `off_product_id`, station_id validation, consume capping feedback
 
-### Test Results
-- **161 passing** - All core functionality works
-- **3 failing** - Known async event loop issues in integration tests (NOT production bugs)
-  - `test_receipt_confirm_broadcasts_status`
-  - `test_update_inventory_broadcasts`
-  - `test_delete_inventory_broadcasts`
-- **1 skipped** - MinerU service test (requires external service)
+## Next Priorities
 
-## In Progress 🚧
+### GS1 DataMatrix Parser (2-3h)
+- File: `backend/app/services/gs1_parser.py` (stub exists)
+- Parse AIs: (17) expiry YYMMDD, (10) batch, (310x) weight
+- Wire into `POST /api/scanner/scan` — if GS1 expiry found, use it instead of category default
+- Tests: common GS1 format cases
 
-### Open Food Facts Integration (Current Session - TDD Approach) ✅
-**Status:** Implementation Complete - Integration tests require Docker
+### Home Assistant Integration (see `docs/HOME_ASSISTANT_SPEC.md`)
+- `GET /api/ha/status` — aggregated inventory stats
+- `GET /api/ha/expiring` — items expiring soon
+- `POST /api/ha/consume` — consume by name (voice command)
 
-Implemented comprehensive OFF API integration using Test-Driven Development:
-
-**Service Layer** (`backend/app/services/off_service.py` - 177 lines):
-- ✅ `fetch_product_from_off()` - Fetches product data from OFF API v2
-- ✅ `map_off_category_to_system()` - Maps OFF categories to 12 system categories
-- ✅ `enrich_product_from_off()` - Builds canonical name (brand + product + quantity)
-- ✅ Smart brand deduplication (prevents "Valio Valio Milk" duplication)
-- ✅ Custom exceptions: `OffProductNotFoundError`, `OffApiError`
-
-**API Endpoint** (`backend/app/api/endpoints/products.py`):
-- ✅ `POST /api/products/enrich?barcode={barcode}` - Create or update product from OFF
-- ✅ Returns 201 (created) or 200 (updated) based on existing product
-- ✅ Returns 404 if product not found in OFF database
-- ✅ Returns 503 if OFF API unavailable
-
-**CRUD Layer** (`backend/app/crud/product_master.py`):
-- ✅ `enrich_product_from_off_data()` - Create/update with sensible defaults
-- ✅ Auto storage_type mapping (dairy/meat → refrigerator, frozen → freezer, etc.)
-- ✅ Auto shelf_life from category defaults
-
-**Test Coverage** (22 tests total):
-- ✅ 17/17 unit tests passing (OFF service)
-- ⏸ 5/5 integration tests written (require Docker/PostgreSQL)
-
-**Category Mappings**:
-- dairy, meat, seafood, produce → refrigerator
-- frozen → freezer
-- bakery, snacks, condiments, grains, pantry → pantry
-- beverages → refrigerator
-
-**Files Created:**
-- `backend/app/services/off_service.py` (177 lines)
-- `backend/tests/services/test_off_service.py` (242 lines)
-
-**Files Modified:**
-- `backend/app/api/endpoints/products.py` +59 lines (enrich endpoint)
-- `backend/app/crud/product_master.py` +70 lines (enrich helper)
-- `backend/tests/api/test_products.py` +126 lines (5 integration tests)
-
-## Next Steps
-
-### Immediate Actions
-1. [ ] **Manual WebSocket testing** (recommended but optional)
-   ```bash
-   # Terminal 1: Start services
-   docker-compose up
-
-   # Terminal 2: Connect WebSocket client
-   wscat -c ws://localhost:8000/api/ws
-
-   # Terminal 3: Trigger broadcasts
-   curl -X POST http://localhost:8000/api/inventory \
-     -H "Content-Type: application/json" \
-     -d '{"product_master_id":"<uuid>","initial_quantity":1000,...}'
-   ```
-
-2. [ ] **Clean up old handoff files** (optional)
-   ```bash
-   git rm HANDOFF_backend.md HANDOFF_frontend.md
-   ```
-
-### Backend Development Priorities (Recommended Order)
-
-#### **Phase 1: Infrastructure (1-2 hours)**
-3. [x] **GitHub Actions CI/CD Pipeline** ⭐ HIGH PRIORITY ✅ (PR #13)
-   - Automated testing (pytest)
-   - Linting (ruff check)
-   - Type checking (mypy)
-   - File: `.github/workflows/backend-ci.yml`
-   - **Impact**: Quality gate for all future development
-
-4. [ ] **Traefik SSL Configuration**
-   - Let's Encrypt HTTPS
-   - Automatic certificate renewal
-   - Update `docker-compose.yml`
-   - **Impact**: Production security requirement
-
-5. [ ] **MinerU Health Check**
-   - Startup connectivity test
-   - Graceful degradation if unavailable
-   - **Impact**: Better error handling
-
-#### **Phase 2: MVP Feature Completion (8-12 hours)**
-6. [x] **Shopping List API** ⭐⭐ CRITICAL for MVP ✅ (In Progress)
-   - CRUD endpoints for shopping list (8 endpoints)
-   - Priority flags (urgent/normal/low)
-   - WebSocket real-time updates
-   - 25 comprehensive tests written
-   - **Impact**: Closes the food waste prevention loop
-
-7. [x] **Open Food Facts Integration** ⭐ HIGH VALUE ✅ (PR #16)
-   - Barcode → product lookup
-   - Auto-populate product master
-   - Cache in `product_master.off_data`
-   - Endpoint: `POST /api/products/enrich?barcode={barcode}`
-   - **Impact**: Dramatically reduces manual entry
-   - **Status**: Implementation complete, 17/17 unit tests passing
-
-8. [ ] **Universal Barcode Scanner API** ⭐⭐ HIGH VALUE (2-3h)
-   - Backend-centric scanning API supporting multiple input methods:
-     - iPad PWA camera scanning (QuaggaJS/ZXing)
-     - Raspberry Pi USB scanner stations (keyboard wedge)
-     - Future: Direct USB scanner on iPad (if supported)
-   - Endpoints:
-     - `POST /api/scanner/scan` - Process barcode with mode (add/consume/lookup)
-     - `GET/POST /api/scanner/mode` - Get/set scanning mode (per-station or global)
-     - `GET /api/scanner/stations` - List active scanning stations
-   - Features:
-     - Integrates with OFF enrichment automatically
-     - Auto-creates products if not exist
-     - WebSocket broadcasts for real-time feedback
-     - Per-station mode state (Redis)
-   - **Impact**: Enables instant inventory updates from any device
-   - **Flexibility**: Same API serves iPad camera AND dedicated Pi stations
-
-9. [ ] **iPad PWA Camera Scanning** (1-2h)
-   - Frontend camera barcode scanning component
-   - QuaggaJS or ZXing integration
-   - Mode selector UI (add/consume/lookup)
-   - Visual feedback via WebSocket
-   - **Prerequisite**: Universal Scanner API (#8)
-   - **Impact**: iPad can scan without USB hardware
-
-10. [ ] **Raspberry Pi Scanning Station** (2-3h)
-    - Python service for dedicated USB scanner
-    - USB HID scanner reading (evdev)
-    - Offline queue (SQLite) with sync
-    - Systemd service (auto-start on boot)
-    - Optional: LCD display for feedback
-    - Optional: GPIO button for mode switching
-    - **Prerequisite**: Universal Scanner API (#8)
-    - **Impact**: Dedicated kitchen scanning station (~$50-80 hardware)
-    - **Hardware**: Pi 3B+, USB scanner, optional LCD
-
-11. [ ] **GS1 DataMatrix Parser** (2-3h)
-    - Extract real expiry dates from 2D barcodes
-    - Parse AI codes (GTIN, batch, weight)
-    - Integration with scanner API
-    - **Impact**: Accurate expiry dates vs. estimates
-
-#### **Phase 3: Optional Enhancements**
-12. [ ] **Celery Async Receipt Processing** (3-4h)
-    - Non-blocking receipt uploads
-    - Background task queue
-    - **Impact**: Better UX for large receipts
-
-13. [ ] **Auto-Restock from Min Stock** (2-3h)
-    - Check stock levels after consumption
-    - Auto-add to shopping list when below min_stock_quantity
-    - Mark auto-generated items
-    - **Impact**: Automated replenishment
+### Celery Async Receipt Processing (optional, low priority)
+- Currently synchronous in the request cycle
+- Only needed if large receipts cause timeout issues in practice
 
 ## Key Files
 
-### Shopping List API (NEW)
-- `backend/app/api/endpoints/shopping.py` - 8 endpoints: list, urgent, get, create, update, purchase, delete, delete_all
-- `backend/app/crud/shopping_list_item.py` - CRUD with priority sorting and filtering
-- `backend/app/services/broadcast_helpers.py:156-189` - WebSocket broadcasts for shopping list updates
-- `backend/tests/api/test_shopping.py` - 25 comprehensive tests
+```
+backend/app/
+  api/endpoints/scanner.py       # Scanner endpoints + station_id validation
+  services/scanner_service.py    # Mode management, station tracking, scan processing
+  services/off_service.py        # OFF client + parse_off_quantity helper
+  services/broadcast_helpers.py  # WebSocket broadcast helpers + Redis client
+  crud/product_master.py         # enrich_product_from_off_data + IntegrityError guard
+  models/product_master.py       # UniqueConstraint on off_product_id
+  core/config.py                 # ALLOWED_ORIGINS field_validator
 
-### WebSocket Implementation
-- `backend/app/api/endpoints/websockets.py` - WebSocket endpoint handler
-- `backend/app/services/broadcast_helpers.py` - Message builders and Redis publisher
-- `backend/app/services/websockets.py` - ConnectionManager with auto-cleanup
-- `backend/app/api/endpoints/inventory.py` - Inventory broadcasts (lines 88, 126, 156, 182)
-- `backend/app/api/endpoints/receipts.py` - Receipt confirmation broadcast (line 246)
-- `backend/app/services/receipt_processing.py` - Processing status broadcasts (lines 68, 125, 153)
-- `backend/app/main.py` - Redis listener lifecycle management
+backend/tests/
+  api/test_scanner.py            # 33 scanner tests (mode, stations, validation, resilience)
+  services/test_off_service.py   # 17 parse_off_quantity tests + enrichment tests
+```
 
-### Tests
-- `backend/tests/api/test_websockets.py` - WebSocket connection tests (7 tests)
-- `backend/tests/integration/test_websocket_broadcasts.py` - Integration tests (5 tests)
-- `backend/tests/conftest.py` - Added `mock_redis_client` fixture
+## Environment
 
-### Documentation
-- `docs/ARCHITECTURE.md:363-530` - **Section 9: WebSocket Real-Time Updates**
-  - Architecture flow diagram
-  - Client connection examples
-  - Message format schemas
-  - Error handling patterns
-  - Use case scenarios
+```bash
+# Run non-DB tests
+/projects/kyokki_2/.venv/bin/pytest tests/api/test_scanner.py tests/services/test_off_service.py -v
 
-## Context
+# Lint
+/projects/kyokki_2/.venv/bin/ruff check .
+# 15 pre-existing errors in receipt.py, matching_service.py, test files — not our code
+```
 
-### Architecture Decisions
-1. **Single /api/ws endpoint** - Client-side filtering by message type (simpler than multiple endpoints)
-2. **Redis pub/sub** - Scalable for multiple API instances
-3. **Major status changes only** - No granular substatus (keeps it simple)
-4. **Auto-cleanup disconnected clients** - ConnectionManager handles failures gracefully
-5. **No new dependencies** - Uses existing FastAPI WebSocket, Redis, structlog
-
-### Technical Notes
-- **Redis channel:** `updates` (changed from "item_updates" for generality)
-- **Message format:** Standardized JSON with `type`, `timestamp`, `entity_id`, `data`
-- **Logging fixed:** All WebSocket code now uses `logger.info("msg", extra={...})`
-- **Deprecations fixed:** `datetime.now(timezone.utc)`, `aclose()` for Redis
-- **Product names in broadcasts:** Helper function `_get_product_name()` with eager loading
-
-### Known Issues
-1. **3 failing integration tests** - Async event loop conflicts when mocking in integration tests
-   - Root cause: pytest-asyncio + AsyncMock + TestClient creates loop conflicts
-   - Impact: NONE - actual WebSocket broadcasting works correctly
-   - Fix options:
-     - Skip these tests (mark with `@pytest.mark.skip`)
-     - Remove mocking entirely (use real Redis in tests)
-     - Refactor to use sync mocks with async wrappers
-   - Decision: **Can ignore** - 97% pass rate is excellent, real functionality verified
-
-2. **pytest-mock installed in Docker only** - Not in requirements.txt yet
-   - Add to `backend/requirements-dev.txt` if keeping these tests
-
-### Dependencies Installed During Session
-- `pytest-mock==3.15.1` (in Docker container, not committed to requirements)
-
-## Environment State
-
-**Current branch:** `main` (after merge)
-**Docker containers:** Running (api, postgres, redis)
-**Test database:** Seeded with categories
-**Git status:** 2 deleted handoff files uncommitted (intentional)
-
----
-
-**Session Summary:** Successfully implemented, tested, and merged WebSocket real-time updates with production-ready logging. Backend is now ready for CI/CD setup and Shopping List API development.
-
-**Recommended next session:** Start with GitHub Actions CI/CD pipeline, then Shopping List API.
-
-Run `/clear` to start fresh when ready.
+### stack.env
+`ALLOWED_ORIGINS` must be set to LAN IP for production (e.g. `http://192.168.0.x:3000`)

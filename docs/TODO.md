@@ -31,12 +31,14 @@
 - [x] WebSocket status broadcasts — ✅ Receipt & inventory updates (Sprint 3B+)
 
 ### Frontend (iPad PWA)
-- [ ] Next.js 14 + PWA setup
-- [ ] Main inventory view with context sorting
-- [ ] Consumption buttons ([1/4] [1/2] [3/4] [Done])
+- [x] Next.js 14 setup (App Router, TypeScript, Tailwind, Jest/RTL)
+- [x] Core UI components (Button, Card, Badge, Skeleton)
+- [x] Inventory API client + useInventory hook
+- [x] ExpiryBadge, QuantityBar, InventoryItemCard components
+- [ ] InventoryList + Main page integration (Increments 1.6–1.7, in progress)
+- [ ] Consumption flow (Phase 2 frontend)
 - [ ] Receipt camera capture
-- [ ] Receipt review/confirmation screen
-- [ ] Offline support (IndexedDB cache)
+- [ ] PWA / offline support
 
 ---
 
@@ -44,17 +46,17 @@
 **Goal:** More input methods, shopping list  
 **Duration:** 3-4 weeks
 
-### Hardware Barcode Scanner
-- [ ] Keyboard wedge input detection (rapid keystrokes + Enter)
-- [ ] Scanner mode toggle: Add / Consume / Lookup
-- [ ] Visual/audio feedback on scan
-- [ ] Scan history log
+### Barcode Scanner API ✅ (PR #16, #20, #21)
+- [x] OFF barcode lookup with product auto-create
+- [x] Scanner API: `POST /api/scanner/scan` (add/consume/lookup modes)
+- [x] Per-station and global mode management (Redis)
+- [x] OFF unit/quantity parsing, duplicate guard, CORS config
+- [ ] iPad PWA camera scanning frontend (QuaggaJS/ZXing)
+- [ ] Raspberry Pi USB scanner station (Python service + evdev)
 
-### Open Food Facts Integration
-- [ ] Barcode → OFF API lookup
-- [ ] Cache responses in product_master.off_data
-- [ ] Extract: name, brand, category, image, nutrition
-- [ ] Fallback to Ollama if OFF miss
+### GS1 DataMatrix Parser
+- [ ] Parse AIs: expiry (AI 17), batch (AI 10), weight (AI 310x)
+- [ ] Integration with scanner API for accurate expiry dates
 
 ### GS1 DataMatrix Scanning
 - [ ] Parse GS1 Application Identifiers
@@ -171,12 +173,17 @@
 1. [x] WebSocket endpoint at /api/ws
 2. [x] ConnectionManager with error handling and auto-cleanup
 3. [x] Redis pub/sub message broadcasting
-4. [x] Receipt status broadcasts (processing/completed/failed/confirmed)
-5. [x] Inventory update broadcasts (created/updated/consumed/deleted)
-6. [x] Standardized JSON message format
-7. [x] Comprehensive tests (connection + integration)
+4. [x] Receipt/Inventory status broadcasts with standardized JSON format
 
-**Stats**: 4 new files, 7 modified files, ~650 lines added
+### ✅ Sprint 4: Scanner API + Frontend Foundations (COMPLETE)
+1. [x] OFF integration: barcode lookup, product auto-create (PR #16)
+2. [x] Shopping List API: 8 endpoints, 25 tests (PR #14)
+3. [x] Universal Scanner API: scan/mode/stations endpoints (PR #20)
+4. [x] Scanner pipeline bug fixes × 9 (CORS, Redis resilience, station mode, unit parsing, etc.) (PR #21)
+5. [x] Frontend Phase 0: Next.js 14, types, API client, testing infra (PR #8)
+6. [x] Frontend Phase 1 Increments 1.1–1.5: UI components, ExpiryBadge, QuantityBar, InventoryItemCard (PRs #15, #18, #21)
+
+**Stats**: 93 backend non-DB tests passing, 9 frontend increments complete
 
 ---
 
