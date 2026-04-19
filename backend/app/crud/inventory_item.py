@@ -1,10 +1,11 @@
 """CRUD operations for InventoryItem model."""
+
 from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
 from app.models.inventory_item import InventoryItem
 from app.schemas.inventory_item import InventoryItemCreate, InventoryItemUpdate
@@ -45,9 +46,7 @@ async def get_inventory_items(
     return list(result.scalars().all())
 
 
-async def get_inventory_item(
-    db: AsyncSession, item_id: UUID
-) -> InventoryItem | None:
+async def get_inventory_item(db: AsyncSession, item_id: UUID) -> InventoryItem | None:
     """Get an inventory item by ID.
 
     Args:
@@ -57,9 +56,7 @@ async def get_inventory_item(
     Returns:
         Inventory item if found, None otherwise.
     """
-    result = await db.execute(
-        select(InventoryItem).where(InventoryItem.id == item_id)
-    )
+    result = await db.execute(select(InventoryItem).where(InventoryItem.id == item_id))
     return result.scalar_one_or_none()
 
 

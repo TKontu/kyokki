@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Quick script to test vLLM response format with real receipt."""
+
 import asyncio
+
 import httpx
 import pdfplumber
+
 
 async def test_vllm():
     """Call vLLM with real receipt and check for truncation."""
@@ -55,7 +58,7 @@ Start your response directly with the opening brace {{{{}}}}.
             headers={
                 "Authorization": "Bearer ollama",
                 "Content-Type": "application/json",
-            }
+            },
         )
 
         data = response.json()
@@ -73,7 +76,10 @@ Start your response directly with the opening brace {{{{}}}}.
         print(f"Token usage: {usage}")
         print(f"Starts with: {repr(content[:50])}")
         print(f"Ends with: {repr(content[-50:])}")
-        print(f"\nIs valid JSON ending: {content.rstrip().endswith('}')} or {content.rstrip().endswith(']')}")
+        print(
+            f"\nIs valid JSON ending: {content.rstrip().endswith('}')} or {content.rstrip().endswith(']')}"
+        )
+
 
 if __name__ == "__main__":
     asyncio.run(test_vllm())

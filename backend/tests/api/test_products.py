@@ -1,4 +1,5 @@
 """Tests for Product CRUD API endpoints."""
+
 from uuid import UUID
 
 import pytest
@@ -13,6 +14,7 @@ from app.main import app
 @pytest.fixture
 async def seeded_db(db_session: AsyncSession) -> AsyncSession:
     """Provide a database session with seeded categories and override app dependency."""
+
     # Override the dependency to use test database session
     async def override_get_db():
         try:
@@ -432,6 +434,7 @@ class TestEnrichProduct:
     ) -> None:
         """POST /api/products/enrich should return 404 when product not in OFF."""
         from unittest.mock import patch
+
         from app.services.off_service import OffProductNotFoundError
 
         barcode = "0000000000000"
@@ -450,6 +453,7 @@ class TestEnrichProduct:
     ) -> None:
         """POST /api/products/enrich should return 503 when OFF API fails."""
         from unittest.mock import patch
+
         from app.services.off_service import OffApiError
 
         barcode = "5901234123457"

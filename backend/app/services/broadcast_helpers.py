@@ -1,8 +1,9 @@
 """Helper functions for broadcasting real-time updates via Redis."""
+
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import redis.asyncio as redis
@@ -45,8 +46,8 @@ def _serialize_value(value: Any) -> Any:
 def _build_message(
     message_type: Literal["receipt_status", "inventory_update", "shopping_list_update"],
     entity_id: UUID,
-    data: Dict[str, Any]
-) -> Dict[str, Any]:
+    data: dict[str, Any],
+) -> dict[str, Any]:
     """Build standardized message structure.
 
     Args:
@@ -59,13 +60,13 @@ def _build_message(
     """
     return {
         "type": message_type,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "entity_id": str(entity_id),
-        "data": {k: _serialize_value(v) for k, v in data.items()}
+        "data": {k: _serialize_value(v) for k, v in data.items()},
     }
 
 
-async def publish_message(message: Dict[str, Any]) -> None:
+async def publish_message(message: dict[str, Any]) -> None:
     """Publish message to Redis updates channel.
 
     Args:
@@ -80,17 +81,14 @@ async def publish_message(message: Dict[str, Any]) -> None:
             "message_published",
             extra={
                 "message_type": message.get("type"),
-                "entity_id": message.get("entity_id")
-            }
+                "entity_id": message.get("entity_id"),
+            },
         )
     except Exception as e:
         logger.error(
             "message_publish_failed",
-            extra={
-                "error": str(e),
-                "message_type": message.get("type")
-            },
-            exc_info=True
+            extra={"error": str(e), "message_type": message.get("type")},
+            exc_info=True,
         )
 
 
@@ -99,7 +97,7 @@ async def broadcast_receipt_status(
     status: Literal["processing", "completed", "failed", "confirmed"],
     items_extracted: int = 0,
     items_matched: int = 0,
-    error: str | None = None
+    error: str | None = None,
 ) -> None:
     """Broadcast receipt processing status update.
 
@@ -118,8 +116,8 @@ async def broadcast_receipt_status(
             "status": status,
             "items_extracted": items_extracted,
             "items_matched": items_matched,
-            "error": error
-        }
+            "error": error,
+        },
     )
     await publish_message(message)
 
@@ -129,7 +127,7 @@ async def broadcast_inventory_update(
     action: Literal["created", "updated", "consumed", "deleted"],
     current_quantity: Decimal | None = None,
     status: str | None = None,
-    product_name: str | None = None
+    product_name: str | None = None,
 ) -> None:
     """Broadcast inventory item update.
 
@@ -148,8 +146,8 @@ async def broadcast_inventory_update(
             "action": action,
             "current_quantity": current_quantity,
             "status": status,
-            "product_name": product_name
-        }
+            "product_name": product_name,
+        },
     )
     await publish_message(message)
 
@@ -161,7 +159,7 @@ async def broadcast_shopping_list_update(
     quantity: Decimal | None = None,
     unit: str | None = None,
     priority: str | None = None,
-    is_purchased: bool | None = None
+    is_purchased: bool | None = None,
 ) -> None:
     """Broadcast shopping list item update.
 
@@ -184,7 +182,7 @@ async def broadcast_shopping_list_update(
             "quantity": quantity,
             "unit": unit,
             "priority": priority,
-            "is_purchased": is_purchased
-        }
+            "is_purchased": is_purchased,
+        },
     )
     await publish_message(message)

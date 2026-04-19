@@ -1,4 +1,5 @@
 """Integration tests for external service connections."""
+
 import httpx
 import pytest
 from sqlalchemy import text

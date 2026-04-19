@@ -1,10 +1,9 @@
 """Seed data for product categories."""
-from sqlalchemy import select
+
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
-
 
 # Seed data based on common food categories and their typical shelf lives
 SEED_CATEGORIES = [
@@ -118,6 +117,10 @@ async def seed_categories(session: AsyncSession) -> None:
     """
     # Use PostgreSQL's INSERT ... ON CONFLICT DO NOTHING for idempotency
     # This ensures we don't overwrite any manual updates to existing categories
-    stmt = insert(Category).values(SEED_CATEGORIES).on_conflict_do_nothing(index_elements=["id"])
+    stmt = (
+        insert(Category)
+        .values(SEED_CATEGORIES)
+        .on_conflict_do_nothing(index_elements=["id"])
+    )
 
     await session.execute(stmt)

@@ -1,8 +1,10 @@
-from sqlalchemy import Column, String, Integer, DateTime, Date, Text
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import Column, Date, DateTime, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
+
 from app.db.base_class import Base
 
 
@@ -28,13 +30,19 @@ class Receipt(Base):
     processing_status = Column(
         String, nullable=False, default="queued", index=True
     )  # queued, processing, completed, failed
-    batch_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-receipt batch
+    batch_id = Column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )  # Multi-receipt batch
 
     # Statistics
     items_extracted = Column(Integer, nullable=False, default=0)
     items_matched = Column(Integer, nullable=False, default=0)
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
 
     # Relationships
     inventory_items = relationship("InventoryItem", back_populates="receipt")

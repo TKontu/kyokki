@@ -1,4 +1,5 @@
 """Integration tests for WebSocket broadcasts from API endpoints."""
+
 from datetime import date, timedelta
 from unittest.mock import AsyncMock
 
@@ -14,10 +15,7 @@ class TestReceiptStatusBroadcasts:
 
     @pytest.mark.asyncio
     async def test_receipt_confirm_broadcasts_status(
-        self,
-        mocker,
-        client: AsyncClient,
-        db_session: AsyncSession
+        self, mocker, client: AsyncClient, db_session: AsyncSession
     ):
         """Test receipt confirmation broadcasts 'confirmed' status."""
         # Mock Redis publish to avoid actual Redis calls
@@ -44,8 +42,9 @@ class TestReceiptStatusBroadcasts:
 
         # Create receipt (simplified - would normally upload file)
         # For this test, we'll create a receipt directly in the database
-        from app.models.receipt import Receipt
         from uuid import uuid4
+
+        from app.models.receipt import Receipt
 
         receipt = Receipt(
             id=uuid4(),
@@ -55,14 +54,8 @@ class TestReceiptStatusBroadcasts:
             items_extracted=1,
             items_matched=1,
             ocr_structured={
-                "products": [
-                    {
-                        "name": "Milk",
-                        "quantity": 1.0,
-                        "unit": "pcs"
-                    }
-                ]
-            }
+                "products": [{"name": "Milk", "quantity": 1.0, "unit": "pcs"}]
+            },
         )
         db_session.add(receipt)
         await db_session.commit()
@@ -74,14 +67,13 @@ class TestReceiptStatusBroadcasts:
                     "product_id": product["id"],
                     "quantity": 1.0,
                     "unit": "pcs",
-                    "purchase_date": str(date.today())
+                    "purchase_date": str(date.today()),
                 }
             ]
         }
 
         response = await client.post(
-            f"/api/receipts/{receipt.id}/confirm",
-            json=confirm_data
+            f"/api/receipts/{receipt.id}/confirm", json=confirm_data
         )
         assert response.status_code == 200
 
@@ -94,10 +86,7 @@ class TestInventoryUpdateBroadcasts:
 
     @pytest.mark.asyncio
     async def test_create_inventory_broadcasts(
-        self,
-        mocker,
-        client: AsyncClient,
-        db_session: AsyncSession
+        self, mocker, client: AsyncClient, db_session: AsyncSession
     ):
         """Test creating inventory item broadcasts 'created' action."""
         # Mock Redis publish to avoid actual Redis calls
@@ -140,10 +129,7 @@ class TestInventoryUpdateBroadcasts:
 
     @pytest.mark.asyncio
     async def test_update_inventory_broadcasts(
-        self,
-        mocker,
-        client: AsyncClient,
-        db_session: AsyncSession
+        self, mocker, client: AsyncClient, db_session: AsyncSession
     ):
         """Test updating inventory item broadcasts 'updated' action."""
         # Mock Redis publish to avoid actual Redis calls
@@ -183,9 +169,7 @@ class TestInventoryUpdateBroadcasts:
         mock_redis_instance.reset_mock()
 
         # Update inventory item
-        update_data = {
-            "status": "opened"
-        }
+        update_data = {"status": "opened"}
         response = await client.patch(f"/api/inventory/{item['id']}", json=update_data)
         assert response.status_code == 200
 
@@ -194,10 +178,7 @@ class TestInventoryUpdateBroadcasts:
 
     @pytest.mark.asyncio
     async def test_consume_inventory_broadcasts(
-        self,
-        mocker,
-        client: AsyncClient,
-        db_session: AsyncSession
+        self, mocker, client: AsyncClient, db_session: AsyncSession
     ):
         """Test consuming inventory item broadcasts 'consumed' action."""
         # Mock Redis publish to avoid actual Redis calls
@@ -237,12 +218,9 @@ class TestInventoryUpdateBroadcasts:
         mock_redis_instance.reset_mock()
 
         # Consume inventory item
-        consume_data = {
-            "quantity": 250
-        }
+        consume_data = {"quantity": 250}
         response = await client.post(
-            f"/api/inventory/{item['id']}/consume",
-            json=consume_data
+            f"/api/inventory/{item['id']}/consume", json=consume_data
         )
         assert response.status_code == 200
 
@@ -251,10 +229,7 @@ class TestInventoryUpdateBroadcasts:
 
     @pytest.mark.asyncio
     async def test_delete_inventory_broadcasts(
-        self,
-        mocker,
-        client: AsyncClient,
-        db_session: AsyncSession
+        self, mocker, client: AsyncClient, db_session: AsyncSession
     ):
         """Test deleting inventory item broadcasts 'deleted' action."""
         # Mock Redis publish to avoid actual Redis calls

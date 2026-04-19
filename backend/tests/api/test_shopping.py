@@ -1,6 +1,7 @@
 """Tests for shopping list API endpoints."""
+
+from datetime import UTC
 from decimal import Decimal
-from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
@@ -42,7 +43,10 @@ class TestShoppingListAPI:
         assert "added_at" in data
 
     async def test_create_shopping_item_with_product(
-        self, client: AsyncClient, db_session: AsyncSession, sample_product: ProductMaster
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        sample_product: ProductMaster,
     ):
         """Test creating a shopping list item linked to a product."""
         response = await client.post(
@@ -63,9 +67,7 @@ class TestShoppingListAPI:
         assert data["priority"] == "urgent"
         assert data["source"] == "auto_restock"
 
-    async def test_create_shopping_item_invalid_priority(
-        self, client: AsyncClient
-    ):
+    async def test_create_shopping_item_invalid_priority(self, client: AsyncClient):
         """Test creating item with invalid priority fails."""
         response = await client.post(
             "/api/shopping/",
@@ -81,9 +83,7 @@ class TestShoppingListAPI:
         assert response.status_code == 422
         assert "Invalid priority" in response.json()["detail"]
 
-    async def test_create_shopping_item_invalid_source(
-        self, client: AsyncClient
-    ):
+    async def test_create_shopping_item_invalid_source(self, client: AsyncClient):
         """Test creating item with invalid source fails."""
         response = await client.post(
             "/api/shopping/",
@@ -344,7 +344,7 @@ class TestShoppingListAPI:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """Test marking a purchased item as unpurchased."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         item = ShoppingListItem(
             name="Test Item",
@@ -353,7 +353,7 @@ class TestShoppingListAPI:
             priority="normal",
             source="manual",
             is_purchased=True,
-            purchased_at=datetime.now(timezone.utc),
+            purchased_at=datetime.now(UTC),
         )
         db_session.add(item)
         await db_session.commit()
@@ -434,9 +434,7 @@ class TestShoppingListAPI:
         assert len(list_response.json()) == 1
         assert list_response.json()[0]["name"] == "Unpurchased"
 
-    async def test_pagination(
-        self, client: AsyncClient, db_session: AsyncSession
-    ):
+    async def test_pagination(self, client: AsyncClient, db_session: AsyncSession):
         """Test pagination of shopping list."""
         # Create 15 items
         for i in range(15):

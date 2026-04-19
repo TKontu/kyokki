@@ -1,8 +1,10 @@
-from sqlalchemy import Column, String, Numeric, DateTime, Date, Text, ForeignKey
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-import uuid
+
 from app.db.base_class import Base
 
 
@@ -16,8 +18,12 @@ class InventoryItem(Base):
     __tablename__ = "inventory_item"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    product_master_id = Column(UUID(as_uuid=True), ForeignKey("product_master.id"), nullable=False, index=True)
-    receipt_id = Column(UUID(as_uuid=True), ForeignKey("receipt.id"), nullable=True, index=True)
+    product_master_id = Column(
+        UUID(as_uuid=True), ForeignKey("product_master.id"), nullable=False, index=True
+    )
+    receipt_id = Column(
+        UUID(as_uuid=True), ForeignKey("receipt.id"), nullable=True, index=True
+    )
 
     # Quantity (approximate tracking)
     initial_quantity = Column(Numeric(10, 2), nullable=False)
@@ -30,16 +36,22 @@ class InventoryItem(Base):
     )  # sealed, opened, partial, empty, discarded
     purchase_date = Column(Date, nullable=True)
     expiry_date = Column(Date, nullable=False, index=True)
-    expiry_source = Column(String, nullable=False, default="calculated")  # scanned, calculated, manual
+    expiry_source = Column(
+        String, nullable=False, default="calculated"
+    )  # scanned, calculated, manual
     opened_date = Column(Date, nullable=True)
 
     # Tracking
     batch_number = Column(String, nullable=True)  # From GS1 DataMatrix
-    location = Column(String, nullable=False, default="main_fridge")  # main_fridge, freezer, pantry
+    location = Column(
+        String, nullable=False, default="main_fridge"
+    )  # main_fridge, freezer, pantry
     notes = Column(Text, nullable=True)
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
     consumed_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships

@@ -3,10 +3,12 @@
 Language-agnostic extraction that works with any receipt format.
 vLLM server provides OpenAI-compatible API with JSON schema support.
 """
+
 import httpx
+
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.parsers.base import ReceiptExtraction, ParsedProduct, StoreInfo
+from app.parsers.base import ReceiptExtraction
 
 logger = get_logger(__name__)
 
@@ -34,14 +36,14 @@ def _extract_json_from_response(content: str) -> str:
     logger.debug(f"Raw LLM response (first 200 chars): {content[:200]}")
 
     # Try to find JSON in markdown code block first
-    code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
+    code_block_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
     if code_block_match:
         logger.debug("Found JSON in markdown code block")
         return code_block_match.group(1)
 
     # Try to find raw JSON object (starts with { and ends with })
     # Use non-greedy pattern but capture full object including nested braces
-    json_match = re.search(r'\{[\s\S]*\}', content)
+    json_match = re.search(r"\{[\s\S]*\}", content)
     if json_match:
         logger.debug("Found raw JSON object")
         return json_match.group(0)
@@ -131,7 +133,9 @@ async def extract_products_from_receipt(ocr_text: str) -> ReceiptExtraction:
     logger.info("Extracting products from receipt using vLLM")
 
     # Build prompt
-    prompt = EXTRACTION_PROMPT_TEMPLATE.format(receipt_text=ocr_text[:4000])  # Limit to 4000 chars
+    prompt = EXTRACTION_PROMPT_TEMPLATE.format(
+        receipt_text=ocr_text[:4000]
+    )  # Limit to 4000 chars
 
     try:
         # Call vLLM with structured output (OpenAI-compatible API)
@@ -155,7 +159,7 @@ async def extract_products_from_receipt(ocr_text: str) -> ReceiptExtraction:
             response = await client.post(
                 f"{settings.LLM_BASE_URL}/chat/completions",
                 json=payload,
-                headers=headers
+                headers=headers,
             )
             response.raise_for_status()
 
@@ -236,7 +240,7 @@ async def extract_with_store_hint(ocr_text: str, store_hint: str) -> ReceiptExtr
             response = await client.post(
                 f"{settings.LLM_BASE_URL}/chat/completions",
                 json=payload,
-                headers=headers
+                headers=headers,
             )
             response.raise_for_status()
 
@@ -248,7 +252,9 @@ async def extract_with_store_hint(ocr_text: str, store_hint: str) -> ReceiptExtr
 
             result = ReceiptExtraction.model_validate_json(json_content)
 
-            logger.info(f"Extraction with hint complete: {len(result.products)} products")
+            logger.info(
+                f"Extraction with hint complete: {len(result.products)} products"
+            )
 
             return result
 

@@ -3,9 +3,11 @@
 Routes between pdfplumber (digital PDFs) and MinerU (photo receipts).
 Based on reference implementation in samples/mineru_selfhosted.py.
 """
+
+from pathlib import Path
+
 import httpx
 import pdfplumber
-from pathlib import Path
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -92,21 +94,17 @@ async def _extract_from_image(image_path: Path) -> str:
         "return_images": "false",
         "response_format_zip": "false",  # Get JSON response, not ZIP
         "start_page_id": "0",
-        "end_page_id": "99999"
+        "end_page_id": "99999",
     }
 
     try:
         async with httpx.AsyncClient(timeout=settings.MINERU_TIMEOUT) as client:
             # Open file and send to MinerU
-            with open(image_path, "rb") as f:
+            with open(image_path, "rb") as f:  # noqa: ASYNC230
                 files = {"files": (image_path.name, f, "image/jpeg")}
 
                 logger.debug(f"Sending {image_path.name} to MinerU at {url}")
-                response = await client.post(
-                    url,
-                    data=form_data,
-                    files=files
-                )
+                response = await client.post(url, data=form_data, files=files)
                 response.raise_for_status()
 
             # Parse JSON response

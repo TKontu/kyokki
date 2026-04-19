@@ -13,13 +13,21 @@ class InventoryItemBase(BaseModel):
     initial_quantity: Decimal = Field(..., gt=0, description="Initial quantity")
     current_quantity: Decimal = Field(..., ge=0, description="Current quantity")
     unit: str = Field(..., description="Unit: ml, g, pcs, unit")
-    status: str = Field("sealed", description="Status: sealed, opened, partial, empty, discarded")
+    status: str = Field(
+        "sealed", description="Status: sealed, opened, partial, empty, discarded"
+    )
     purchase_date: date | None = Field(None, description="Purchase date")
     expiry_date: date = Field(..., description="Expiry date")
-    expiry_source: str = Field("calculated", description="Expiry source: scanned, calculated, manual")
+    expiry_source: str = Field(
+        "calculated", description="Expiry source: scanned, calculated, manual"
+    )
     opened_date: date | None = Field(None, description="Date when opened")
-    batch_number: str | None = Field(None, description="Batch number from GS1 DataMatrix")
-    location: str = Field("main_fridge", description="Location: main_fridge, freezer, pantry")
+    batch_number: str | None = Field(
+        None, description="Batch number from GS1 DataMatrix"
+    )
+    location: str = Field(
+        "main_fridge", description="Location: main_fridge, freezer, pantry"
+    )
     notes: str | None = Field(None, description="User notes")
 
 

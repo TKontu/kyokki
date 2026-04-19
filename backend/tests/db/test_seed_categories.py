@@ -1,10 +1,10 @@
 """Tests for category seed data script."""
-import pytest
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.category import Category
 from app.db.seed_categories import SEED_CATEGORIES, seed_categories
+from app.models.category import Category
 
 
 class TestSeedCategories:
@@ -72,7 +72,6 @@ class TestSeedCategories:
         # Manually update a category
         result = await db_session.execute(select(Category).where(Category.id == "meat"))
         category = result.scalar_one()
-        original_shelf_life = category.default_shelf_life_days
         category.default_shelf_life_days = 999
         await db_session.commit()
 
@@ -83,7 +82,9 @@ class TestSeedCategories:
         # Verify manual update was preserved (not overwritten)
         result = await db_session.execute(select(Category).where(Category.id == "meat"))
         category = result.scalar_one()
-        assert category.default_shelf_life_days == 999, "Manual updates should not be overwritten"
+        assert category.default_shelf_life_days == 999, (
+            "Manual updates should not be overwritten"
+        )
 
     async def test_seed_categories_common_categories_exist(
         self, db_session: AsyncSession
@@ -100,5 +101,9 @@ class TestSeedCategories:
                 select(Category).where(Category.id == cat_id)
             )
             category = result.scalar_one_or_none()
-            assert category is not None, f"Category '{cat_id}' should exist in seed data"
-            assert category.display_name, f"Category '{cat_id}' should have display_name"
+            assert category is not None, (
+                f"Category '{cat_id}' should exist in seed data"
+            )
+            assert category.display_name, (
+                f"Category '{cat_id}' should have display_name"
+            )

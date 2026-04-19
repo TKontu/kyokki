@@ -1,3 +1,4 @@
+from datetime import UTC
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -6,10 +7,15 @@ from sqlalchemy.orm import joinedload
 
 from app.crud.base import CRUDBase
 from app.models.shopping_list_item import ShoppingListItem
-from app.schemas.shopping_list_item import ShoppingListItemCreate, ShoppingListItemUpdate
+from app.schemas.shopping_list_item import (
+    ShoppingListItemCreate,
+    ShoppingListItemUpdate,
+)
 
 
-class CRUDShoppingListItem(CRUDBase[ShoppingListItem, ShoppingListItemCreate, ShoppingListItemUpdate]):
+class CRUDShoppingListItem(
+    CRUDBase[ShoppingListItem, ShoppingListItemCreate, ShoppingListItemUpdate]
+):
     """CRUD operations for shopping list items."""
 
     async def get_all(
@@ -35,11 +41,13 @@ class CRUDShoppingListItem(CRUDBase[ShoppingListItem, ShoppingListItemCreate, Sh
         Returns:
             List of shopping list items
         """
-        query = select(ShoppingListItem).options(joinedload(ShoppingListItem.product_master))
+        query = select(ShoppingListItem).options(
+            joinedload(ShoppingListItem.product_master)
+        )
 
         # Default: exclude purchased items unless explicitly requested
         if not include_purchased and is_purchased is None:
-            query = query.where(ShoppingListItem.is_purchased == False)
+            query = query.where(ShoppingListItem.is_purchased.is_(False))
         elif is_purchased is not None:
             query = query.where(ShoppingListItem.is_purchased == is_purchased)
 
@@ -49,11 +57,12 @@ class CRUDShoppingListItem(CRUDBase[ShoppingListItem, ShoppingListItemCreate, Sh
         # Order by priority (urgent first), then by added date
         # Use CASE to map priority to numeric values for proper sorting
         from sqlalchemy import case
+
         priority_order = case(
             (ShoppingListItem.priority == "urgent", 1),
             (ShoppingListItem.priority == "normal", 2),
             (ShoppingListItem.priority == "low", 3),
-            else_=4
+            else_=4,
         )
 
         query = query.order_by(
@@ -90,14 +99,14 @@ class CRUDShoppingListItem(CRUDBase[ShoppingListItem, ShoppingListItemCreate, Sh
         Returns:
             Updated shopping list item or None if not found
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         item = await self.get(db, id=item_id)
         if not item:
             return None
 
         item.is_purchased = purchased
-        item.purchased_at = datetime.now(timezone.utc) if purchased else None
+        item.purchased_at = datetime.now(UTC) if purchased else None
 
         await db.commit()
         await db.refresh(item)
@@ -112,7 +121,7 @@ class CRUDShoppingListItem(CRUDBase[ShoppingListItem, ShoppingListItemCreate, Sh
         Returns:
             Number of items deleted
         """
-        stmt = delete(ShoppingListItem).where(ShoppingListItem.is_purchased == True)
+        stmt = delete(ShoppingListItem).where(ShoppingListItem.is_purchased.is_(True))
         result = await db.execute(stmt)
         await db.commit()
         return result.rowcount
@@ -132,7 +141,7 @@ class CRUDShoppingListItem(CRUDBase[ShoppingListItem, ShoppingListItemCreate, Sh
         query = (
             select(ShoppingListItem)
             .where(ShoppingListItem.product_master_id == product_master_id)
-            .where(ShoppingListItem.is_purchased == False)
+            .where(ShoppingListItem.is_purchased.is_(False))
             .options(joinedload(ShoppingListItem.product_master))
         )
         result = await db.execute(query)

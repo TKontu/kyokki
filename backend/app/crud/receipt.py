@@ -1,8 +1,10 @@
 """CRUD operations for Receipt model."""
+
+import uuid
 from datetime import date
 from pathlib import Path
 from uuid import UUID
-import uuid
+
 import aiofiles
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,9 +54,7 @@ async def get_receipt(db: AsyncSession, receipt_id: UUID) -> Receipt | None:
     Returns:
         Receipt if found, None otherwise.
     """
-    result = await db.execute(
-        select(Receipt).where(Receipt.id == receipt_id)
-    )
+    result = await db.execute(select(Receipt).where(Receipt.id == receipt_id))
     return result.scalar_one_or_none()
 
 

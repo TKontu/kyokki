@@ -1,6 +1,7 @@
 """Shared pytest fixtures for all tests."""
+
+from collections.abc import AsyncGenerator
 from decimal import Decimal
-from typing import AsyncGenerator
 from uuid import uuid4
 
 import pytest
@@ -26,8 +27,7 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
             assert response.status_code == 200
     """
     async with AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test"
+        transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
         yield ac
 
@@ -41,9 +41,9 @@ def sample_receipt_data() -> dict:
         "items": [
             {"name": "Maito 1L", "price": 1.49, "quantity": 1},
             {"name": "Leipä 500g", "price": 2.29, "quantity": 2},
-            {"name": "Juusto 200g", "price": 3.99, "quantity": 1}
+            {"name": "Juusto 200g", "price": 3.99, "quantity": 1},
         ],
-        "total": 10.06
+        "total": 10.06,
     }
 
 
@@ -54,7 +54,7 @@ def sample_product_data() -> dict:
         "name": "Maito",
         "category": "dairy",
         "default_shelf_life_days": 7,
-        "opened_shelf_life_days": 3
+        "opened_shelf_life_days": 3,
     }
 
 
@@ -121,9 +121,7 @@ async def db_engine():
 @pytest.fixture(scope="function")
 async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
     """Create async database session for testing."""
-    async_session = sessionmaker(
-        db_engine, class_=AsyncSession, expire_on_commit=False
-    )
+    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as session:
         try:

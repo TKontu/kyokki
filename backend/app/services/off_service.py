@@ -1,4 +1,5 @@
 """Service for Open Food Facts API integration."""
+
 from typing import Any
 
 import httpx
@@ -52,7 +53,9 @@ async def fetch_product_from_off(barcode: str) -> dict[str, Any]:
         # Re-raise our custom exception
         raise
     except httpx.HTTPStatusError as e:
-        raise OffApiError(f"Failed to fetch product {barcode}: HTTP {e.response.status_code}") from e
+        raise OffApiError(
+            f"Failed to fetch product {barcode}: HTTP {e.response.status_code}"
+        ) from e
     except Exception as e:
         raise OffApiError(f"Failed to fetch product {barcode}: {str(e)}") from e
 
@@ -79,7 +82,15 @@ def map_off_category_to_system(off_category: str | None) -> str:
     # Dairy products
     if any(
         keyword in category_lower
-        for keyword in ["dairy", "milk", "cheese", "yogurt", "yoghurt", "cream", "butter"]
+        for keyword in [
+            "dairy",
+            "milk",
+            "cheese",
+            "yogurt",
+            "yoghurt",
+            "cream",
+            "butter",
+        ]
     ):
         return "dairy"
 
@@ -91,12 +102,15 @@ def map_off_category_to_system(off_category: str | None) -> str:
         return "meat"
 
     # Seafood
-    if any(keyword in category_lower for keyword in ["fish", "seafood", "salmon", "tuna"]):
+    if any(
+        keyword in category_lower for keyword in ["fish", "seafood", "salmon", "tuna"]
+    ):
         return "seafood"
 
     # Produce (fruits and vegetables)
     if any(
-        keyword in category_lower for keyword in ["fruit", "vegetable", "produce", "fresh"]
+        keyword in category_lower
+        for keyword in ["fruit", "vegetable", "produce", "fresh"]
     ):
         return "produce"
 
@@ -112,7 +126,9 @@ def map_off_category_to_system(off_category: str | None) -> str:
         return "beverages"
 
     # Snacks
-    if any(keyword in category_lower for keyword in ["snack", "chip", "candy", "chocolate"]):
+    if any(
+        keyword in category_lower for keyword in ["snack", "chip", "candy", "chocolate"]
+    ):
         return "snacks"
 
     # Condiments
@@ -123,7 +139,9 @@ def map_off_category_to_system(off_category: str | None) -> str:
         return "condiments"
 
     # Grains
-    if any(keyword in category_lower for keyword in ["grain", "rice", "pasta", "cereal"]):
+    if any(
+        keyword in category_lower for keyword in ["grain", "rice", "pasta", "cereal"]
+    ):
         return "grains"
 
     # Default to pantry for unknown categories

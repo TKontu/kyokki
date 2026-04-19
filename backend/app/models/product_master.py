@@ -1,8 +1,10 @@
-from sqlalchemy import Column, String, Integer, Numeric, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
 import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import relationship
+
 from app.db.base_class import Base
 
 
@@ -30,7 +32,9 @@ class ProductMaster(Base):
     default_quantity = Column(Numeric(10, 2), nullable=True)  # 1000, 500, 6
 
     # Auto-restock
-    min_stock_quantity = Column(Numeric(10, 2), nullable=True)  # threshold for auto shopping list
+    min_stock_quantity = Column(
+        Numeric(10, 2), nullable=True
+    )  # threshold for auto shopping list
     reorder_quantity = Column(Numeric(10, 2), nullable=True)  # how much to reorder
 
     # Open Food Facts integration
@@ -38,11 +42,15 @@ class ProductMaster(Base):
     off_data = Column(JSONB, nullable=True)  # cached nutrition, image, etc.
 
     # Timestamps
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
 
@@ -50,4 +58,6 @@ class ProductMaster(Base):
     category_rel = relationship("Category", foreign_keys=[category])
     store_aliases = relationship("StoreProductAlias", back_populates="product_master")
     inventory_items = relationship("InventoryItem", back_populates="product_master")
-    shopping_list_items = relationship("ShoppingListItem", back_populates="product_master")
+    shopping_list_items = relationship(
+        "ShoppingListItem", back_populates="product_master"
+    )

@@ -1,7 +1,7 @@
 """CRUD operations for Category model."""
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
 
 from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryUpdate
@@ -16,9 +16,7 @@ async def get_categories(db: AsyncSession) -> list[Category]:
     Returns:
         List of all categories.
     """
-    result = await db.execute(
-        select(Category).order_by(Category.sort_order)
-    )
+    result = await db.execute(select(Category).order_by(Category.sort_order))
     return list(result.scalars().all())
 
 
@@ -32,9 +30,7 @@ async def get_category(db: AsyncSession, category_id: str) -> Category | None:
     Returns:
         Category if found, None otherwise.
     """
-    result = await db.execute(
-        select(Category).where(Category.id == category_id)
-    )
+    result = await db.execute(select(Category).where(Category.id == category_id))
     return result.scalar_one_or_none()
 
 

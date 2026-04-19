@@ -1,4 +1,5 @@
 """Tests for Receipt API endpoints."""
+
 import shutil
 from io import BytesIO
 from pathlib import Path
@@ -14,6 +15,7 @@ from app.main import app
 @pytest.fixture
 async def test_db(db_session: AsyncSession):
     """Provide a test database session with dependency override and cleanup test receipts."""
+
     # Override the dependency to use test database session
     async def override_get_db():
         try:
@@ -45,10 +47,7 @@ class TestUploadReceipt:
         # Create a fake image file
         file_content = b"fake image content"
         files = {"file": ("receipt.jpg", BytesIO(file_content), "image/jpeg")}
-        data = {
-            "store_chain": "S-Market",
-            "purchase_date": "2024-01-05"
-        }
+        data = {"store_chain": "S-Market", "purchase_date": "2024-01-05"}
 
         response = await client.post("/api/receipts/scan", files=files, data=data)
 
@@ -68,10 +67,7 @@ class TestUploadReceipt:
         """POST /api/receipts/scan should successfully upload a PDF file."""
         file_content = b"%PDF-1.4 fake pdf content"
         files = {"file": ("receipt.pdf", BytesIO(file_content), "application/pdf")}
-        data = {
-            "store_chain": "K-Citymarket",
-            "purchase_date": "2024-01-04"
-        }
+        data = {"store_chain": "K-Citymarket", "purchase_date": "2024-01-04"}
 
         response = await client.post("/api/receipts/scan", files=files, data=data)
 
@@ -149,7 +145,9 @@ class TestGetReceipt:
         files = {"file": ("receipt.jpg", BytesIO(file_content), "image/jpeg")}
         data = {"store_chain": "Lidl", "purchase_date": "2024-01-03"}
 
-        create_response = await client.post("/api/receipts/scan", files=files, data=data)
+        create_response = await client.post(
+            "/api/receipts/scan", files=files, data=data
+        )
         receipt_id = create_response.json()["id"]
 
         # Now get it
@@ -256,7 +254,9 @@ class TestListReceipts:
         # Create receipts from different stores
         for store in ["S-Market", "K-Citymarket", "S-Market"]:
             file_content = f"fake image {store}".encode()
-            files = {"file": (f"receipt_{store}.jpg", BytesIO(file_content), "image/jpeg")}
+            files = {
+                "file": (f"receipt_{store}.jpg", BytesIO(file_content), "image/jpeg")
+            }
             data = {"store_chain": store}
             await client.post("/api/receipts/scan", files=files, data=data)
 
@@ -275,8 +275,9 @@ class TestProcessReceipt:
         self, client: AsyncClient, test_db: AsyncSession
     ) -> None:
         """POST /api/receipts/{id}/process should process receipt through OCR + LLM + matching."""
-        from unittest.mock import patch, AsyncMock
-        from app.parsers.base import ReceiptExtraction, ParsedProduct, StoreInfo
+        from unittest.mock import AsyncMock, patch
+
+        from app.parsers.base import ParsedProduct, ReceiptExtraction, StoreInfo
 
         # Create a receipt
         file_content = b"fake receipt image"
@@ -288,29 +289,29 @@ class TestProcessReceipt:
         mock_ocr_text = "S-MARKET\nVALIO MILK 1L  2.49\nTOTAL  2.49"
         mock_extraction = ReceiptExtraction(
             store=StoreInfo(name="S-Market", chain="s-group"),
-            products=[
-                ParsedProduct(name="Valio Milk 1L", quantity=1.0, price=2.49)
-            ],
+            products=[ParsedProduct(name="Valio Milk 1L", quantity=1.0, price=2.49)],
             confidence=0.95,
         )
 
-        with patch(
-            "app.services.receipt_processing.extract_text_from_receipt",
-            new_callable=AsyncMock,
-            return_value=mock_ocr_text,
-        ):
-            with patch(
+        with (
+            patch(
+                "app.services.receipt_processing.extract_text_from_receipt",
+                new_callable=AsyncMock,
+                return_value=mock_ocr_text,
+            ),
+            patch(
                 "app.services.receipt_processing.extract_products_from_receipt",
                 new_callable=AsyncMock,
                 return_value=mock_extraction,
-            ):
-                response = await client.post(f"/api/receipts/{receipt_id}/process")
+            ),
+        ):
+            response = await client.post(f"/api/receipts/{receipt_id}/process")
 
-                assert response.status_code == 200
-                result = response.json()
-                assert result["success"] is True
-                assert result["items_extracted"] == 1
-                # items_matched may be 0 if no matching products in DB
+            assert response.status_code == 200
+            result = response.json()
+            assert result["success"] is True
+            assert result["items_extracted"] == 1
+            # items_matched may be 0 if no matching products in DB
 
     async def test_process_receipt_not_found(
         self, client: AsyncClient, test_db: AsyncSession
@@ -325,7 +326,8 @@ class TestProcessReceipt:
         self, client: AsyncClient, test_db: AsyncSession
     ) -> None:
         """POST /api/receipts/{id}/process should update receipt processing_status."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
+
         from app.parsers.base import ReceiptExtraction, StoreInfo
 
         # Create a receipt
@@ -340,21 +342,23 @@ class TestProcessReceipt:
             confidence=0.9,
         )
 
-        with patch(
-            "app.services.receipt_processing.extract_text_from_receipt",
-            new_callable=AsyncMock,
-            return_value="text",
-        ):
-            with patch(
+        with (
+            patch(
+                "app.services.receipt_processing.extract_text_from_receipt",
+                new_callable=AsyncMock,
+                return_value="text",
+            ),
+            patch(
                 "app.services.receipt_processing.extract_products_from_receipt",
                 new_callable=AsyncMock,
                 return_value=mock_extraction,
-            ):
-                await client.post(f"/api/receipts/{receipt_id}/process")
+            ),
+        ):
+            await client.post(f"/api/receipts/{receipt_id}/process")
 
-                # Check receipt status was updated
-                get_response = await client.get(f"/api/receipts/{receipt_id}")
-                assert get_response.status_code == 200
-                receipt = get_response.json()
-                assert receipt["processing_status"] == "completed"
-                assert receipt["ocr_raw_text"] is not None
+            # Check receipt status was updated
+            get_response = await client.get(f"/api/receipts/{receipt_id}")
+            assert get_response.status_code == 200
+            receipt = get_response.json()
+            assert receipt["processing_status"] == "completed"
+            assert receipt["ocr_raw_text"] is not None

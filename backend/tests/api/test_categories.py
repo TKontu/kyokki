@@ -1,4 +1,5 @@
 """Tests for Category CRUD API endpoints."""
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from app.main import app
 @pytest.fixture
 async def seeded_db(db_session: AsyncSession) -> AsyncSession:
     """Provide a database session with seeded categories and override app dependency."""
+
     # Override the dependency to use test database session
     async def override_get_db():
         try:

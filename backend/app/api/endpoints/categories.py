@@ -1,4 +1,5 @@
 """API endpoints for Category CRUD operations."""
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud import category as crud_category
 from app.db.session import get_db
 from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
-
 
 router = APIRouter()
 
@@ -63,9 +63,7 @@ async def update_category(
 
 
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_category(
-    category_id: str, db: AsyncSession = Depends(get_db)
-) -> None:
+async def delete_category(category_id: str, db: AsyncSession = Depends(get_db)) -> None:
     """Delete a category."""
     deleted = await crud_category.delete_category(db, category_id)
     if not deleted:

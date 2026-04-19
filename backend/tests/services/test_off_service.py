@@ -1,13 +1,15 @@
 """Tests for Open Food Facts service."""
+
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import AsyncMock, patch
 
 from app.services.off_service import (
-    fetch_product_from_off,
-    enrich_product_from_off,
-    map_off_category_to_system,
-    OffProductNotFoundError,
     OffApiError,
+    OffProductNotFoundError,
+    enrich_product_from_off,
+    fetch_product_from_off,
+    map_off_category_to_system,
 )
 
 
@@ -42,7 +44,9 @@ class TestFetchProductFromOff:
         mock_response.json = Mock(return_value=mock_response_data)
         mock_response.raise_for_status = Mock()
 
-        with patch("app.services.off_service.httpx.AsyncClient.get", return_value=mock_response):
+        with patch(
+            "app.services.off_service.httpx.AsyncClient.get", return_value=mock_response
+        ):
             result = await fetch_product_from_off(barcode)
 
             assert result["code"] == barcode
@@ -61,25 +65,35 @@ class TestFetchProductFromOff:
         mock_response.status_code = 200
         mock_response.json = Mock(return_value=mock_response_data)
 
-        with patch("app.services.off_service.httpx.AsyncClient.get", return_value=mock_response):
-            with pytest.raises(OffProductNotFoundError, match=f"Product {barcode} not found"):
-                await fetch_product_from_off(barcode)
+        with (
+            patch(
+                "app.services.off_service.httpx.AsyncClient.get",
+                return_value=mock_response,
+            ),
+            pytest.raises(
+                OffProductNotFoundError, match=f"Product {barcode} not found"
+            ),
+        ):
+            await fetch_product_from_off(barcode)
 
     async def test_raises_api_error_on_network_failure(self):
         """Should raise OffApiError on network failures."""
         barcode = "5901234123457"
 
-        with patch(
-            "app.services.off_service.httpx.AsyncClient.get",
-            side_effect=Exception("Network error"),
+        with (
+            patch(
+                "app.services.off_service.httpx.AsyncClient.get",
+                side_effect=Exception("Network error"),
+            ),
+            pytest.raises(OffApiError, match="Failed to fetch product"),
         ):
-            with pytest.raises(OffApiError, match="Failed to fetch product"):
-                await fetch_product_from_off(barcode)
+            await fetch_product_from_off(barcode)
 
     async def test_raises_api_error_on_http_error(self):
         """Should raise OffApiError on HTTP errors."""
-        import httpx
         from unittest.mock import Mock
+
+        import httpx
 
         barcode = "5901234123457"
 
@@ -91,9 +105,14 @@ class TestFetchProductFromOff:
             )
         )
 
-        with patch("app.services.off_service.httpx.AsyncClient.get", return_value=mock_response):
-            with pytest.raises(OffApiError, match="Failed to fetch product"):
-                await fetch_product_from_off(barcode)
+        with (
+            patch(
+                "app.services.off_service.httpx.AsyncClient.get",
+                return_value=mock_response,
+            ),
+            pytest.raises(OffApiError, match="Failed to fetch product"),
+        ):
+            await fetch_product_from_off(barcode)
 
     async def test_uses_correct_api_endpoint(self):
         """Should call the correct OFF API endpoint."""
@@ -102,10 +121,14 @@ class TestFetchProductFromOff:
         barcode = "5901234123457"
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json = Mock(return_value={"code": barcode, "status": 1, "product": {}})
+        mock_response.json = Mock(
+            return_value={"code": barcode, "status": 1, "product": {}}
+        )
         mock_response.raise_for_status = Mock()
 
-        with patch("app.services.off_service.httpx.AsyncClient.get", return_value=mock_response) as mock_get:
+        with patch(
+            "app.services.off_service.httpx.AsyncClient.get", return_value=mock_response
+        ) as mock_get:
             await fetch_product_from_off(barcode)
 
             # Verify the API was called with correct URL
@@ -175,7 +198,10 @@ class TestEnrichProductFromOff:
             },
         }
 
-        with patch("app.services.off_service.fetch_product_from_off", return_value=mock_off_data):
+        with patch(
+            "app.services.off_service.fetch_product_from_off",
+            return_value=mock_off_data,
+        ):
             result = await enrich_product_from_off(barcode)
 
             assert result["canonical_name"] == "Valio Whole Milk 1L"
@@ -195,7 +221,10 @@ class TestEnrichProductFromOff:
             },
         }
 
-        with patch("app.services.off_service.fetch_product_from_off", return_value=mock_off_data):
+        with patch(
+            "app.services.off_service.fetch_product_from_off",
+            return_value=mock_off_data,
+        ):
             result = await enrich_product_from_off(barcode)
 
             assert result["canonical_name"] == "Unknown Product"
@@ -215,7 +244,10 @@ class TestEnrichProductFromOff:
             },
         }
 
-        with patch("app.services.off_service.fetch_product_from_off", return_value=mock_off_data):
+        with patch(
+            "app.services.off_service.fetch_product_from_off",
+            return_value=mock_off_data,
+        ):
             result = await enrich_product_from_off(barcode)
 
             assert result["canonical_name"] == "Valio Whole Milk 1L"
@@ -232,7 +264,10 @@ class TestEnrichProductFromOff:
             },
         }
 
-        with patch("app.services.off_service.fetch_product_from_off", return_value=mock_off_data):
+        with patch(
+            "app.services.off_service.fetch_product_from_off",
+            return_value=mock_off_data,
+        ):
             result = await enrich_product_from_off(barcode)
 
             assert result["canonical_name"] == "Test Brand Test Product"
@@ -241,20 +276,24 @@ class TestEnrichProductFromOff:
         """Should propagate OffProductNotFoundError."""
         barcode = "0000000000000"
 
-        with patch(
-            "app.services.off_service.fetch_product_from_off",
-            side_effect=OffProductNotFoundError(barcode),
+        with (
+            patch(
+                "app.services.off_service.fetch_product_from_off",
+                side_effect=OffProductNotFoundError(barcode),
+            ),
+            pytest.raises(OffProductNotFoundError),
         ):
-            with pytest.raises(OffProductNotFoundError):
-                await enrich_product_from_off(barcode)
+            await enrich_product_from_off(barcode)
 
     async def test_propagates_api_error(self):
         """Should propagate OffApiError."""
         barcode = "5901234123457"
 
-        with patch(
-            "app.services.off_service.fetch_product_from_off",
-            side_effect=OffApiError("Network error"),
+        with (
+            patch(
+                "app.services.off_service.fetch_product_from_off",
+                side_effect=OffApiError("Network error"),
+            ),
+            pytest.raises(OffApiError),
         ):
-            with pytest.raises(OffApiError):
-                await enrich_product_from_off(barcode)
+            await enrich_product_from_off(barcode)

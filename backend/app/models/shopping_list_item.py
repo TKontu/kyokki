@@ -1,8 +1,10 @@
-from sqlalchemy import Column, String, Numeric, Boolean, DateTime, ForeignKey
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-import uuid
+
 from app.db.base_class import Base
 
 
@@ -26,12 +28,20 @@ class ShoppingListItem(Base):
     unit = Column(String, nullable=False)
 
     # Organization
-    priority = Column(String, nullable=False, default="normal", index=True)  # urgent, normal, low
-    source = Column(String, nullable=False, default="manual", index=True)  # manual, auto_restock, recipe
+    priority = Column(
+        String, nullable=False, default="normal", index=True
+    )  # urgent, normal, low
+    source = Column(
+        String, nullable=False, default="manual", index=True
+    )  # manual, auto_restock, recipe
 
     # Purchase tracking
     is_purchased = Column(Boolean, nullable=False, default=False, index=True)
-    added_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    added_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
     purchased_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships

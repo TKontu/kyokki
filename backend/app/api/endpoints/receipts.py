@@ -1,4 +1,5 @@
 """API endpoints for Receipt upload and management."""
+
 from datetime import date, timedelta
 from uuid import UUID
 
@@ -17,10 +18,7 @@ from app.schemas.receipt import (
     ReceiptResponse,
 )
 from app.services.broadcast_helpers import broadcast_receipt_status
-from app.services.llm_extractor import extract_products_from_receipt
-from app.services.ocr_service import extract_text_from_receipt
 from app.services.receipt_processing import ReceiptProcessingService
-
 
 router = APIRouter()
 
@@ -34,7 +32,9 @@ ALLOWED_CONTENT_TYPES = {
 }
 
 
-@router.post("/scan", response_model=ReceiptResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/scan", response_model=ReceiptResponse, status_code=status.HTTP_201_CREATED
+)
 async def upload_receipt(
     file: UploadFile = File(...),
     store_chain: str | None = Form(None),
@@ -219,7 +219,9 @@ async def confirm_receipt(
                 )
 
             # Calculate expiry date
-            expiry_date = item.purchase_date + timedelta(days=product.default_shelf_life_days)
+            expiry_date = item.purchase_date + timedelta(
+                days=product.default_shelf_life_days
+            )
 
             # Create inventory item
             inventory_item = InventoryItem(
@@ -247,7 +249,7 @@ async def confirm_receipt(
             receipt_id=receipt.id,
             status="confirmed",
             items_extracted=receipt.items_extracted,
-            items_matched=items_created
+            items_matched=items_created,
         )
 
         return ReceiptConfirmResponse(

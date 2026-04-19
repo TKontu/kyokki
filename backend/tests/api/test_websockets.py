@@ -1,5 +1,7 @@
 """Tests for WebSocket real-time updates endpoint."""
+
 import json
+from datetime import UTC
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,10 +35,10 @@ class TestWebSocketConnection:
         manager.active_connections.clear()
 
         with TestClient(app) as client:
-            with client.websocket_connect("/api/ws") as ws1:
+            with client.websocket_connect("/api/ws") as _ws1:
                 assert len(manager.active_connections) == 1
 
-                with client.websocket_connect("/api/ws") as ws2:
+                with client.websocket_connect("/api/ws") as _ws2:
                     assert len(manager.active_connections) == 2
 
             # After context exits, connections should be removed
@@ -48,8 +50,9 @@ class TestWebSocketMessageFormat:
 
     def test_receipt_status_message_structure(self):
         """Test receipt status messages have correct structure."""
-        from app.services.broadcast_helpers import _build_message
         from uuid import uuid4
+
+        from app.services.broadcast_helpers import _build_message
 
         receipt_id = uuid4()
         message = _build_message(
@@ -60,8 +63,8 @@ class TestWebSocketMessageFormat:
                 "status": "completed",
                 "items_extracted": 5,
                 "items_matched": 3,
-                "error": None
-            }
+                "error": None,
+            },
         )
 
         assert message["type"] == "receipt_status"
@@ -73,9 +76,10 @@ class TestWebSocketMessageFormat:
 
     def test_inventory_update_message_structure(self):
         """Test inventory update messages have correct structure."""
-        from app.services.broadcast_helpers import _build_message
-        from uuid import uuid4
         from decimal import Decimal
+        from uuid import uuid4
+
+        from app.services.broadcast_helpers import _build_message
 
         item_id = uuid4()
         message = _build_message(
@@ -86,8 +90,8 @@ class TestWebSocketMessageFormat:
                 "action": "consumed",
                 "current_quantity": Decimal("750.00"),
                 "status": "opened",
-                "product_name": "Milk 1L"
-            }
+                "product_name": "Milk 1L",
+            },
         )
 
         assert message["type"] == "inventory_update"
@@ -100,14 +104,15 @@ class TestWebSocketMessageFormat:
 
     def test_value_serialization(self):
         """Test that UUIDs and Decimals are serialized correctly."""
-        from app.services.broadcast_helpers import _serialize_value
-        from uuid import uuid4
+        from datetime import datetime
         from decimal import Decimal
-        from datetime import datetime, timezone
+        from uuid import uuid4
+
+        from app.services.broadcast_helpers import _serialize_value
 
         test_uuid = uuid4()
         test_decimal = Decimal("123.45")
-        test_datetime = datetime.now(timezone.utc)
+        test_datetime = datetime.now(UTC)
 
         assert _serialize_value(test_uuid) == str(test_uuid)
         assert _serialize_value(test_decimal) == str(test_decimal)
@@ -122,8 +127,9 @@ class TestConnectionManagerBroadcast:
     @pytest.mark.asyncio
     async def test_broadcast_to_disconnected_client_removes_it(self):
         """Test that broadcast removes disconnected clients."""
-        from app.services.websockets import ConnectionManager
         from unittest.mock import AsyncMock, MagicMock
+
+        from app.services.websockets import ConnectionManager
 
         # Create a fresh manager for this test
         test_manager = ConnectionManager()
@@ -132,7 +138,9 @@ class TestConnectionManagerBroadcast:
         mock_ws1 = MagicMock()
         mock_ws1.send_text = AsyncMock()  # Working connection
         mock_ws2 = MagicMock()
-        mock_ws2.send_text = AsyncMock(side_effect=Exception("Connection closed"))  # Broken connection
+        mock_ws2.send_text = AsyncMock(
+            side_effect=Exception("Connection closed")
+        )  # Broken connection
 
         # Add both to manager
         test_manager.active_connections = [mock_ws1, mock_ws2]
@@ -147,8 +155,9 @@ class TestConnectionManagerBroadcast:
     @pytest.mark.asyncio
     async def test_broadcast_json(self):
         """Test that broadcast_json sends proper JSON."""
-        from app.services.websockets import ConnectionManager
         from unittest.mock import AsyncMock, MagicMock
+
+        from app.services.websockets import ConnectionManager
 
         test_manager = ConnectionManager()
         mock_ws = MagicMock()

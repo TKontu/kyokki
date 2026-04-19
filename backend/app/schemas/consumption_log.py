@@ -10,7 +10,9 @@ class ConsumptionLogBase(BaseModel):
 
     inventory_item_id: UUID = Field(..., description="Inventory item ID")
     product_master_id: UUID = Field(..., description="Product master ID")
-    action: str = Field(..., description="Action: use_partial, use_full, discard, adjust")
+    action: str = Field(
+        ..., description="Action: use_partial, use_full, discard, adjust"
+    )
     quantity_consumed: Decimal = Field(..., gt=0, description="Quantity consumed")
     consumption_context: str | None = Field(
         None, description="Context: breakfast, lunch, dinner, snack, cooking"

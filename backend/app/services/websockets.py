@@ -1,6 +1,8 @@
 """WebSocket connection manager for real-time updates."""
+
 import json
-from typing import List, Dict, Any
+from typing import Any
+
 from fastapi import WebSocket
 
 from app.core.logging import get_logger
@@ -12,7 +14,7 @@ class ConnectionManager:
     """Manages WebSocket connections and broadcasts messages."""
 
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         """Accept WebSocket connection and add to active connections.
@@ -22,7 +24,10 @@ class ConnectionManager:
         """
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info("websocket_connected", extra={"total_connections": len(self.active_connections)})
+        logger.info(
+            "websocket_connected",
+            extra={"total_connections": len(self.active_connections)},
+        )
 
     def disconnect(self, websocket: WebSocket):
         """Remove WebSocket from active connections.
@@ -32,7 +37,10 @@ class ConnectionManager:
         """
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
-            logger.info("websocket_disconnected", extra={"total_connections": len(self.active_connections)})
+            logger.info(
+                "websocket_disconnected",
+                extra={"total_connections": len(self.active_connections)},
+            )
 
     async def broadcast(self, message: str):
         """Broadcast message to all connected clients with error handling.
@@ -50,10 +58,7 @@ class ConnectionManager:
             except Exception as e:
                 logger.warning(
                     "websocket_send_failed",
-                    extra={
-                        "error": str(e),
-                        "operation": "broadcast"
-                    }
+                    extra={"error": str(e), "operation": "broadcast"},
                 )
                 disconnected_clients.append(connection)
 
@@ -65,11 +70,11 @@ class ConnectionManager:
             "broadcast_complete",
             extra={
                 "message_length": len(message),
-                "recipients": len(self.active_connections)
-            }
+                "recipients": len(self.active_connections),
+            },
         )
 
-    async def send_json(self, websocket: WebSocket, data: Dict[str, Any]):
+    async def send_json(self, websocket: WebSocket, data: dict[str, Any]):
         """Send JSON message to a specific client.
 
         Args:
@@ -80,13 +85,11 @@ class ConnectionManager:
             await websocket.send_json(data)
         except Exception as e:
             logger.error(
-                "websocket_send_json_failed",
-                extra={"error": str(e)},
-                exc_info=True
+                "websocket_send_json_failed", extra={"error": str(e)}, exc_info=True
             )
             self.disconnect(websocket)
 
-    async def broadcast_json(self, data: Dict[str, Any]):
+    async def broadcast_json(self, data: dict[str, Any]):
         """Broadcast JSON data to all connected clients.
 
         Args:

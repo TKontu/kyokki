@@ -1,4 +1,5 @@
 """WebSocket endpoint for real-time updates."""
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.core.logging import get_logger
@@ -42,9 +43,5 @@ async def websocket_endpoint(websocket: WebSocket):
         logger.info("websocket_client_disconnected")
         manager.disconnect(websocket)
     except Exception as e:
-        logger.error(
-            "websocket_error",
-            extra={"error": str(e)},
-            exc_info=True
-        )
+        logger.error("websocket_error", extra={"error": str(e)}, exc_info=True)
         manager.disconnect(websocket)

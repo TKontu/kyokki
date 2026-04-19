@@ -2,14 +2,16 @@
 
 Matches extracted receipt product names to canonical products in product_master.
 """
-from enum import Enum
+
 from dataclasses import dataclass
+from enum import Enum
+
 from rapidfuzz import fuzz, process
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.product_master import ProductMaster
 from app.core.logging import get_logger
+from app.models.product_master import ProductMaster
 
 logger = get_logger(__name__)
 

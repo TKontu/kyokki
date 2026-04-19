@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Quick script to test vLLM response format."""
+
 import asyncio
+
 import httpx
+
 
 async def test_vllm():
     """Call vLLM and print raw response."""
@@ -41,7 +44,7 @@ Output as valid JSON only."""
             headers={
                 "Authorization": "Bearer ollama",
                 "Content-Type": "application/json",
-            }
+            },
         )
 
         data = response.json()
@@ -56,6 +59,7 @@ Output as valid JSON only."""
         print(f"Starts with: {repr(content[:100])}")
         print(f"Contains '{{': {'{' in content}")
         print(f"First {{ at position: {content.find('{')}")
+
 
 if __name__ == "__main__":
     asyncio.run(test_vllm())

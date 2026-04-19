@@ -1,4 +1,5 @@
 """CRUD operations for ProductMaster model."""
+
 from uuid import UUID
 
 from sqlalchemy import select
