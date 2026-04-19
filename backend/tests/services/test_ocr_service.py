@@ -3,6 +3,7 @@
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
+import anyio
 import pytest
 
 from app.services.ocr_service import (
@@ -199,17 +200,14 @@ class TestOCRWithRealSamples:
 
     async def test_extract_from_s_group_pdf(self):
         """Integration test with real S-Group PDF sample."""
-        # Samples mounted at /app/samples in Docker
-        sample_pdf = Path("samples/s_group_receipt.pdf")
+        sample_pdf = anyio.Path("samples/s_group_receipt.pdf")
 
-        if not sample_pdf.exists():
+        if not await sample_pdf.exists():
             pytest.skip(f"S-Group PDF sample not found at {sample_pdf}")
 
         text = await extract_text_from_receipt(str(sample_pdf))
 
-        # Should extract text successfully
         assert len(text) > 0
-        # Should contain S-Group markers
         assert any(
             marker in text.upper() for marker in ["PRISMA", "S-KAUPAT", "S-MARKET"]
         )
@@ -221,16 +219,14 @@ class TestOCRWithRealSamples:
         Skipped by default as it requires MinerU service to be running.
         Run with: pytest -m integration --run-mineru
         """
-        sample_img = Path("samples/kesko_receipt.jpg")
+        sample_img = anyio.Path("samples/kesko_receipt.jpg")
 
-        if not sample_img.exists():
+        if not await sample_img.exists():
             pytest.skip(f"Kesko image sample not found at {sample_img}")
 
         text = await _extract_from_image(sample_img)
 
-        # Should extract text successfully
         assert len(text) > 0
-        # Should contain K-Group markers
         assert any(
             marker in text.upper() for marker in ["K-MARKET", "K-CITYMARKET", "KESKO"]
         )

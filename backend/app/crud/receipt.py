@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 import aiofiles
+import anyio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,12 +87,12 @@ async def create_receipt(
     stored_filename = f"{receipt_id}{file_extension}"
 
     # Ensure receipts directory exists
-    receipts_dir = Path("data/receipts")
-    receipts_dir.mkdir(parents=True, exist_ok=True)
+    receipts_dir = anyio.Path("data/receipts")
+    await receipts_dir.mkdir(parents=True, exist_ok=True)
 
     # Save file to disk
     file_path = receipts_dir / stored_filename
-    async with aiofiles.open(file_path, "wb") as f:
+    async with aiofiles.open(str(file_path), "wb") as f:
         await f.write(file_content)
 
     # Create database record
@@ -155,9 +156,9 @@ async def delete_receipt(db: AsyncSession, receipt_id: UUID) -> bool:
         return False
 
     # Delete file from disk
-    file_path = Path(db_receipt.image_path)
-    if file_path.exists():
-        file_path.unlink()
+    file_path = anyio.Path(db_receipt.image_path)
+    if await file_path.exists():
+        await file_path.unlink()
 
     # Delete database record
     await db.delete(db_receipt)

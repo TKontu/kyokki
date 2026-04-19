@@ -4,7 +4,7 @@ Matches extracted receipt product names to canonical products in product_master.
 """
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 from rapidfuzz import fuzz, process
 from sqlalchemy import select
@@ -16,7 +16,7 @@ from app.models.product_master import ProductMaster
 logger = get_logger(__name__)
 
 
-class MatchConfidence(str, Enum):
+class MatchConfidence(StrEnum):
     """Match confidence levels based on fuzzy match score."""
 
     EXACT = "exact"  # 100% match (case-insensitive)

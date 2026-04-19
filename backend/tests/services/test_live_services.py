@@ -12,8 +12,7 @@ To run all live service tests:
     pytest tests/services/test_live_services.py -m "requires_vllm or requires_mineru" -v
 """
 
-from pathlib import Path
-
+import anyio
 import pytest
 
 from app.core.config import settings
@@ -136,15 +135,12 @@ class TestLiveMinerUService:
         Note: This test requires a sample image file in samples/ directory.
         If no sample exists, the test will be skipped.
         """
-        # Check if sample image exists
-        sample_image = Path("samples/kesko_receipt.jpg")
-        if not sample_image.exists():
+        sample_image = anyio.Path("samples/kesko_receipt.jpg")
+        if not await sample_image.exists():
             pytest.skip(f"Sample image not found at {sample_image}")
 
-        # Extract OCR text
         ocr_text = await extract_text_from_receipt(str(sample_image))
 
-        # Verify we got some text
         assert ocr_text, "MinerU should return OCR text"
         assert len(ocr_text) > 10, "OCR text should be substantial"
 
@@ -154,17 +150,15 @@ class TestLiveMinerUService:
     @pytest.mark.requires_mineru
     async def test_mineru_with_pdf_fallback(self):
         """Test that PDFs use pdfplumber, not MinerU."""
-        sample_pdf = Path("samples/s_group_receipt.pdf")
-        if not sample_pdf.exists():
+        sample_pdf = anyio.Path("samples/s_group_receipt.pdf")
+        if not await sample_pdf.exists():
             pytest.skip(f"Sample PDF not found at {sample_pdf}")
 
-        # This should use pdfplumber, not MinerU
         ocr_text = await extract_text_from_receipt(str(sample_pdf))
 
         assert ocr_text, "Should extract text from PDF"
         assert len(ocr_text) > 10
 
-        # Verify it looks like Finnish S-Group receipt
         text_upper = ocr_text.upper()
         assert any(
             marker in text_upper for marker in ["PRISMA", "S-KAUPAT", "S-MARKET"]
@@ -180,20 +174,17 @@ class TestLiveEndToEndPipeline:
     @pytest.mark.requires_vllm
     async def test_end_to_end_ocr_and_extraction_with_pdf(self):
         """Full pipeline: PDF → pdfplumber → vLLM → structured data."""
-        sample_pdf = Path("samples/s_group_receipt.pdf")
-        if not sample_pdf.exists():
+        sample_pdf = anyio.Path("samples/s_group_receipt.pdf")
+        if not await sample_pdf.exists():
             pytest.skip(f"Sample PDF not found at {sample_pdf}")
 
-        # Step 1: OCR
         print("\n=== Step 1: OCR Extraction ===")
         ocr_text = await extract_text_from_receipt(str(sample_pdf))
         print(f"Extracted {len(ocr_text)} characters")
 
-        # Step 2: LLM Extraction
         print("\n=== Step 2: LLM Product Extraction ===")
         result = await extract_products_from_receipt(ocr_text)
 
-        # Verify results
         assert isinstance(result, ReceiptExtraction)
         assert len(result.products) >= 1, (
             "Should extract at least one product from real receipt"
@@ -213,27 +204,23 @@ class TestLiveEndToEndPipeline:
             if product.price:
                 print(f"     Price: {product.price}")
 
-        # Verify at least one product has a name
         assert any(p.name for p in result.products)
 
     @pytest.mark.requires_mineru
     @pytest.mark.requires_vllm
     async def test_end_to_end_ocr_and_extraction_with_image(self):
         """Full pipeline: Image → MinerU → vLLM → structured data."""
-        sample_image = Path("samples/kesko_receipt.jpg")
-        if not sample_image.exists():
+        sample_image = anyio.Path("samples/kesko_receipt.jpg")
+        if not await sample_image.exists():
             pytest.skip(f"Sample image not found at {sample_image}")
 
-        # Step 1: OCR with MinerU
         print("\n=== Step 1: MinerU OCR ===")
         ocr_text = await extract_text_from_receipt(str(sample_image))
         print(f"Extracted {len(ocr_text)} characters")
 
-        # Step 2: LLM Extraction
         print("\n=== Step 2: vLLM Product Extraction ===")
         result = await extract_products_from_receipt(ocr_text)
 
-        # Verify results
         assert isinstance(result, ReceiptExtraction)
 
         store_info = result.get_store_info()
@@ -241,6 +228,4 @@ class TestLiveEndToEndPipeline:
         print(f"Chain: {store_info.chain}")
         print(f"Extracted {len(result.products)} products")
 
-        # May extract 0 products if image quality is poor or OCR fails
-        # So we just verify the structure is correct
         assert result.products is not None

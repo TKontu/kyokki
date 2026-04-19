@@ -101,18 +101,20 @@ async def db_engine():
     """Create test database engine using PostgreSQL.
 
     Uses the same PostgreSQL instance as dev, but creates/drops tables
-    per test for isolation.
+    per test for isolation. Skips automatically when PostgreSQL is unavailable.
     """
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
 
-    # Create all tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception:
+        await engine.dispose()
+        pytest.skip("PostgreSQL not available")
 
     try:
         yield engine
     finally:
-        # Ensure cleanup happens even if test fails
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()

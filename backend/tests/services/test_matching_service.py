@@ -315,7 +315,7 @@ class TestMatchingService:
 class TestMatchResult:
     """Test MatchResult data structure."""
 
-    def test_match_result_creation(self, db_session: AsyncSession):
+    def test_match_result_creation(self):
         """Test creating a MatchResult."""
         product = ProductMaster(
             id=uuid4(),

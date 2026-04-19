@@ -3,12 +3,12 @@
 Pydantic models for LLM extraction with Ollama JSON mode.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
 
-class StoreChain(str, Enum):
+class StoreChain(StrEnum):
     """Known store chains (expandable)."""
 
     S_GROUP = "s-group"

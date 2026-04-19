@@ -2,8 +2,8 @@
 
 import shutil
 from io import BytesIO
-from pathlib import Path
 
+import anyio
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,10 +31,10 @@ async def test_db(db_session: AsyncSession):
     app.dependency_overrides.clear()
 
     # Clean up test receipt files
-    receipts_dir = Path("data/receipts")
-    if receipts_dir.exists():
-        shutil.rmtree(receipts_dir)
-        receipts_dir.mkdir(parents=True, exist_ok=True)
+    receipts_dir = anyio.Path("data/receipts")
+    if await receipts_dir.exists():
+        shutil.rmtree(str(receipts_dir))
+        await receipts_dir.mkdir(parents=True, exist_ok=True)
 
 
 class TestUploadReceipt:
@@ -126,11 +126,11 @@ class TestUploadReceipt:
         receipt = response.json()
 
         # Verify file path exists
-        file_path = Path(receipt["image_path"])
-        assert file_path.exists()
+        file_path = anyio.Path(receipt["image_path"])
+        assert await file_path.exists()
 
         # Verify file content matches
-        assert file_path.read_bytes() == file_content
+        assert await file_path.read_bytes() == file_content
 
 
 class TestGetReceipt:
