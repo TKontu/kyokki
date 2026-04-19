@@ -277,6 +277,52 @@ class TestScanBarcodeConsume:
         assert data["action"] == "inventory_consumed"
         assert data["inventory_item"]["current_quantity"] == "750"
 
+    async def test_scan_consume_capped_message_when_quantity_exceeds_stock(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        sample_product: ProductMaster,
+        mock_redis: AsyncMock,
+    ) -> None:
+        """Consuming more than available reports capping in the message."""
+        from datetime import date, timedelta
+
+        sample_product.off_product_id = "2222222222299"
+        await seeded_db.commit()
+
+        inv = InventoryItem(
+            id=uuid4(),
+            product_master_id=sample_product.id,
+            initial_quantity=Decimal("100"),
+            current_quantity=Decimal("100"),
+            unit="ml",
+            status="sealed",
+            expiry_date=date.today() + timedelta(days=7),
+        )
+        seeded_db.add(inv)
+        await seeded_db.commit()
+
+        with (
+            patch(
+                "app.services.scanner_service.get_redis_client",
+                return_value=mock_redis,
+            ),
+            patch(
+                "app.services.broadcast_helpers.get_redis_client",
+                return_value=mock_redis,
+            ),
+        ):
+            response = await client.post(
+                "/api/scanner/scan",
+                json={"barcode": "2222222222299", "mode": "consume", "quantity": "500"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["action"] == "inventory_consumed"
+        assert "500" in data["message"]  # requested amount mentioned
+        assert "only" in data["message"].lower()  # capping phrase present
+
     async def test_scan_consume_no_inventory_returns_404(
         self,
         client: AsyncClient,
@@ -539,3 +585,103 @@ class TestScannerStations:
         assert station["mode"] == "add"
         assert station["scan_count"] == 5
         assert station["online"] is True
+
+
+class TestScannerStationIdValidation:
+    """Tests for station_id input validation (Fix 7)."""
+
+    async def test_scan_invalid_station_id_returns_422(
+        self, client: AsyncClient
+    ) -> None:
+        """station_id with illegal characters returns 422."""
+        response = await client.post(
+            "/api/scanner/scan",
+            json={"barcode": "1234567890123", "station_id": "bad station/id!"},
+        )
+        assert response.status_code == 422
+
+    async def test_scan_station_id_too_long_returns_422(
+        self, client: AsyncClient
+    ) -> None:
+        """station_id longer than 64 characters returns 422."""
+        response = await client.post(
+            "/api/scanner/scan",
+            json={"barcode": "1234567890123", "station_id": "a" * 65},
+        )
+        assert response.status_code == 422
+
+    async def test_scan_valid_station_id_accepted(
+        self, client: AsyncClient, mock_redis: AsyncMock
+    ) -> None:
+        """Valid station_id with hyphens and underscores is accepted."""
+        with patch(
+            "app.services.scanner_service.get_redis_client",
+            return_value=mock_redis,
+        ):
+            # Will hit DB and fail (no seeded_db), but validation passes → not 422
+            response = await client.post(
+                "/api/scanner/scan",
+                json={
+                    "barcode": "  ",  # empty → 400, not 422
+                    "station_id": "kitchen-pi_01",
+                },
+            )
+        assert response.status_code == 400  # empty barcode, not a validation error
+
+    async def test_set_mode_invalid_station_id_returns_422(
+        self, client: AsyncClient
+    ) -> None:
+        """Setting mode with illegal station_id returns 422."""
+        response = await client.post(
+            "/api/scanner/mode",
+            json={"mode": "add", "station_id": "bad station!"},
+        )
+        assert response.status_code == 422
+
+    async def test_set_mode_valid_station_id_accepted(
+        self, client: AsyncClient, mock_redis: AsyncMock
+    ) -> None:
+        """Valid station_id is accepted on set mode."""
+        with patch(
+            "app.services.scanner_service.get_redis_client",
+            return_value=mock_redis,
+        ):
+            response = await client.post(
+                "/api/scanner/mode",
+                json={"mode": "consume", "station_id": "kitchen-pi_01"},
+            )
+        assert response.status_code == 200
+
+
+class TestScannerRedisResilience:
+    """Tests for Redis unavailability fallback (Fix 2)."""
+
+    async def test_get_mode_returns_default_when_redis_down(
+        self, client: AsyncClient
+    ) -> None:
+        """When Redis is unavailable, mode defaults to 'add'."""
+        with patch(
+            "app.services.scanner_service.get_redis_client",
+            side_effect=Exception("Redis connection refused"),
+        ):
+            response = await client.get("/api/scanner/mode")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["mode"] == "add"
+        assert data["is_global"] is True
+
+    async def test_get_stations_returns_empty_when_redis_down(
+        self, client: AsyncClient
+    ) -> None:
+        """When Redis is unavailable, stations endpoint returns empty list."""
+        with patch(
+            "app.services.scanner_service.get_redis_client",
+            side_effect=Exception("Redis connection refused"),
+        ):
+            response = await client.get("/api/scanner/stations")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["stations"] == []
+        assert data["total_stations"] == 0

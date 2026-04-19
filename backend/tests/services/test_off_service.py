@@ -1,5 +1,6 @@
 """Tests for Open Food Facts service."""
 
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
@@ -10,6 +11,7 @@ from app.services.off_service import (
     enrich_product_from_off,
     fetch_product_from_off,
     map_off_category_to_system,
+    parse_off_quantity,
 )
 
 
@@ -297,3 +299,147 @@ class TestEnrichProductFromOff:
             pytest.raises(OffApiError),
         ):
             await enrich_product_from_off(barcode)
+
+    async def test_returns_default_unit_fields_when_no_quantity(self):
+        """Should return default_unit='pcs' and default_quantity=None when no quantity."""
+        barcode = "5901234123457"
+        mock_off_data = {
+            "code": barcode,
+            "status": 1,
+            "product": {"product_name": "Test Product"},
+        }
+
+        with patch(
+            "app.services.off_service.fetch_product_from_off",
+            return_value=mock_off_data,
+        ):
+            result = await enrich_product_from_off(barcode)
+
+            assert result["default_unit"] == "pcs"
+            assert result["default_quantity"] is None
+
+    async def test_returns_parsed_quantity_for_volume(self):
+        """Should parse '1L' quantity into default_quantity=1000 and default_unit='ml'."""
+        barcode = "5901234123457"
+        mock_off_data = {
+            "code": barcode,
+            "status": 1,
+            "product": {"product_name": "Milk", "quantity": "1L"},
+        }
+
+        with patch(
+            "app.services.off_service.fetch_product_from_off",
+            return_value=mock_off_data,
+        ):
+            result = await enrich_product_from_off(barcode)
+
+            assert result["default_unit"] == "ml"
+            assert result["default_quantity"] == Decimal("1000")
+
+    async def test_returns_parsed_quantity_for_weight(self):
+        """Should parse '500g' into default_quantity=500 and default_unit='g'."""
+        barcode = "5901234123457"
+        mock_off_data = {
+            "code": barcode,
+            "status": 1,
+            "product": {"product_name": "Flour", "quantity": "500g"},
+        }
+
+        with patch(
+            "app.services.off_service.fetch_product_from_off",
+            return_value=mock_off_data,
+        ):
+            result = await enrich_product_from_off(barcode)
+
+            assert result["default_unit"] == "g"
+            assert result["default_quantity"] == Decimal("500")
+
+
+class TestParseOffQuantity:
+    """Tests for parse_off_quantity helper."""
+
+    def test_none_returns_pcs(self):
+        qty, unit = parse_off_quantity(None)
+        assert qty is None
+        assert unit == "pcs"
+
+    def test_empty_string_returns_pcs(self):
+        qty, unit = parse_off_quantity("")
+        assert qty is None
+        assert unit == "pcs"
+
+    def test_unparseable_string_returns_pcs(self):
+        qty, unit = parse_off_quantity("assorted")
+        assert qty is None
+        assert unit == "pcs"
+
+    def test_litre_uppercase(self):
+        qty, unit = parse_off_quantity("1 L")
+        assert qty == Decimal("1000")
+        assert unit == "ml"
+
+    def test_litre_lowercase(self):
+        qty, unit = parse_off_quantity("1l")
+        assert qty == Decimal("1000")
+        assert unit == "ml"
+
+    def test_litre_decimal_comma(self):
+        qty, unit = parse_off_quantity("1,5 L")
+        assert qty == Decimal("1500")
+        assert unit == "ml"
+
+    def test_litre_decimal_dot(self):
+        qty, unit = parse_off_quantity("1.5 L")
+        assert qty == Decimal("1500")
+        assert unit == "ml"
+
+    def test_ml(self):
+        qty, unit = parse_off_quantity("500 ml")
+        assert qty == Decimal("500")
+        assert unit == "ml"
+
+    def test_cl(self):
+        qty, unit = parse_off_quantity("33 cl")
+        assert qty == Decimal("330")
+        assert unit == "ml"
+
+    def test_dl(self):
+        qty, unit = parse_off_quantity("5 dl")
+        assert qty == Decimal("500")
+        assert unit == "ml"
+
+    def test_grams(self):
+        qty, unit = parse_off_quantity("500 g")
+        assert qty == Decimal("500")
+        assert unit == "g"
+
+    def test_grams_no_space(self):
+        qty, unit = parse_off_quantity("500g")
+        assert qty == Decimal("500")
+        assert unit == "g"
+
+    def test_kg(self):
+        qty, unit = parse_off_quantity("1 kg")
+        assert qty == Decimal("1000")
+        assert unit == "g"
+
+    def test_oz_returns_pcs(self):
+        qty, unit = parse_off_quantity("12 oz")
+        assert qty is None
+        assert unit == "pcs"
+
+    def test_fl_oz_returns_pcs(self):
+        qty, unit = parse_off_quantity("8 fl oz")
+        assert qty is None
+        assert unit == "pcs"
+
+    def test_bare_number_returns_pcs(self):
+        qty, unit = parse_off_quantity("6")
+        assert qty is None
+        assert unit == "pcs"
+
+    def test_multipack_picks_first_number(self):
+        # "6 x 250 ml" — regex finds "6" first (no unit), falls through to pcs
+        qty, unit = parse_off_quantity("6 x 250 ml")
+        assert qty is None
+        assert unit == "pcs"

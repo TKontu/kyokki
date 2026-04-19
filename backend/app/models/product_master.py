@@ -1,7 +1,15 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -16,6 +24,9 @@ class ProductMaster(Base):
     """
 
     __tablename__ = "product_master"
+    __table_args__ = (
+        UniqueConstraint("off_product_id", name="uq_product_master_off_product_id"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     canonical_name = Column(String, nullable=False, index=True)  # "Valio Whole Milk 1L"

@@ -1,9 +1,10 @@
 """Scanner API endpoints — barcode scanning, mode management, station monitoring."""
 
+import re
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -14,6 +15,17 @@ router = APIRouter()
 
 VALID_MODES = {"add", "consume", "lookup"}
 
+# Allowed station_id characters: alphanumeric, hyphens, underscores, max 64 chars
+_STATION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def _validate_station_id(v: str | None) -> str | None:
+    if v is not None and not _STATION_ID_RE.match(v):
+        raise ValueError(
+            "station_id must be 1–64 alphanumeric characters, hyphens, or underscores"
+        )
+    return v
+
 
 # --- Schemas ---
 
@@ -23,6 +35,11 @@ class ScanRequest(BaseModel):
     mode: str | None = None
     station_id: str | None = None
     quantity: Decimal = Decimal("1")
+
+    @field_validator("station_id")
+    @classmethod
+    def validate_station_id(cls, v: str | None) -> str | None:
+        return _validate_station_id(v)
 
 
 class ScanResponse(BaseModel):
@@ -36,6 +53,11 @@ class ScanResponse(BaseModel):
 class SetModeRequest(BaseModel):
     mode: str
     station_id: str | None = None
+
+    @field_validator("station_id")
+    @classmethod
+    def validate_station_id(cls, v: str | None) -> str | None:
+        return _validate_station_id(v)
 
 
 class ModeResponse(BaseModel):
