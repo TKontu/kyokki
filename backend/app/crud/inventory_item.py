@@ -128,6 +128,28 @@ async def delete_inventory_item(db: AsyncSession, item_id: UUID) -> bool:
     return True
 
 
+async def get_active_items_by_product(
+    db: AsyncSession, product_id: UUID
+) -> list[InventoryItem]:
+    """Get non-empty, non-discarded inventory items for a product, oldest expiry first.
+
+    Args:
+        db: Database session.
+        product_id: Product master UUID.
+
+    Returns:
+        List of active inventory items ordered by expiry date ascending.
+    """
+    query = (
+        select(InventoryItem)
+        .where(InventoryItem.product_master_id == product_id)
+        .where(InventoryItem.status.notin_(["empty", "discarded"]))
+        .order_by(InventoryItem.expiry_date.asc())
+    )
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
 async def consume_inventory_item(
     db: AsyncSession, item_id: UUID, quantity: Decimal
 ) -> InventoryItem | None:

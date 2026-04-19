@@ -6,6 +6,7 @@ from .endpoints import (
     inventory,
     products,
     receipts,
+    scanner,
     shopping,
     websockets,
 )
@@ -19,4 +20,5 @@ api_router.include_router(products.router, prefix="/products", tags=["products"]
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(receipts.router, prefix="/receipts", tags=["receipts"])
 api_router.include_router(shopping.router, prefix="/shopping", tags=["shopping"])
+api_router.include_router(scanner.router, prefix="/scanner", tags=["scanner"])
 api_router.include_router(websockets.router, tags=["websockets"])

@@ -152,6 +152,50 @@ async def broadcast_inventory_update(
     await publish_message(message)
 
 
+async def broadcast_scanner_action(
+    action: Literal[
+        "product_created_and_added", "inventory_added", "inventory_consumed", "lookup"
+    ],
+    barcode: str,
+    product_name: str,
+    station_id: str | None,
+    mode: str,
+    quantity: Decimal | None = None,
+    unit: str | None = None,
+    entity_id: UUID | None = None,
+) -> None:
+    """Broadcast scanner action to all connected clients.
+
+    Args:
+        action: Type of scanner action performed.
+        barcode: Scanned barcode.
+        product_name: Name of the product.
+        station_id: Scanning station ID (None for global/iPad).
+        mode: Scanning mode (add, consume, lookup).
+        quantity: Quantity involved (if applicable).
+        unit: Unit of measurement (if applicable).
+        entity_id: Inventory item UUID (if applicable).
+    """
+    message = {
+        "type": "scanner_action",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "entity_id": str(entity_id) if entity_id else None,
+        "data": {
+            k: _serialize_value(v)
+            for k, v in {
+                "action": action,
+                "barcode": barcode,
+                "product_name": product_name,
+                "station_id": station_id,
+                "mode": mode,
+                "quantity": quantity,
+                "unit": unit,
+            }.items()
+        },
+    }
+    await publish_message(message)
+
+
 async def broadcast_shopping_list_update(
     shopping_list_item_id: UUID,
     action: Literal["created", "updated", "purchased", "deleted"],
