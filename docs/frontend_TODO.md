@@ -123,11 +123,12 @@ frontend/
 - [x] Inactive state (empty/discarded) → opacity-60, consume disabled
 - [x] 30 tests passing
 
-### Increment 1.6: InventoryList Display (4h) — NEXT
-- [ ] Scrollable container using `useInventory` hook
-- [ ] Loading skeleton, error state, empty state
-- [ ] Render `InventoryItemCard` for each item
-- [ ] Test: All states
+### ✅ Increment 1.6: InventoryList Display (4h) — DONE
+- [x] `frontend/components/inventory/InventoryList.tsx`
+- [x] Uses `useInventoryList` hook; renders `InventoryItemCard` per item
+- [x] States: loading skeleton, error, empty
+- [x] Optional `productNames: Record<string, string>` prop; falls back to truncated UUID
+- [x] 23 tests passing
 
 ### Increment 1.7: Main Page Integration (2h)
 - [ ] Update `/app/page.tsx` to render InventoryList
@@ -449,4 +450,4 @@ frontend/
 
 ---
 
-**Progress**: 9/47 increments completed (~19% done) — through Increment 1.5
+**Progress**: 10/47 increments completed (~21% done) — through Increment 1.6

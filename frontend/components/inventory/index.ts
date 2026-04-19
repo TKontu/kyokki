@@ -11,3 +11,6 @@ export type { QuantityBarProps } from './QuantityBar'
 
 export { InventoryItemCard } from './InventoryItemCard'
 export type { InventoryItemCardProps } from './InventoryItemCard'
+
+export { InventoryList } from './InventoryList'
+export type { InventoryListProps } from './InventoryList'
