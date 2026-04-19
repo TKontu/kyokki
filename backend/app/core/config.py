@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import ConfigDict, computed_field
+from pydantic import ConfigDict, computed_field, field_validator
 from pydantic_settings import BaseSettings
 
 # Get project root directory (two levels up from this file: backend/app/core/config.py -> project root)
@@ -26,6 +26,17 @@ class Settings(BaseSettings):
     # Redis
     REDIS_HOST: str
     REDIS_PORT: int = 6379
+
+    # CORS — comma-separated list of allowed origins, e.g.
+    # ALLOWED_ORIGINS=http://localhost:3000,http://192.168.0.10:17301
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def parse_allowed_origins(cls, v: str | list) -> list[str]:
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
 
     # MinerU OCR Service
     MINERU_BASE_URL: str = "http://192.168.0.136:8000"

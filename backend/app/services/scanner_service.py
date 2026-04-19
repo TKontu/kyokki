@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging import get_logger
 from app.crud import inventory_item as crud_inventory
 from app.crud import product_master as crud_product
 from app.schemas.inventory_item import InventoryItemCreate
@@ -20,9 +21,15 @@ from app.services.off_service import (
     fetch_product_from_off,
 )
 
+logger = get_logger(__name__)
+
 GLOBAL_MODE_KEY = "scanner:mode:global"
 DEFAULT_MODE = "add"
 STATION_ONLINE_TTL = 300  # 5 minutes
+
+# Key prefix/suffix used to extract station_id from Redis keys
+_STATION_KEY_PREFIX = "scanner:station:"
+_STATION_ONLINE_SUFFIX = ":online"
 
 
 def _mode_key(station_id: str) -> str:
@@ -45,6 +52,7 @@ async def get_mode(station_id: str | None) -> tuple[str, bool]:
     """Get effective scanning mode and whether it's the global fallback.
 
     Checks station-specific key first, falls back to global, then DEFAULT_MODE.
+    Returns DEFAULT_MODE silently if Redis is unavailable.
 
     Args:
         station_id: Optional station ID to check.
@@ -52,16 +60,20 @@ async def get_mode(station_id: str | None) -> tuple[str, bool]:
     Returns:
         Tuple of (mode, is_global).
     """
-    redis = await get_redis_client()
+    try:
+        redis = await get_redis_client()
 
-    if station_id:
-        station_mode = await redis.get(_mode_key(station_id))
-        if station_mode:
-            return station_mode.decode(), False
+        if station_id:
+            station_mode = await redis.get(_mode_key(station_id))
+            if station_mode:
+                return station_mode.decode(), False
 
-    global_mode = await redis.get(GLOBAL_MODE_KEY)
-    if global_mode:
-        return global_mode.decode(), True
+        global_mode = await redis.get(GLOBAL_MODE_KEY)
+        if global_mode:
+            return global_mode.decode(), True
+
+    except Exception:
+        logger.warning("redis_unavailable_mode_fallback")
 
     return DEFAULT_MODE, True
 
@@ -78,68 +90,86 @@ async def set_mode(mode: str, station_id: str | None) -> None:
     await redis.set(key, mode)
 
 
-async def update_station_activity(station_id: str, mode: str) -> None:
+async def update_station_activity(station_id: str) -> None:
     """Record scan activity for a station.
 
     Updates last_scan timestamp, increments scan_count, and marks station online
-    with a TTL of STATION_ONLINE_TTL seconds.
+    with a TTL of STATION_ONLINE_TTL seconds.  Station mode is NOT set here —
+    use POST /scanner/mode to set per-station mode explicitly.
 
     Args:
         station_id: Station ID to update.
-        mode: Current mode (stored alongside station info).
     """
-    redis = await get_redis_client()
-    now = datetime.now(UTC).isoformat()
+    try:
+        redis = await get_redis_client()
+        now = datetime.now(UTC).isoformat()
 
-    await redis.set(_station_last_scan_key(station_id), now)
-    await redis.incr(_station_scan_count_key(station_id))
-    await redis.set(_station_online_key(station_id), "true", ex=STATION_ONLINE_TTL)
-
-    # Also ensure station mode is set (so stations endpoint can read it)
-    existing = await redis.get(_mode_key(station_id))
-    if not existing:
-        await redis.set(_mode_key(station_id), mode)
+        await redis.set(_station_last_scan_key(station_id), now)
+        await redis.incr(_station_scan_count_key(station_id))
+        await redis.set(_station_online_key(station_id), "true", ex=STATION_ONLINE_TTL)
+    except Exception:
+        logger.warning(
+            "redis_unavailable_station_activity_skipped",
+            extra={"station_id": station_id},
+        )
 
 
 async def get_all_stations() -> list[dict]:
     """Return all known stations with their current state.
 
     Discovers stations by scanning for online keys, then reads their metadata.
+    The effective mode shown is the station-specific mode if set, otherwise the
+    current global mode (same resolution as get_mode).
 
     Returns:
-        List of station info dicts.
+        List of station info dicts, or empty list if Redis is unavailable.
     """
-    redis = await get_redis_client()
+    try:
+        redis = await get_redis_client()
+        online_keys = await redis.keys("scanner:station:*:online")
 
-    # Find all station online keys
-    online_keys = await redis.keys("scanner:station:*:online")
-    stations = []
+        # Read global mode once as the fallback for all stations
+        global_mode_raw = await redis.get(GLOBAL_MODE_KEY)
+        global_mode = global_mode_raw.decode() if global_mode_raw else DEFAULT_MODE
 
-    for key in online_keys:
-        # Extract station_id from key pattern "scanner:station:{id}:online"
-        key_str = key.decode() if isinstance(key, bytes) else key
-        parts = key_str.split(":")
-        if len(parts) != 4:
-            continue
-        station_id = parts[2]
+        stations = []
+        for key in online_keys:
+            key_str = key.decode() if isinstance(key, bytes) else key
+            # Robust extraction: strip known prefix/suffix instead of splitting on ":"
+            if not (
+                key_str.startswith(_STATION_KEY_PREFIX)
+                and key_str.endswith(_STATION_ONLINE_SUFFIX)
+            ):
+                continue
+            station_id = key_str[
+                len(_STATION_KEY_PREFIX) : -len(_STATION_ONLINE_SUFFIX)
+            ]
+            if not station_id:
+                continue
 
-        # Read station metadata
-        last_scan_raw = await redis.get(_station_last_scan_key(station_id))
-        scan_count_raw = await redis.get(_station_scan_count_key(station_id))
-        online_raw = await redis.get(_station_online_key(station_id))
-        mode_raw = await redis.get(_mode_key(station_id))
+            last_scan_raw = await redis.get(_station_last_scan_key(station_id))
+            scan_count_raw = await redis.get(_station_scan_count_key(station_id))
+            online_raw = await redis.get(_station_online_key(station_id))
+            mode_raw = await redis.get(_mode_key(station_id))
 
-        stations.append(
-            {
-                "station_id": station_id,
-                "mode": mode_raw.decode() if mode_raw else DEFAULT_MODE,
-                "last_scan": last_scan_raw.decode() if last_scan_raw else None,
-                "scan_count": int(scan_count_raw) if scan_count_raw else 0,
-                "online": online_raw is not None,
-            }
-        )
+            # Use station-specific mode if set, otherwise inherit global mode
+            effective_mode = mode_raw.decode() if mode_raw else global_mode
 
-    return stations
+            stations.append(
+                {
+                    "station_id": station_id,
+                    "mode": effective_mode,
+                    "last_scan": last_scan_raw.decode() if last_scan_raw else None,
+                    "scan_count": int(scan_count_raw) if scan_count_raw else 0,
+                    "online": online_raw is not None,
+                }
+            )
+
+        return stations
+
+    except Exception:
+        logger.warning("redis_unavailable_stations_empty")
+        return []
 
 
 async def process_scan(
@@ -165,7 +195,7 @@ async def process_scan(
         ValueError: If product not found (404 case) or no active inventory (consume).
     """
     if station_id:
-        await update_station_activity(station_id, mode)
+        await update_station_activity(station_id)
 
     if mode == "consume":
         return await _handle_consume(db, barcode, station_id, quantity)
@@ -277,6 +307,8 @@ async def _handle_consume(
     # Consume from oldest (first due to expiry ASC ordering)
     inv_item = active_items[0]
     consume_qty = min(quantity, inv_item.current_quantity)
+    capped = consume_qty < quantity
+
     updated = await crud_inventory.consume_inventory_item(db, inv_item.id, consume_qty)
 
     await broadcast_scanner_action(
@@ -297,6 +329,10 @@ async def _handle_consume(
         product_name=product.canonical_name,
     )
 
+    message = f"Consumed {consume_qty} {inv_item.unit} of {product.canonical_name}"
+    if capped:
+        message += f" (only {consume_qty} available; {quantity} requested)"
+
     return {
         "success": True,
         "action": "inventory_consumed",
@@ -312,7 +348,7 @@ async def _handle_consume(
             "status": updated.status if updated else "empty",
             "unit": inv_item.unit,
         },
-        "message": f"Consumed {consume_qty} {inv_item.unit} of {product.canonical_name}",
+        "message": message,
     }
 
 

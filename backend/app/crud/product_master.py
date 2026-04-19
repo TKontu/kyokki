@@ -3,10 +3,22 @@
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.product_master import ProductMaster
 from app.schemas.product_master import ProductMasterCreate, ProductMasterUpdate
+
+
+def _unit_type(unit: str) -> str:
+    """Derive SQLAlchemy unit_type from a unit string."""
+    if unit in ("ml", "cl", "l"):
+        return "volume"
+    if unit in ("g", "kg"):
+        return "weight"
+    if unit == "pcs":
+        return "count"
+    return "unit"
 
 
 async def get_products(
@@ -186,6 +198,8 @@ async def enrich_product_from_off_data(
 
         storage_type = storage_type_map.get(enriched_data["category"], "pantry")
 
+        default_unit = enriched_data.get("default_unit", "pcs")
+
         new_product = ProductMaster(
             canonical_name=enriched_data["canonical_name"],
             category=enriched_data["category"],
@@ -193,13 +207,22 @@ async def enrich_product_from_off_data(
             default_shelf_life_days=category_defaults.default_shelf_life_days
             if category_defaults
             else 365,
-            unit_type="unit",  # Default, can be updated later
-            default_unit="pcs",  # Default, can be updated later
+            unit_type=_unit_type(default_unit),
+            default_unit=default_unit,
+            default_quantity=enriched_data.get("default_quantity"),
             off_product_id=enriched_data["off_product_id"],
             off_data=enriched_data["off_data"],
         )
 
-        db.add(new_product)
-        await db.commit()
-        await db.refresh(new_product)
-        return new_product, True
+        try:
+            db.add(new_product)
+            await db.commit()
+            await db.refresh(new_product)
+            return new_product, True
+        except IntegrityError:
+            # Concurrent request already created this product — fetch and return it
+            await db.rollback()
+            existing = await get_product_by_barcode(db, barcode)
+            if existing:
+                return existing, False
+            raise

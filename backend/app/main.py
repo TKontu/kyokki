@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api.router import api_router
 from .core.config import settings
 from .core.logging import get_logger, setup_logging
+from .services.broadcast_helpers import close_redis_client
 from .services.websockets import manager
 
 # from .middleware.logging import LoggingMiddleware  # TODO: Create if needed
@@ -64,9 +65,9 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Application shutting down...")
-    # Cancel the listener task and wait for it to finish
     listener_task.cancel()
     await listener_task
+    await close_redis_client()
 
 
 app = FastAPI(title="Kyokki API", lifespan=lifespan)
@@ -74,13 +75,10 @@ app = FastAPI(title="Kyokki API", lifespan=lifespan)
 # Add logging middleware (TODO: uncomment when middleware is created)
 # app.add_middleware(LoggingMiddleware)
 
-# CORS Middleware
+# CORS — origins configured via ALLOWED_ORIGINS env var (comma-separated)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
