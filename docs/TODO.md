@@ -35,7 +35,8 @@
 - [x] Core UI components (Button, Card, Badge, Skeleton)
 - [x] Inventory API client + useInventory hook
 - [x] ExpiryBadge, QuantityBar, InventoryItemCard components
-- [ ] InventoryList + Main page integration (Increments 1.6–1.7, in progress)
+- [x] InventoryList component (Increment 1.6)
+- [ ] Main page integration (Increment 1.7, next)
 - [ ] Consumption flow (Phase 2 frontend)
 - [ ] Receipt camera capture
 - [ ] PWA / offline support
@@ -183,7 +184,7 @@
 5. [x] Frontend Phase 0: Next.js 14, types, API client, testing infra (PR #8)
 6. [x] Frontend Phase 1 Increments 1.1–1.5: UI components, ExpiryBadge, QuantityBar, InventoryItemCard (PRs #15, #18, #21)
 
-**Stats**: 93 backend non-DB tests passing, 9 frontend increments complete
+**Stats**: 93 backend non-DB tests passing, 10 frontend increments complete (111 frontend tests)
 
 ---
 

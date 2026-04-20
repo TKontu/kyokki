@@ -4,9 +4,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.exceptions import handle_integrity_errors
 from app.crud import product_master as crud_product
 from app.db.session import get_db
 from app.schemas.product_master import (
@@ -68,19 +68,8 @@ async def create_product(
     product: ProductMasterCreate, db: AsyncSession = Depends(get_db)
 ) -> ProductMasterResponse:
     """Create a new product."""
-    try:
+    async with handle_integrity_errors():
         return await crud_product.create_product(db, product)
-    except IntegrityError as e:
-        # Check if it's a foreign key constraint error
-        if "category" in str(e.orig):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Category '{product.category}' does not exist",
-            ) from e
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Database integrity error",
-        ) from e
 
 
 @router.patch("/{product_id}", response_model=ProductMasterResponse)
@@ -129,26 +118,22 @@ async def enrich_product(
         - 503: Open Food Facts API unavailable
     """
     try:
-        # Fetch and enrich data from OFF
         enriched_data = await enrich_product_from_off(barcode)
 
-        # Create or update product
-        product, created = await crud_product.enrich_product_from_off_data(
-            db, enriched_data
-        )
+        async with handle_integrity_errors():
+            product, created = await crud_product.enrich_product_from_off_data(
+                db, enriched_data
+            )
 
-        # Serialize response
         response_data = ProductMasterResponse.model_validate(
             product, from_attributes=True
         ).model_dump(mode="json")
 
-        # Return appropriate status code
         if created:
             return JSONResponse(
                 content=response_data, status_code=status.HTTP_201_CREATED
             )
-        else:
-            return JSONResponse(content=response_data, status_code=status.HTTP_200_OK)
+        return JSONResponse(content=response_data, status_code=status.HTTP_200_OK)
 
     except OffProductNotFoundError as e:
         raise HTTPException(
@@ -159,10 +144,4 @@ async def enrich_product(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Open Food Facts API unavailable: {str(e)}",
-        ) from e
-    except IntegrityError as e:
-        # Handle database integrity errors (e.g., invalid category)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Database integrity error: {str(e)}",
         ) from e
