@@ -12,5 +12,6 @@ export function useProductList(params?: ProductListParams) {
   return useQuery({
     queryKey: productKeys.list(params),
     queryFn: () => productsAPI.list(params),
+    staleTime: 5 * 60_000,
   })
 }

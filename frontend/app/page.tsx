@@ -6,7 +6,7 @@ import { InventoryList } from '@/components/inventory'
 import { useProductList } from '@/hooks/useProducts'
 
 export default function Home() {
-  const { data: products } = useProductList()
+  const { data: products, isError: productsError } = useProductList()
 
   const productNames = useMemo(
     () => Object.fromEntries((products ?? []).map((p) => [p.id, p.canonical_name])),
@@ -24,6 +24,11 @@ export default function Home() {
           Components
         </Link>
       </header>
+      {productsError && (
+        <p className="px-6 py-2 text-sm bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400 border-b border-yellow-200 dark:border-yellow-800">
+          Could not load product names — showing item IDs instead.
+        </p>
+      )}
       <main className="px-6 py-4">
         <InventoryList productNames={productNames} />
       </main>

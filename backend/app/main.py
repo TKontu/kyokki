@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 import redis.asyncio as redis
@@ -17,39 +18,53 @@ from .services.websockets import manager
 async def redis_listener(app: FastAPI):
     """
     Listens to a Redis channel and broadcasts messages to WebSocket clients.
+    Reconnects automatically with exponential backoff on failure.
     """
     logger = get_logger("redis_listener")
-    redis_client = redis.from_url(
-        f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
-    )
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe("updates")
+    backoff = 1  # seconds; doubles on each failure, capped at 60
 
-    logger.info("Redis listener started. Waiting for messages...")
-    try:
-        while True:
-            message = await pubsub.get_message(
-                ignore_subscribe_messages=True, timeout=1.0
+    while True:
+        redis_client = None
+        pubsub = None
+        try:
+            redis_client = redis.from_url(
+                f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
             )
-            if message and message.get("type") == "message":
-                logger.info(
-                    "Received message from Redis",
-                    extra={
-                        "operation": "redis_message_received",
-                        "message_data": message["data"].decode("utf-8"),
-                    },
+            pubsub = redis_client.pubsub()
+            await pubsub.subscribe("updates")
+            backoff = 1  # reset on successful connect
+            logger.info("redis_listener_connected")
+
+            while True:
+                message = await pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=1.0
                 )
-                await manager.broadcast(message["data"].decode("utf-8"))
-            await asyncio.sleep(0.1)  # Short sleep to prevent high CPU usage
-    except asyncio.CancelledError:
-        logger.info("Redis listener cancelled.")
-    except Exception as e:
-        logger.error(f"Redis listener error: {str(e)}", exc_info=True)
-    finally:
-        logger.info("Closing Redis listener.")
-        await pubsub.unsubscribe("updates")
-        await pubsub.aclose()
-        await redis_client.aclose()
+                if message and message.get("type") == "message":
+                    logger.info(
+                        "redis_message_received",
+                        extra={"message_data": message["data"].decode("utf-8")},
+                    )
+                    await manager.broadcast(message["data"].decode("utf-8"))
+                await asyncio.sleep(0.1)
+
+        except asyncio.CancelledError:
+            logger.info("redis_listener_cancelled")
+            break  # clean shutdown — do not retry
+
+        except Exception as e:
+            logger.error(
+                "redis_listener_error",
+                extra={"error": str(e), "retry_in_seconds": backoff},
+                exc_info=True,
+            )
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60)
+
+        finally:
+            for resource in (pubsub, redis_client):
+                if resource is not None:
+                    with contextlib.suppress(Exception):
+                        await resource.aclose()
 
 
 @asynccontextmanager
