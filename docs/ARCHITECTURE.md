@@ -1,5 +1,29 @@
 # Kyokki — System Architecture
 
+> **As built (2026-09-13).** This document is the target design. What actually exists on
+> `main` today, so that work is planned against reality rather than the diagrams:
+>
+> - **Running:** FastAPI API, PostgreSQL 15, Redis (pub/sub for WebSocket broadcasts and
+>   scanner mode state), Next.js 14 frontend. No Traefik, no TLS; the prod compose publishes
+>   plain HTTP ports on the LAN.
+> - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images) → one LLM
+>   extraction call (OpenAI-compatible endpoint, vLLM or Ollama) → RapidFuzz match against
+>   `product_master.canonical_name` → review → confirm. Synchronous; runs inside the request.
+>   No store parsers, no learned templates, no alias lookup, no Ollama vision fallback.
+> - **Not built:** Celery worker (the container exists but crash-loops on a missing module
+>   and is being removed), `/api/receipts/batch`, `/api/inventory/reconcile`,
+>   `/api/scanner/input` (the real endpoint is `/api/scanner/scan`), GS1 parsing, shopping
+>   list UI, Home Assistant, offline mode, service worker.
+> - **Written but unused:** `store_product_alias` and `consumption_log` tables; nothing
+>   reads or writes them yet. Both get their first writers in the MVP plan (R1/R2 and S1).
+> - **MVP decisions (see `docs/TODO.md`):** polling instead of WebSockets on the iPad,
+>   FastAPI `BackgroundTasks` instead of Celery, `<input type="file" capture>` instead of
+>   `getUserMedia`, LLM-based extraction stays the general core with a generic heuristic
+>   line parser as fallback; a vision model is under evaluation as an alternative front end
+>   to OCR+LLM (MVP-R0). Open operator decisions: DEC-1…4 in `docs/TODO.md`.
+>
+> Findings behind these notes: `docs/PLAN_REVIEW_2026-09-13.md`.
+
 ## 1. Vision & Design Principles
 
 ### Core Vision
@@ -20,6 +44,8 @@ Self-hosted kitchen inventory system that **reduces food waste** through intelli
 ---
 
 ## 2. System Architecture
+
+Target topology (post-MVP; see the as-built note at the top for what runs today):
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -90,7 +116,8 @@ product_master (
   updated_at TIMESTAMP
 )
 
--- How stores name products on receipts
+-- How stores name products on receipts. Written on receipt confirm (MVP-R2) and consulted
+-- before fuzzy matching (MVP-R1): this is the general, per-store learning mechanism.
 store_product_alias (
   id UUID PK,
   product_master_id FK,
@@ -148,10 +175,12 @@ receipt (
   image_path VARCHAR,
   ocr_raw_text TEXT,
   ocr_structured JSONB,
-  processing_status VARCHAR,       -- queued, processing, completed, failed
+  processing_status VARCHAR,       -- uploaded, processing, completed, failed, confirmed
   batch_id UUID NULL,              -- For multi-receipt batch processing
   items_extracted INT,
   items_matched INT,
+  error TEXT NULL,                 -- planned MVP-R3: failure reason
+  processing_started_at TIMESTAMP NULL, -- planned MVP-R3: stale-state recovery
   created_at TIMESTAMP
 )
 
@@ -186,8 +215,20 @@ category (
 
 ### 4.1 Receipt Scanning (Primary)
 ```
-Photo → MinerU OCR → Store Parser → Product Matching → Review → Inventory
+Photo or PDF
+  → text          pdfplumber for PDF (digital e-receipts), MinerU OCR for images
+  → extraction    LLM, store-agnostic (vision model directly from the image under
+                  evaluation, MVP-R0); generic heuristic line parser as fallback (MVP-R3b)
+  → matching      store_product_alias exact hit first, then RapidFuzz on canonical names
+                  and alias names; unmatched items get an LLM category suggestion
+  → review        per-item edit / re-match / skip on the iPad
+  → confirm       creates products for new items, inventory items, and alias rows
 ```
+
+Generality principle: the LLM path must work for a store the system has never seen.
+Store-specific accelerators (learned templates, `ADAPTIVE_PARSER_SPEC.md`) and digital
+receipt import adapters (loyalty-app exports, e-mail ingestion) are post-MVP layers on top
+of this pipeline, never replacements for it.
 
 **Multi-Receipt Batch Mode:**
 - Capture multiple receipt photos
@@ -245,10 +286,12 @@ GET https://world.openfoodfacts.org/api/v2/product/{barcode}
 
 **Caching:** Store in `product_master.off_data` to reduce API calls.
 
-### 5.3 Ollama (Fallback)
-For unknown products when OCR + fuzzy match + OFF all fail.
-- Product identification from receipt text
-- Category inference
+### 5.3 LLM endpoint (Primary extraction)
+Any OpenAI-compatible chat endpoint (`LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY`): vLLM or
+Ollama on the homelab. Used for receipt extraction and for category suggestion of unmatched
+items. Thinking-mode models must run with thinking disabled for this workload
+(`docs/vLLM_MANUAL_TEST.md`). A vision-capable model reading the receipt image directly is
+an alternative front end under evaluation (MVP-R0).
 
 ---
 
@@ -325,19 +368,24 @@ POST   /api/inventory              Add item
 PATCH  /api/inventory/{id}         Update
 DELETE /api/inventory/{id}         Remove
 POST   /api/inventory/{id}/consume Log consumption
-POST   /api/inventory/reconcile    Batch update for sync recovery
+POST   /api/inventory/reconcile    Batch update for sync recovery (planned, post-MVP)
 
 # Products
 GET    /api/products               Search
 POST   /api/products               Create
 GET    /api/products/barcode/{bc}  Lookup by barcode
-POST   /api/products/enrich/{id}   Trigger OFF lookup
+POST   /api/products/enrich?barcode=  Trigger OFF lookup
+
+# Categories
+GET    /api/categories             List (seeded shelf-life defaults)
 
 # Receipts
-POST   /api/receipts/scan          Upload single image
-POST   /api/receipts/batch         Upload multiple images
+POST   /api/receipts/scan          Upload single image or PDF
+GET    /api/receipts               List (filter by status, store)
 GET    /api/receipts/{id}          Get status/results
+POST   /api/receipts/{id}/process  Run extraction (202 + poll after MVP-R3)
 POST   /api/receipts/{id}/confirm  Confirm items
+POST   /api/receipts/batch         Upload multiple images        (planned, post-MVP)
 
 # Shopping List
 GET    /api/shopping               Get list
@@ -347,9 +395,10 @@ DELETE /api/shopping/{id}          Remove
 POST   /api/shopping/{id}/purchase Mark purchased
 
 # Scanner
-POST   /api/scanner/input          Process barcode input
+POST   /api/scanner/scan           Process barcode input
 GET    /api/scanner/mode           Get current mode
 POST   /api/scanner/mode           Set mode (add/consume/lookup)
+GET    /api/scanner/stations       List active stations
 
 # WebSocket (Real-Time Updates)
 WS     /api/ws                     Real-time broadcasts
@@ -361,6 +410,9 @@ GET    /api/health                 Health check
 ---
 
 ## 9. WebSocket Real-Time Updates
+
+MVP note: the iPad PWA polls (inventory every 30 s, a processing receipt every 3 s) and does
+not open this socket. The broadcasts below are emitted today and will be consumed post-MVP.
 
 ### 9.1 Architecture
 The system uses **Redis Pub/Sub** with WebSocket broadcasting for real-time updates.
@@ -536,27 +588,28 @@ Family member adds item via phone
 | Component | Technology |
 |-----------|------------|
 | Frontend | Next.js 14, PWA, Tailwind |
-| Backend | FastAPI, Python 3.11+ |
-| Database | PostgreSQL 15 |
-| Queue | Celery + Redis |
-| Real-Time | WebSocket + Redis Pub/Sub |
-| OCR | MinerU (existing homelab) |
-| LLM | vLLM with Qwen3-8B (homelab) |
+| Backend | FastAPI, Python 3.12 |
+| Database | PostgreSQL 15, Alembic |
+| Background work | FastAPI `BackgroundTasks` (MVP-R3); Celery removed |
+| Real-Time | WebSocket + Redis Pub/Sub (emitted today; PWA polls until post-MVP) |
+| OCR | MinerU (homelab), pdfplumber for digital PDFs |
+| LLM | Any OpenAI-compatible endpoint (vLLM / Ollama); model set by `LLM_MODEL` |
 | Product DB | Open Food Facts API |
-| AI Fallback | Ollama (Qwen2-VL) |
-| Proxy | Traefik |
+| Extraction fallback | Generic heuristic line parser (MVP-R3b); vision model under evaluation (MVP-R0) |
+| Proxy / TLS | None for MVP. Same-origin Next.js rewrite proposed (DEC-3); Caddy or Traefik post-MVP |
 
 ---
 
 ## 11. Deployment
 
-Docker Compose with:
-- `traefik` — SSL, routing
-- `frontend` — Next.js
-- `api` — FastAPI
-- `celery-worker` — Background tasks
-- `postgres` — Database
-- `redis` — Queue/cache
+`docker-compose.prod.yml` (MVP, plain HTTP on the LAN):
+- `frontend` — Next.js standalone, port 17301
+- `kyokki-api` — FastAPI (uvicorn), port 17300; runs receipt processing in-process
+- `postgres` — Database (no host port after MVP-F2)
+- `redis` — Pub/sub and scanner state (no host port after MVP-F2)
+
+Post-MVP: a reverse proxy with TLS (Caddy or Traefik) in front of `frontend`, which also
+carries the WebSocket. Runbook: `docs/DEPLOY.md` (MVP-F2).
 
 External services:
 - MinerU OCR (your homelab)

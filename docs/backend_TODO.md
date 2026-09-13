@@ -45,15 +45,21 @@
 - Scanner API: `POST /api/scanner/scan`, mode management, station tracking
 - OFF unit parsing, UNIQUE constraint on off_product_id, CORS env config, Redis resilience
 
-**📍 Next: backend increments of the MVP plan (`docs/TODO.md`)**
-- MVP-S1 `product_name` + `category` on inventory responses
-- MVP-R1 typed `ExtractedItem` with per-item match result and `suggested_category`
-- MVP-R2 confirm auto-creates products for new items; expiry/location overrides
-- MVP-R3 background receipt processing (FastAPI `BackgroundTasks`, 202, status transitions)
-- MVP-R4 real-receipt validation on the homelab; LLM settings that finish reliably
+**📍 Next: backend increments of the MVP plan (`docs/TODO.md`, amended 2026-09-13)**
+- MVP-R0 extraction feasibility spike on the homelab (text LLM vs vision model) — Wave 1
+- MVP-S1 `product_name` + `category` on inventory responses; Decimal→number (DEC-2);
+  server-side inactive filter; `consumption_log` writes
+- MVP-R1 typed `ExtractedItem` with per-item match result, alias-first matching, unit
+  normalisation (DEC-1), single status enum, category suggestion call
+- MVP-R2 confirm auto-creates products for new items, writes `store_product_alias`,
+  category-derived location/storage type, expiry/location overrides
+- MVP-R3 background receipt processing (FastAPI `BackgroundTasks`, 202, stale recovery)
+- MVP-R3b generic heuristic line-parser fallback
+- MVP-R4 real-receipt validation on the homelab with R0's settings
 
-GS1 DataMatrix parser and Home Assistant integration are post-MVP.
-- Celery async receipt processing (optional)
+Celery is removed in MVP-F2 (the worker crash-loops on the missing `app.tasks` module).
+GS1 DataMatrix parser, Home Assistant integration, learned store templates and digital
+receipt import adapters are post-MVP.
 
 ---
 
