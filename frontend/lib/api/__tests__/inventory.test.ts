@@ -46,6 +46,40 @@ describe('Inventory API', () => {
     ;(global.fetch as jest.Mock).mockClear()
   })
 
+  describe('quantity normalization', () => {
+    // Regression: the backend sends Decimal columns as strings ("1000.00"); the
+    // inventory page crashed with "toFixed is not a function" on the prod stack.
+    const wireItem = {
+      ...mockInventoryItem,
+      initial_quantity: '1000.00' as unknown as number,
+      current_quantity: '750.50' as unknown as number,
+    }
+
+    it('coerces string quantities to numbers on list', async () => {
+      ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [wireItem],
+      })
+
+      const [item] = await inventoryAPI.list()
+      expect(item.initial_quantity).toBe(1000)
+      expect(item.current_quantity).toBe(750.5)
+    })
+
+    it('coerces string quantities on consume', async () => {
+      ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...wireItem, current_quantity: '500.00' }),
+      })
+
+      const item = await inventoryAPI.consume(mockInventoryItem.id, { quantity: 250 })
+      expect(item.current_quantity).toBe(500)
+      expect(typeof item.initial_quantity).toBe('number')
+    })
+  })
+
   describe('list', () => {
     it('should fetch all inventory items', async () => {
       ;(global.fetch as jest.Mock).mockResolvedValueOnce({
