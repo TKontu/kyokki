@@ -87,7 +87,7 @@ Operator-gated. An agent may lay out options but must not pick one and proceed.
 | DEC-1 | Canonical unit vocabulary: `ml \| g \| pcs` with R1 normalising `kg→g`, `l→ml`, `unit→pcs`, or keep receipt-native units with display conversion | R1, C2, S3 | `ml \| g \| pcs` | **decided 2026-09-13**: `dl \| tsp \| tbsp \| g \| pcs`. ml, l and kg are not canonical; conversion factors for R1 still to confirm (see R1) |
 | DEC-2 | Quantities on the wire: backend serialises `Decimal` as JSON number, or frontend types become `string` and parse at the API boundary (today the API sends `"750.00"` and the TS types say `number`) | S1, C2 | JSON number | **decided 2026-09-13**: JSON number, applied to every Decimal field in API schemas in MVP-S1 |
 | DEC-3 | Frontend→API path: same-origin Next.js rewrite `/api/*` → `kyokki-api:8000` (no CORS, no build-time LAN IP), or keep `NEXT_PUBLIC_API_URL` + `ALLOWED_ORIGINS` | F2 | rewrite | **decided 2026-09-13**: rewrite; shipped in MVP-F2 (#26) |
-| DEC-4 | If the R0 spike cannot finish a 60-line receipt: heuristic parser becomes primary with the LLM only categorising; switch model; or accept chunked multi-call extraction | R1, R4 | decide the fallback order now | open |
+| DEC-4 | If the R0 spike cannot finish a 60-line receipt: heuristic parser becomes primary with the LLM only categorising; switch model; or accept chunked multi-call extraction | R1, R4 | decide the fallback order now | **not needed**: R0 passed on 2026-09-14 |
 
 ### Increment detail
 
@@ -159,6 +159,14 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
   a fallback. Record timings and the working `curl` in `docs/vLLM_MANUAL_TEST.md`.
 - **Acceptance:** one candidate completes the 60-line receipt in under 60 s with ≥ 80 % of
   product lines. Otherwise file DEC-4's ruling before Wave 2 starts.
+- [x] **Passed 2026-09-14** (details and working request in `docs/vLLM_MANUAL_TEST.md`,
+  harness in `docs/spikes/r0_extraction_spike.py`). On the llama-swap gateway
+  (`192.168.0.94:9292/v1`, one RTX 3090 usable), `muse-glimmer` extracted 49/49 products with
+  all quantities and weights correct in 41–44 s from text and 49–53 s from a rendered image,
+  using compact output keys, `json_schema` and `reasoning_strength: minimal`. It is the
+  always-loaded model, so no cold load. From text the names were exact (49/49); from a clean
+  rendered image ~8 names per receipt were misspelt. Primary path (MinerU OCR → text vs.
+  photo → vision) is decided in R4 with real photos once MinerU is back; R1 wires both.
 
 #### MVP-S1 — `product_name` and `category` on inventory responses
 - `InventoryItemResponse` gains `product_name: str` and `category: str` (from
@@ -559,10 +567,10 @@ Ordered by expected value once MVP is live.
 
 ### 🚧 Sprint 5: MVP on the iPad (IN PROGRESS, started 2026-09-13)
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
-- Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [ ] R0
-- Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [ ] DEC-4 (if R0 fails)
+- Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
+- Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
 - Wave 2: [x] S1 (PR #27)  [ ] R1  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [ ] S2 (PR open)  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
+- Wave 3: [x] S2 (PR #30)  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance
