@@ -7,7 +7,7 @@ Kyokki is a self-hosted kitchen inventory system that reduces food waste. Receip
 everything runs local-first on a homelab. See `docs/ARCHITECTURE.md` for the full design.
 
 **Stack:** Python 3.12, FastAPI, async SQLAlchemy + asyncpg, Alembic, PostgreSQL, Redis
-(WebSocket pub/sub, Celery) · Next.js 14 App Router, TypeScript, Tailwind, TanStack Query,
+(WebSocket pub/sub) · Next.js 14 App Router, TypeScript, Tailwind, TanStack Query,
 Jest + React Testing Library · Docker Compose for services.
 **Profiles:** `.claude/templates/profiles/python-fastapi.md` and `node-typescript.md` hold the
 detailed style and pattern guidance. Read them on demand; they are not loaded here.
@@ -42,7 +42,9 @@ everything from the repo root. Backend tools go through `python -m` so no activa
   (`backend/pytest.ini`). Set `KYOKKI_TEST_REQUIRE_DB=1` (CI does) to fail instead of skip
   when PostgreSQL is unreachable.
 - Migrations run through Docker only, because the `postgres` hostname resolves inside the
-  compose network: `docker compose run --rm kyokki-api alembic upgrade head`. See `backend/README.md`.
+  compose network: `docker compose run --rm kyokki-api alembic upgrade head` (add
+  `-f docker-compose.prod.yml` on the homelab). CI runs `alembic check`, so every model change
+  needs a revision. Deploy runbook: `docs/DEPLOY.md`.
 - CI (`.github/workflows/`) runs ruff, mypy, pytest with coverage, and the frontend lint, tsc,
   jest, and build. Match it locally before opening a PR.
 

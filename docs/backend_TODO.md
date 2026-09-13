@@ -57,7 +57,7 @@
 - MVP-R3b generic heuristic line-parser fallback
 - MVP-R4 real-receipt validation on the homelab with R0's settings
 
-Celery is removed in MVP-F2 (the worker crash-loops on the missing `app.tasks` module).
+Celery was removed in MVP-F2 (#26); the worker had crash-looped on the missing `app.tasks` module.
 GS1 DataMatrix parser, Home Assistant integration, learned store templates and digital
 receipt import adapters are post-MVP.
 

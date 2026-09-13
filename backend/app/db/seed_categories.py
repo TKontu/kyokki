@@ -1,8 +1,16 @@
-"""Seed data for product categories."""
+"""Seed data for product categories.
+
+Run inside the API container to seed a fresh database:
+
+    python -m app.db.seed_categories
+"""
+
+import asyncio
 
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import AsyncSessionLocal
 from app.models.category import Category
 
 # Seed data based on common food categories and their typical shelf lives
@@ -124,3 +132,14 @@ async def seed_categories(session: AsyncSession) -> None:
     )
 
     await session.execute(stmt)
+
+
+async def main() -> None:
+    """Seed categories using the application's database settings and commit."""
+    async with AsyncSessionLocal() as session:
+        await seed_categories(session)
+        await session.commit()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

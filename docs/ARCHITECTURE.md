@@ -4,14 +4,15 @@
 > `main` today, so that work is planned against reality rather than the diagrams:
 >
 > - **Running:** FastAPI API, PostgreSQL 15, Redis (pub/sub for WebSocket broadcasts and
->   scanner mode state), Next.js 14 frontend. No Traefik, no TLS; the prod compose publishes
->   plain HTTP ports on the LAN.
+>   scanner mode state), Next.js 14 frontend. The frontend proxies `/api/*` to the API on the
+>   same origin (MVP-F2). No Traefik, no TLS; the prod compose publishes two plain HTTP ports on
+>   the LAN (17301 frontend, 17300 API). Runbook: [DEPLOY.md](./DEPLOY.md).
 > - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images) → one LLM
 >   extraction call (OpenAI-compatible endpoint, vLLM or Ollama) → RapidFuzz match against
 >   `product_master.canonical_name` → review → confirm. Synchronous; runs inside the request.
 >   No store parsers, no learned templates, no alias lookup, no Ollama vision fallback.
-> - **Not built:** Celery worker (the container exists but crash-loops on a missing module
->   and is being removed), `/api/receipts/batch`, `/api/inventory/reconcile`,
+> - **Not built:** Celery worker (removed in MVP-F2; it crash-looped on a missing module),
+>   `/api/receipts/batch`, `/api/inventory/reconcile`,
 >   `/api/scanner/input` (the real endpoint is `/api/scanner/scan`), GS1 parsing, shopping
 >   list UI, Home Assistant, offline mode, service worker.
 > - **Written but unused:** `store_product_alias` and `consumption_log` tables; nothing
@@ -20,7 +21,8 @@
 >   FastAPI `BackgroundTasks` instead of Celery, `<input type="file" capture>` instead of
 >   `getUserMedia`, LLM-based extraction stays the general core with a generic heuristic
 >   line parser as fallback; a vision model is under evaluation as an alternative front end
->   to OCR+LLM (MVP-R0). Open operator decisions: DEC-1…4 in `docs/TODO.md`.
+>   to OCR+LLM (MVP-R0). DEC-3 (same-origin rewrite) is decided and shipped; open operator
+>   decisions: DEC-1, DEC-2, DEC-4 in `docs/TODO.md`.
 >
 > Findings behind these notes: `docs/PLAN_REVIEW_2026-09-13.md`.
 
@@ -596,7 +598,7 @@ Family member adds item via phone
 | LLM | Any OpenAI-compatible endpoint (vLLM / Ollama); model set by `LLM_MODEL` |
 | Product DB | Open Food Facts API |
 | Extraction fallback | Generic heuristic line parser (MVP-R3b); vision model under evaluation (MVP-R0) |
-| Proxy / TLS | None for MVP. Same-origin Next.js rewrite proposed (DEC-3); Caddy or Traefik post-MVP |
+| Proxy / TLS | No TLS for MVP. Next.js proxies `/api/*` to the API on the same origin (MVP-F2); Caddy or Traefik post-MVP |
 
 ---
 
@@ -605,11 +607,11 @@ Family member adds item via phone
 `docker-compose.prod.yml` (MVP, plain HTTP on the LAN):
 - `frontend` — Next.js standalone, port 17301
 - `kyokki-api` — FastAPI (uvicorn), port 17300; runs receipt processing in-process
-- `postgres` — Database (no host port after MVP-F2)
-- `redis` — Pub/sub and scanner state (no host port after MVP-F2)
+- `postgres` — Database (no host port)
+- `redis` — Pub/sub and scanner state (no host port)
 
 Post-MVP: a reverse proxy with TLS (Caddy or Traefik) in front of `frontend`, which also
-carries the WebSocket. Runbook: `docs/DEPLOY.md` (MVP-F2).
+carries the WebSocket. Runbook: `docs/DEPLOY.md`.
 
 External services:
 - MinerU OCR (your homelab)

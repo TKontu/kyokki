@@ -86,7 +86,7 @@ Operator-gated. An agent may lay out options but must not pick one and proceed.
 | --- | --- | --- | --- | --- |
 | DEC-1 | Canonical unit vocabulary: `ml \| g \| pcs` with R1 normalising `kg→g`, `l→ml`, `unit→pcs`, or keep receipt-native units with display conversion | R1, C2, S3 | `ml \| g \| pcs` | open |
 | DEC-2 | Quantities on the wire: backend serialises `Decimal` as JSON number, or frontend types become `string` and parse at the API boundary (today the API sends `"750.00"` and the TS types say `number`) | S1, C2 | JSON number | open |
-| DEC-3 | Frontend→API path: same-origin Next.js rewrite `/api/*` → `kyokki-api:8000` (no CORS, no build-time LAN IP), or keep `NEXT_PUBLIC_API_URL` + `ALLOWED_ORIGINS` | F2 | rewrite | open |
+| DEC-3 | Frontend→API path: same-origin Next.js rewrite `/api/*` → `kyokki-api:8000` (no CORS, no build-time LAN IP), or keep `NEXT_PUBLIC_API_URL` + `ALLOWED_ORIGINS` | F2 | rewrite | **decided 2026-09-13**: rewrite; shipped in MVP-F2 (#26) |
 | DEC-4 | If the R0 spike cannot finish a 60-line receipt: heuristic parser becomes primary with the LLM only categorising; switch model; or accept chunked multi-call extraction | R1, R4 | decide the fallback order now | open |
 
 ### Increment detail
@@ -111,21 +111,35 @@ Operator-gated. An agent may lay out options but must not pick one and proceed.
   `.env.example` and `stack.env.example`.
 
 #### MVP-F2 — Deployable prod stack + runbook
-- Frontend→API path per DEC-3. Recommended: Next.js rewrite `/api/:path*` →
-  `http://kyokki-api:8000/api/:path*` (compose service name, safe at build time), API client
-  base URL defaults to `/api`, and `ALLOWED_ORIGINS` / `NEXT_PUBLIC_API_URL` leave `stack.env`.
-  If DEC-3 goes the other way: `${KYOKKI_HOST}`-based `NEXT_PUBLIC_API_URL` and document that
-  `ALLOWED_ORIGINS` must include `http://<KYOKKI_HOST>:17301`.
-- Remove the `celery-worker` service from both compose files, delete `app/core/celery_app.py`
-  and the `celery` requirement. It crash-loops today (`include=["app.tasks"]`, module absent).
-- Drop the published host ports for `postgres` (17302) and `redis` (17303); the API reaches
-  them over the compose network. Bind to `127.0.0.1` only if host `psql` access is wanted.
-- Schema drift guard: add a migration for the `off_product_id` unique constraint (in the
-  model since PR #21, never migrated) and a CI step that fails on Alembic autogenerate diff.
-- `docs/DEPLOY.md`: prerequisites, `stack.env` from example, `docker compose -f
-  docker-compose.prod.yml up -d --build`, `alembic upgrade head`, seed categories
-  (`python -m app.db.seed_categories`), health check URL, open on iPad, add to Home Screen.
-- Run it on the homelab. Add a few inventory rows via the API and confirm the iPad renders them.
+Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (S1, S5, S6, S10).
+- [x] Same-origin API (decision: rewrite over CORS). `next.config.mjs` proxies `/api/*` to
+  `API_INTERNAL_URL` (compose service name, build arg); `lib/api/client.ts` defaults to `/api`.
+  No LAN IP in the frontend image, no `ALLOWED_ORIGINS` needed in production.
+- [x] `docker-compose.prod.yml`: crash-looping `celery-worker` removed (`app.tasks` never
+  existed); `celery_app.py` and the `celery` dependency deleted; Postgres and Redis host ports
+  unpublished. Dev compose loses the worker too.
+- [x] Migration drift: new revision adds `uq_product_master_off_product_id` (model had it since
+  PR #21, schema did not); CI runs `alembic upgrade head && alembic check` before pytest.
+  Root cause found on the way: `app/db/base.py` never imported the models, so Alembic
+  autogenerate compared against an empty schema (and would have proposed dropping every
+  table). Fixed with a registry test.
+- [x] `docker-compose.prod.yml` read `POSTGRES_PASSWORD` via `${...}` interpolation, which
+  Compose takes from the shell or `.env`, not from `stack.env`; Postgres now gets it via
+  `env_file`. Smoke-tested locally with the real compose file under a separate project name.
+- [x] Found by that smoke: the API container never started with a comma-separated
+  `ALLOWED_ORIGINS` in `stack.env` (pydantic-settings JSON-decodes `list[str]` env values before
+  the split validator runs). Field is now `Annotated[list[str], NoDecode]`, with tests in
+  `tests/core/test_config.py`. This means the prod API had not been startable with CORS
+  configured since PR #21.
+- [x] Also found by the smoke (review finding C3): with one item in stock the page crashed
+  with `toFixed is not a function` because Decimal quantities arrive as JSON strings.
+  `lib/api/inventory.ts` now coerces `initial_quantity`/`current_quantity` to numbers at the
+  API boundary (with tests). The number-vs-string wire decision (DEC 2) stays open for S1.
+- [x] `python -m app.db.seed_categories` entry point for the runbook (with test).
+- [x] `docs/DEPLOY.md` runbook; README Quick Start and ARCHITECTURE.md "as built" note updated.
+- [ ] **Operator:** deploy on the homelab following `docs/DEPLOY.md` verbatim (rebuild the
+  frontend image; `ALLOWED_ORIGINS` can go from `stack.env`), open `http://<host>:17301` on the
+  iPad, confirm the inventory list renders. That ticks F2.
 - **Acceptance:** iPad Safari shows the inventory list from the prod stack; runbook followed
   verbatim by someone who did not write it.
 
@@ -154,6 +168,8 @@ Operator-gated. An agent may lay out options but must not pick one and proceed.
 - Quantities per DEC-2. Recommended: `field_serializer` emitting `float` for
   `initial_quantity`, `current_quantity` (and `ProductMasterResponse.default_quantity`), with a
   test asserting the JSON type. Today pydantic emits `"750.00"` and the TS types say `number`.
+  Since F2 the frontend already coerces both quantities to numbers at the API boundary
+  (`lib/api/inventory.ts`), so DEC-2 only settles the wire format; the UI no longer depends on it.
 - Server-side default filter: `GET /api/inventory` hides `empty` and `discarded` unless
   `include_inactive=true`. Keeps the 30 s polling payload small on an always-on device.
 - Write a `consumption_log` row on consume and on discard (`crud/inventory_item.py` writes
@@ -240,8 +256,8 @@ Operator-gated. An agent may lay out options but must not pick one and proceed.
   OCR time, LLM time, items extracted, items matched, failures. Append to
   `docs/vLLM_MANUAL_TEST.md`.
 - Apply R0's winning settings in `llm_extractor.py`. Whatever works becomes the single
-  documented default in `config.py`, `.env.example` and `stack.env.example` (today three
-  different `LLM_MODEL` defaults). Include OCR language as a measured variable.
+  documented default in `config.py`, `.env.example` and `stack.env.example` (today `.env.example`
+  says `Qwen3-4B-Instruct` while `config.py` and `stack.env.example` say `qwen3-8B`). Include OCR language as a measured variable.
 - **Acceptance:** 5/5 receipts reach `completed` in under 120 s each with ≥ 80 % of line
   items extracted. If this cannot be met, stop and file a DEC before building R6/R7.
 
@@ -358,7 +374,7 @@ Ordered by expected value once MVP is live.
 **Duration:** 4-6 weeks
 
 ### Infrastructure
-- [x] Docker Compose (api, frontend, postgres, redis, celery) — ✅ dev + `docker-compose.prod.yml`; Traefik deferred
+- [x] Docker Compose (api, frontend, postgres, redis) — ✅ dev + `docker-compose.prod.yml`; Celery removed in MVP-F2; Traefik deferred
 - [ ] Traefik SSL config
 - [ ] MinerU OCR connectivity test
 - [x] Basic CI (lint, type check, tests) — ✅ `.github/workflows/`; backend job green since PR #24 (MVP-F1)
@@ -481,8 +497,8 @@ Ordered by expected value once MVP is live.
 
 ### 🚧 Sprint 5: MVP on the iPad (IN PROGRESS, started 2026-09-13)
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
-- Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [ ] F2  [ ] R0
-- Decisions: [ ] DEC-1  [ ] DEC-2  [ ] DEC-3  [ ] DEC-4 (if R0 fails)
+- Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [ ] R0
+- Decisions: [ ] DEC-1  [ ] DEC-2  [x] DEC-3 (same-origin rewrite, shipped in F2)  [ ] DEC-4 (if R0 fails)
 - Wave 2: [ ] S1  [ ] R1  [ ] R2  [ ] C1  [ ] C2
 - Wave 3: [ ] S2  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8

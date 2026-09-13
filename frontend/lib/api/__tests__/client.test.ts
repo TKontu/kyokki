@@ -214,3 +214,29 @@ describe('APIClient', () => {
     })
   })
 })
+
+describe('default apiClient base URL', () => {
+  const originalEnv = process.env.NEXT_PUBLIC_API_URL
+
+  afterEach(() => {
+    process.env.NEXT_PUBLIC_API_URL = originalEnv
+  })
+
+  it('falls back to the same-origin /api path when NEXT_PUBLIC_API_URL is unset', async () => {
+    delete process.env.NEXT_PUBLIC_API_URL
+    let defaultClient: APIClient | undefined
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      defaultClient = require('../client').default
+    })
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => [],
+    })
+
+    await defaultClient!.get('/inventory')
+    expect(mockFetch).toHaveBeenCalledWith('/api/inventory', expect.anything())
+  })
+})

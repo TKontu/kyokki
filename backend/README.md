@@ -27,6 +27,17 @@ docker compose run --rm kyokki-api alembic history
 docker compose run --rm kyokki-api alembic downgrade -1
 ```
 
+On the homelab (production stack) add `-f docker-compose.prod.yml` to every command above,
+and seed the default categories once after the first `upgrade head`:
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm kyokki-api alembic upgrade head
+docker compose -f docker-compose.prod.yml run --rm kyokki-api python -m app.db.seed_categories
+```
+
+CI runs `alembic check` against a migrated database, so a model change without a revision
+fails the build. Full runbook: `docs/DEPLOY.md`.
+
 **Why Docker?**
 - PostgreSQL hostname `postgres` only resolves inside Docker network
 - Running locally would fail with "could not translate host name" error
