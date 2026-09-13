@@ -1,36 +1,64 @@
-import React from 'react'
+import React, { useId } from 'react'
 import { useInventoryList } from '@/hooks/useInventory'
+import { buildStockView } from '@/lib/stock'
 import { InventoryItemCard } from './InventoryItemCard'
 import type { InventoryItem, InventoryListParams } from '@/types/inventory'
 
 export interface InventoryListProps {
   params?: InventoryListParams
-  productNames?: Record<string, string>
   onConsume?: (id: string) => void
   onEdit?: (id: string) => void
   className?: string
 }
 
-// The API sends product_name on every item (MVP-S1). The productNames map is a
-// legacy fallback that MVP-S2 removes together with the products fetch.
-function resolveProductName(
-  item: InventoryItem,
-  productNames?: Record<string, string>
-): string {
+interface StockSectionProps {
+  label: string
+  items: InventoryItem[]
+  urgent?: boolean
+  showLocation: boolean
+  onConsume?: (id: string) => void
+  onEdit?: (id: string) => void
+}
+
+function StockSection({ label, items, urgent = false, showLocation, onConsume, onEdit }: StockSectionProps) {
+  const headingId = useId()
+  const headingColor = urgent
+    ? 'text-orange-700 dark:text-orange-400'
+    : 'text-ui-text dark:text-ui-dark-text'
+  const chipColor = urgent
+    ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-400'
+    : 'bg-ui-bg-secondary dark:bg-ui-dark-bg-secondary border-ui-border dark:border-ui-dark-border text-ui-text-secondary dark:text-ui-dark-text-secondary'
+
   return (
-    item.product_name ||
-    productNames?.[item.product_master_id] ||
-    `Product ${item.product_master_id.slice(0, 8)}`
+    <section aria-labelledby={headingId}>
+      <h2
+        id={headingId}
+        className={`mb-3 flex items-center gap-2 text-base font-semibold ${headingColor}`}
+      >
+        {label}
+        <span className={`rounded-full border px-2 text-sm font-medium ${chipColor}`}>
+          {items.length}
+        </span>
+      </h2>
+      <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {items.map((item) => (
+          <li key={item.id}>
+            <InventoryItemCard
+              item={item}
+              productName={item.product_name}
+              productCategory={item.category_name}
+              showLocation={showLocation}
+              onConsume={onConsume}
+              onEdit={onEdit}
+            />
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
-export function InventoryList({
-  params,
-  productNames,
-  onConsume,
-  onEdit,
-  className = '',
-}: InventoryListProps) {
+export function InventoryList({ params, onConsume, onEdit, className = '' }: InventoryListProps) {
   const { data: items, isLoading, isError, error } = useInventoryList(params)
 
   if (isLoading) {
@@ -49,34 +77,49 @@ export function InventoryList({
 
   if (isError) {
     return (
-      <p role="alert" className="text-sm text-red-600 dark:text-red-400 py-4">
+      <p role="alert" className={`text-sm text-red-600 dark:text-red-400 py-4 ${className}`.trim()}>
         {error instanceof Error ? error.message : 'Failed to load inventory.'}
       </p>
     )
   }
 
-  if (!items?.length) {
+  const { expiringSoon, groups } = buildStockView(items ?? [], {
+    includeInactive: params?.include_inactive === true,
+  })
+
+  if (expiringSoon.length === 0 && groups.length === 0) {
     return (
-      <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary py-4">
+      <p
+        className={`text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary py-4 ${className}`.trim()}
+      >
         No items found. Scan a product to add it to your inventory.
       </p>
     )
   }
 
   return (
-    <ul className={`space-y-3 ${className}`.trim()}>
-      {items.map((item) => (
-        <li key={item.id}>
-          <InventoryItemCard
-            item={item}
-            productName={resolveProductName(item, productNames)}
-            productCategory={item.category_name}
-            onConsume={onConsume}
-            onEdit={onEdit}
-          />
-        </li>
+    <div className={`space-y-6 ${className}`.trim()}>
+      {expiringSoon.length > 0 && (
+        <StockSection
+          label="Expiring soon"
+          items={expiringSoon}
+          urgent
+          showLocation
+          onConsume={onConsume}
+          onEdit={onEdit}
+        />
+      )}
+      {groups.map((group) => (
+        <StockSection
+          key={group.key}
+          label={group.label}
+          items={group.items}
+          showLocation={false}
+          onConsume={onConsume}
+          onEdit={onEdit}
+        />
       ))}
-    </ul>
+    </div>
   )
 }
 

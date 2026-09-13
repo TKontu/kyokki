@@ -317,14 +317,29 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
     transform exception for `until-async`, and `test/msw/server.ts` (opt-in per test file).
     `app/__tests__/consume-flow.test.tsx` covers the optimistic update, the POST body, the
     toast and the rollback.
-  - Note for S2: items with equal expiry dates come back in varying order, so cards can swap
-    places after each refetch. S2's sort should add a stable tie-breaker.
+  - Items with equal expiry dates came back in varying order, so cards swapped places after
+    refetches. Resolved in S2 (stable sort on client and server).
 
 #### MVP-S2 — Stock view
 - Default query hides `empty` and `discarded`. Sort by `expiry_date` ascending. Group by
   `location` (Fridge / Freezer / Pantry) with counts. "Expiring soon" (≤ 3 days) pinned on top.
 - Uses `product_name` from S1; remove the products list fetch from `page.tsx`.
 - **Acceptance:** tests for sort, grouping, hiding; visual check in iPad landscape.
+- As built (branch `feat/mvp-s2-stock-view`), with the operator ruling of 2026-09-14:
+  - [x] `lib/stock.ts` `buildStockView`: hides empty/discarded (so an optimistic Done removes
+    the card at once), pins items expiring in ≤ 3 days (expired included) **only** in
+    "Expiring soon" (ruling: no duplicate cards), then groups Fridge / Freezer / Pantry and an
+    "Other" group for unknown location strings (the API accepts any string). Empty groups hidden.
+  - [x] Stable order everywhere: expiry, then `created_at`, then `id`, in `compareStock` and in
+    `crud/inventory_item.py` (list and scanner consume). The backend test rewrites rows first,
+    because Postgres only reshuffles ties after an UPDATE.
+  - [x] `InventoryList` renders labelled sections with count chips, two-column grid from `lg`
+    (iPad landscape); grouped cards drop the location from the subtitle, pinned cards keep it.
+  - [x] Products fetch, name map and "Could not load product names" banner removed from the
+    home page. `hooks/useProducts.ts` stays for S3.
+  - Checked in Chrome at 1280 px against the real API: section order and counts, two columns,
+    tie order unchanged after a consume rewrote a row, Done on a pinned item removes it.
+    Not yet checked on the iPad itself.
 
 #### MVP-S3 — Quick Add item
 - "+ Add" opens a BottomSheet: product search (`GET /api/products?search=`) with
@@ -546,8 +561,8 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [ ] R0
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [ ] DEC-4 (if R0 fails)
-- Wave 2: [x] S1 (PR #27)  [ ] R1  [ ] R2  [x] C1 (PR #28)  [ ] C2 (PR open)
-- Wave 3: [ ] S2  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
+- Wave 2: [x] S1 (PR #27)  [ ] R1  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
+- Wave 3: [ ] S2 (PR open)  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance

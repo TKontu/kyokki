@@ -686,6 +686,50 @@ class TestInactiveItemsHidden:
         assert [i["id"] for i in response.json()] == [items["empty"]["id"]]
 
 
+class TestListOrdering:
+    """MVP-S2: a total, stable order so cards do not swap places between refetches."""
+
+    async def test_equal_expiry_items_keep_creation_order(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        expiry = str(date.today() + timedelta(days=5))
+        created = [
+            (await _create_item(client, test_product["id"], expiry_date=expiry))["id"]
+            for _ in range(4)
+        ]
+
+        first = [item["id"] for item in (await client.get("/api/inventory")).json()]
+
+        # Consuming or editing rewrites the row, and Postgres then returns ties in a new
+        # physical order unless the query breaks them explicitly.
+        await client.post(
+            f"/api/inventory/{created[0]}/consume", json={"quantity": 100}
+        )
+        await client.patch(f"/api/inventory/{created[1]}", json={"notes": "moved"})
+        second = [item["id"] for item in (await client.get("/api/inventory")).json()]
+
+        assert first == created
+        assert second == created
+
+    async def test_earlier_expiry_comes_first(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        later = await _create_item(
+            client,
+            test_product["id"],
+            expiry_date=str(date.today() + timedelta(days=9)),
+        )
+        sooner = await _create_item(
+            client,
+            test_product["id"],
+            expiry_date=str(date.today() + timedelta(days=2)),
+        )
+
+        ids = [item["id"] for item in (await client.get("/api/inventory")).json()]
+
+        assert ids == [sooner["id"], later["id"]]
+
+
 class TestConsumptionLogWrites:
     """MVP-S1: consume and discard write consumption_log rows."""
 

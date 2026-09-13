@@ -1,37 +1,38 @@
 # Handoff
-Generated-UTC: 2026-09-14T01:30:00Z
-Base-SHA: 1659ace
+Generated-UTC: 2026-09-14T03:00:00Z
+Base-SHA: 7de543e
 
 ## Round delta
-- #28 MVP-C1 merged: `BottomSheet`, `ToastProvider`/`useToast`.
-- MVP-C2 on `feat/mvp-c2-consumption-sheet` (PR open): ConsumptionSheet wired from the home
-  page, list-wide optimistic consume with rollback and no retry, API client reads FastAPI
-  `detail`, msw set up for Jest. Rulings: no Undo; pieces get −1/−2/−3.
+- #29 MVP-C2 merged: ConsumptionSheet, list-wide optimistic consume with rollback and no retry,
+  client reads FastAPI `detail`, msw for Jest.
+- MVP-S2 on `feat/mvp-s2-stock-view` (PR open): grouped stock view (Expiring soon, Fridge,
+  Freezer, Pantry, Other), stable sort on client and server, products fetch removed.
+  Ruling: pinned items are not repeated in their location group.
 
 ## Active PRs and conflicts
-- MVP-C2 PR. Touches `hooks/useInventory.ts`, `lib/api/client.ts`, `app/page.tsx`,
-  `jest.config.js`, `jest.setup.js`. S2 will touch `app/page.tsx` and `InventoryList` next.
+- MVP-S2 PR. Touches `InventoryList.tsx`, `InventoryItemCard.tsx`, `app/page.tsx`,
+  `lib/consumption.ts`, `backend/app/crud/inventory_item.py`. S3 and S4 both add UI to the home
+  page and card, so start them from main after S2 merges.
 - Worktree `C:/code/Kyokki-docs` still holds merged `docs/mvp-plan-review-amendments`; removable.
 
 ## Non-obvious decisions or blockers
-- Non-idempotent mutations must set `retry: false`: `app/providers.tsx` retries mutations once
-  by default, and TanStack pauses retries while the page is hidden. S4 (PATCH is idempotent,
-  DELETE is not) and R2's confirm should follow the same rule.
-- msw: `test/msw/server.ts` is opt-in per file (`server.listen` in the test); older tests still
-  mock `global.fetch`. New ESM-only msw dependencies go in `esmPackages` in `jest.config.js`.
-- `npm run build` while `npm run dev` is running corrupts the dev server's `.next`: the page
-  renders unstyled with no data. Stop dev, `rm -rf .next`, restart. Stopping the background
-  npm task does not kill the Next child process; check the port with netstat.
-- Manual API runs: move the root `.env` aside only while uvicorn imports settings, then restore
-  it; use a throwaway database (`CREATE DATABASE ...`, alembic upgrade, `python -m
-  app.db.seed_categories`, drop afterwards).
-- The browser screenshot tool renders a hidden tab at the wrong scale; measure the DOM instead.
-- Items with equal expiry dates come back in varying order; S2 needs a stable sort.
-- DEC-1 left ml, l and kg out; confirm conversion factors before R1. TS `Unit` is still
-  `ml | g | pcs | unit`.
+- Stock rules live in `lib/stock.ts`; the list only renders `buildStockView`. Client hiding of
+  inactive items is deliberate: an optimistic Done removes the card before the refetch.
+- Ordering tests must UPDATE rows before listing: Postgres returns ties in insertion order on
+  fresh tables, so a naive test passes without a tie-breaker.
+- Locations are free strings in the API. S4's "move location" should offer only the three known
+  values; unknown ones already render under "Other".
+- `receipts.py` confirm still hardcodes `location="main_fridge"` (R2 fixes it via category mapping).
+- Non-idempotent mutations need `retry: false` (providers retry mutations once).
+- Before a browser check: stop old dev servers (the Next child survives stopping the npm task),
+  `rm -rf .next`, never build while dev runs. Window resize above the screen size fails; the
+  default automation viewport is 1280 wide, which already exercises the `lg` two-column layout.
+- Manual API runs: throwaway database, move root `.env` aside only while uvicorn starts.
+- DEC-1 left ml, l and kg out; confirm conversion factors before R1.
 - Operator items still open: rotate Postgres password + LLM key, purge `stack.env` history,
   deploy on the homelab and confirm the iPad renders inventory, run the R0 spike.
 
 ## Next action
-Operator merges the C2 PR. Wave 2 is then done except R1/R2 (gated on R0, DEC-4, DEC-1
-conversions). Wave 3 frontend is unblocked: S2 (stock view), S3 (quick add), S4 (edit sheet).
+Operator merges the S2 PR. Then S3 (quick add) or S4 (item edit sheet); S4 is smaller and gives
+the fix-a-mistake path that C2's no-Undo ruling relies on. R1/R2 remain gated on R0, DEC-4 and the
+DEC-1 conversions.
