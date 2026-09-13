@@ -8,6 +8,10 @@ const MOCK_NOW = new Date('2024-02-01T12:00:00Z')
 const MOCK_ITEM: InventoryItem = {
   id: 'abc123',
   product_master_id: 'def456',
+  product_name: 'Oat Milk',
+  category: 'dairy',
+  category_name: 'Dairy & Eggs',
+  category_icon: '🥛',
   receipt_id: null,
   initial_quantity: 1000,
   current_quantity: 750,

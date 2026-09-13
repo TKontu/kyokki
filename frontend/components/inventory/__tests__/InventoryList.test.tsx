@@ -12,6 +12,10 @@ const MOCK_NOW = new Date('2024-02-01T12:00:00Z')
 const MOCK_ITEM_A: InventoryItem = {
   id: 'item-aaa',
   product_master_id: 'prod-111',
+  product_name: 'Oat Milk',
+  category: 'dairy',
+  category_name: 'Dairy & Eggs',
+  category_icon: '🥛',
   receipt_id: null,
   initial_quantity: 1000,
   current_quantity: 750,
@@ -32,6 +36,7 @@ const MOCK_ITEM_B: InventoryItem = {
   ...MOCK_ITEM_A,
   id: 'item-bbb',
   product_master_id: 'prod-222',
+  product_name: 'Pasta',
   location: 'pantry',
   status: 'sealed',
   current_quantity: 500,
@@ -148,50 +153,61 @@ describe('TestInventoryListRendering', () => {
       isError: false,
       data: [MOCK_ITEM_A, MOCK_ITEM_B],
     })
-    render(<InventoryList productNames={{ 'prod-111': 'Oat Milk', 'prod-222': 'Pasta' }} />)
+    render(<InventoryList />)
     expect(screen.getByText('Oat Milk')).toBeInTheDocument()
     expect(screen.getByText('Pasta')).toBeInTheDocument()
   })
 
-  it('renders single item correctly', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A],
-    })
-    render(<InventoryList productNames={{ 'prod-111': 'Oat Milk' }} />)
-    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
-  })
-
-  it('falls back to truncated UUID when productNames not provided', () => {
+  it('renders the product name from the item without a productNames map', () => {
     mockUseInventoryList.mockReturnValue({
       isLoading: false,
       isError: false,
       data: [MOCK_ITEM_A],
     })
     render(<InventoryList />)
-    expect(screen.getByText('Product prod-111')).toBeInTheDocument()
+    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
+    expect(screen.queryByText(/Product prod/)).not.toBeInTheDocument()
   })
 
-  it('falls back to truncated UUID for unknown product_master_id', () => {
+  it('prefers the item product name over the productNames map', () => {
     mockUseInventoryList.mockReturnValue({
       isLoading: false,
       isError: false,
       data: [MOCK_ITEM_A],
+    })
+    render(<InventoryList productNames={{ 'prod-111': 'Stale Name' }} />)
+    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
+    expect(screen.queryByText('Stale Name')).not.toBeInTheDocument()
+  })
+
+  it('falls back to productNames when the item has no product name', () => {
+    mockUseInventoryList.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: [{ ...MOCK_ITEM_A, product_name: '' }],
+    })
+    render(<InventoryList productNames={{ 'prod-111': 'Mapped Milk' }} />)
+    expect(screen.getByText('Mapped Milk')).toBeInTheDocument()
+  })
+
+  it('falls back to truncated UUID when no name is available', () => {
+    mockUseInventoryList.mockReturnValue({
+      isLoading: false,
+      isError: false,
+      data: [{ ...MOCK_ITEM_A, product_name: '' }],
     })
     render(<InventoryList productNames={{ 'prod-999': 'Other' }} />)
     expect(screen.getByText('Product prod-111')).toBeInTheDocument()
   })
 
-  it('uses provided product name when key matches product_master_id', () => {
+  it('shows the category display name on the card', () => {
     mockUseInventoryList.mockReturnValue({
       isLoading: false,
       isError: false,
       data: [MOCK_ITEM_A],
     })
-    render(<InventoryList productNames={{ 'prod-111': 'Oat Milk' }} />)
-    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
-    expect(screen.queryByText(/Product prod/)).not.toBeInTheDocument()
+    render(<InventoryList />)
+    expect(screen.getByText(/Dairy & Eggs/)).toBeInTheDocument()
   })
 
   it('renders items inside a list element', () => {

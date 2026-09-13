@@ -5,11 +5,13 @@ from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.seed_categories import seed_categories
 from app.db.session import get_db
 from app.main import app
+from app.models.consumption_log import ConsumptionLog
 
 
 @pytest.fixture
@@ -217,7 +219,7 @@ class TestGetInventoryItem:
 
         assert response.status_code == 200
         item = response.json()
-        assert item["current_quantity"] == "750.00"
+        assert item["current_quantity"] == 750
         assert item["status"] == "opened"
 
     async def test_get_inventory_item_not_found(
@@ -256,7 +258,7 @@ class TestCreateInventoryItem:
 
         assert response.status_code == 201
         item = response.json()
-        assert item["current_quantity"] == "1000.00"
+        assert item["current_quantity"] == 1000
         assert item["status"] == "sealed"
         assert "id" in item
         assert UUID(item["id"])  # Valid UUID
@@ -345,7 +347,7 @@ class TestUpdateInventoryItem:
 
         assert response.status_code == 200
         item = response.json()
-        assert item["current_quantity"] == "750.00"
+        assert item["current_quantity"] == 750
         assert item["status"] == "opened"
         assert item["opened_date"] == str(today)
 
@@ -455,7 +457,7 @@ class TestConsumeInventoryItem:
 
         assert response.status_code == 200
         item = response.json()
-        assert item["current_quantity"] == "0.00"
+        assert item["current_quantity"] == 0
         assert item["status"] == "empty"
 
     async def test_consume_partial_item(
@@ -484,7 +486,7 @@ class TestConsumeInventoryItem:
 
         assert response.status_code == 200
         item = response.json()
-        assert item["current_quantity"] == "500.00"
+        assert item["current_quantity"] == 500
         assert item["status"] == "partial"
 
     async def test_consume_opens_sealed_item(
@@ -513,7 +515,7 @@ class TestConsumeInventoryItem:
 
         assert response.status_code == 200
         item = response.json()
-        assert item["current_quantity"] == "750.00"
+        assert item["current_quantity"] == 750
         assert item["status"] == "opened"
         assert item["opened_date"] == str(today)
 
@@ -555,3 +557,203 @@ class TestConsumeInventoryItem:
         )
 
         assert response.status_code == 404
+
+
+async def _create_item(client: AsyncClient, product_id: str, **overrides) -> dict:
+    """Create an inventory item through the API and return its JSON body."""
+    item = {
+        "product_master_id": product_id,
+        "initial_quantity": 1000,
+        "current_quantity": 1000,
+        "unit": "ml",
+        "expiry_date": str(date.today() + timedelta(days=7)),
+    }
+    item.update(overrides)
+    response = await client.post("/api/inventory", json=item)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def _logs_for(db: AsyncSession, item_id: str) -> list[ConsumptionLog]:
+    result = await db.execute(
+        select(ConsumptionLog).where(ConsumptionLog.inventory_item_id == UUID(item_id))
+    )
+    return list(result.scalars().all())
+
+
+def _assert_product_fields(item: dict) -> None:
+    assert item["product_name"] == "Test Milk 1L"
+    assert item["category"] == "dairy"
+    assert item["category_name"] == "Dairy & Eggs"
+    assert item["category_icon"] == "\U0001f95b"
+
+
+class TestInventoryResponseShape:
+    """MVP-S1: product fields and numeric quantities on every inventory response."""
+
+    async def test_create_response_includes_product_fields(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"])
+        _assert_product_fields(item)
+
+    async def test_list_and_get_include_product_fields(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        created = await _create_item(client, test_product["id"])
+
+        listed = (await client.get("/api/inventory")).json()
+        fetched = (await client.get(f"/api/inventory/{created['id']}")).json()
+
+        assert len(listed) == 1
+        _assert_product_fields(listed[0])
+        _assert_product_fields(fetched)
+
+    async def test_update_and_consume_include_product_fields(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        created = await _create_item(client, test_product["id"])
+
+        updated = await client.patch(
+            f"/api/inventory/{created['id']}", json={"location": "freezer"}
+        )
+        consumed = await client.post(
+            f"/api/inventory/{created['id']}/consume", json={"quantity": 100}
+        )
+
+        assert updated.status_code == 200
+        assert consumed.status_code == 200
+        _assert_product_fields(updated.json())
+        _assert_product_fields(consumed.json())
+
+    async def test_quantities_are_json_numbers(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        created = await _create_item(
+            client, test_product["id"], initial_quantity=1000, current_quantity=750.5
+        )
+
+        for body in (created, (await client.get("/api/inventory")).json()[0]):
+            assert isinstance(body["initial_quantity"], int | float)
+            assert isinstance(body["current_quantity"], int | float)
+            assert body["current_quantity"] == 750.5
+
+
+class TestInactiveItemsHidden:
+    """MVP-S1: empty and discarded items are hidden from the default list."""
+
+    async def _create_one_of_each(self, client: AsyncClient, product_id: str) -> dict:
+        return {
+            "sealed": await _create_item(client, product_id),
+            "empty": await _create_item(
+                client, product_id, current_quantity=0, status="empty"
+            ),
+            "discarded": await _create_item(client, product_id, status="discarded"),
+        }
+
+    async def test_default_list_hides_empty_and_discarded(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        items = await self._create_one_of_each(client, test_product["id"])
+
+        response = await client.get("/api/inventory")
+
+        assert response.status_code == 200
+        assert [i["id"] for i in response.json()] == [items["sealed"]["id"]]
+
+    async def test_include_inactive_returns_all(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        await self._create_one_of_each(client, test_product["id"])
+
+        response = await client.get("/api/inventory?include_inactive=true")
+
+        assert response.status_code == 200
+        assert sorted(i["status"] for i in response.json()) == [
+            "discarded",
+            "empty",
+            "sealed",
+        ]
+
+    async def test_explicit_status_filter_returns_inactive_items(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        items = await self._create_one_of_each(client, test_product["id"])
+
+        response = await client.get("/api/inventory?status=empty")
+
+        assert response.status_code == 200
+        assert [i["id"] for i in response.json()] == [items["empty"]["id"]]
+
+
+class TestConsumptionLogWrites:
+    """MVP-S1: consume and discard write consumption_log rows."""
+
+    async def test_partial_consume_logs_use_partial(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"])
+
+        await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 250}
+        )
+
+        logs = await _logs_for(seeded_db, item["id"])
+        assert [(log.action, float(log.quantity_consumed)) for log in logs] == [
+            ("use_partial", 250.0)
+        ]
+        assert str(logs[0].product_master_id) == test_product["id"]
+
+    async def test_full_consume_logs_use_full(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"], current_quantity=400)
+
+        await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 400}
+        )
+
+        logs = await _logs_for(seeded_db, item["id"])
+        assert [(log.action, float(log.quantity_consumed)) for log in logs] == [
+            ("use_full", 400.0)
+        ]
+
+    async def test_rejected_consume_logs_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"], current_quantity=100)
+
+        response = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 500}
+        )
+
+        assert response.status_code == 400
+        assert await _logs_for(seeded_db, item["id"]) == []
+
+    async def test_discard_logs_once_with_remaining_quantity(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"], current_quantity=600)
+
+        first = await client.patch(
+            f"/api/inventory/{item['id']}", json={"status": "discarded"}
+        )
+        second = await client.patch(
+            f"/api/inventory/{item['id']}", json={"status": "discarded"}
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        logs = await _logs_for(seeded_db, item["id"])
+        assert [(log.action, float(log.quantity_consumed)) for log in logs] == [
+            ("discard", 600.0)
+        ]
+
+    async def test_non_status_update_logs_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"])
+
+        await client.patch(f"/api/inventory/{item['id']}", json={"location": "pantry"})
+
+        assert await _logs_for(seeded_db, item["id"]) == []

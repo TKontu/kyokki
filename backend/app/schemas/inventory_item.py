@@ -1,8 +1,9 @@
 from datetime import date, datetime
-from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from app.schemas.types import JsonDecimal
 
 
 class InventoryItemBase(BaseModel):
@@ -10,8 +11,8 @@ class InventoryItemBase(BaseModel):
 
     product_master_id: UUID = Field(..., description="Product master ID")
     receipt_id: UUID | None = Field(None, description="Source receipt ID")
-    initial_quantity: Decimal = Field(..., gt=0, description="Initial quantity")
-    current_quantity: Decimal = Field(..., ge=0, description="Current quantity")
+    initial_quantity: JsonDecimal = Field(..., gt=0, description="Initial quantity")
+    current_quantity: JsonDecimal = Field(..., ge=0, description="Current quantity")
     unit: str = Field(..., description="Unit: ml, g, pcs, unit")
     status: str = Field(
         "sealed", description="Status: sealed, opened, partial, empty, discarded"
@@ -40,7 +41,7 @@ class InventoryItemCreate(InventoryItemBase):
 class InventoryItemUpdate(BaseModel):
     """Schema for updating an inventory item."""
 
-    current_quantity: Decimal | None = Field(None, ge=0)
+    current_quantity: JsonDecimal | None = Field(None, ge=0)
     status: str | None = None
     expiry_date: date | None = None
     expiry_source: str | None = None
@@ -53,6 +54,10 @@ class InventoryItemResponse(InventoryItemBase):
     """Schema for inventory item API responses."""
 
     id: UUID
+    product_name: str = Field(..., description="Product canonical name")
+    category: str = Field(..., description="Category ID, e.g. dairy")
+    category_name: str = Field(..., description="Category display name")
+    category_icon: str | None = Field(None, description="Category emoji icon")
     created_at: datetime
     consumed_at: datetime | None = None
 

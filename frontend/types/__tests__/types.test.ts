@@ -15,6 +15,10 @@ describe('TypeScript Types', () => {
       const item: InventoryItem = {
         id: '123e4567-e89b-12d3-a456-426614174000',
         product_master_id: '123e4567-e89b-12d3-a456-426614174001',
+        product_name: 'Milk',
+        category: 'dairy',
+        category_name: 'Dairy & Eggs',
+        category_icon: null,
         receipt_id: null,
         initial_quantity: 1000,
         current_quantity: 750,

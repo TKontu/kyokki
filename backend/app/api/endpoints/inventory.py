@@ -3,15 +3,11 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.api.exceptions import handle_integrity_errors
 from app.crud import inventory_item as crud_inventory
 from app.db.session import get_db
-from app.models.inventory_item import InventoryItem
-from app.models.product_master import ProductMaster
 from app.schemas.consume import ConsumeRequest
 from app.schemas.inventory_item import (
     InventoryItemCreate,
@@ -23,29 +19,6 @@ from app.services.broadcast_helpers import broadcast_inventory_update
 router = APIRouter()
 
 
-async def _get_product_name(db: AsyncSession, item) -> str | None:
-    """Get product name for broadcast display.
-
-    Args:
-        db: Database session.
-        item: Inventory item.
-
-    Returns:
-        Product canonical name or None if not found.
-    """
-    try:
-        if hasattr(item, "product_master") and item.product_master:
-            return item.product_master.canonical_name
-        # Query if relationship not loaded
-        result = await db.execute(
-            select(ProductMaster).where(ProductMaster.id == item.product_master_id)
-        )
-        product = result.scalar_one_or_none()
-        return product.canonical_name if product else None
-    except Exception:
-        return None
-
-
 @router.get("", response_model=list[InventoryItemResponse])
 async def list_inventory(
     location: str | None = Query(None, description="Filter by location"),
@@ -53,11 +26,18 @@ async def list_inventory(
     expiring_days: int | None = Query(
         None, description="Filter items expiring within N days"
     ),
+    include_inactive: bool = Query(
+        False, description="Include empty and discarded items when no status is given"
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> list[InventoryItemResponse]:
-    """Get all inventory items with optional filters."""
+    """Get inventory items with optional filters; empty and discarded are hidden."""
     items = await crud_inventory.get_inventory_items(
-        db, location=location, status=status, expiring_days=expiring_days
+        db,
+        location=location,
+        status=status,
+        expiring_days=expiring_days,
+        include_inactive=include_inactive,
     )
     return items
 
@@ -86,13 +66,12 @@ async def create_inventory_item(
     async with handle_integrity_errors():
         created_item = await crud_inventory.create_inventory_item(db, item)
 
-    product_name = await _get_product_name(db, created_item)
     await broadcast_inventory_update(
         inventory_item_id=created_item.id,
         action="created",
         current_quantity=created_item.current_quantity,
         status=created_item.status,
-        product_name=product_name,
+        product_name=created_item.product_name,
     )
 
     return created_item
@@ -112,13 +91,12 @@ async def update_inventory_item(
             detail=f"Inventory item with ID '{item_id}' not found",
         )
 
-    product_name = await _get_product_name(db, item)
     await broadcast_inventory_update(
         inventory_item_id=item.id,
         action="updated",
         current_quantity=item.current_quantity,
         status=item.status,
-        product_name=product_name,
+        product_name=item.product_name,
     )
 
     return item
@@ -129,13 +107,8 @@ async def delete_inventory_item(
     item_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> None:
     """Delete an inventory item."""
-    # Get item before deletion for broadcast (with product relationship loaded)
-    result = await db.execute(
-        select(InventoryItem)
-        .where(InventoryItem.id == item_id)
-        .options(selectinload(InventoryItem.product_master))
-    )
-    item = result.scalar_one_or_none()
+    # Get item before deletion for broadcast (product relationship is eager-loaded)
+    item = await crud_inventory.get_inventory_item(db, item_id)
 
     if not item:
         raise HTTPException(
@@ -143,7 +116,7 @@ async def delete_inventory_item(
             detail=f"Inventory item with ID '{item_id}' not found",
         )
 
-    product_name = await _get_product_name(db, item)
+    product_name = item.product_name
     await crud_inventory.delete_inventory_item(db, item_id)
     await broadcast_inventory_update(
         inventory_item_id=item_id, action="deleted", product_name=product_name
@@ -167,13 +140,12 @@ async def consume_inventory_item(
                 detail=f"Inventory item with ID '{item_id}' not found",
             )
 
-        product_name = await _get_product_name(db, item)
         await broadcast_inventory_update(
             inventory_item_id=item.id,
             action="consumed",
             current_quantity=item.current_quantity,
             status=item.status,
-            product_name=product_name,
+            product_name=item.product_name,
         )
 
         return item

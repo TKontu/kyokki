@@ -1,8 +1,9 @@
 from datetime import datetime
-from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from app.schemas.types import JsonDecimal
 
 
 class ProductMasterBase(BaseModel):
@@ -21,11 +22,15 @@ class ProductMasterBase(BaseModel):
     )
     unit_type: str = Field(..., description="Unit type: volume, weight, count, unit")
     default_unit: str = Field(..., description="Default unit: ml, g, pcs")
-    default_quantity: Decimal | None = Field(None, gt=0, description="Default quantity")
-    min_stock_quantity: Decimal | None = Field(
+    default_quantity: JsonDecimal | None = Field(
+        None, gt=0, description="Default quantity"
+    )
+    min_stock_quantity: JsonDecimal | None = Field(
         None, ge=0, description="Minimum stock threshold"
     )
-    reorder_quantity: Decimal | None = Field(None, gt=0, description="Reorder quantity")
+    reorder_quantity: JsonDecimal | None = Field(
+        None, gt=0, description="Reorder quantity"
+    )
     off_product_id: str | None = Field(None, description="Open Food Facts product ID")
 
 
@@ -45,9 +50,9 @@ class ProductMasterUpdate(BaseModel):
     opened_shelf_life_days: int | None = Field(None, gt=0)
     unit_type: str | None = None
     default_unit: str | None = None
-    default_quantity: Decimal | None = Field(None, gt=0)
-    min_stock_quantity: Decimal | None = Field(None, ge=0)
-    reorder_quantity: Decimal | None = Field(None, gt=0)
+    default_quantity: JsonDecimal | None = Field(None, gt=0)
+    min_stock_quantity: JsonDecimal | None = Field(None, ge=0)
+    reorder_quantity: JsonDecimal | None = Field(None, gt=0)
     off_product_id: str | None = None
 
 

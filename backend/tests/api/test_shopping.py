@@ -33,7 +33,7 @@ class TestShoppingListAPI:
         assert response.status_code == 201
         data = response.json()
         assert data["name"] == "Bananas"
-        assert data["quantity"] == "6.00"
+        assert data["quantity"] == 6
         assert data["unit"] == "pcs"
         assert data["priority"] == "normal"
         assert data["source"] == "manual"
@@ -297,7 +297,7 @@ class TestShoppingListAPI:
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "Updated Name"
-        assert data["quantity"] == "5.00"
+        assert data["quantity"] == 5
         assert data["priority"] == "urgent"
 
     async def test_update_shopping_item_invalid_priority(

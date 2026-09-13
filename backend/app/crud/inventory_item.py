@@ -4,11 +4,28 @@ from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.crud.consumption_log import add_consumption_log
 from app.models.inventory_item import InventoryItem
+from app.models.product_master import ProductMaster
 from app.schemas.inventory_item import InventoryItemCreate, InventoryItemUpdate
+
+# Items in these states are gone from the kitchen and hidden from default listings.
+INACTIVE_STATUSES = ("empty", "discarded")
+
+
+def _with_product(
+    query: Select[tuple[InventoryItem]],
+) -> Select[tuple[InventoryItem]]:
+    """Eager-load the product and its category for response serialisation."""
+    return query.options(
+        selectinload(InventoryItem.product_master).selectinload(
+            ProductMaster.category_rel
+        )
+    )
 
 
 async def get_inventory_items(
@@ -16,6 +33,7 @@ async def get_inventory_items(
     location: str | None = None,
     status: str | None = None,
     expiring_days: int | None = None,
+    include_inactive: bool = False,
 ) -> list[InventoryItem]:
     """Get all inventory items with optional filters.
 
@@ -23,18 +41,22 @@ async def get_inventory_items(
         db: Database session.
         location: Optional location filter (main_fridge, freezer, pantry).
         status: Optional status filter (sealed, opened, partial, empty, discarded).
+            An explicit status is always honoured, including inactive ones.
         expiring_days: Optional filter for items expiring within N days.
+        include_inactive: Include empty and discarded items when no status is given.
 
     Returns:
         List of inventory items matching the filters.
     """
-    query = select(InventoryItem)
+    query = _with_product(select(InventoryItem))
 
     if location:
         query = query.where(InventoryItem.location == location)
 
     if status:
         query = query.where(InventoryItem.status == status)
+    elif not include_inactive:
+        query = query.where(InventoryItem.status.notin_(INACTIVE_STATUSES))
 
     if expiring_days is not None:
         expiry_threshold = date.today() + timedelta(days=expiring_days)
@@ -56,7 +78,12 @@ async def get_inventory_item(db: AsyncSession, item_id: UUID) -> InventoryItem |
     Returns:
         Inventory item if found, None otherwise.
     """
-    result = await db.execute(select(InventoryItem).where(InventoryItem.id == item_id))
+    query = (
+        _with_product(select(InventoryItem))
+        .where(InventoryItem.id == item_id)
+        .execution_options(populate_existing=True)
+    )
+    result = await db.execute(query)
     return result.scalar_one_or_none()
 
 
@@ -78,8 +105,7 @@ async def create_inventory_item(
     db_item = InventoryItem(**item.model_dump())
     db.add(db_item)
     await db.commit()
-    await db.refresh(db_item)
-    return db_item
+    return await _reload(db, db_item.id)
 
 
 async def update_inventory_item(
@@ -101,12 +127,17 @@ async def update_inventory_item(
 
     # Update only provided fields
     update_data = item_update.model_dump(exclude_unset=True)
+
+    if update_data.get("status") == "discarded" and db_item.status != "discarded":
+        add_consumption_log(
+            db, item=db_item, action="discard", quantity=db_item.current_quantity
+        )
+
     for field, value in update_data.items():
         setattr(db_item, field, value)
 
     await db.commit()
-    await db.refresh(db_item)
-    return db_item
+    return await _reload(db, db_item.id)
 
 
 async def delete_inventory_item(db: AsyncSession, item_id: UUID) -> bool:
@@ -143,7 +174,7 @@ async def get_active_items_by_product(
     query = (
         select(InventoryItem)
         .where(InventoryItem.product_master_id == product_id)
-        .where(InventoryItem.status.notin_(["empty", "discarded"]))
+        .where(InventoryItem.status.notin_(INACTIVE_STATUSES))
         .order_by(InventoryItem.expiry_date.asc())
     )
     result = await db.execute(query)
@@ -179,6 +210,13 @@ async def consume_inventory_item(
     new_quantity = db_item.current_quantity - quantity
     db_item.current_quantity = new_quantity
 
+    add_consumption_log(
+        db,
+        item=db_item,
+        action="use_full" if new_quantity == 0 else "use_partial",
+        quantity=quantity,
+    )
+
     # Update status based on quantity
     if new_quantity == 0:
         db_item.status = "empty"
@@ -195,5 +233,12 @@ async def consume_inventory_item(
             db_item.status = "opened"
 
     await db.commit()
-    await db.refresh(db_item)
-    return db_item
+    return await _reload(db, db_item.id)
+
+
+async def _reload(db: AsyncSession, item_id: UUID) -> InventoryItem:
+    """Re-read an item after commit with its product and category loaded."""
+    item = await get_inventory_item(db, item_id)
+    if item is None:  # pragma: no cover - the row was committed in this session
+        raise LookupError(f"Inventory item {item_id} vanished after commit")
+    return item
