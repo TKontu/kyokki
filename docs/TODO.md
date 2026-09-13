@@ -52,6 +52,7 @@ previous wave is merged. Backend and frontend increments inside a wave are indep
 | --- | --- | --- | --- | --- | --- |
 | MVP-F1 | 1 | repo | Green CI and secrets out of git | 3h | — |
 | MVP-F2 | 1 | infra | Deployable prod stack + runbook, iPad loads inventory | 5h | F1 |
+| MVP-R0 | 1 | pipeline | Extraction feasibility spike: text LLM vs vision model on a real receipt | 2h | — |
 | MVP-S1 | 2 | backend | `product_name` and `category` on inventory responses | 3h | F1 |
 | MVP-R1 | 2 | backend | Typed extracted items with per-item match + suggested category | 6h | F1 |
 | MVP-R2 | 2 | backend | Confirm creates products for new items; expiry/location overrides | 5h | R1 |
@@ -61,7 +62,8 @@ previous wave is merged. Backend and frontend increments inside a wave are indep
 | MVP-S3 | 3 | frontend | Quick Add item (product search or new product) | 8h | C1, S1 |
 | MVP-S4 | 3 | frontend | Item edit sheet: adjust quantity/expiry/location, mark gone, delete | 5h | C1 |
 | MVP-R3 | 3 | backend | Background receipt processing, status transitions, 202 response | 5h | R1 |
-| MVP-R4 | 3 | pipeline | Real-receipt validation on the homelab, LLM settings that finish | 6h | F2, R1 |
+| MVP-R3b | 3 | backend | Generic heuristic line-parser fallback when extraction fails | 3h | R1 |
+| MVP-R4 | 3 | pipeline | Real-receipt validation on the homelab, LLM settings that finish | 6h | F2, R0, R1 |
 | MVP-R5 | 4 | frontend | Receipt types, API module, hooks with status polling | 5h | R1, R2, R3 |
 | MVP-R6 | 4 | frontend | Scan page: camera capture, upload, processing status | 6h | R5 |
 | MVP-R7 | 4 | frontend | Receipt review page: edit, re-match, skip, confirm | 12h | R5, R6, C1 |
@@ -70,8 +72,22 @@ previous wave is merged. Backend and frontend increments inside a wave are indep
 | MVP-P2 | 5 | frontend | PWA manifest, icons, Home Screen install, polling refresh | 4h | P1 |
 | MVP-P3 | 6 | all | Acceptance week on the iPad, friction log | — | everything |
 
-Total planned: ~97h across 18 increments. Critical path through the backend receipt work
-(R1 → R2 → R3 → R5 → R7) is ~33h, so frontend Stock/Consume work fills the gaps in waves 2–3.
+Total planned: ~105h across 20 increments. Critical path through the backend receipt work
+(R1 → R2 → R3 → R5 → R7) is ~35h, so frontend Stock/Consume work fills the gaps in waves 2–3.
+
+Amended 2026-09-13 from `docs/PLAN_REVIEW_2026-09-13.md` (sections 6 and 8): R0 and R3b
+added, alias learning folded into R1/R2, serialisation and unit decisions surfaced as DECs.
+
+### Decisions needed before Wave 2
+
+Operator-gated. An agent may lay out options but must not pick one and proceed.
+
+| ID | Question | Blocks | Recommended | Status |
+| --- | --- | --- | --- | --- |
+| DEC-1 | Canonical unit vocabulary: `ml \| g \| pcs` with R1 normalising `kg→g`, `l→ml`, `unit→pcs`, or keep receipt-native units with display conversion | R1, C2, S3 | `ml \| g \| pcs` | open |
+| DEC-2 | Quantities on the wire: backend serialises `Decimal` as JSON number, or frontend types become `string` and parse at the API boundary (today the API sends `"750.00"` and the TS types say `number`) | S1, C2 | JSON number | open |
+| DEC-3 | Frontend→API path: same-origin Next.js rewrite `/api/*` → `kyokki-api:8000` (no CORS, no build-time LAN IP), or keep `NEXT_PUBLIC_API_URL` + `ALLOWED_ORIGINS` | F2 | rewrite | **decided 2026-09-13**: rewrite; shipped in MVP-F2 (#26) |
+| DEC-4 | If the R0 spike cannot finish a 60-line receipt: heuristic parser becomes primary with the LLM only categorising; switch model; or accept chunked multi-call extraction | R1, R4 | decide the fallback order now | open |
 
 ### Increment detail
 
@@ -127,14 +143,41 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
 - **Acceptance:** iPad Safari shows the inventory list from the prod stack; runbook followed
   verbatim by someone who did not write it.
 
+#### MVP-R0 — Extraction feasibility spike (Wave 1, time-boxed 2 h)
+- Paper receipts are the common case, so OCR + extraction is on the critical path for most
+  input. Prove it before Wave 2 instead of in R4. Needs only the homelab endpoints and the
+  60-line S-kaupat text in `docs/vLLM_MANUAL_TEST.md`; no code merge required.
+- Candidate A, text LLM after OCR (current design): `chat_template_kwargs:
+  {"enable_thinking": false}` (or `/no_think`), `max_tokens` 4096, prompt trimmed to the
+  fields the MVP reads (`name`, `quantity`, `unit`, `weight_kg`, `volume_l`), skip-pattern
+  pre-filter on OCR lines (`YHTEENSÄ`, `ALV`, `Kortti:`, `Viite:`, `TOIMITUSMAKSU`, `NORM.`,
+  `ALENNUS`, VAT table), then retry `response_format` json_schema with thinking off. If still
+  failing, chunk product lines in batches of ~15 and merge.
+- Candidate B, vision model straight from the image (Qwen2.5-VL class via the same
+  OpenAI-compatible endpoint): one step, sees layout, no OCR language setting.
+- Both are store-agnostic. The winner becomes the primary path; the other stays wired as
+  a fallback. Record timings and the working `curl` in `docs/vLLM_MANUAL_TEST.md`.
+- **Acceptance:** one candidate completes the 60-line receipt in under 60 s with ≥ 80 % of
+  product lines. Otherwise file DEC-4's ruling before Wave 2 starts.
+
 #### MVP-S1 — `product_name` and `category` on inventory responses
 - `InventoryItemResponse` gains `product_name: str` and `category: str` (from
   `ProductMaster` via the relationship; `selectinload` in `crud/inventory_item.py`). The
   consume endpoint already looks the name up for broadcasts; reuse that path.
+- Also expose `category_icon` so S2 needs no products or categories fetch at all.
+- Quantities per DEC-2. Recommended: `field_serializer` emitting `float` for
+  `initial_quantity`, `current_quantity` (and `ProductMasterResponse.default_quantity`), with a
+  test asserting the JSON type. Today pydantic emits `"750.00"` and the TS types say `number`.
+  Since F2 the frontend already coerces both quantities to numbers at the API boundary
+  (`lib/api/inventory.ts`), so DEC-2 only settles the wire format; the UI no longer depends on it.
+- Server-side default filter: `GET /api/inventory` hides `empty` and `discarded` unless
+  `include_inactive=true`. Keeps the 30 s polling payload small on an always-on device.
+- Write a `consumption_log` row on consume and on discard (`crud/inventory_item.py` writes
+  none today), so P3's acceptance week produces waste and usage history.
 - Frontend `types/inventory.ts` updated; `InventoryList` drops the `productNames` prop path
   once S2 lands (keep it optional until then).
 - **Acceptance:** `GET /api/inventory` returns names without an extra products request;
-  existing inventory tests extended.
+  inactive items hidden by default; quantity JSON type asserted; existing inventory tests extended.
 
 #### MVP-R1 — Typed extracted items with per-item match and suggested category
 - New schema `ExtractedItem` in `schemas/receipt.py`: `name`, `name_en`, `quantity`, `unit`,
@@ -143,40 +186,78 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
   (derived from `ocr_structured`), plus `store` and `purchase_date` if extracted.
 - `ReceiptProcessingService` writes the match result *per item* (today only the count
   survives). Unmatched items keep `product_id = null`.
-- LLM prompt asks for `suggested_category` constrained to the seeded category ids; invalid
-  values are dropped, not failed. This is what makes auto-created products get a sane expiry.
+- Alias-first matching (the general learning mechanism): before RapidFuzz, look up
+  `store_product_alias` by normalised `receipt_name` (scoped to `store_chain` when known);
+  a hit is `exact`. Alias names also join the fuzzy candidate set so OCR-noise variants of a
+  known line still land on the right product. The table and model exist and are unused today.
+- Unit normalisation per DEC-1 in one backend function with tests (`kg→g×1000`,
+  `l→ml×1000`, `unit→pcs`). `ExtractedItem.unit` and `ConfirmedItemCreate.unit` use it.
+- One `ReceiptStatus` enum in `schemas/receipt.py`: `uploaded | processing | completed |
+  failed | confirmed`; model default and `crud/receipt.py` use it (today three values disagree).
+- Category suggestion as a separate small LLM call (names in, category ids out,
+  schema-constrained enum) rather than inside the main extraction prompt; invalid values are
+  dropped, not failed. Only unmatched items need it. This is what makes auto-created products
+  get a sane expiry.
+- `ExtractedItem` also carries pre-filled `location` and the product `storage_type` derived
+  from the category (`frozen→freezer`; `pantry`, `condiments`, `snacks`, `beverages→pantry`;
+  else `main_fridge` / `refrigerator`), so R7 shows it and the user can change it.
+- Drop the deprecated flat fields from `ReceiptExtraction`; prompt trimmed per R0's result.
+- `MINERU_LANG` setting (default `fi`, today hardcoded `en`) and a real `MINERU_TIMEOUT`
+  default (120 s, today `None`); send the file's actual content type.
 - Frontend `types/receipt.ts` rewritten to mirror the schema (the current `ParsedProduct`
   type describes fields the backend never produced).
 - **Acceptance:** tests in `tests/services/test_receipt_processing.py` assert per-item
-  `product_id` and `suggested_category` round-trip through `GET /receipts/{id}`.
+  `product_id` and `suggested_category` round-trip through `GET /receipts/{id}`; an alias
+  hit wins over a fuzzy candidate; unit normalisation and the status enum are covered.
 
 #### MVP-R2 — Confirm creates products for new items; overrides
 - `ConfirmedItemCreate`: `product_id: UUID | None`, `name: str | None`, `category: str | None`,
   `quantity`, `unit`, `purchase_date`, `expiry_date: date | None`, `location: str = "main_fridge"`.
   Rule: `product_id` or (`name` and `category`) required.
 - When `product_id` is null: create `ProductMaster` (canonical_name = name, category, shelf
-  life from the category default, `unit_type`/`default_unit` derived from `unit`), then the
-  inventory item. Expiry = override if given else purchase_date + product shelf life.
+  life from the category default, `unit_type`/`default_unit` derived from `unit`,
+  `storage_type` from the category mapping in R1), then the inventory item. Expiry =
+  override if given else purchase_date + product shelf life. `location` = override if given
+  else the category-derived default (never a blanket `main_fridge`).
+- Learning: for every confirmed item upsert a `store_product_alias` row (`receipt_name` =
+  extracted name, `store_chain` = receipt chain or `unknown`, `product_master_id`,
+  `manually_verified = true`, `occurrence_count += 1`). This is what makes the second receipt
+  from a store arrive mostly pre-matched.
 - Broadcast `inventory created` for each item (rule: mutating endpoints broadcast).
 - **Acceptance:** confirm with a mix of matched, new, and skipped items yields the right
-  product and inventory rows; duplicate confirm of the same receipt is rejected (409).
+  product, inventory and alias rows with category-derived locations; duplicate confirm of
+  the same receipt is rejected (409).
 
 #### MVP-R3 — Background receipt processing
 - `POST /receipts/{id}/process` sets `processing_status = "processing"`, schedules the
   pipeline via FastAPI `BackgroundTasks` with its own DB session, returns `202` with the
   receipt. `GET /receipts/{id}` reflects `processing → completed | failed` with `error`
   persisted on failure. Existing WebSocket broadcasts unchanged.
-- Celery stays out of scope; the worker container can be removed from compose or left idle.
+- Migration adds `error` and `processing_started_at` to `receipt`.
+- Stale-state recovery: a receipt `processing` for more than 10 minutes is treated as
+  `failed` on read and on `/process` (a container restart or a hung OCR call must not leave it
+  stuck behind the 409). `/process` is allowed on `failed`.
+- Celery is removed in F2; nothing here depends on it.
 - **Acceptance:** endpoint returns within 200 ms in tests with the pipeline mocked; status
-  transitions covered; a second `/process` while processing returns 409.
+  transitions and stale recovery covered; a second `/process` while processing returns 409;
+  `/process` on a `failed` receipt re-runs.
+
+#### MVP-R3b — Generic heuristic fallback
+- When extraction fails or times out, a deterministic, store-agnostic line parser turns
+  `NAME … PRICE` lines (with an optional following `n KPL` / `x,xxx KG` line) into
+  `ExtractedItem` rows, so `completed` always has rows on the review screen. Marks the receipt
+  `extraction_method = "heuristic"` so R7 can show a hint. The grammar in the
+  `ARCHITECTURE.md` appendix is the reference; chain-specific rules stay post-MVP.
+- **Acceptance:** the 60-line S-kaupat text yields ≥ 80 % of product lines with no LLM
+  call; a failing LLM call degrades to heuristic rows rather than `failed`.
 
 #### MVP-R4 — Real-receipt validation on the homelab
 - Run at least five real receipts through the deployed stack via the API. Record per receipt:
   OCR time, LLM time, items extracted, items matched, failures. Append to
   `docs/vLLM_MANUAL_TEST.md`.
-- Resolve the thinking-loop timeouts noted there: disable thinking for Qwen3 via
-  `chat_template_kwargs: {enable_thinking: false}` or switch `LLM_MODEL`; cap `max_tokens`.
-  Whatever works becomes the documented default in `.env.example` / `stack.env.example`.
+- Apply R0's winning settings in `llm_extractor.py`. Whatever works becomes the single
+  documented default in `config.py`, `.env.example` and `stack.env.example` (today `.env.example`
+  says `Qwen3-4B-Instruct` while `config.py` and `stack.env.example` say `qwen3-8B`). Include OCR language as a measured variable.
 - **Acceptance:** 5/5 receipts reach `completed` in under 120 s each with ≥ 80 % of line
   items extracted. If this cannot be met, stop and file a DEC before building R6/R7.
 
@@ -218,6 +299,7 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
   `get`, `list`, `process`, `confirm`. `hooks/useReceipts.ts`: `useReceipt(id)` polls every
   3 s while `processing`, stops on `completed | failed | confirmed`; `useReceiptList`,
   `useUploadReceipt`, `useConfirmReceipt` (invalidates inventory lists).
+- Status union copied from the single backend `ReceiptStatus` enum; quantity types follow DEC-2.
 - **Acceptance:** msw tests including polling stop conditions and multipart body.
 
 #### MVP-R6 — Scan page
@@ -225,6 +307,11 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
   HTTP on iOS; `getUserMedia` does not), preview thumbnail, optional store and date, Upload →
   scan → process → navigate to `/receipt/[id]`. `ProcessingStatus` shows queued/processing
   with elapsed time and a failure state with retry.
+- Second button "Choose a file" (`accept="image/*,application/pdf"`, no `capture`) so a
+  digital e-receipt PDF saved to the iPad Files app can be uploaded; the backend already
+  routes PDFs to pdfplumber, so this is the whole digital-receipt path for MVP.
+- Client-side downscale before upload (canvas, long edge ≤ 2000 px, JPEG q 0.85); a 12 MP
+  camera capture is 3–5 MB and inflates OCR time and prompt length.
 - **Acceptance:** tests for the happy path and the failure path; manual test on the iPad.
 
 #### MVP-R7 — Receipt review page
@@ -254,7 +341,9 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
 - Verify "Add to Home Screen" over HTTP on the iPad. If iOS refuses standalone mode without
   HTTPS, file a DEC to pull Traefik/TLS into MVP; otherwise TLS stays deferred.
 - **Acceptance:** app launches from the Home Screen icon without browser chrome; list updates
-  within a minute after a change made elsewhere.
+  within a minute after a change made elsewhere; the runbook states the iPad setting that
+  keeps the screen on (Auto-Lock: Never, or Guided Access), since a home-screen web app
+  cannot do that itself.
 
 #### MVP-P3 — Acceptance week
 - Use it for a week. Scan every receipt, consume from the iPad, fix stock by hand when wrong.
@@ -271,6 +360,12 @@ Ordered by expected value once MVP is live.
 6. Home Assistant REST endpoints (`HOME_ASSISTANT_SPEC.md`).
 7. Barcode scanning in the PWA camera; Raspberry Pi scanner station.
 8. Multi-receipt batch, consumption learning, analytics, Mealie.
+9. Learned store templates (`ADAPTIVE_PARSER_SPEC.md`): chain-specific parse rules that
+   skip the LLM for known formats. Generalising accelerator, not a core dependency.
+10. Digital receipt import adapters: loyalty-app exports, e-receipt e-mail ingestion, PDF
+    watch folder. MVP covers PDF upload via the file picker (R6).
+11. Runtime simplification for single-node installs: one uvicorn worker with in-process
+    broadcast, Redis optional (scanner mode state moves to Postgres).
 
 ---
 
@@ -279,10 +374,10 @@ Ordered by expected value once MVP is live.
 **Duration:** 4-6 weeks
 
 ### Infrastructure
-- [x] Docker Compose (api, frontend, postgres, redis, celery) — ✅ dev + `docker-compose.prod.yml`; Traefik deferred
+- [x] Docker Compose (api, frontend, postgres, redis) — ✅ dev + `docker-compose.prod.yml`; Celery removed in MVP-F2; Traefik deferred
 - [ ] Traefik SSL config
 - [ ] MinerU OCR connectivity test
-- [x] Basic CI (lint, type check, tests) — ✅ `.github/workflows/`; backend job red on main since 2026-04-20, see MVP-F1
+- [x] Basic CI (lint, type check, tests) — ✅ `.github/workflows/`; backend job green since PR #24 (MVP-F1)
 
 ### Database
 - [x] PostgreSQL schema (see ARCHITECTURE.md) — ✅ All 7 models complete
@@ -301,7 +396,7 @@ Ordered by expected value once MVP is live.
 - [x] MinerU OCR integration — ✅ pdfplumber + MinerU API (Sprint 3A)
 - [x] Language-agnostic LLM extraction — ✅ vLLM with structured output (Sprint 3A)
 - [x] Fuzzy product matching (RapidFuzz) — ✅ WRatio scorer with confidence levels (Sprint 3B)
-- [ ] Celery task for async processing — Optional enhancement (currently synchronous)
+- [ ] Background processing — FastAPI `BackgroundTasks` in **MVP-R3**; Celery removed in **MVP-F2**
 - [x] WebSocket status broadcasts — ✅ Receipt & inventory updates (Sprint 3B+)
 
 ### Frontend (iPad PWA)
@@ -402,9 +497,10 @@ Ordered by expected value once MVP is live.
 
 ### 🚧 Sprint 5: MVP on the iPad (IN PROGRESS, started 2026-09-13)
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
-- Wave 1: [x] F1 (PR #24)  [~] F2 (PR open; homelab verification pending)
+- Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [ ] R0
+- Decisions: [ ] DEC-1  [ ] DEC-2  [x] DEC-3 (same-origin rewrite, shipped in F2)  [ ] DEC-4 (if R0 fails)
 - Wave 2: [ ] S1  [ ] R1  [ ] R2  [ ] C1  [ ] C2
-- Wave 3: [ ] S2  [ ] S3  [ ] S4  [ ] R3  [ ] R4
+- Wave 3: [ ] S2  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance

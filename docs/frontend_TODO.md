@@ -10,13 +10,17 @@
 > | MVP-S2 | 3.3 CategoryFilter (as location groups), 3.4 ExpiringPanel (as pinned section) |
 > | MVP-S3, MVP-S4 | not previously planned: Quick Add and item edit |
 > | MVP-R5 | 4.3 Receipt upload API |
-> | MVP-R6 | 4.1, 4.2 (file input, not getUserMedia), 4.4 Scan page, 4.6 ProcessingStatus |
+> | MVP-R6 | 4.1, 4.2 (file input, not getUserMedia; plus a file picker for PDF e-receipts and client-side downscale), 4.4 Scan page, 4.6 ProcessingStatus |
 > | MVP-R7 | 4.5, 4.7, 4.8, 4.9, 4.10 |
 > | MVP-R8 | not previously planned: receipts list |
 > | MVP-P1 | 3.1 AppShell, 3.2 Sidebar, 3.5 ActionBar, 3.6 Integrate |
 > | MVP-P2 | 6.1 PWA manifest; polling instead of 5.1–5.2 |
 >
 > 2.1 (Zustand) is dropped for MVP. Phases 5 and the rest of 6 are post-MVP.
+>
+> Two backend decisions gate frontend work and are listed in `docs/TODO.md`: DEC-1 (unit
+> vocabulary, blocks C2 and S3) and DEC-2 (quantities as JSON numbers or strings, blocks S1
+> and C2). Today the API sends `"750.00"` while `types/inventory.ts` says `number`.
 
 **Stack:** Next.js 14, TypeScript, Tailwind, PWA, Zustand, React Query
 **Approach:** 47 small increments with full test coverage from day 1

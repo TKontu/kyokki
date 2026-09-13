@@ -355,3 +355,42 @@ If you find a solution, please update `backend/app/services/llm_extractor.py` wi
 - Working model name
 - Required vLLM parameters
 - Any system message needed
+
+---
+
+## MVP-R0 spike protocol (added 2026-09-13)
+
+Time-box: 2 hours. Input: the "Test 2: Real Receipt" text above. Pass bar: one candidate
+completes it in under 60 s with at least 80 % of product lines extracted. Record timings and
+the working request here. Full rationale: `docs/PLAN_REVIEW_2026-09-13.md` section 1 (C1).
+
+### Candidate A — text LLM after OCR (current design), in this order
+
+1. Thinking off: add `"chat_template_kwargs": {"enable_thinking": false}` to the request
+   (vLLM, Qwen3 hybrid models) or append `/no_think` to the prompt.
+2. `max_tokens`: 4096. A 40-product receipt is roughly 2500 output tokens.
+3. Trim the prompt to the fields the MVP reads: `name`, `quantity`, `unit`, `weight_kg`,
+   `volume_l`. Drop `name_en`, `price`, `country`, `language`, `currency`, `confidence`.
+4. Pre-filter OCR lines before the prompt with the skip patterns from `ARCHITECTURE.md`
+   (`YHTEENSÄ`, `VÄLISUMMA`, `ALV`, `Kortti:`, `Viite:`, `TOIMITUSMAKSU`, `NORM.`, `ALENNUS`,
+   `BONUSTA`, the VAT table, card and reference lines).
+5. With thinking off, retry `response_format: {"type": "json_schema", ...}`.
+6. If still over budget: split product lines into batches of ~15, one call each, merge.
+
+### Candidate B — vision model straight from the image
+
+Same endpoint with a vision-capable model (Qwen2.5-VL class), the receipt photo as an
+`image_url` part, and the trimmed prompt. One step; no OCR language setting; sees layout
+(indented `n KPL` lines, columns). Same thinking-off and `max_tokens` rules apply.
+
+### Record per run
+
+| Candidate | Model | Settings | Wall time | Products found / expected | Notes |
+| --- | --- | --- | --- | --- | --- |
+| | | | | | |
+
+### Outcome
+
+- Winner becomes the primary path in `llm_extractor.py` (MVP-R4 applies the settings and
+  makes them the single documented default); the other stays wired as fallback.
+- If neither passes, file DEC-4's ruling in `docs/TODO.md` before Wave 2 starts.
