@@ -3,9 +3,10 @@
  * Using fetch mocks instead of MSW for simplicity
  */
 
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
+  inventoryKeys,
   useInventoryList,
   useInventoryItem,
   useCreateInventoryItem,
@@ -214,6 +215,133 @@ describe('useInventory Hooks', () => {
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
 
       expect(result.current.data?.current_quantity).toBe(500)
+    })
+
+    describe('optimistic list updates', () => {
+      function setup() {
+        const queryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+        })
+        const otherItem = { ...mockInventoryItem, id: 'other-item', current_quantity: 300 }
+        queryClient.setQueryData(inventoryKeys.list(undefined), [mockInventoryItem, otherItem])
+        queryClient.setQueryData(inventoryKeys.list({ location: 'main_fridge' }), [
+          mockInventoryItem,
+        ])
+        const wrapper = ({ children }: { children: React.ReactNode }) => (
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        )
+        return { queryClient, wrapper, otherItem }
+      }
+
+      function listItem(queryClient: QueryClient, params: unknown, id: string) {
+        const list = queryClient.getQueryData<InventoryItem[]>(
+          inventoryKeys.list(params as undefined)
+        )
+        return list?.find((item) => item.id === id)
+      }
+
+      it('updates every cached list before the request resolves', async () => {
+        const { queryClient, wrapper, otherItem } = setup()
+        let resolveFetch: (value: unknown) => void = () => {}
+        ;(global.fetch as jest.Mock).mockReturnValueOnce(
+          new Promise((resolve) => {
+            resolveFetch = resolve
+          })
+        )
+
+        const { result } = renderHook(() => useConsumeInventoryItem(), { wrapper })
+        act(() => {
+          result.current.mutate({ id: mockInventoryItem.id, data: { quantity: 250 } })
+        })
+
+        await waitFor(() =>
+          expect(listItem(queryClient, undefined, mockInventoryItem.id)?.current_quantity).toBe(500)
+        )
+        expect(
+          listItem(queryClient, { location: 'main_fridge' }, mockInventoryItem.id)?.current_quantity
+        ).toBe(500)
+        expect(listItem(queryClient, undefined, otherItem.id)?.current_quantity).toBe(300)
+        expect(result.current.isPending).toBe(true)
+
+        resolveFetch({
+          ok: true,
+          status: 200,
+          json: async () => ({ ...mockInventoryItem, current_quantity: 500 }),
+        })
+        await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      })
+
+      it('restores every list when the request fails', async () => {
+        const { queryClient, wrapper } = setup()
+        ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          json: async () => ({ detail: 'Cannot consume 250 - only 100 available' }),
+        })
+
+        const { result } = renderHook(() => useConsumeInventoryItem(), { wrapper })
+        act(() => {
+          result.current.mutate({ id: mockInventoryItem.id, data: { quantity: 250 } })
+        })
+
+        await waitFor(() => expect(result.current.isError).toBe(true))
+        expect(listItem(queryClient, undefined, mockInventoryItem.id)?.current_quantity).toBe(750)
+        expect(
+          listItem(queryClient, { location: 'main_fridge' }, mockInventoryItem.id)?.current_quantity
+        ).toBe(750)
+        expect(result.current.error?.message).toBe('Cannot consume 250 - only 100 available')
+      })
+
+      it('never retries a failed consume, even when the app retries mutations by default', async () => {
+        // app/providers.tsx sets mutations.retry = 1. Consuming is not idempotent: a retry after
+        // a lost response would consume twice, and a paused retry (hidden tab) hides the error.
+        const queryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false }, mutations: { retry: 1 } },
+        })
+        queryClient.setQueryData(inventoryKeys.list(undefined), [mockInventoryItem])
+        const wrapper = ({ children }: { children: React.ReactNode }) => (
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        )
+        ;(global.fetch as jest.Mock).mockResolvedValue({
+          ok: false,
+          status: 500,
+          statusText: 'Internal Server Error',
+          json: async () => ({}),
+        })
+
+        const { result } = renderHook(() => useConsumeInventoryItem(), { wrapper })
+        act(() => {
+          result.current.mutate({ id: mockInventoryItem.id, data: { quantity: 250 } })
+        })
+
+        await waitFor(() => expect(result.current.isError).toBe(true))
+        const consumeCalls = (global.fetch as jest.Mock).mock.calls.filter(([url]) =>
+          String(url).endsWith('/consume')
+        )
+        expect(consumeCalls).toHaveLength(1)
+        expect(listItem(queryClient, undefined, mockInventoryItem.id)?.current_quantity).toBe(750)
+        ;(global.fetch as jest.Mock).mockReset()
+      })
+
+      it('invalidates the lists once the mutation settles', async () => {
+        const { queryClient, wrapper } = setup()
+        const invalidate = jest.spyOn(queryClient, 'invalidateQueries')
+        ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: 'Server Error',
+          json: async () => ({}),
+        })
+
+        const { result } = renderHook(() => useConsumeInventoryItem(), { wrapper })
+        act(() => {
+          result.current.mutate({ id: mockInventoryItem.id, data: { quantity: 250 } })
+        })
+
+        await waitFor(() => expect(result.current.isError).toBe(true))
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: inventoryKeys.lists() })
+      })
     })
   })
 

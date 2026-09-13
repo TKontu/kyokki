@@ -4,6 +4,7 @@
  */
 
 import React from 'react'
+import { formatQuantity } from '@/lib/consumption'
 
 export interface QuantityBarProps {
   /**
@@ -44,19 +45,6 @@ function getQuantityColor(percentage: number): string {
   if (percentage >= 50) return 'bg-yellow-500'
   if (percentage >= 25) return 'bg-orange-500'
   return 'bg-red-500'
-}
-
-/**
- * Format quantity for display
- * - Whole numbers: no decimals
- * - Decimals: up to 2 decimal places, trimmed
- */
-function formatQuantity(value: number): string {
-  if (Number.isInteger(value)) {
-    return value.toString()
-  }
-  // Round to 2 decimal places and remove trailing zeros
-  return parseFloat(value.toFixed(2)).toString()
 }
 
 /**

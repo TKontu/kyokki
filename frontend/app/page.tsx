@@ -1,17 +1,24 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { InventoryList } from '@/components/inventory'
+import { ConsumptionSheet, InventoryList } from '@/components/inventory'
+import { useInventoryList } from '@/hooks/useInventory'
 import { useProductList } from '@/hooks/useProducts'
 
 export default function Home() {
   const { data: products, isError: productsError } = useProductList()
+  // Same query key as InventoryList, so this shares its cache instead of refetching.
+  const { data: items } = useInventoryList()
+  const [consumingId, setConsumingId] = useState<string | null>(null)
 
   const productNames = useMemo(
     () => Object.fromEntries((products ?? []).map((p) => [p.id, p.canonical_name])),
     [products]
   )
+
+  // Read the live cached item so the sheet reflects optimistic and refetched values.
+  const consumingItem = items?.find((item) => item.id === consumingId) ?? null
 
   return (
     <div className="min-h-screen bg-ui-bg dark:bg-ui-dark-bg">
@@ -30,8 +37,13 @@ export default function Home() {
         </p>
       )}
       <main className="px-6 py-4">
-        <InventoryList productNames={productNames} />
+        <InventoryList productNames={productNames} onConsume={setConsumingId} />
       </main>
+      <ConsumptionSheet
+        item={consumingItem}
+        open={consumingItem !== null}
+        onClose={() => setConsumingId(null)}
+      />
     </div>
   )
 }

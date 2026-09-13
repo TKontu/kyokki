@@ -160,6 +160,52 @@ describe('APIClient', () => {
       })
     })
 
+    it('uses a FastAPI string detail as the error message', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => ({ detail: 'Cannot consume 500 - only 100 available' }),
+      })
+
+      await expect(client.post('/test', {})).rejects.toMatchObject({
+        status: 400,
+        message: 'Cannot consume 500 - only 100 available',
+      })
+    })
+
+    it('uses the first validation message from a FastAPI detail list', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        statusText: 'Unprocessable Entity',
+        json: async () => ({
+          detail: [{ loc: ['body', 'quantity'], msg: 'Input should be greater than 0' }],
+        }),
+      })
+
+      await expect(client.post('/test', {})).rejects.toMatchObject({
+        status: 422,
+        message: 'Input should be greater than 0',
+      })
+    })
+
+    it('falls back to a readable message when the body and status text are empty', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        statusText: '',
+        json: async () => {
+          throw new Error('not json')
+        },
+      })
+
+      await expect(client.get('/test')).rejects.toMatchObject({
+        status: 502,
+        message: 'Request failed (502)',
+      })
+    })
+
     it('should throw NetworkError on fetch failure', async () => {
       mockFetch.mockRejectedValueOnce(new Error('Network failed'))
 

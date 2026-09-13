@@ -6,7 +6,7 @@
 > | MVP increment | Covers here |
 > | --- | --- |
 > | MVP-C1 | 2.2 Modal (as BottomSheet), 2.4 Toast. Built without sizes and without warning/info toast types |
-> | MVP-C2 | 2.3 ConsumptionSheet, 2.5 Wire consumption |
+> | MVP-C2 | 2.3 ConsumptionSheet, 2.5 Wire consumption. Pieces get −1/−2/−3; no custom amount, no Undo |
 > | MVP-S2 | 3.3 CategoryFilter (as location groups), 3.4 ExpiringPanel (as pinned section) |
 > | MVP-S3, MVP-S4 | not previously planned: Quick Add and item edit |
 > | MVP-R5 | 4.3 Receipt upload API |

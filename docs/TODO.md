@@ -287,8 +287,8 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
     safe-area bottom padding. Slide-up is a CSS keyframe (`animate-sheet-up`), not a
     frame-driven transition: a hidden tab or resuming PWA pauses `requestAnimationFrame`, and
     the first version left the sheet stuck off-screen in that case (found in the browser check).
-  - [x] `ToastProvider` + `useToast()`: `success` / `error` with an optional action (for C2's
-    Undo), 3 s / 5 s auto-dismiss, at most 3 stacked, top centre above sheets. Mounted in
+  - [x] `ToastProvider` + `useToast()`: `success` / `error` with an optional action (e.g. a
+    future Undo), 3 s / 5 s auto-dismiss, at most 3 stacked, top centre above sheets. Mounted in
     `app/providers.tsx` inside the query client, so any component or hook can raise toasts.
   - [x] Demo sections in `/components-demo`. Dropped for MVP: sheet sizes, warning/info toasts.
 
@@ -299,6 +299,26 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
   error toast on failure. Wire `onConsume` from `page.tsx` through `InventoryList`.
 - **Acceptance:** calculation tests (¼ of 1000 ml = 250 ml; cap when 100 ml left), flow test
   with msw, rollback test.
+- As built (branch `feat/mvp-c2-consumption-sheet`), with operator rulings of 2026-09-13:
+  - [x] `components/inventory/ConsumptionSheet.tsx` opened from the card's Consume button (the
+    card has no whole-card tap: `Card` renders a `<button>` and would nest the action buttons).
+    ¼ ½ ¾ Done for measured units; **−1 −2 −3 Done for `pcs`/`unit`** (ruling), counts not less
+    than what is left disabled. Rules and rounding live in `lib/consumption.ts`.
+  - [x] **No Undo** (ruling): the backend has no clean reversal. Mistakes are fixed in S4.
+  - [x] `useConsumeInventoryItem` now updates every cached inventory list optimistically (it
+    only touched the detail cache, which the home page never reads), rolls all of them back on
+    error, invalidates on settle, and **never retries**: `app/providers.tsx` retries mutations
+    once, consuming is not idempotent, and TanStack pauses retries in a hidden tab, which left
+    the optimistic value up with no error (found in the browser check against the real API).
+  - [x] `lib/api/client.ts` reads FastAPI's `detail` (string or validation list) for
+    `APIError.message`. The sheet shows 4xx messages as-is and "Could not update <name>" for
+    5xx and network errors.
+  - [x] msw is set up for Jest: `jest.polyfills.js`, `customExportConditions: ['']`, an ESM
+    transform exception for `until-async`, and `test/msw/server.ts` (opt-in per test file).
+    `app/__tests__/consume-flow.test.tsx` covers the optimistic update, the POST body, the
+    toast and the rollback.
+  - Note for S2: items with equal expiry dates come back in varying order, so cards can swap
+    places after each refetch. S2's sort should add a stable tie-breaker.
 
 #### MVP-S2 — Stock view
 - Default query hides `empty` and `discarded`. Sort by `expiry_date` ascending. Group by
@@ -391,6 +411,8 @@ Ordered by expected value once MVP is live.
     watch folder. MVP covers PDF upload via the file picker (R6).
 11. Runtime simplification for single-node installs: one uvicorn worker with in-process
     broadcast, Redis optional (scanner mode state moves to Postgres).
+12. Undo for consume: a backend endpoint that reverses a consume (quantity, status,
+    `opened_date`) and removes its `consumption_log` row, then an Undo action on C2's toast.
 
 ---
 
@@ -524,7 +546,7 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [ ] R0
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [ ] DEC-4 (if R0 fails)
-- Wave 2: [x] S1 (PR #27)  [ ] R1  [ ] R2  [ ] C1 (PR open)  [ ] C2
+- Wave 2: [x] S1 (PR #27)  [ ] R1  [ ] R2  [x] C1 (PR #28)  [ ] C2 (PR open)
 - Wave 3: [ ] S2  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
