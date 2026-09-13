@@ -115,6 +115,29 @@ describe('TestInventoryItemCardRendering', () => {
     )
     expect(screen.getByText(/Dairy Alternatives · Main Fridge/)).toBeInTheDocument()
   })
+
+  it('omits the location when showLocation is false', () => {
+    render(
+      <InventoryItemCard
+        item={MOCK_ITEM}
+        productName="Oat Milk"
+        productCategory="Dairy Alternatives"
+        showLocation={false}
+      />
+    )
+    expect(screen.getByText('Dairy Alternatives')).toBeInTheDocument()
+    expect(screen.queryByText(/Main Fridge/)).not.toBeInTheDocument()
+  })
+
+  it('shows an unknown location as its raw value', () => {
+    render(
+      <InventoryItemCard
+        item={{ ...MOCK_ITEM, location: 'garage' as InventoryItem['location'] }}
+        productName="Oat Milk"
+      />
+    )
+    expect(screen.getByText('garage')).toBeInTheDocument()
+  })
 })
 
 // ---------------------------------------------------------------------------

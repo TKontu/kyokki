@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, within } from '@testing-library/react'
 import { InventoryList } from '../InventoryList'
 import type { InventoryItem, InventoryListParams } from '@/types/inventory'
 
@@ -9,6 +9,7 @@ const mockUseInventoryList = useInventoryList as jest.Mock
 
 const MOCK_NOW = new Date('2024-02-01T12:00:00Z')
 
+// Fridge, expires in four weeks
 const MOCK_ITEM_A: InventoryItem = {
   id: 'item-aaa',
   product_master_id: 'prod-111',
@@ -32,15 +33,35 @@ const MOCK_ITEM_A: InventoryItem = {
   consumed_at: null,
 }
 
+// Pantry, expires in four months
 const MOCK_ITEM_B: InventoryItem = {
   ...MOCK_ITEM_A,
   id: 'item-bbb',
   product_master_id: 'prod-222',
   product_name: 'Pasta',
+  category_name: 'Pantry Staples',
   location: 'pantry',
   status: 'sealed',
   current_quantity: 500,
   expiry_date: '2024-06-01',
+}
+
+// Fridge, expires tomorrow: pinned
+const MOCK_ITEM_URGENT: InventoryItem = {
+  ...MOCK_ITEM_A,
+  id: 'item-urgent',
+  product_master_id: 'prod-333',
+  product_name: 'Minced Meat',
+  category_name: 'Meat & Poultry',
+  expiry_date: '2024-02-02',
+}
+
+function mockItems(data: InventoryItem[]) {
+  mockUseInventoryList.mockReturnValue({ isLoading: false, isError: false, data })
+}
+
+function sectionNamed(name: RegExp) {
+  return screen.getByRole('region', { name })
 }
 
 beforeEach(() => {
@@ -67,13 +88,12 @@ describe('TestInventoryListLoading', () => {
   it('renders 3 skeleton divs', () => {
     mockUseInventoryList.mockReturnValue({ isLoading: true, isError: false, data: undefined })
     const { container } = render(<InventoryList />)
-    const skeletons = container.querySelectorAll('.animate-pulse')
-    expect(skeletons).toHaveLength(3)
+    expect(container.querySelectorAll('.animate-pulse')).toHaveLength(3)
   })
 
   it('does not render item cards while loading', () => {
     mockUseInventoryList.mockReturnValue({ isLoading: true, isError: false, data: undefined })
-    render(<InventoryList productNames={{ 'prod-111': 'Oat Milk' }} />)
+    render(<InventoryList />)
     expect(screen.queryByText('Oat Milk')).not.toBeInTheDocument()
   })
 })
@@ -87,19 +107,18 @@ describe('TestInventoryListError', () => {
     mockUseInventoryList.mockReturnValue({
       isLoading: false,
       isError: true,
-      error: new Error('Network error'),
+      error: new Error('Network failure'),
       data: undefined,
     })
     render(<InventoryList />)
-    expect(screen.getByRole('alert')).toBeInTheDocument()
-    expect(screen.getByRole('alert')).toHaveTextContent('Network error')
+    expect(screen.getByRole('alert')).toHaveTextContent('Network failure')
   })
 
   it('renders fallback message when error has no message', () => {
     mockUseInventoryList.mockReturnValue({
       isLoading: false,
       isError: true,
-      error: null,
+      error: 'not an Error instance',
       data: undefined,
     })
     render(<InventoryList />)
@@ -113,112 +132,122 @@ describe('TestInventoryListError', () => {
       error: new Error('oops'),
       data: undefined,
     })
-    render(<InventoryList productNames={{ 'prod-111': 'Oat Milk' }} />)
+    render(<InventoryList />)
     expect(screen.queryByText('Oat Milk')).not.toBeInTheDocument()
   })
 })
 
 // ---------------------------------------------------------------------------
-// Empty
+// Empty and hidden items
 // ---------------------------------------------------------------------------
 
 describe('TestInventoryListEmpty', () => {
   it('renders empty state message when items array is empty', () => {
-    mockUseInventoryList.mockReturnValue({ isLoading: false, isError: false, data: [] })
+    mockItems([])
     render(<InventoryList />)
-    expect(screen.getByText(/No items found/)).toBeInTheDocument()
+    expect(screen.getByText(/No items found/i)).toBeInTheDocument()
   })
 
   it('renders suggestion to scan a product', () => {
-    mockUseInventoryList.mockReturnValue({ isLoading: false, isError: false, data: [] })
+    mockItems([])
     render(<InventoryList />)
     expect(screen.getByText(/Scan a product/i)).toBeInTheDocument()
   })
 
-  it('does not render item cards when empty', () => {
-    mockUseInventoryList.mockReturnValue({ isLoading: false, isError: false, data: [] })
-    render(<InventoryList productNames={{ 'prod-111': 'Oat Milk' }} />)
-    expect(screen.queryByText('Oat Milk')).not.toBeInTheDocument()
+  it('hides empty and discarded items', () => {
+    mockItems([
+      MOCK_ITEM_A,
+      { ...MOCK_ITEM_B, status: 'empty', current_quantity: 0 },
+      { ...MOCK_ITEM_URGENT, status: 'discarded' },
+    ])
+    render(<InventoryList />)
+    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
+    expect(screen.queryByText('Pasta')).not.toBeInTheDocument()
+    expect(screen.queryByText('Minced Meat')).not.toBeInTheDocument()
+  })
+
+  it('shows the empty state when only inactive items are left', () => {
+    mockItems([{ ...MOCK_ITEM_A, status: 'empty', current_quantity: 0 }])
+    render(<InventoryList />)
+    expect(screen.getByText(/No items found/i)).toBeInTheDocument()
+  })
+
+  it('shows inactive items when include_inactive is requested', () => {
+    mockItems([{ ...MOCK_ITEM_A, status: 'empty', current_quantity: 0 }])
+    render(<InventoryList params={{ include_inactive: true }} />)
+    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
   })
 })
 
 // ---------------------------------------------------------------------------
-// Rendering
+// Grouping and sorting
 // ---------------------------------------------------------------------------
 
-describe('TestInventoryListRendering', () => {
-  it('renders one card per item', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A, MOCK_ITEM_B],
-    })
+describe('TestInventoryListGrouping', () => {
+  it('renders sections in order: expiring soon, then locations, with counts', () => {
+    mockItems([MOCK_ITEM_B, MOCK_ITEM_A, MOCK_ITEM_URGENT])
     render(<InventoryList />)
-    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
-    expect(screen.getByText('Pasta')).toBeInTheDocument()
+
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)
+    expect(headings).toEqual(['Expiring soon1', 'Fridge1', 'Pantry1'])
   })
 
-  it('renders the product name from the item without a productNames map', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A],
-    })
+  it('renders a pinned item only once, in the expiring soon section', () => {
+    mockItems([MOCK_ITEM_A, MOCK_ITEM_URGENT])
     render(<InventoryList />)
-    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
-    expect(screen.queryByText(/Product prod/)).not.toBeInTheDocument()
+
+    expect(screen.getAllByText('Minced Meat')).toHaveLength(1)
+    expect(within(sectionNamed(/Expiring soon/)).getByText('Minced Meat')).toBeInTheDocument()
+    expect(within(sectionNamed(/Fridge/)).queryByText('Minced Meat')).not.toBeInTheDocument()
   })
 
-  it('prefers the item product name over the productNames map', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A],
-    })
-    render(<InventoryList productNames={{ 'prod-111': 'Stale Name' }} />)
-    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
-    expect(screen.queryByText('Stale Name')).not.toBeInTheDocument()
+  it('sorts items within a group by expiry, then creation time', () => {
+    const later = { ...MOCK_ITEM_A, id: 'later', product_name: 'Later', expiry_date: '2024-04-01' }
+    const tieNewer = {
+      ...MOCK_ITEM_A,
+      id: 'tie-newer',
+      product_name: 'Tie Newer',
+      created_at: '2024-01-03T10:00:00Z',
+    }
+    const tieOlder = {
+      ...MOCK_ITEM_A,
+      id: 'tie-older',
+      product_name: 'Tie Older',
+      created_at: '2024-01-02T10:00:00Z',
+    }
+    mockItems([later, tieNewer, tieOlder])
+    render(<InventoryList />)
+
+    const names = within(sectionNamed(/Fridge/))
+      .getAllByRole('heading', { level: 3 })
+      .map((h) => h.textContent)
+    expect(names).toEqual(['Tie Older', 'Tie Newer', 'Later'])
   })
 
-  it('falls back to productNames when the item has no product name', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [{ ...MOCK_ITEM_A, product_name: '' }],
-    })
-    render(<InventoryList productNames={{ 'prod-111': 'Mapped Milk' }} />)
-    expect(screen.getByText('Mapped Milk')).toBeInTheDocument()
+  it('omits the location from grouped cards but keeps it on pinned cards', () => {
+    mockItems([MOCK_ITEM_A, MOCK_ITEM_URGENT])
+    render(<InventoryList />)
+
+    expect(within(sectionNamed(/Fridge/)).getByText('Dairy & Eggs')).toBeInTheDocument()
+    expect(
+      within(sectionNamed(/Expiring soon/)).getByText('Meat & Poultry · Main Fridge')
+    ).toBeInTheDocument()
   })
 
-  it('falls back to truncated UUID when no name is available', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [{ ...MOCK_ITEM_A, product_name: '' }],
-    })
-    render(<InventoryList productNames={{ 'prod-999': 'Other' }} />)
-    expect(screen.getByText('Product prod-111')).toBeInTheDocument()
+  it('lays each section out as a two-column grid on iPad landscape', () => {
+    mockItems([MOCK_ITEM_A, MOCK_ITEM_URGENT])
+    render(<InventoryList />)
+
+    for (const list of screen.getAllByRole('list')) {
+      expect(list.className).toContain('grid')
+      expect(list.className).toContain('lg:grid-cols-2')
+    }
   })
 
   it('shows the category display name on the card', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A],
-    })
+    mockItems([MOCK_ITEM_A])
     render(<InventoryList />)
-    expect(screen.getByText(/Dairy & Eggs/)).toBeInTheDocument()
-  })
-
-  it('renders items inside a list element', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A],
-    })
-    const { container } = render(<InventoryList productNames={{ 'prod-111': 'Oat Milk' }} />)
-    expect(container.querySelector('ul')).toBeInTheDocument()
-    expect(container.querySelector('li')).toBeInTheDocument()
+    expect(screen.getByText('Dairy & Eggs')).toBeInTheDocument()
   })
 })
 
@@ -229,109 +258,73 @@ describe('TestInventoryListRendering', () => {
 describe('TestInventoryListCallbacks', () => {
   it('forwards onConsume to each card', () => {
     const onConsume = jest.fn()
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A],
-    })
-    render(
-      <InventoryList
-        productNames={{ 'prod-111': 'Oat Milk' }}
-        onConsume={onConsume}
-      />
-    )
+    mockItems([MOCK_ITEM_A])
+    render(<InventoryList onConsume={onConsume} />)
     fireEvent.click(screen.getByRole('button', { name: /consume/i }))
     expect(onConsume).toHaveBeenCalledWith('item-aaa')
   })
 
   it('forwards onEdit to each card', () => {
     const onEdit = jest.fn()
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A],
-    })
-    render(
-      <InventoryList
-        productNames={{ 'prod-111': 'Oat Milk' }}
-        onEdit={onEdit}
-      />
-    )
+    mockItems([MOCK_ITEM_A])
+    render(<InventoryList onEdit={onEdit} />)
     fireEvent.click(screen.getByRole('button', { name: /edit/i }))
     expect(onEdit).toHaveBeenCalledWith('item-aaa')
   })
 
   it('renders no action buttons when no callbacks provided', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A],
-    })
-    render(<InventoryList productNames={{ 'prod-111': 'Oat Milk' }} />)
+    mockItems([MOCK_ITEM_A])
+    render(<InventoryList />)
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
-  it('calls correct item id when multiple items rendered', () => {
+  it('calls the right item id from each section', () => {
     const onConsume = jest.fn()
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A, MOCK_ITEM_B],
-    })
-    render(
-      <InventoryList
-        productNames={{ 'prod-111': 'Oat Milk', 'prod-222': 'Pasta' }}
-        onConsume={onConsume}
-      />
-    )
-    const buttons = screen.getAllByRole('button', { name: /consume/i })
-    fireEvent.click(buttons[1])
-    expect(onConsume).toHaveBeenCalledWith('item-bbb')
+    mockItems([MOCK_ITEM_B, MOCK_ITEM_A, MOCK_ITEM_URGENT])
+    render(<InventoryList onConsume={onConsume} />)
+
+    fireEvent.click(within(sectionNamed(/Expiring soon/)).getByRole('button', { name: /consume/i }))
+    fireEvent.click(within(sectionNamed(/Pantry/)).getByRole('button', { name: /consume/i }))
+
+    expect(onConsume.mock.calls).toEqual([['item-urgent'], ['item-bbb']])
   })
 })
 
 // ---------------------------------------------------------------------------
-// Params forwarding
+// Params and className
 // ---------------------------------------------------------------------------
 
 describe('TestInventoryListParams', () => {
   it('forwards params to useInventoryList', () => {
-    const params: InventoryListParams = { location: 'freezer', status: 'sealed' }
-    mockUseInventoryList.mockReturnValue({ isLoading: false, isError: false, data: [] })
+    const params: InventoryListParams = { location: 'freezer' }
+    mockItems([])
     render(<InventoryList params={params} />)
     expect(mockUseInventoryList).toHaveBeenCalledWith(params)
   })
 
   it('calls useInventoryList with undefined when no params given', () => {
-    mockUseInventoryList.mockReturnValue({ isLoading: false, isError: false, data: [] })
+    mockItems([])
     render(<InventoryList />)
     expect(mockUseInventoryList).toHaveBeenCalledWith(undefined)
   })
 })
 
-// ---------------------------------------------------------------------------
-// Custom className
-// ---------------------------------------------------------------------------
-
 describe('TestInventoryListClassName', () => {
-  it('applies className to list wrapper', () => {
-    mockUseInventoryList.mockReturnValue({
-      isLoading: false,
-      isError: false,
-      data: [MOCK_ITEM_A],
-    })
-    const { container } = render(
-      <InventoryList
-        productNames={{ 'prod-111': 'Oat Milk' }}
-        className="my-custom-class"
-      />
-    )
-    expect(container.querySelector('ul')?.className).toContain('my-custom-class')
+  it('applies className to the wrapper when items render', () => {
+    mockItems([MOCK_ITEM_A])
+    const { container } = render(<InventoryList className="custom-class" />)
+    expect((container.firstChild as HTMLElement).className).toContain('custom-class')
   })
 
   it('applies className to loading wrapper', () => {
     mockUseInventoryList.mockReturnValue({ isLoading: true, isError: false, data: undefined })
-    const { container } = render(<InventoryList className="my-custom-class" />)
-    expect((container.firstChild as HTMLElement).className).toContain('my-custom-class')
+    const { container } = render(<InventoryList className="custom-class" />)
+    expect((container.firstChild as HTMLElement).className).toContain('custom-class')
+  })
+
+  it('applies className to the empty state', () => {
+    mockItems([])
+    const { container } = render(<InventoryList className="custom-class" />)
+    expect((container.firstChild as HTMLElement).className).toContain('custom-class')
   })
 })

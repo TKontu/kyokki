@@ -62,7 +62,10 @@ async def get_inventory_items(
         expiry_threshold = date.today() + timedelta(days=expiring_days)
         query = query.where(InventoryItem.expiry_date <= expiry_threshold)
 
-    query = query.order_by(InventoryItem.expiry_date)
+    # Total order so equal-expiry items keep their place between refetches
+    query = query.order_by(
+        InventoryItem.expiry_date, InventoryItem.created_at, InventoryItem.id
+    )
 
     result = await db.execute(query)
     return list(result.scalars().all())
@@ -175,7 +178,11 @@ async def get_active_items_by_product(
         select(InventoryItem)
         .where(InventoryItem.product_master_id == product_id)
         .where(InventoryItem.status.notin_(INACTIVE_STATUSES))
-        .order_by(InventoryItem.expiry_date.asc())
+        .order_by(
+            InventoryItem.expiry_date.asc(),
+            InventoryItem.created_at.asc(),
+            InventoryItem.id.asc(),
+        )
     )
     result = await db.execute(query)
     return list(result.scalars().all())

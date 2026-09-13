@@ -7,7 +7,7 @@
 > | --- | --- |
 > | MVP-C1 | 2.2 Modal (as BottomSheet), 2.4 Toast. Built without sizes and without warning/info toast types |
 > | MVP-C2 | 2.3 ConsumptionSheet, 2.5 Wire consumption. Pieces get −1/−2/−3; no custom amount, no Undo |
-> | MVP-S2 | 3.3 CategoryFilter (as location groups), 3.4 ExpiringPanel (as pinned section) |
+> | MVP-S2 | 3.3 CategoryFilter (as location groups), 3.4 ExpiringPanel (as pinned section). No filter pills or collapse; pinned items are not repeated in their group |
 > | MVP-S3, MVP-S4 | not previously planned: Quick Add and item edit |
 > | MVP-R5 | 4.3 Receipt upload API |
 > | MVP-R6 | 4.1, 4.2 (file input, not getUserMedia; plus a file picker for PDF e-receipts and client-side downscale), 4.4 Scan page, 4.6 ProcessingStatus |

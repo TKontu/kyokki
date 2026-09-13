@@ -15,6 +15,8 @@ export interface InventoryItemCardProps {
   item: InventoryItem
   productName: string
   productCategory?: string
+  /** Hide the location when the surrounding section already names it. */
+  showLocation?: boolean
   onConsume?: (id: string) => void
   onEdit?: (id: string) => void
   className?: string
@@ -33,6 +35,7 @@ export const InventoryItemCard: React.FC<InventoryItemCardProps> = ({
   item,
   productName,
   productCategory,
+  showLocation = true,
   onConsume,
   onEdit,
   className = '',
@@ -40,9 +43,14 @@ export const InventoryItemCard: React.FC<InventoryItemCardProps> = ({
   const inactive = isInactive(item.status)
   const hasActions = onConsume !== undefined || onEdit !== undefined
 
+  // Unknown locations (the API accepts any string) show their raw value rather than vanish
+  const locationLabel = showLocation
+    ? LOCATION_LABELS[item.location] ?? item.location
+    : undefined
+
   const subtitle = [
     productCategory,
-    LOCATION_LABELS[item.location],
+    locationLabel,
   ]
     .filter(Boolean)
     .join(' · ')

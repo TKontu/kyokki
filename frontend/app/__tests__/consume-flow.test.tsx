@@ -73,7 +73,6 @@ describe('Consume flow', () => {
 
     server.use(
       http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
-      http.get(`${API_URL}/products`, () => HttpResponse.json([])),
       http.post(`${API_URL}/inventory/:id/consume`, async ({ request, params }) => {
         consumeBodies.push({ id: params.id, body: await request.json() })
         await consumeReleased
@@ -101,10 +100,35 @@ describe('Consume flow', () => {
     expect(remaining('500 of 1000 ml remaining')).toBeInTheDocument()
   })
 
+  it('removes a used-up item from the list as soon as Done is tapped', async () => {
+    let releaseConsume: () => void = () => {}
+    const consumeReleased = new Promise<void>((resolve) => {
+      releaseConsume = resolve
+    })
+    server.use(
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
+      http.post(`${API_URL}/inventory/:id/consume`, async () => {
+        await consumeReleased
+        return HttpResponse.json({ ...MILK, current_quantity: 0, status: 'empty' })
+      })
+    )
+
+    renderHome()
+    expect(await screen.findByText('Oat Milk')).toBeInTheDocument()
+
+    await openSheetAndTap('Done')
+
+    // Optimistically empty, so the stock view hides it before the server answers
+    await waitFor(() => expect(screen.queryByText('Oat Milk')).not.toBeInTheDocument())
+    expect(screen.getByText(/No items found/i)).toBeInTheDocument()
+
+    releaseConsume()
+    expect(await screen.findByRole('status')).toHaveTextContent('Used up · Oat Milk')
+  })
+
   it('rolls the list back and shows the server error when consuming fails', async () => {
     server.use(
       http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
-      http.get(`${API_URL}/products`, () => HttpResponse.json([])),
       http.post(`${API_URL}/inventory/:id/consume`, () =>
         HttpResponse.json({ detail: 'Cannot consume 500 - only 100 available' }, { status: 400 })
       )

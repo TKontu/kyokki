@@ -3,6 +3,7 @@
  * The status rules mirror backend/app/crud/inventory_item.py consume_inventory_item.
  */
 
+import { isInactive as isGone } from '@/lib/stock'
 import type { InventoryItem, Unit } from '@/types/inventory'
 
 export type ConsumptionOptionKey =
@@ -55,7 +56,7 @@ export function formatQuantity(value: number): string {
 }
 
 function isInactive(item: InventoryItem): boolean {
-  return item.status === 'empty' || item.status === 'discarded' || item.current_quantity <= 0
+  return isGone(item) || item.current_quantity <= 0
 }
 
 /** The buttons offered for an item: ¼ ½ ¾ Done, or −1 −2 −3 Done for countable units. */
