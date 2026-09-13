@@ -385,12 +385,106 @@ Same endpoint with a vision-capable model (Qwen2.5-VL class), the receipt photo 
 
 ### Record per run
 
+Run on 2026-09-14 against the llama-swap gateway `http://192.168.0.94:9292/v1`, using only models
+pinned to the one available RTX 3090 (`GPU-a8c640ca-...`). Harness:
+`docs/spikes/r0_extraction_spike.py` (ground truth parsed from the receipt above, fuzzy name match
+≥ 80, quantity and weight checked per line). "Found" below uses that fuzzy match; the exact
+name accuracy is listed separately after the table because it differs for vision. MinerU was not deployed, so Candidate A used the
+receipt text above as its "OCR output". Candidate B used that text rendered as an image
+(Consolas, 1.2° tilt, slight blur, scaled to a 2000 px long edge, 503×1999): **cleaner than a
+phone photo**, so vision results are an upper bound until a real photo is tried.
+
+Ground truth: 49 product lines (42 food, 7 household), 11 with an `n KPL` line, 10 sold by weight;
+the two fees (`VERKKOK.PAKKAUSMATERIAALIMAKSU`, `TOIMITUSMAKSU`) are not products.
+
 | Candidate | Model | Settings | Wall time | Products found / expected | Notes |
 | --- | --- | --- | --- | --- | --- |
-| | | | | | |
+| A text | `muse-glimmer` | full keys, json_schema | 54.2 s | 44/49* | *all 49 present; 5 short names carried the price ("LIME 2,21") |
+| B vision | `muse-glimmer` | full keys, json_schema | 60.4 s | 44/49* | same five names with price |
+| A text | `muse-glimmer` | full keys, json_schema, prompt "without the price", reasoning `none` | 55.9 s | 49/49 | qty 11/11, kg 10/10; 3361 output tokens |
+| A text | `muse-glimmer` | same, reasoning `minimal` | 51.9 s | 49/49 | qty 11/11, kg 10/10 |
+| A text | `muse-glimmer` | same, **no** json_schema | 58.4 s | 49/49 | schema costs nothing measurable |
+| A text | `muse-glimmer` | **compact keys**, json_schema, reasoning `minimal` | 44.1 / 41.3 / 42.6 s | 49/49 ×3 | qty 11/11, kg 10/10; ~2400 output tokens |
+| B vision | `muse-glimmer` | compact keys, json_schema, reasoning `minimal` | 48.6 / 53.3 / 50.8 s | 49/49 ×3 | qty 11/11, kg 10/10; third run kept the price in every name |
+| A text | `muse-glimmer` | **compact keys, json_schema, reasoning `low`** (documented value) | 39.9 / 42.8 / 40.4 s | 49/49 ×3 | qty 11/11, kg 10/10; exact names 49/49 ×3 |
+| B vision | `muse-glimmer` | **compact keys, json_schema, reasoning `low`** | 46.5 / 46.9 / 51.8 s | 49/49 ×3 | qty 11/11, kg 10/10; exact names 42, 41, 41; no prices in names |
+
+`none` and `minimal` are **not** supported values (see findings); those rows are kept as
+measured but the `low` rows are the reference configuration.
+| A text | `gemma-26b` | compact keys, json_schema | 13.0 s | 49/49 | qty 11/11, kg 10/10; cold load 247 s |
+| A text | `gemma-26b` | full keys, json_schema | 18.1 s | 49/49 | one name carried the price |
+| B vision | `gemma-26b` | compact keys, json_schema | 12.9 s | 48/49 | qty 8/11, kg 9/10; vLLM gave the image ~450 tokens |
+| A text | `qwen3.5-9b` | compact keys, json_schema | 26.4 s | 48/49 | qty 11/11, kg 10/10; cold load 220 s |
+| B vision | `qwen3.5-9b` | compact keys, json_schema | 22.5 s | 49/49 | qty 8/11, **kg 2/10** |
+
+Exact product names (after stripping a trailing price), per run:
+
+| Model | Text | Vision |
+| --- | --- | --- |
+| `muse-glimmer` | 49/49 on all 9 runs | 42, 41, 41, 41, 42, 41, 41 /49 (≈ 8 misread names per receipt, e.g. `KEVYMAITOJUOMA`, `GRANAATT IOMENA`, `KEITTIÖSUHKE`) |
+| `gemma-26b` | 49/49 | 26/49 |
+| `qwen3.5-9b` | 47/49 | 48/49 (but weights 2/10) |
+
+Findings:
+- **`muse-glimmer` always reasons.** Per Meta's prompting guide
+  (https://dev.meta.ai/docs/muse-glimmer/prompting), reasoning is built into the format (a
+  private `assistant to=self` turn) and `reasoning_strength` accepts only `xhigh`, `high`,
+  `medium` or `low` (template default `high`; this gateway's server default is `low`). There
+  is no off switch and `enable_thinking` is ignored. `low` is the lowest supported setting;
+  the `none`/`minimal` runs only rendered unsupported text into the template and behaved like
+  `low`. Time scales with output tokens (~58 tok/s), so the lever is **output size**.
+- **Stream long generations.** The guide recommends streaming for reasoning workloads so
+  multi-thousand-token traces do not hit request timeouts. The spike used non-streaming
+  calls under 60 s; R1 should stream (or at least set a generous client timeout).
+- **Compact keys** (`{"p": [{"n", "q", "w"}]}`) cut ~25 % of output tokens and bring
+  `muse-glimmer` under the bar with margin. The backend maps them to `ExtractedItem`.
+- **"without the price"** in the name rule is needed, and still not sufficient for vision (one
+  run in three kept every price). Strip a trailing `\s+\d+,\d{2}` in the backend regardless.
+- **Vision reads counts and weights reliably but misspells ~1 in 6 names** even on a clean
+  rendered image. Near-miss names still fuzzy-match existing products, and the review screen
+  (R7) lets the user fix them, but new products would be created with misspelt names.
+- `response_format: json_schema` works on both llama.cpp and vLLM here (no thinking loop, unlike
+  the 2025 Qwen3 vLLM setup at the top of this file) and always produced valid JSON.
+- The unit enum is unnecessary: quantity and weight are what the receipt states, and DEC-1
+  conversion happens in the backend.
+- Smaller models are fast on text but much worse at reading quantities and weights from the image.
+- `muse-glimmer` is the always-loaded model on this gateway (a hot agent and an idle poller keep
+  it up), so it has no cold-load cost. Any other model evicts it and costs 3–4 minutes cold.
+
+### Working request (Candidate A, `muse-glimmer`)
+
+```bash
+curl -s http://192.168.0.94:9292/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "model": "muse-glimmer",
+  "max_tokens": 4096,
+  "temperature": 0.2,
+  "chat_template_kwargs": {"reasoning_strength": "low"},
+  "response_format": {"type": "json_schema", "json_schema": {"name": "receipt", "strict": true,
+    "schema": {"type": "object", "required": ["p"], "properties": {"p": {"type": "array",
+      "items": {"type": "object", "required": ["n", "q", "w"], "properties": {
+        "n": {"type": "string"}, "q": {"type": "number"}, "w": {"type": ["number", "null"]}}}}}}}},
+  "messages": [{"role": "user", "content": "<COMPACT_INSTRUCTIONS>\n\nReceipt:\n<pre-filtered receipt text>"}]
+}'
+```
+
+`COMPACT_INSTRUCTIONS` and the pre-filter regex are in the harness. Candidate B sends the same
+instructions as a `text` part plus an `image_url` part (`data:image/png;base64,...`).
 
 ### Outcome
 
-- Winner becomes the primary path in `llm_extractor.py` (MVP-R4 applies the settings and
-  makes them the single documented default); the other stays wired as fallback.
-- If neither passes, file DEC-4's ruling in `docs/TODO.md` before Wave 2 starts.
+- **R0 passes.** `muse-glimmer` (`reasoning_strength: low`) completes the 60-line receipt in
+  40–43 s from text and 47–52 s from an image, with 49/49 products
+  and every quantity and weight correct, on both candidates; `gemma-26b` text does it in 13 s.
+- **Model:** `muse-glimmer` for both paths. It is always loaded, gets every quantity and weight
+  right from text and image, and is the only single-GPU model whose image reading holds up.
+- **Primary path is not decided yet.** From perfect text, Candidate A is exact (49/49 names);
+  from a clean image, Candidate B misspells ~8 names. But Candidate A's real input is MinerU OCR
+  of a phone photo, which has not been measured (MinerU is offline until 2026-09-15). R4 decides
+  with real photos: MinerU → text vs. image → vision, comparing exact names, counts and time.
+  Until then R1 wires both: text for digital PDFs (pdfplumber) and whenever OCR text exists,
+  vision for photos when MinerU is unreachable. The heuristic parser (R3b) stays last resort.
+- DEC-4 (fallback if R0 failed) is not needed.
+- For R1/R4: `config.py`, `.env.example` and `stack.env.example` still point at the retired
+  endpoint `192.168.0.247:9003` with `LLM_MODEL=qwen3-8B`; `llm_extractor.py` still sends
+  `max_tokens: 16384`, no schema, and the full-key prompt. The request above replaces that.
+  Receipt processing must allow ~60 s per call (R3 runs it in the background).
