@@ -44,7 +44,7 @@ def _serialize_value(value: Any) -> Any:
     Returns:
         JSON-serializable value.
     """
-    if isinstance(value, (UUID, Decimal)):
+    if isinstance(value, UUID | Decimal):
         return str(value)
     if isinstance(value, datetime):
         return value.isoformat()

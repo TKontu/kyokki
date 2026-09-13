@@ -102,7 +102,8 @@ async def create_shopping_item(
     logger.info(
         "create_shopping_item",
         extra={
-            "name": item_in.name,
+            # "name" is reserved on logging.LogRecord; using it raises KeyError.
+            "item_name": item_in.name,
             "priority": item_in.priority,
             "source": item_in.source,
         },

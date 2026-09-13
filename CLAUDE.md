@@ -38,7 +38,9 @@ everything from the repo root. Backend tools go through `python -m` so no activa
 <!-- /claude:commands -->
 
 - Backend DB tests need PostgreSQL and Redis: `docker compose up -d postgres redis` first.
-  Tests marked `requires_mineru` / `requires_vllm` are excluded by default (`backend/pytest.ini`).
+  Tests marked `requires_mineru` / `requires_vllm` / `requires_ollama` are excluded by default
+  (`backend/pytest.ini`). Set `KYOKKI_TEST_REQUIRE_DB=1` (CI does) to fail instead of skip
+  when PostgreSQL is unreachable.
 - Migrations run through Docker only, because the `postgres` hostname resolves inside the
   compose network: `docker compose run --rm kyokki-api alembic upgrade head`. See `backend/README.md`.
 - CI (`.github/workflows/`) runs ruff, mypy, pytest with coverage, and the frontend lint, tsc,
@@ -70,7 +72,8 @@ docs/              ARCHITECTURE.md, specs, TODO.md and per-area *_TODO.md
 - **DB writes** go through `async with handle_integrity_errors():` so constraint violations map
   to 400/409 instead of 500.
 - **Configuration:** `settings` from `app/core/config.py` (pydantic-settings, reads `.env`).
-  Never hardcode hosts, keys, or model names. `.env*` and `stack.env` are git-ignored.
+  Never hardcode hosts, keys, or model names. `.env*`, `stack.env` and `local.env` are
+  git-ignored; commit only the `*.example` files.
 - **Logging:** `get_logger(__name__)` from `app/core/logging.py`, structured fields, no prints.
   Never log receipt images, API keys, or full LLM prompts at INFO.
 - **Real-time:** inventory and receipt mutations broadcast over Redis pub/sub to WebSocket clients

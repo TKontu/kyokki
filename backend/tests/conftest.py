@@ -1,5 +1,6 @@
 """Shared pytest fixtures for all tests."""
 
+import os
 from collections.abc import AsyncGenerator
 from decimal import Decimal
 from uuid import uuid4
@@ -11,9 +12,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 from app.db.base_class import Base
+from app.db.session import engine as app_engine
 from app.main import app
 from app.models.category import Category
 from app.models.product_master import ProductMaster
+from app.services.broadcast_helpers import close_redis_client
 
 
 @pytest.fixture
@@ -60,7 +63,15 @@ def sample_product_data() -> dict:
 
 @pytest.fixture
 async def sample_category(db_session: AsyncSession) -> Category:
-    """Create sample category in database for tests."""
+    """Return the ``dairy`` category, creating it if the test has not seeded it.
+
+    Tests may combine this fixture with ``seed_categories`` (which already inserts
+    ``dairy``), so it must be idempotent instead of blindly inserting.
+    """
+    existing = await db_session.get(Category, "dairy")
+    if existing is not None:
+        return existing
+
     category = Category(
         id="dairy",
         display_name="Dairy",
@@ -110,6 +121,10 @@ async def db_engine():
             await conn.run_sync(Base.metadata.create_all)
     except Exception:
         await engine.dispose()
+        if os.environ.get("KYOKKI_TEST_REQUIRE_DB"):
+            # CI provides PostgreSQL; a connection failure there is a real failure,
+            # not a reason to silently skip the whole DB-backed suite.
+            raise
         pytest.skip("PostgreSQL not available")
 
     try:
@@ -130,6 +145,24 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
             yield session
         finally:
             await session.rollback()
+
+
+@pytest.fixture(autouse=True)
+async def _dispose_app_engine() -> AsyncGenerator[None, None]:
+    """Drop the application's pooled DB connections after each test.
+
+    pytest-asyncio runs every test in its own event loop. Endpoints that are not
+    behind a ``get_db`` override use the module-level engine in ``app.db.session``;
+    its pool would otherwise hand a connection created in a previous test's (now
+    closed) loop to the next test, which fails with "event loop is closed" style
+    errors. Disposing in the loop that created the connections avoids that.
+
+    The cached broadcast Redis client in ``app.services.broadcast_helpers`` has the
+    same lifetime problem, so it is closed here as well.
+    """
+    yield
+    await app_engine.dispose()
+    await close_redis_client()
 
 
 @pytest.fixture

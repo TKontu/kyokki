@@ -32,14 +32,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff
+          pip install "$(grep -E '^ruff==' backend/requirements.txt)"
 
       - name: Run ruff check
         run: ruff check backend/
 
       - name: Run ruff format check
         run: ruff format --check backend/
-        continue-on-error: true  # TODO: Fix pre-existing format issues
 
   type-check:
     name: Type Check with mypy
@@ -98,6 +97,7 @@ jobs:
       POSTGRES_USER: kyokki_user
       POSTGRES_PASSWORD: test_password
       POSTGRES_DB: kyokki_test
+      KYOKKI_TEST_REQUIRE_DB: "1"
       REDIS_HOST: localhost
       REDIS_PORT: 6379
       MINERU_BASE_URL: http://192.168.0.136:8000
@@ -190,6 +190,7 @@ jobs:
       POSTGRES_USER: kyokki_user
       POSTGRES_PASSWORD: test_password
       POSTGRES_DB: kyokki_test
+      KYOKKI_TEST_REQUIRE_DB: "1"
       REDIS_HOST: localhost
       REDIS_PORT: 6379
       MINERU_BASE_URL: http://192.168.0.136:8000

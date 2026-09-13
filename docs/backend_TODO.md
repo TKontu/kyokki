@@ -45,9 +45,14 @@
 - Scanner API: `POST /api/scanner/scan`, mode management, station tracking
 - OFF unit parsing, UNIQUE constraint on off_product_id, CORS env config, Redis resilience
 
-**📍 Next: Phase 2 Remaining**
-- GS1 DataMatrix parser
-- Home Assistant integration
+**📍 Next: backend increments of the MVP plan (`docs/TODO.md`)**
+- MVP-S1 `product_name` + `category` on inventory responses
+- MVP-R1 typed `ExtractedItem` with per-item match result and `suggested_category`
+- MVP-R2 confirm auto-creates products for new items; expiry/location overrides
+- MVP-R3 background receipt processing (FastAPI `BackgroundTasks`, 202, status transitions)
+- MVP-R4 real-receipt validation on the homelab; LLM settings that finish reliably
+
+GS1 DataMatrix parser and Home Assistant integration are post-MVP.
 - Celery async receipt processing (optional)
 
 ---

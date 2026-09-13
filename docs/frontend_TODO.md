@@ -1,5 +1,23 @@
 # Frontend — Granular Incremental Development TODO
 
+> **2026-09-13 — MVP plan supersedes the phase order below.** Work is now dispatched from
+> the `MVP-*` increments in `docs/TODO.md`. The mapping to this file's increments:
+>
+> | MVP increment | Covers here |
+> | --- | --- |
+> | MVP-C1 | 2.2 Modal (as BottomSheet), 2.4 Toast |
+> | MVP-C2 | 2.3 ConsumptionSheet, 2.5 Wire consumption |
+> | MVP-S2 | 3.3 CategoryFilter (as location groups), 3.4 ExpiringPanel (as pinned section) |
+> | MVP-S3, MVP-S4 | not previously planned: Quick Add and item edit |
+> | MVP-R5 | 4.3 Receipt upload API |
+> | MVP-R6 | 4.1, 4.2 (file input, not getUserMedia), 4.4 Scan page, 4.6 ProcessingStatus |
+> | MVP-R7 | 4.5, 4.7, 4.8, 4.9, 4.10 |
+> | MVP-R8 | not previously planned: receipts list |
+> | MVP-P1 | 3.1 AppShell, 3.2 Sidebar, 3.5 ActionBar, 3.6 Integrate |
+> | MVP-P2 | 6.1 PWA manifest; polling instead of 5.1–5.2 |
+>
+> 2.1 (Zustand) is dropped for MVP. Phases 5 and the rest of 6 are post-MVP.
+
 **Stack:** Next.js 14, TypeScript, Tailwind, PWA, Zustand, React Query
 **Approach:** 47 small increments with full test coverage from day 1
 **Estimated Time:** ~170 hours (4-5 weeks)
@@ -130,39 +148,39 @@ frontend/
 - [x] Optional `productNames: Record<string, string>` prop; falls back to truncated UUID
 - [x] 23 tests passing
 
-### Increment 1.7: Main Page Integration (2h)
-- [ ] Update `/app/page.tsx` to render InventoryList
-- [ ] Basic header
-- [ ] Manual smoke test with backend
+### ✅ Increment 1.7: Main Page Integration (2h) — DONE (PR #22)
+- [x] Update `/app/page.tsx` to render InventoryList
+- [x] Basic header
+- [ ] Manual smoke test with backend on the iPad (moved to `docs/TODO.md` MVP-F2)
 
 ---
 
 ## Phase 2: Consumption Actions (20h)
 
-### ✅ Increment 2.1: UI Store (3h)
+### Increment 2.1: UI Store (3h)
 - [ ] Install Zustand
 - [ ] Create UI store: modal state, selected item
 - [ ] Actions: `openModal()`, `closeModal()`, `selectItem()`
 - [ ] Test: State updates
 
-### ✅ Increment 2.2: Modal Component (4h)
+### Increment 2.2: Modal Component (4h)
 - [ ] Portal rendering, backdrop, ESC key, focus trap
 - [ ] Sizes: sm, md, lg, fullscreen
 - [ ] Test: Open/close, backdrop click, accessibility
 
-### ✅ Increment 2.3: ConsumptionSheet Component (6h)
+### Increment 2.3: ConsumptionSheet Component (6h)
 - [ ] Bottom sheet with proportional buttons: 1/4, 1/2, 3/4, Done
 - [ ] Calculate quantity, call consume mutation
 - [ ] Loading/error states
 - [ ] Test: Calculations (1/4 of 1000ml = 250ml), mutations
 
-### ✅ Increment 2.4: Toast Notification System (4h)
+### Increment 2.4: Toast Notification System (4h)
 - [ ] Toast component with auto-dismiss
 - [ ] useToast hook
 - [ ] Types: success, error, warning, info
 - [ ] Test: Display, auto-dismiss, multiple toasts
 
-### ✅ Increment 2.5: Wire Consumption Flow (3h)
+### Increment 2.5: Wire Consumption Flow (3h)
 - [ ] Click InventoryItem → open ConsumptionSheet → consume → update list
 - [ ] Optimistic UI update
 - [ ] Toast notifications
@@ -172,32 +190,32 @@ frontend/
 
 ## Phase 3: Layout & Navigation (20h)
 
-### ✅ Increment 3.1: AppShell Layout (4h)
+### Increment 3.1: AppShell Layout (4h)
 - [ ] Three-column CSS Grid: Sidebar (240px), Main (flex), Actions (80px)
 - [ ] Responsive breakpoints
 - [ ] Test: Column widths
 
-### ✅ Increment 3.2: Sidebar (2h)
+### Increment 3.2: Sidebar (2h)
 - [ ] Left sidebar with logo/title
 - [ ] Test: Rendering
 
-### ✅ Increment 3.3: CategoryFilter (5h)
+### Increment 3.3: CategoryFilter (5h)
 - [ ] Category API client + `useCategories` hook
 - [ ] Horizontal filter pills with "All" option
 - [ ] Wire to InventoryList filtering
 - [ ] Test: Filter selection, integration
 
-### ✅ Increment 3.4: ExpiringPanel (4h)
+### Increment 3.4: ExpiringPanel (4h)
 - [ ] Sidebar widget showing count of expiring items (≤3 days)
 - [ ] Color indicators (red/orange)
 - [ ] Click to filter main list
 - [ ] Test: Count calculations
 
-### ✅ Increment 3.5: ActionBar (3h)
+### Increment 3.5: ActionBar (3h)
 - [ ] Right column with "Scan Receipt" button (56px touch target)
 - [ ] Test: Rendering, touch target size
 
-### ✅ Increment 3.6: Integrate Layout (2h)
+### Increment 3.6: Integrate Layout (2h)
 - [ ] Update root layout with AppShell
 - [ ] Integrate Sidebar, ActionBar, InventoryList
 - [ ] Manual UI/UX review on iPad
@@ -206,62 +224,62 @@ frontend/
 
 ## Phase 4: Receipt Scanning (43h)
 
-### ✅ Increment 4.1: Camera API Setup (3h)
+### Increment 4.1: Camera API Setup (3h)
 - [ ] Research `getUserMedia` API
 - [ ] Camera permission utility
 - [ ] Test: Permission handling, iPad Safari compatibility
 
-### ✅ Increment 4.2: CameraCapture Component (6h)
+### Increment 4.2: CameraCapture Component (6h)
 - [ ] Full-screen camera preview
 - [ ] Capture button (center bottom), cancel (top left), flash toggle
 - [ ] Capture to canvas → Blob
 - [ ] Test: Mock video, capture triggers
 
-### ✅ Increment 4.3: Receipt Upload API (4h)
+### Increment 4.3: Receipt Upload API (4h)
 - [ ] Receipt API client: `upload()`, `get()`, `list()`
 - [ ] `useReceipts` hook
 - [ ] FormData upload with progress
 - [ ] Test: Upload with mock file
 
-### ✅ Increment 4.4: Scan Page (3h)
+### Increment 4.4: Scan Page (3h)
 - [ ] `/app/scan/page.tsx` with CameraCapture
 - [ ] Navigation from ActionBar
 - [ ] Test: Routing
 
-### ✅ Increment 4.5: ReceiptPreview Component (4h)
+### Increment 4.5: ReceiptPreview Component (4h)
 - [ ] Display captured image
 - [ ] Retake/Upload buttons
 - [ ] Upload progress indicator
 - [ ] Navigate to receipt detail on success
 - [ ] Test: Retake, upload, navigation
 
-### ✅ Increment 4.6: ProcessingStatus Component (3h)
+### Increment 4.6: ProcessingStatus Component (3h)
 - [ ] Loading spinner with status messages
 - [ ] Poll receipt status every 2s
 - [ ] Transition to review when status = "completed"
 - [ ] Test: Polling, status transitions
 
-### ✅ Increment 4.7: ParsedItemList Component (5h)
+### Increment 4.7: ParsedItemList Component (5h)
 - [ ] Display extracted items with icons: ✓ matched, ? uncertain, + new, — skipped
 - [ ] Color-code by confidence (green >0.8, yellow 0.5-0.8, red <0.5)
 - [ ] Click handler for correction
 - [ ] Test: Confidence levels, icons
 
-### ✅ Increment 4.8: Receipt Detail Page (4h)
+### Increment 4.8: Receipt Detail Page (4h)
 - [ ] `/app/receipt/[id]/page.tsx`
 - [ ] Fetch receipt by ID
 - [ ] Show ProcessingStatus or ParsedItemList based on status
 - [ ] "Confirm All" button (placeholder)
 - [ ] Test: Dynamic routing, states
 
-### ✅ Increment 4.9: ItemCorrection Modal (6h)
+### Increment 4.9: ItemCorrection Modal (6h)
 - [ ] Modal to edit parsed items
 - [ ] Product search/select dropdown
 - [ ] Quantity adjustment input
 - [ ] "Create new product", "Skip this item" options
 - [ ] Test: Form validation, product search, submit
 
-### ✅ Increment 4.10: Confirm Receipt Action (5h)
+### Increment 4.10: Confirm Receipt Action (5h)
 - [ ] "Confirm All" button adds items to inventory
 - [ ] Bulk create inventory items
 - [ ] Success toast with count
@@ -272,38 +290,38 @@ frontend/
 
 ## Phase 5: Real-time & Offline (24h)
 
-### ✅ Increment 5.1: WebSocket Manager (5h)
+### Increment 5.1: WebSocket Manager (5h)
 - [ ] WebSocket client with connection/reconnection
 - [ ] Message parsing
 - [ ] `useWebSocket` hook
 - [ ] Test: Connection lifecycle, messages
 
-### ✅ Increment 5.2: WebSocket Integration (3h)
+### Increment 5.2: WebSocket Integration (3h)
 - [ ] Connect useWebSocket to InventoryList
 - [ ] Parse "item_updated" messages
 - [ ] Invalidate queries on updates
 - [ ] Test: Query invalidation, manual test with two clients
 
-### ✅ Increment 5.3: Offline Store (4h)
+### Increment 5.3: Offline Store (4h)
 - [ ] Zustand offline store
 - [ ] Online/offline detection
 - [ ] Action queue (consume, adjust, etc.)
 - [ ] Sync function
 - [ ] Test: Queue add/remove, online/offline state
 
-### ✅ Increment 5.4: IndexedDB Storage (5h)
+### Increment 5.4: IndexedDB Storage (5h)
 - [ ] Install `idb` library
 - [ ] IndexedDB wrapper: save/load/clear queue
 - [ ] Persist offline actions
 - [ ] Test: CRUD with fake-indexeddb
 
-### ✅ Increment 5.5: Offline Queue Integration (4h)
+### Increment 5.5: Offline Queue Integration (4h)
 - [ ] Queue consumption actions when offline
 - [ ] Auto-sync on reconnect
 - [ ] Pending indicator in UI
 - [ ] Test: Manual (disconnect WiFi → consume → reconnect)
 
-### ✅ Increment 5.6: OfflineIndicator Component (3h)
+### Increment 5.6: OfflineIndicator Component (3h)
 - [ ] Visual indicator showing connection status
 - [ ] Pending action count
 - [ ] Add to Sidebar
@@ -313,41 +331,41 @@ frontend/
 
 ## Phase 6: PWA & Polish (22h)
 
-### ✅ Increment 6.1: PWA Manifest (2h)
+### Increment 6.1: PWA Manifest (2h)
 - [ ] Create `manifest.json`
 - [ ] Icons (192x192, 512x512)
 - [ ] Display: standalone, orientation: landscape
 - [ ] Test: "Add to Home Screen" on iPad
 
-### ✅ Increment 6.2: Service Worker (5h)
+### Increment 6.2: Service Worker (5h)
 - [ ] Install `next-pwa`
 - [ ] Cache app shell (HTML, CSS, JS)
 - [ ] Network-first for API responses
 - [ ] Test: Offline app launch
 
-### ✅ Increment 6.3: ProgressBar Component (3h)
+### Increment 6.3: ProgressBar Component (3h)
 - [ ] Generic progress bar for loading
 - [ ] Determinate and indeterminate modes
 - [ ] Use in upload progress
 - [ ] Test: Modes, color variants
 
-### ✅ Increment 6.4: Error Boundary (3h)
+### Increment 6.4: Error Boundary (3h)
 - [ ] React error boundary with fallback UI
 - [ ] Log errors
 - [ ] Add to root layout
 - [ ] Test: Error caught, fallback shown
 
-### ✅ Increment 6.5: Loading States (4h)
+### Increment 6.5: Loading States (4h)
 - [ ] Consistent loading skeletons for all lists
 - [ ] Page-level loading indicators
 - [ ] Test: Skeleton dimensions
 
-### ✅ Increment 6.6: Accessibility Audit (4h)
+### Increment 6.6: Accessibility Audit (4h)
 - [ ] Run axe-core tests
 - [ ] Fix ARIA labels, keyboard navigation, focus indicators, color contrast
 - [ ] Test: axe-core passes, screen reader
 
-### ✅ Increment 6.7: E2E Tests (6h)
+### Increment 6.7: E2E Tests (6h)
 - [ ] Install Playwright
 - [ ] Write E2E tests: view inventory, consume item, scan receipt, offline queue
 - [ ] CI integration
@@ -450,4 +468,5 @@ frontend/
 
 ---
 
-**Progress**: 10/47 increments completed (~21% done) — through Increment 1.6
+**Progress**: 11/47 increments completed (~23% done) — through Increment 1.7.
+**MVP critical path** (see `docs/TODO.md`): Phase 2 (2.1–2.5), Phase 4 (4.1–4.10), then 6.1, 3.1, 3.5. Phases 3 (rest), 5 and 6 (rest) are deferred until MVP is live on the iPad.

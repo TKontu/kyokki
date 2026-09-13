@@ -92,6 +92,9 @@ jobs:
   check-dependencies:
     name: Check for Dependency Changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # the job comments on the PR; without this it fails with 403
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
