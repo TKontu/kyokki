@@ -6,6 +6,29 @@
 import { APIError, NetworkError } from './errors'
 import type { APIConfig, RequestOptions } from '@/types/api'
 
+/**
+ * Human-readable message for a failed response. FastAPI sends `{ detail: string }` for
+ * HTTPException and `{ detail: [{ msg, ... }] }` for validation errors.
+ */
+function errorMessage(
+  errorData: { message?: unknown; detail?: unknown },
+  response: { status: number; statusText: string }
+): string {
+  if (typeof errorData.message === 'string' && errorData.message) {
+    return errorData.message
+  }
+  if (typeof errorData.detail === 'string' && errorData.detail) {
+    return errorData.detail
+  }
+  if (Array.isArray(errorData.detail)) {
+    const first = errorData.detail[0] as { msg?: unknown } | undefined
+    if (typeof first?.msg === 'string' && first.msg) {
+      return first.msg
+    }
+  }
+  return response.statusText || `Request failed (${response.status})`
+}
+
 export class APIClient {
   private baseURL: string
   private onError?: (error: APIError) => void
@@ -50,7 +73,7 @@ export class APIClient {
         const error = new APIError(
           response.status,
           errorData.code || 'UNKNOWN_ERROR',
-          errorData.message || response.statusText,
+          errorMessage(errorData, response),
           errorData.details
         )
         this.onError?.(error)
@@ -138,7 +161,7 @@ export class APIClient {
         const error = new APIError(
           response.status,
           errorData.code || 'UNKNOWN_ERROR',
-          errorData.message || response.statusText,
+          errorMessage(errorData, response),
           errorData.details
         )
         this.onError?.(error)

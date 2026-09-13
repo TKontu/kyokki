@@ -5,9 +5,4 @@ import '@testing-library/jest-dom'
 // variable). The app itself defaults to the same-origin '/api' path.
 process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8000/api'
 
-// Polyfills for test environment
-import { TextEncoder, TextDecoder } from 'util'
-import 'whatwg-fetch'
-
-global.TextEncoder = TextEncoder
-global.TextDecoder = TextDecoder
+// Fetch, streams and TextEncoder globals come from jest.polyfills.js (setupFiles).

@@ -5,6 +5,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import inventoryAPI from '@/lib/api/inventory'
+import { applyConsume } from '@/lib/consumption'
 import type {
   InventoryItem,
   InventoryItemCreate,
@@ -85,37 +86,49 @@ export function useConsumeInventoryItem() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ConsumeRequest }) =>
       inventoryAPI.consume(id, data),
+    // Consuming is not idempotent: retrying after a lost response would consume twice, and
+    // TanStack pauses retries while the page is hidden, which leaves the optimistic value up.
+    retry: false,
     onMutate: async ({ id, data }) => {
-      // Cancel outgoing refetches
-      await queryClient.cancelQueries({ queryKey: inventoryKeys.detail(id) })
+      // Stop in-flight refetches from overwriting the optimistic value
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: inventoryKeys.lists() }),
+        queryClient.cancelQueries({ queryKey: inventoryKeys.detail(id) }),
+      ])
 
-      // Snapshot previous value
-      const previousItem = queryClient.getQueryData<InventoryItem>(
-        inventoryKeys.detail(id)
+      // Snapshot every cached list (the home page renders from a list, not the detail)
+      const previousLists = queryClient.getQueriesData<InventoryItem[]>({
+        queryKey: inventoryKeys.lists(),
+      })
+      const previousItem = queryClient.getQueryData<InventoryItem>(inventoryKeys.detail(id))
+
+      queryClient.setQueriesData<InventoryItem[]>({ queryKey: inventoryKeys.lists() }, (list) =>
+        list?.map((item) => (item.id === id ? applyConsume(item, data.quantity) : item))
       )
-
-      // Optimistically update
       if (previousItem) {
-        const newQuantity = previousItem.current_quantity - data.quantity
-        queryClient.setQueryData<InventoryItem>(inventoryKeys.detail(id), {
-          ...previousItem,
-          current_quantity: newQuantity,
-          status: newQuantity <= 0 ? 'empty' : previousItem.status,
-        })
+        queryClient.setQueryData<InventoryItem>(
+          inventoryKeys.detail(id),
+          applyConsume(previousItem, data.quantity)
+        )
       }
 
-      return { previousItem }
+      return { previousLists, previousItem }
     },
-    onError: (err, { id }, context) => {
-      // Rollback on error
+    onError: (_err, { id }, context) => {
+      // Roll back every list and the detail
+      context?.previousLists.forEach(([queryKey, list]) => {
+        queryClient.setQueryData(queryKey, list)
+      })
       if (context?.previousItem) {
         queryClient.setQueryData(inventoryKeys.detail(id), context.previousItem)
       }
     },
     onSuccess: (updatedItem) => {
-      // Update cache with server response
+      // The server response is authoritative for this item
       queryClient.setQueryData(inventoryKeys.detail(updatedItem.id), updatedItem)
-      // Invalidate lists to reflect changes
+    },
+    onSettled: () => {
+      // Success or failure, refetch so lists match the server (empty items drop out)
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
     },
   })

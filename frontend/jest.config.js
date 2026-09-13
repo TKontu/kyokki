@@ -10,6 +10,12 @@ const createJestConfig = nextJest({
 const config = {
   coverageProvider: 'v8',
   testEnvironment: 'jsdom',
+  // msw v2 resolves its Node build only with the default export condition
+  testEnvironmentOptions: {
+    customExportConditions: [''],
+  },
+  // Fetch API, streams and TextEncoder globals for msw (must run before test imports)
+  setupFiles: ['<rootDir>/jest.polyfills.js'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
@@ -30,5 +36,19 @@ const config = {
   ],
 }
 
+// ESM-only packages pulled in by msw that Jest must transform. next/jest sets its own
+// transformIgnorePatterns, so they are adjusted after it resolves the config.
+const esmPackages = ['until-async']
+
 // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async
-module.exports = createJestConfig(config)
+module.exports = async () => {
+  const resolved = await createJestConfig(config)()
+  return {
+    ...resolved,
+    transformIgnorePatterns: resolved.transformIgnorePatterns.map((pattern) =>
+      pattern === '/node_modules/'
+        ? `/node_modules/(?!(${esmPackages.join('|')})/)`
+        : pattern
+    ),
+  }
+}
