@@ -162,8 +162,8 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
 - [x] **Passed 2026-09-14** (details and working request in `docs/vLLM_MANUAL_TEST.md`,
   harness in `docs/spikes/r0_extraction_spike.py`). On the llama-swap gateway
   (`192.168.0.94:9292/v1`, one RTX 3090 usable), `muse-glimmer` extracted 49/49 products with
-  all quantities and weights correct in 41–44 s from text and 49–53 s from a rendered image,
-  using compact output keys, `json_schema` and `reasoning_strength: minimal`. It is the
+  all quantities and weights correct in 40–43 s from text and 47–52 s from a rendered image,
+  using compact output keys, `json_schema` and `reasoning_strength: low` (lowest supported value). It is the
   always-loaded model, so no cold load. From text the names were exact (49/49); from a clean
   rendered image ~8 names per receipt were misspelt. Primary path (MinerU OCR → text vs.
   photo → vision) is decided in R4 with real photos once MinerU is back; R1 wires both.

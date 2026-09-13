@@ -406,6 +406,11 @@ the two fees (`VERKKOK.PAKKAUSMATERIAALIMAKSU`, `TOIMITUSMAKSU`) are not product
 | A text | `muse-glimmer` | same, **no** json_schema | 58.4 s | 49/49 | schema costs nothing measurable |
 | A text | `muse-glimmer` | **compact keys**, json_schema, reasoning `minimal` | 44.1 / 41.3 / 42.6 s | 49/49 ×3 | qty 11/11, kg 10/10; ~2400 output tokens |
 | B vision | `muse-glimmer` | compact keys, json_schema, reasoning `minimal` | 48.6 / 53.3 / 50.8 s | 49/49 ×3 | qty 11/11, kg 10/10; third run kept the price in every name |
+| A text | `muse-glimmer` | **compact keys, json_schema, reasoning `low`** (documented value) | 39.9 / 42.8 / 40.4 s | 49/49 ×3 | qty 11/11, kg 10/10; exact names 49/49 ×3 |
+| B vision | `muse-glimmer` | **compact keys, json_schema, reasoning `low`** | 46.5 / 46.9 / 51.8 s | 49/49 ×3 | qty 11/11, kg 10/10; exact names 42, 41, 41; no prices in names |
+
+`none` and `minimal` are **not** supported values (see findings); those rows are kept as
+measured but the `low` rows are the reference configuration.
 | A text | `gemma-26b` | compact keys, json_schema | 13.0 s | 49/49 | qty 11/11, kg 10/10; cold load 247 s |
 | A text | `gemma-26b` | full keys, json_schema | 18.1 s | 49/49 | one name carried the price |
 | B vision | `gemma-26b` | compact keys, json_schema | 12.9 s | 48/49 | qty 8/11, kg 9/10; vLLM gave the image ~450 tokens |
@@ -416,15 +421,21 @@ Exact product names (after stripping a trailing price), per run:
 
 | Model | Text | Vision |
 | --- | --- | --- |
-| `muse-glimmer` | 49/49 on all 6 runs | 42, 41, 41, 41 /49 (≈ 8 misread names per receipt, e.g. `KEVYTMATOJUOMA`, `GRANAATTIO MEN A`) |
+| `muse-glimmer` | 49/49 on all 9 runs | 42, 41, 41, 41, 42, 41, 41 /49 (≈ 8 misread names per receipt, e.g. `KEVYMAITOJUOMA`, `GRANAATT IOMENA`, `KEITTIÖSUHKE`) |
 | `gemma-26b` | 49/49 | 26/49 |
 | `qwen3.5-9b` | 47/49 | 48/49 (but weights 2/10) |
 
 Findings:
-- **`muse-glimmer` always reasons.** Its chat template has no thinking switch; it renders
-  `Reasoning strength: <value>.` from `chat_template_kwargs.reasoning_strength` (server default
-  `low`). `none` and `minimal` still produce ~2–3 k characters of reasoning, and `enable_thinking`
-  is ignored. Time scales with output tokens (~58 tok/s), so the lever is **output size**.
+- **`muse-glimmer` always reasons.** Per Meta's prompting guide
+  (https://dev.meta.ai/docs/muse-glimmer/prompting), reasoning is built into the format (a
+  private `assistant to=self` turn) and `reasoning_strength` accepts only `xhigh`, `high`,
+  `medium` or `low` (template default `high`; this gateway's server default is `low`). There
+  is no off switch and `enable_thinking` is ignored. `low` is the lowest supported setting;
+  the `none`/`minimal` runs only rendered unsupported text into the template and behaved like
+  `low`. Time scales with output tokens (~58 tok/s), so the lever is **output size**.
+- **Stream long generations.** The guide recommends streaming for reasoning workloads so
+  multi-thousand-token traces do not hit request timeouts. The spike used non-streaming
+  calls under 60 s; R1 should stream (or at least set a generous client timeout).
 - **Compact keys** (`{"p": [{"n", "q", "w"}]}`) cut ~25 % of output tokens and bring
   `muse-glimmer` under the bar with margin. The backend maps them to `ExtractedItem`.
 - **"without the price"** in the name rule is needed, and still not sufficient for vision (one
@@ -447,7 +458,7 @@ curl -s http://192.168.0.94:9292/v1/chat/completions -H 'Content-Type: applicati
   "model": "muse-glimmer",
   "max_tokens": 4096,
   "temperature": 0.2,
-  "chat_template_kwargs": {"reasoning_strength": "minimal"},
+  "chat_template_kwargs": {"reasoning_strength": "low"},
   "response_format": {"type": "json_schema", "json_schema": {"name": "receipt", "strict": true,
     "schema": {"type": "object", "required": ["p"], "properties": {"p": {"type": "array",
       "items": {"type": "object", "required": ["n", "q", "w"], "properties": {
@@ -461,7 +472,8 @@ instructions as a `text` part plus an `image_url` part (`data:image/png;base64,.
 
 ### Outcome
 
-- **R0 passes.** `muse-glimmer` completes the 60-line receipt in 41–53 s with 49/49 products
+- **R0 passes.** `muse-glimmer` (`reasoning_strength: low`) completes the 60-line receipt in
+  40–43 s from text and 47–52 s from an image, with 49/49 products
   and every quantity and weight correct, on both candidates; `gemma-26b` text does it in 13 s.
 - **Model:** `muse-glimmer` for both paths. It is always loaded, gets every quantity and weight
   right from text and image, and is the only single-GPU model whose image reading holds up.

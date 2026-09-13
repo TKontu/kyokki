@@ -2,7 +2,7 @@
 
 Run with the backend venv (needs httpx, rapidfuzz, Pillow) from any directory, e.g.
   backend/.venv/Scripts/python docs/spikes/r0_extraction_spike.py run muse-glimmer text \\
-      --compact --rs minimal
+      --compact --rs low
 Outputs (rendered image, raw replies, scored JSON) go to <tempdir>/kyokki_r0/.
 Set R0_GATEWAY to target another OpenAI-compatible server.
 

@@ -17,7 +17,8 @@ Base-SHA: a8608cd
   `Z:\llama-swap-deploy`; do not read its `.env`/`stack.env`). Only the RTX 3090
   `GPU-a8c640ca-...` is usable: no `*-split`, `pairNN.*`, `x2extract.*` models.
 - Use `muse-glimmer`: always loaded by the operator's hot agent (no cold load); any other model
-  evicts it and costs 3-4 min. It always reasons (`reasoning_strength` only tunes it), so keep
+  evicts it and costs 3-4 min. It always reasons: `reasoning_strength` is only `xhigh|high|medium|low`
+  (use `low`; no off switch). Stream long generations and keep
   output small: compact keys `{"p":[{"n","q","w"}]}`, `json_schema`, `max_tokens` 4096. ~42 s text,
   ~50 s image for a 49-product receipt; allow 60-90 s per call.
 - Vision gets counts and weights right but misspells ~1 in 6 names on a clean image; text is exact.
