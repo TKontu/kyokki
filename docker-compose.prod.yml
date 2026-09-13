@@ -1,3 +1,10 @@
+# Production stack for the homelab. Reads secrets and service URLs from stack.env
+# (copy stack.env.example). See docs/DEPLOY.md for the runbook.
+#
+# Only two ports are published:
+#   17301  frontend (the iPad opens this; /api/* is proxied to the backend)
+#   17300  backend API directly (diagnostics, future integrations)
+# Postgres and Redis are reachable only on the compose network.
 services:
   kyokki-api:
     build: ./backend
@@ -25,32 +32,13 @@ services:
         condition: service_started
     restart: unless-stopped
 
-  celery-worker:
-    build: ./backend
-    command: celery -A app.core.celery_app worker -l info --concurrency 2
-    volumes:
-      - ./data:/app/data
-    env_file:
-      - stack.env
-    environment:
-      - DEBUG=false
-      - POSTGRES_SERVER=postgres
-      - POSTGRES_USER=kyokki_user
-      - POSTGRES_DB=kyokki
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    networks:
-      - kyokki_net
-    depends_on:
-      - kyokki-api
-    restart: unless-stopped
-
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://192.168.0.1:17300/api
+        # Where the Next.js server proxies /api/* to (compose service name).
+        - API_INTERNAL_URL=http://kyokki-api:8000
     ports:
       - "17301:3000"
     networks:
@@ -61,12 +49,13 @@ services:
 
   postgres:
     image: postgres:15
-    ports:
-      - "17302:5432"
+    # POSTGRES_PASSWORD comes from stack.env via env_file (not ${...} interpolation,
+    # which Compose would read from the shell or a .env file instead).
+    env_file:
+      - stack.env
     environment:
       POSTGRES_DB: kyokki
       POSTGRES_USER: kyokki_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -80,8 +69,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "17303:6379"
     networks:
       - kyokki_net
     restart: unless-stopped

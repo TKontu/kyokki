@@ -32,31 +32,8 @@ services:
       - postgres
       - redis
 
-  celery-worker:
-    build: ./backend
-    command: celery -A app.core.celery_app worker -l info
-    networks:
-      - kyokki_net
-    volumes:
-      - ./data:/app/data
-      - ./samples:/app/samples  # Mount samples for testing
-    env_file:
-      - .env
-    depends_on:
-      - redis
-      - postgres
-
-  # TODO: Uncomment when frontend is ready
-  # frontend:
-  #   build: ./frontend
-  #   ports:
-  #     - "3000:3000"
-  #   environment:
-  #     - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api
-  #   networks:
-  #     - kyokki_net
-  #   depends_on:
-  #     - kyokki-api
+  # Development runs the frontend with `npm run dev` on the host (see docs/DEPLOY.md);
+  # the production frontend container lives in docker-compose.prod.yml.
 
   postgres:
     image: postgres:15

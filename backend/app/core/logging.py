@@ -109,11 +109,6 @@ def setup_logging():
                 "handlers": ["file"],
                 "propagate": False,
             },
-            "celery": {
-                "level": "INFO",
-                "handlers": ["console", "file"],
-                "propagate": False,
-            },
         },
         "root": {
             "level": "INFO",

@@ -1,7 +1,8 @@
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import ConfigDict, computed_field, field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, NoDecode
 
 # Get project root directory (two levels up from this file: backend/app/core/config.py -> project root)
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -29,7 +30,12 @@ class Settings(BaseSettings):
 
     # CORS — comma-separated list of allowed origins, e.g.
     # ALLOWED_ORIGINS=http://localhost:3000,http://192.168.0.10:17301
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    # NoDecode: pydantic-settings would otherwise try to JSON-decode the env value
+    # before the validator below can split it, and the app fails to start.
+    ALLOWED_ORIGINS: Annotated[list[str], NoDecode] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ]
 
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
