@@ -1,472 +1,270 @@
-"""Pytest tests for LLM extractor service (vLLM integration)."""
+"""Tests for the LLM receipt extractor (compact JSON contract proven in MVP-R0)."""
 
+import base64
 import json
-from unittest.mock import AsyncMock, patch
+from datetime import date
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
 
 from app.core.config import settings
-from app.parsers.base import ReceiptExtraction
+from app.parsers.base import ExtractedLine, ReceiptExtraction
 from app.services.llm_extractor import (
-    build_prompt_for_store,
-    extract_products_from_receipt,
-    extract_with_store_hint,
+    CategoryOption,
+    LLMExtractionError,
+    build_response_schema,
+    extract_from_image,
+    extract_from_text,
+    parse_completion,
+    prefilter_receipt_text,
 )
 
+CATEGORIES = [
+    CategoryOption(id="dairy", name="Dairy & Eggs"),
+    CategoryOption(id="produce", name="Vegetables"),
+]
+CATEGORY_IDS = {c.id for c in CATEGORIES}
 
-class TestExtractProductsFromReceipt:
-    """Test LLM extraction with vLLM structured output."""
-
-    @pytest.fixture
-    def mock_vllm_response(self):
-        """Mock successful vLLM API response."""
-        return {
-            "id": "chatcmpl-123",
-            "object": "chat.completion",
-            "created": 1677652288,
-            "model": "qwen3-8B",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": json.dumps(
-                            {
-                                "store": {
-                                    "name": "Prisma Jyväskylä",
-                                    "chain": "s-group",
-                                    "country": "FI",
-                                    "language": "fi",
-                                    "currency": "EUR",
-                                },
-                                "products": [
-                                    {
-                                        "name": "Maito",
-                                        "name_en": "Milk",
-                                        "quantity": 1.0,
-                                        "weight_kg": None,
-                                        "volume_l": 1.0,
-                                        "unit": "l",
-                                        "price": 1.49,
-                                    },
-                                    {
-                                        "name": "Leipä",
-                                        "name_en": "Bread",
-                                        "quantity": 1.0,
-                                        "weight_kg": None,
-                                        "volume_l": None,
-                                        "unit": "pcs",
-                                        "price": 2.95,
-                                    },
-                                ],
-                                "confidence": 0.95,
-                            }
-                        ),
-                    },
-                    "finish_reason": "stop",
-                }
-            ],
-        }
-
-    @pytest.fixture
-    def sample_ocr_text(self):
-        """Sample Finnish S-Group receipt OCR text."""
-        return """
-        PRISMA JYVÄSKYLÄ
-        S-KAUPAT OY
-
-        Maito 1 l            1.49
-        Leipä                2.95
-
-        YHTEENSÄ            4.44
-        KORTTI              4.44
-        """
-
-    async def test_successful_extraction(self, mock_vllm_response, sample_ocr_text):
-        """Test successful product extraction with valid vLLM response."""
-        with patch("httpx.AsyncClient") as mock_client:
-            # Mock the response object
-            mock_response = AsyncMock()
-            mock_response.json = lambda: mock_vllm_response  # Sync method
-            mock_response.raise_for_status = lambda: None  # Sync method
-
-            # Mock the post method
-            mock_post = AsyncMock(return_value=mock_response)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
-
-            # Execute extraction
-            result = await extract_products_from_receipt(sample_ocr_text)
-
-            # Verify result
-            assert isinstance(result, ReceiptExtraction)
-            assert len(result.products) == 2
-            assert result.get_store_info().name == "Prisma Jyväskylä"
-            assert result.get_store_info().chain == "s-group"
-            assert result.get_store_info().country == "FI"
-            assert result.confidence == 0.95
-
-            # Verify first product
-            product1 = result.products[0]
-            assert product1.name == "Maito"
-            assert product1.name_en == "Milk"
-            assert product1.volume_l == 1.0
-            assert product1.unit == "l"
-            assert product1.price == 1.49
-
-            # Verify second product
-            product2 = result.products[1]
-            assert product2.name == "Leipä"
-            assert product2.name_en == "Bread"
-            assert product2.unit == "pcs"
-            assert product2.price == 2.95
-
-            # Verify API call
-            mock_post.assert_called_once()
-            call_args = mock_post.call_args
-            payload = call_args.kwargs["json"]
-
-            assert payload["model"] == settings.LLM_MODEL
-            assert payload["temperature"] == settings.LLM_TEMPERATURE
-            assert payload["max_tokens"] == 16384
-            # Note: response_format is NOT included because it causes thinking loops in vLLM
-            # The prompt itself instructs the model to output JSON
-            assert "response_format" not in payload
-
-    async def test_extraction_with_minimal_response(self):
-        """Test extraction with minimal valid response (no store info)."""
-        minimal_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            {
-                                "store": {},
-                                "products": [
-                                    {"name": "Product", "quantity": 1.0, "unit": "pcs"}
-                                ],
-                            }
-                        )
-                    }
-                }
-            ]
-        }
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = AsyncMock()
-            mock_response.json = lambda: minimal_response
-            mock_response.raise_for_status = lambda: None
-
-            mock_post = AsyncMock(return_value=mock_response)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
-
-            result = await extract_products_from_receipt("Some OCR text")
-
-            assert isinstance(result, ReceiptExtraction)
-            assert len(result.products) == 1
-            assert result.products[0].name == "Product"
-            assert result.get_store_info().name is None
-
-    async def test_http_error_handling(self, sample_ocr_text):
-        """Test handling of vLLM API HTTP errors."""
-        with patch("httpx.AsyncClient") as mock_client:
-            # Create mock request and response for HTTPStatusError
-            mock_request = AsyncMock()
-            mock_error_response = AsyncMock()
-            mock_error_response.status_code = 500
-
-            def raise_status_error():
-                raise httpx.HTTPStatusError(
-                    "500 Server Error",
-                    request=mock_request,
-                    response=mock_error_response,
-                )
-
-            mock_response = AsyncMock()
-            mock_response.raise_for_status = raise_status_error
-
-            mock_post = AsyncMock(return_value=mock_response)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
-
-            with pytest.raises(httpx.HTTPStatusError):
-                await extract_products_from_receipt(sample_ocr_text)
-
-    async def test_invalid_json_response(self, sample_ocr_text):
-        """Test handling of invalid JSON in response."""
-        invalid_response = {"choices": [{"message": {"content": "not valid json"}}]}
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = AsyncMock()
-            mock_response.json = lambda: invalid_response
-            mock_response.raise_for_status = lambda: None
-
-            mock_post = AsyncMock(return_value=mock_response)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
-
-            with pytest.raises(Exception):  # noqa: B017  # Pydantic validation error
-                await extract_products_from_receipt(sample_ocr_text)
-
-    async def test_ocr_text_truncation(self):
-        """Test that OCR text is truncated to 4000 characters."""
-        long_text = "A" * 5000
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = AsyncMock()
-            mock_response.json = lambda: {
-                "choices": [
-                    {"message": {"content": json.dumps({"store": {}, "products": []})}}
-                ]
-            }
-            mock_response.raise_for_status = lambda: None
-
-            mock_post = AsyncMock(return_value=mock_response)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
-
-            await extract_products_from_receipt(long_text)
-
-            # Verify OCR text was truncated to 4000 chars
-            call_args = mock_post.call_args
-            payload = call_args.kwargs["json"]
-            prompt = payload["messages"][0]["content"]
-
-            # Check that "AAAA..." appears in prompt but not all 5000 As
-            # OCR text should be limited to 4000 chars (prompt template adds overhead)
-            assert "A" * 4000 in prompt  # Truncated text is present
-            assert "A" * 4001 not in prompt  # But not more than 4000 chars
+RECEIPT_TEXT = """S-KAUPAT
+Prisma ruoan verkkokauppa
+02.01.2026 11:40
+----------------------------------------
+KEVYTMAITOJUOMA LAKTON 1,28
+BARISTA KAURAJUOMA 4,50
+3 KPL 1,88 €/KPL
+NORM. 5,64
+ALENNUS -1,14
+PUNASIPULI 0,52
+0,330 KG 1,59 €/KG
+TOIMITUSMAKSU 11,90 11,90
+VERKKOK.PAKKAUSMATERIAALIMAKSU 2,55
+----------------------------------------
+VÄLISUMMA 173,92
+YHTEENSÄ 173,92
+BONUSTA KERRYTTÄVÄT OSTOK 173,92
+MAKSUTAPA Korttimaksu
+Kortti: Mastercard Credit
+************6568
+Veloitus: 173,92
+Autentisointi: FW88SHFFHDVXS9G3
+Viite: 1089366829
+Aika: 02.01.2026 11:41
+ALV VEROTON VERO VEROLLINEN
+25,5% 31,13 7,93 39,06
+YHT. 149,93 23,99 173,92"""
 
 
-class TestBuildPromptForStore:
-    """Test prompt building with store hints."""
-
-    def test_basic_prompt_without_hint(self):
-        """Test basic prompt generation without store hint."""
-        prompt = build_prompt_for_store("Sample OCR text")
-
-        assert "Sample OCR text" in prompt
-        assert "language-agnostic" in prompt.lower() or "any language" in prompt.lower()
-        assert "Note: This receipt appears to be from" not in prompt
-
-    def test_prompt_with_store_hint(self):
-        """Test prompt includes store hint."""
-        prompt = build_prompt_for_store("Sample OCR text", "Prisma")
-
-        assert "Sample OCR text" in prompt
-        assert "Prisma" in prompt
-        assert "Note: This receipt appears to be from Prisma" in prompt
-
-    def test_prompt_truncation(self):
-        """Test OCR text is truncated in prompt."""
-        long_text = "X" * 5000
-        prompt = build_prompt_for_store(long_text)
-
-        # Should contain truncated text (max 4000 chars)
-        assert "X" * 4000 in prompt
-        # Prompt should be truncated: 4000 char text + ~2000 char template = ~6000 chars
-        assert len(prompt) < 7000  # Allow for template overhead
-        assert len(prompt) > 5000  # Should have text + template
+def _completion(content: str) -> dict:
+    return {"choices": [{"message": {"role": "assistant", "content": content}}]}
 
 
-class TestExtractWithStoreHint:
-    """Test LLM extraction with store hint."""
-
-    @pytest.fixture
-    def mock_vllm_response(self):
-        """Mock vLLM response with store hint applied."""
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            {
-                                "store": {
-                                    "name": "Prisma",
-                                    "chain": "s-group",
-                                    "country": "FI",
-                                    "language": "fi",
-                                    "currency": "EUR",
-                                },
-                                "products": [
-                                    {
-                                        "name": "Test Product",
-                                        "quantity": 1.0,
-                                        "unit": "pcs",
-                                    }
-                                ],
-                            }
-                        )
-                    }
-                }
-            ]
-        }
-
-    async def test_extraction_with_hint(self, mock_vllm_response):
-        """Test extraction includes store hint in prompt."""
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = AsyncMock()
-            mock_response.json = lambda: mock_vllm_response
-            mock_response.raise_for_status = lambda: None
-
-            mock_post = AsyncMock(return_value=mock_response)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
-
-            result = await extract_with_store_hint("Sample OCR", "Prisma")
-
-            assert isinstance(result, ReceiptExtraction)
-            assert len(result.products) == 1
-            assert result.get_store_info().name == "Prisma"
-
-            # Verify prompt included hint
-            call_args = mock_post.call_args
-            payload = call_args.kwargs["json"]
-            prompt = payload["messages"][0]["content"]
-
-            assert "Prisma" in prompt
-            assert "Note: This receipt appears to be from Prisma" in prompt
-
-    async def test_http_error_with_hint(self):
-        """Test error handling with store hint."""
-        with patch("httpx.AsyncClient") as mock_client:
-            # Create mock request and response for HTTPStatusError
-            mock_request = AsyncMock()
-            mock_error_response = AsyncMock()
-            mock_error_response.status_code = 503
-
-            def raise_status_error():
-                raise httpx.HTTPStatusError(
-                    "503 Service Unavailable",
-                    request=mock_request,
-                    response=mock_error_response,
-                )
-
-            mock_response = AsyncMock()
-            mock_response.raise_for_status = raise_status_error
-
-            mock_post = AsyncMock(return_value=mock_response)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
-
-            with pytest.raises(httpx.HTTPStatusError):
-                await extract_with_store_hint("OCR text", "K-Citymarket")
+def _compact(**overrides) -> str:
+    body = {
+        "s": "S-KAUPAT",
+        "d": "2026-01-02",
+        "p": [
+            {"n": "KEVYTMAITOJUOMA LAKTON", "q": 1, "w": None, "c": "dairy"},
+            {"n": "PUNASIPULI", "q": 1, "w": 0.33, "c": "produce"},
+        ],
+    }
+    body.update(overrides)
+    return json.dumps(body, ensure_ascii=False)
 
 
-class TestLanguageAgnosticExtraction:
-    """Test language-agnostic extraction capabilities."""
+def _mock_client(response_json: dict | None = None, status: int = 200, raises=None):
+    """Patch httpx.AsyncClient and return (patcher, post_mock)."""
+    response = MagicMock()
+    response.status_code = status
+    response.json.return_value = response_json or _completion(_compact())
+    if status >= 400:
+        request = httpx.Request("POST", "http://llm/v1/chat/completions")
+        response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "error", request=request, response=httpx.Response(status, request=request)
+        )
+    else:
+        response.raise_for_status.return_value = None
+    post = AsyncMock(side_effect=raises) if raises else AsyncMock(return_value=response)
+    client = MagicMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    client.post = post
+    return patch(
+        "app.services.llm_extractor.httpx.AsyncClient", return_value=client
+    ), post
+
+
+class TestPrefilter:
+    def test_drops_totals_payment_vat_discount_and_fee_lines(self):
+        filtered = prefilter_receipt_text(RECEIPT_TEXT)
+        for dropped in (
+            "YHTEENSÄ",
+            "VÄLISUMMA",
+            "BONUSTA",
+            "Kortti:",
+            "Veloitus:",
+            "Viite:",
+            "ALV ",
+            "25,5%",
+            "YHT.",
+            "NORM.",
+            "ALENNUS",
+            "TOIMITUSMAKSU",
+            "VERKKOK.PAKKAUS",
+            "*****",
+            "-----",
+        ):
+            assert dropped not in filtered, dropped
+
+    def test_keeps_header_products_and_quantity_lines(self):
+        filtered = prefilter_receipt_text(RECEIPT_TEXT)
+        for kept in (
+            "S-KAUPAT",
+            "02.01.2026 11:40",
+            "KEVYTMAITOJUOMA LAKTON 1,28",
+            "3 KPL 1,88 €/KPL",
+            "0,330 KG 1,59 €/KG",
+        ):
+            assert kept in filtered, kept
+
+
+class TestResponseSchema:
+    def test_constrains_category_to_given_ids_or_null(self):
+        schema = build_response_schema(["dairy", "produce"])
+        item = schema["properties"]["p"]["items"]
+        assert item["properties"]["c"]["enum"] == ["dairy", "produce", None]
+        assert item["required"] == ["n", "q", "w", "c"]
+        assert schema["required"] == ["s", "d", "p"]
+
+
+class TestParseCompletion:
+    def test_maps_compact_keys(self):
+        result = parse_completion(_compact(), CATEGORY_IDS, method="text")
+        assert isinstance(result, ReceiptExtraction)
+        assert result.method == "text"
+        assert result.store_chain == "S-KAUPAT"
+        assert result.purchase_date == date(2026, 1, 2)
+        assert result.lines == [
+            ExtractedLine(
+                name="KEVYTMAITOJUOMA LAKTON",
+                quantity=1,
+                weight_kg=None,
+                category="dairy",
+            ),
+            ExtractedLine(
+                name="PUNASIPULI", quantity=1, weight_kg=0.33, category="produce"
+            ),
+        ]
+
+    def test_strips_reasoning_and_code_fences(self):
+        content = f"<think>let me read the receipt</think>\n```json\n{_compact()}\n```"
+        assert len(parse_completion(content, CATEGORY_IDS, method="vision").lines) == 2
+
+    def test_strips_trailing_prices_from_names(self):
+        content = _compact(p=[{"n": "LIME 2,21", "q": 1, "w": 0.74, "c": None}])
+        assert (
+            parse_completion(content, CATEGORY_IDS, method="text").lines[0].name
+            == "LIME"
+        )
+
+    def test_unknown_category_becomes_none(self):
+        content = _compact(p=[{"n": "SIENILIINA", "q": 2, "w": None, "c": "household"}])
+        assert (
+            parse_completion(content, CATEGORY_IDS, method="text").lines[0].category
+            is None
+        )
+
+    def test_invalid_or_missing_date_and_store_become_none(self):
+        result = parse_completion(
+            _compact(s="", d="02.01.2026"), CATEGORY_IDS, method="text"
+        )
+        assert result.store_chain is None
+        assert result.purchase_date is None
+
+    def test_drops_entries_without_a_name(self):
+        content = _compact(
+            p=[{"n": " ", "q": 1, "w": None, "c": None}, {"n": "KURKKU", "q": 1}]
+        )
+        lines = parse_completion(content, CATEGORY_IDS, method="text").lines
+        assert [line.name for line in lines] == ["KURKKU"]
+        assert lines[0].weight_kg is None
 
     @pytest.mark.parametrize(
-        "language,store_name,product_names",
-        [
-            ("fi", "Prisma", ["Maito", "Leipä"]),
-            ("en", "Walmart", ["Milk", "Bread"]),
-            ("de", "LIDL", ["Milch", "Brot"]),
-            ("sv", "ICA", ["Mjölk", "Bröd"]),
-        ],
+        "content", ["not json at all", '{"s": null, "d": null}', '{"p": "x"}']
     )
-    async def test_multi_language_extraction(self, language, store_name, product_names):
-        """Test extraction works with different languages."""
-        mock_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            {
-                                "store": {
-                                    "name": store_name,
-                                    "language": language,
-                                    "country": "FI" if language == "fi" else "US",
-                                },
-                                "products": [
-                                    {"name": name, "quantity": 1.0, "unit": "pcs"}
-                                    for name in product_names
-                                ],
-                            }
-                        )
-                    }
-                }
-            ]
+    def test_malformed_output_raises(self, content):
+        with pytest.raises(LLMExtractionError):
+            parse_completion(content, CATEGORY_IDS, method="text")
+
+
+class TestExtractFromText:
+    async def test_sends_the_r0_request(self):
+        patcher, post = _mock_client()
+        with patcher:
+            result = await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        assert len(result.lines) == 2
+        url = post.call_args.args[0]
+        payload = post.call_args.kwargs["json"]
+        assert url == f"{settings.LLM_BASE_URL}/chat/completions"
+        assert payload["model"] == settings.LLM_MODEL
+        assert payload["max_tokens"] == settings.LLM_MAX_TOKENS
+        assert payload["response_format"]["type"] == "json_schema"
+        assert payload["response_format"]["json_schema"]["strict"] is True
+        schema = payload["response_format"]["json_schema"]["schema"]
+        assert schema["properties"]["p"]["items"]["properties"]["c"]["enum"] == [
+            "dairy",
+            "produce",
+            None,
+        ]
+        assert payload["chat_template_kwargs"] == {
+            "reasoning_strength": settings.LLM_REASONING_STRENGTH
         }
 
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_resp = AsyncMock()
-            mock_resp.json = lambda: mock_response
-            mock_resp.raise_for_status = lambda: None
+    async def test_prompt_is_prefiltered_and_names_categories(self):
+        patcher, post = _mock_client()
+        with patcher:
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
 
-            mock_post = AsyncMock(return_value=mock_resp)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
+        prompt = post.call_args.kwargs["json"]["messages"][0]["content"]
+        assert isinstance(prompt, str)
+        assert "KEVYTMAITOJUOMA LAKTON 1,28" in prompt
+        assert "YHTEENSÄ" not in prompt
+        assert "dairy (Dairy & Eggs)" in prompt
 
-            result = await extract_products_from_receipt(f"{store_name} receipt text")
+    async def test_reasoning_kwargs_omitted_when_unset(self, monkeypatch):
+        monkeypatch.setattr(settings, "LLM_REASONING_STRENGTH", None)
+        patcher, post = _mock_client()
+        with patcher:
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+        assert "chat_template_kwargs" not in post.call_args.kwargs["json"]
 
-            assert result.get_store_info().language == language
-            assert len(result.products) == len(product_names)
-            for i, product in enumerate(result.products):
-                assert product.name == product_names[i]
+    async def test_http_error_raises_extraction_error(self):
+        patcher, _ = _mock_client(status=500)
+        with patcher, pytest.raises(LLMExtractionError):
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+    async def test_timeout_raises_extraction_error(self):
+        patcher, _ = _mock_client(raises=httpx.ReadTimeout("slow"))
+        with patcher, pytest.raises(LLMExtractionError):
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+    async def test_missing_choices_raises_extraction_error(self):
+        patcher, _ = _mock_client(response_json={"error": "model not found"})
+        with patcher, pytest.raises(LLMExtractionError):
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
 
 
-class TestPydanticValidation:
-    """Test Pydantic model validation of LLM responses."""
+class TestExtractFromImage:
+    async def test_sends_text_and_image_parts(self):
+        image = b"\x89PNG fake image bytes"
+        patcher, post = _mock_client()
+        with patcher:
+            result = await extract_from_image(image, "image/png", CATEGORIES)
 
-    async def test_invalid_product_schema(self):
-        """Test that invalid product schema raises validation error."""
-        invalid_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            {
-                                "store": {},
-                                "products": [
-                                    {
-                                        "name": "Product",
-                                        "quantity": -1.0,  # Invalid: negative quantity
-                                        "unit": "pcs",
-                                    }
-                                ],
-                            }
-                        )
-                    }
-                }
-            ]
-        }
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = AsyncMock()
-            mock_response.json = lambda: invalid_response
-            mock_response.raise_for_status = lambda: None
-
-            mock_post = AsyncMock(return_value=mock_response)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
-
-            with pytest.raises(Exception):  # noqa: B017  # Pydantic validation error
-                await extract_products_from_receipt("OCR text")
-
-    async def test_missing_required_fields(self):
-        """Test that missing required fields raise validation error."""
-        invalid_response = {
-            "choices": [
-                {
-                    "message": {
-                        "content": json.dumps(
-                            {
-                                "store": {},
-                                "products": [
-                                    {
-                                        # Missing 'name' field
-                                        "quantity": 1.0,
-                                        "unit": "pcs",
-                                    }
-                                ],
-                            }
-                        )
-                    }
-                }
-            ]
-        }
-
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = AsyncMock()
-            mock_response.json = lambda: invalid_response
-            mock_response.raise_for_status = lambda: None
-
-            mock_post = AsyncMock(return_value=mock_response)
-            mock_client.return_value.__aenter__.return_value.post = mock_post
-
-            with pytest.raises(Exception):  # noqa: B017  # Pydantic validation error
-                await extract_products_from_receipt("OCR text")
+        assert result.method == "vision"
+        parts = post.call_args.kwargs["json"]["messages"][0]["content"]
+        assert [part["type"] for part in parts] == ["text", "image_url"]
+        assert "dairy (Dairy & Eggs)" in parts[0]["text"]
+        expected = "data:image/png;base64," + base64.b64encode(image).decode()
+        assert parts[1]["image_url"]["url"] == expected

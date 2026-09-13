@@ -277,7 +277,7 @@ class TestProcessReceipt:
         """POST /api/receipts/{id}/process should process receipt through OCR + LLM + matching."""
         from unittest.mock import AsyncMock, patch
 
-        from app.parsers.base import ParsedProduct, ReceiptExtraction, StoreInfo
+        from app.parsers.base import ExtractedLine, ReceiptExtraction
 
         # Create a receipt
         file_content = b"fake receipt image"
@@ -288,9 +288,9 @@ class TestProcessReceipt:
         # Mock OCR and LLM services
         mock_ocr_text = "S-MARKET\nVALIO MILK 1L  2.49\nTOTAL  2.49"
         mock_extraction = ReceiptExtraction(
-            store=StoreInfo(name="S-Market", chain="s-group"),
-            products=[ParsedProduct(name="Valio Milk 1L", quantity=1.0, price=2.49)],
-            confidence=0.95,
+            method="text",
+            store_chain="S-MARKET",
+            lines=[ExtractedLine(name="Valio Milk 1L", quantity=1.0)],
         )
 
         with (
@@ -300,7 +300,7 @@ class TestProcessReceipt:
                 return_value=mock_ocr_text,
             ),
             patch(
-                "app.services.receipt_processing.extract_products_from_receipt",
+                "app.services.receipt_processing.extract_from_text",
                 new_callable=AsyncMock,
                 return_value=mock_extraction,
             ),
@@ -328,7 +328,7 @@ class TestProcessReceipt:
         """POST /api/receipts/{id}/process should update receipt processing_status."""
         from unittest.mock import AsyncMock, patch
 
-        from app.parsers.base import ReceiptExtraction, StoreInfo
+        from app.parsers.base import ReceiptExtraction
 
         # Create a receipt
         file_content = b"fake receipt"
@@ -336,11 +336,7 @@ class TestProcessReceipt:
         create_response = await client.post("/api/receipts/scan", files=files)
         receipt_id = create_response.json()["id"]
 
-        mock_extraction = ReceiptExtraction(
-            store=StoreInfo(),
-            products=[],
-            confidence=0.9,
-        )
+        mock_extraction = ReceiptExtraction(method="text", lines=[])
 
         with (
             patch(
@@ -349,7 +345,7 @@ class TestProcessReceipt:
                 return_value="text",
             ),
             patch(
-                "app.services.receipt_processing.extract_products_from_receipt",
+                "app.services.receipt_processing.extract_from_text",
                 new_callable=AsyncMock,
                 return_value=mock_extraction,
             ),

@@ -4,9 +4,11 @@ from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import anyio
+import httpx
 import pytest
 
 from app.services.ocr_service import (
+    OCRUnavailableError,
     _extract_from_image,
     _extract_from_pdf,
     extract_text_from_receipt,
@@ -230,3 +232,85 @@ class TestOCRWithRealSamples:
         assert any(
             marker in text.upper() for marker in ["K-MARKET", "K-CITYMARKET", "KESKO"]
         )
+
+
+class TestMinerURequestAndAvailability:
+    """MVP-R1a: configurable language, real content type, availability errors."""
+
+    @staticmethod
+    def _client(post):
+        client = AsyncMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=None)
+        client.post = post
+        return client
+
+    async def test_sends_configured_language_and_real_content_type(
+        self, tmp_path, monkeypatch
+    ):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "MINERU_LANG", "latin")
+        img_file = tmp_path / "receipt.png"
+        img_file.write_bytes(b"\x89PNG fake")
+        response = Mock()
+        response.status_code = 200
+        response.raise_for_status = Mock()
+        response.json.return_value = {
+            "results": {"receipt.png": {"md_content": "TEXT"}}
+        }
+        post = AsyncMock(return_value=response)
+
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient",
+            return_value=self._client(post),
+        ) as client_cls:
+            assert await _extract_from_image(img_file) == "TEXT"
+
+        assert post.call_args.kwargs["data"]["lang_list"] == "latin"
+        name, _, content_type = post.call_args.kwargs["files"]["files"]
+        assert (name, content_type) == ("receipt.png", "image/png")
+        assert client_cls.call_args.kwargs["timeout"] == settings.MINERU_TIMEOUT
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            httpx.ConnectError("refused"),
+            httpx.ReadTimeout("slow"),
+        ],
+    )
+    async def test_connection_problems_raise_unavailable(self, tmp_path, error):
+        img_file = tmp_path / "receipt.jpg"
+        img_file.write_bytes(b"fake")
+        post = AsyncMock(side_effect=error)
+
+        with (
+            patch(
+                "app.services.ocr_service.httpx.AsyncClient",
+                return_value=self._client(post),
+            ),
+            pytest.raises(OCRUnavailableError),
+        ):
+            await _extract_from_image(img_file)
+
+    async def test_server_error_raises_unavailable(self, tmp_path):
+        img_file = tmp_path / "receipt.jpg"
+        img_file.write_bytes(b"fake")
+        request = httpx.Request("POST", "http://mineru/file_parse")
+        response = Mock()
+        response.status_code = 503
+        response.raise_for_status = Mock(
+            side_effect=httpx.HTTPStatusError(
+                "down", request=request, response=httpx.Response(503, request=request)
+            )
+        )
+        post = AsyncMock(return_value=response)
+
+        with (
+            patch(
+                "app.services.ocr_service.httpx.AsyncClient",
+                return_value=self._client(post),
+            ),
+            pytest.raises(OCRUnavailableError),
+        ):
+            await _extract_from_image(img_file)
