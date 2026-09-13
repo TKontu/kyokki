@@ -95,13 +95,35 @@ Total planned: ~97h across 18 increments. Critical path through the backend rece
   `.env.example` and `stack.env.example`.
 
 #### MVP-F2 — Deployable prod stack + runbook
-- `docker-compose.prod.yml`: replace the hardcoded `NEXT_PUBLIC_API_URL=http://192.168.0.1:17300/api`
-  with `${KYOKKI_HOST}`-based value read from `stack.env`; document that `ALLOWED_ORIGINS`
-  must include `http://<KYOKKI_HOST>:17301`.
-- `docs/DEPLOY.md`: prerequisites, `stack.env` from example, `docker compose -f
-  docker-compose.prod.yml up -d --build`, `alembic upgrade head`, seed categories
-  (`python -m app.db.seed_categories`), health check URL, open on iPad, add to Home Screen.
-- Run it on the homelab. Add a few inventory rows via the API and confirm the iPad renders them.
+Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (S1, S5, S6, S10).
+- [x] Same-origin API (decision: rewrite over CORS). `next.config.mjs` proxies `/api/*` to
+  `API_INTERNAL_URL` (compose service name, build arg); `lib/api/client.ts` defaults to `/api`.
+  No LAN IP in the frontend image, no `ALLOWED_ORIGINS` needed in production.
+- [x] `docker-compose.prod.yml`: crash-looping `celery-worker` removed (`app.tasks` never
+  existed); `celery_app.py` and the `celery` dependency deleted; Postgres and Redis host ports
+  unpublished. Dev compose loses the worker too.
+- [x] Migration drift: new revision adds `uq_product_master_off_product_id` (model had it since
+  PR #21, schema did not); CI runs `alembic upgrade head && alembic check` before pytest.
+  Root cause found on the way: `app/db/base.py` never imported the models, so Alembic
+  autogenerate compared against an empty schema (and would have proposed dropping every
+  table). Fixed with a registry test.
+- [x] `docker-compose.prod.yml` read `POSTGRES_PASSWORD` via `${...}` interpolation, which
+  Compose takes from the shell or `.env`, not from `stack.env`; Postgres now gets it via
+  `env_file`. Smoke-tested locally with the real compose file under a separate project name.
+- [x] Found by that smoke: the API container never started with a comma-separated
+  `ALLOWED_ORIGINS` in `stack.env` (pydantic-settings JSON-decodes `list[str]` env values before
+  the split validator runs). Field is now `Annotated[list[str], NoDecode]`, with tests in
+  `tests/core/test_config.py`. This means the prod API had not been startable with CORS
+  configured since PR #21.
+- [x] Also found by the smoke (review finding C3): with one item in stock the page crashed
+  with `toFixed is not a function` because Decimal quantities arrive as JSON strings.
+  `lib/api/inventory.ts` now coerces `initial_quantity`/`current_quantity` to numbers at the
+  API boundary (with tests). The number-vs-string wire decision (DEC 2) stays open for S1.
+- [x] `python -m app.db.seed_categories` entry point for the runbook (with test).
+- [x] `docs/DEPLOY.md` runbook; README Quick Start and ARCHITECTURE.md "as built" note updated.
+- [ ] **Operator:** deploy on the homelab following `docs/DEPLOY.md` verbatim (rebuild the
+  frontend image; `ALLOWED_ORIGINS` can go from `stack.env`), open `http://<host>:17301` on the
+  iPad, confirm the inventory list renders. That ticks F2.
 - **Acceptance:** iPad Safari shows the inventory list from the prod stack; runbook followed
   verbatim by someone who did not write it.
 
@@ -380,7 +402,7 @@ Ordered by expected value once MVP is live.
 
 ### 🚧 Sprint 5: MVP on the iPad (IN PROGRESS, started 2026-09-13)
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
-- Wave 1: [ ] F1  [ ] F2
+- Wave 1: [x] F1 (PR #24)  [~] F2 (PR open; homelab verification pending)
 - Wave 2: [ ] S1  [ ] R1  [ ] R2  [ ] C1  [ ] C2
 - Wave 3: [ ] S2  [ ] S3  [ ] S4  [ ] R3  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8

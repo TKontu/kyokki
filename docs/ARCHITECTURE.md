@@ -1,5 +1,10 @@
 # Kyokki — System Architecture
 
+> **As built (2026-09-13):** the deployed stack is `docker-compose.prod.yml` (frontend, API,
+> PostgreSQL, Redis; no Traefik, no Celery). The frontend proxies `/api/*` to the API on the
+> same origin. Runbook: [DEPLOY.md](./DEPLOY.md). Sections below describe the target design;
+> where they differ from this note, this note is current.
+
 ## 1. Vision & Design Principles
 
 ### Core Vision
@@ -538,7 +543,7 @@ Family member adds item via phone
 | Frontend | Next.js 14, PWA, Tailwind |
 | Backend | FastAPI, Python 3.11+ |
 | Database | PostgreSQL 15 |
-| Queue | Celery + Redis |
+| Background work | In-process (FastAPI `BackgroundTasks`, planned MVP-R3); Redis for pub/sub only |
 | Real-Time | WebSocket + Redis Pub/Sub |
 | OCR | MinerU (existing homelab) |
 | LLM | vLLM with Qwen3-8B (homelab) |
@@ -554,9 +559,8 @@ Docker Compose with:
 - `traefik` — SSL, routing
 - `frontend` — Next.js
 - `api` — FastAPI
-- `celery-worker` — Background tasks
 - `postgres` — Database
-- `redis` — Queue/cache
+- `redis` — WebSocket pub/sub, scanner state
 
 External services:
 - MinerU OCR (your homelab)

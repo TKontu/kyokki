@@ -157,9 +157,11 @@ export class APIClient {
   }
 }
 
-// Create default client instance
+// Create default client instance.
+// Default is the same-origin path proxied by the Next.js rewrite (next.config.mjs);
+// NEXT_PUBLIC_API_URL overrides it when the API is served from another origin.
 const apiClient = new APIClient({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
+  baseURL: process.env.NEXT_PUBLIC_API_URL || '/api',
 })
 
 export default apiClient

@@ -3,7 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.seed_categories import SEED_CATEGORIES, seed_categories
+from app.db.seed_categories import SEED_CATEGORIES, main, seed_categories
 from app.models.category import Category
 
 
@@ -107,3 +107,15 @@ class TestSeedCategories:
             assert category.display_name, (
                 f"Category '{cat_id}' should have display_name"
             )
+
+    async def test_main_seeds_and_commits_with_app_session(
+        self, db_session: AsyncSession
+    ) -> None:
+        """`python -m app.db.seed_categories` must work against the configured DB."""
+        # db_session's fixture created the tables; main() opens its own session
+        # via app.db.session.AsyncSessionLocal and must commit what it seeds.
+        await main()
+        await main()  # idempotent
+
+        result = await db_session.execute(select(Category))
+        assert len(result.scalars().all()) == len(SEED_CATEGORIES)
