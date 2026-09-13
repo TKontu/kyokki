@@ -1,72 +1,59 @@
 # Handoff
-Generated-UTC: 2026-09-13T13:31:06Z
-Base-SHA: 6382f349658ac0eace5d7ba42824e6a5d119a061
+Generated-UTC: 2026-09-13T18:45:00Z
+Base-SHA: 83b2e62
 
 ## Round delta
-- PR #23 merged (squash): stack-neutral Claude Code scaffold kit. New `.claude/commands/*`
-  resolve tooling from the `claude:commands` table in `CLAUDE.md`; six round commands added.
-- `CLAUDE.md` rewritten for Kyokki (two-package command table, layout, conventions).
-- Formatter hook was a silent no-op (`$CLAUDE_FILE_PATH` never existed). Replaced by
-  `.claude/hooks/format.py`, which reads the event JSON from stdin. Verified firing.
-- `settings.json`: merged allow-list (78 rules) plus deny-list (force push, hard reset,
-  clean, `gh pr merge`). Skills `debug`/`tdd`/`verify` and templates now tracked; GitNexus removed.
-- Local `main` had an unrelated July-2025 prototype history. It was replaced by origin/main;
-  the old tree is preserved on `backup/local-main-2026-09-13`.
-
-- MVP-F1 (`fix/mvp-f1-green-ci-secrets`): `stack.env` untracked and ignored, `stack.env.example`
-  added, ruff pinned to 0.12.12 in requirements and CI, `ruff format --check` blocking.
-  Backend CI's pytest job had never passed; root causes found by running the suite against a
-  real Postgres: duplicate `dairy` category from composing `sample_category` with
-  `seed_categories`; app engine pool and cached Redis client reused across per-test event
-  loops (now disposed by an autouse fixture); `requires_ollama` tests not deselected; a real
-  bug in `POST /api/shopping/` (`extra={"name": ...}` raises KeyError in logging). Local
-  result: 247 passed, 2 skipped, 12 deselected. `KYOKKI_TEST_REQUIRE_DB=1` makes the DB
-  fixture fail loudly instead of skipping; CI sets it.
-- Local repro recipe: `py -3.12 -m venv backend/.venv`, install requirements, `docker compose
-  up -d postgres redis`, run pytest with `POSTGRES_SERVER=localhost` etc. The local `.env`
-  holds legacy keys (`gemini_api_key`, `db_password`, `database_url`, `ollama_host`) that the
-  strict `Settings` rejects, so move `.env` aside for the run. Those keys look like real
-  credentials from the old prototype and should be deleted from `.env`.
-- `docs/PLAN_REVIEW_2026-09-13.md` appeared untracked during the F1 session (not authored by
-  it). It reviews the MVP plan and recommends amendments; read it before planning Wave 2.
+- PR #24 merged (MVP-F1): `stack.env` untracked and ignored, `stack.env.example` added, ruff
+  pinned, backend CI green for the first time (fixture collision, engine/Redis clients leaking
+  across pytest-asyncio loops, `requires_ollama` deselected, real 500 in `POST /api/shopping/`
+  from `extra={"name": ...}`). Details in the PR description.
+- MVP-F2 in flight on `feat/mvp-f2-deployable-stack`: same-origin `/api` rewrite in
+  `next.config.mjs` (`API_INTERNAL_URL` build arg, default `http://kyokki-api:8000`), client
+  default base URL `/api`; `celery-worker` removed from both compose files and `celery_app.py`
+  deleted (it referenced a non-existent `app.tasks` and crash-looped); Postgres/Redis host ports
+  unpublished in prod; migration `7c1f2a9d4b30` adds the missing unique constraint and CI runs
+  `alembic check`; `python -m app.db.seed_categories` entry point; `docs/DEPLOY.md` runbook.
+- `docs/PLAN_REVIEW_2026-09-13.md` (untracked, user-authored) reviews the MVP plan. Its F2
+  amendments were adopted; the rest (R0 spike, alias learning, unit/serialisation decisions)
+  are pending operator decisions listed in its section 7.
 
 ## Active PRs and conflicts
-- No open PRs.
-- `chore/claude-scaffold-kit` is merged but still exists locally and on origin; safe to delete.
-- Local branch `frontend` tracks the old prototype `origin/frontend`; unrelated to current main.
+- MVP-F2 PR (see git log / `gh pr list`). No other open PRs.
+- `chore/claude-scaffold-kit` and `fix/mvp-f1-green-ci-secrets` are merged; safe to delete.
 
 ## Non-obvious decisions or blockers
-- `docs/TODO.md` still lists Increment 1.7 (main page integration) as open; PR #22 delivered
-  it. Mark done before planning from the TODO.
-- Round commands expect `docs/backlog.md` and `docs/conventions.md`; neither exists. Everyday
-  commands fall back to `docs/TODO.md` per `CLAUDE.md` "Work tracking". Adopting the round
-  workflow (step 4 of the kit rollout) was deliberately deferred.
-- Hook runs `python -m ruff` (ruff is not on PATH here) and ESLint only when
-  `frontend/node_modules/.bin` exists. Hook exit is always 0; failures are silent by design.
-- `HANDOFF.md` is git-tracked in this repo, unlike the kit's advice to ignore it. Left tracked
-  to match existing project practice; change only with a deliberate `git rm --cached`.
-- `local.env` and `git-cheat-sheet.md` sit untracked and unignored at repo root. Check
-  `local.env` for secrets before any broad `git add`.
-- Carried over: backend DB tests need Postgres and Redis up (`docker compose up -d postgres
-  redis`); `InventoryList` takes an optional `productNames` map because `InventoryItem` has
-  no product name.
+- Local backend tests: Python 3.12 venv at `backend/.venv`, `docker compose up -d postgres
+  redis`, env vars `POSTGRES_SERVER=localhost ... KYOKKI_TEST_REQUIRE_DB=1`, and move the root
+  `.env` aside first: it still carries legacy prototype keys (`gemini_api_key`, `db_password`,
+  `database_url`, `ollama_host`) that the strict `Settings` rejects. Those look like real
+  credentials and should be deleted from `.env`.
+- Many committed backend files are CRLF in git while docs are LF. Preserve the existing ending
+  and stage CRLF files with `git -c core.autocrlf=false add`, or the diff becomes the whole file.
+- `mypy backend/app/` has 171 strict-mode errors; the CI step is `continue-on-error`. Post-MVP debt.
+- `git pull` of the F1 merge deletes a checkout's tracked `stack.env` (happened locally;
+  restored with `git show 6382f34:stack.env > stack.env`). The homelab checkout will hit the
+  same thing: back the file up before pulling. Documented in `docs/DEPLOY.md`.
+- Quantities are JSON strings on the wire (`"1000.00"`); the inventory page crashed on the
+  first real item. Frontend now coerces at the API boundary (`normalizeInventoryItem`). The
+  wire-format decision (review DEC 2) is still open for MVP-S1.
+- `ALLOWED_ORIGINS` as a comma-separated env value crashed `Settings` at import (pydantic-
+  settings decodes `list[str]` env values as JSON first). Fixed with `NoDecode`; the prod API
+  had not been startable that way since PR #21. Caught only by running the prod compose file.
+- `app/db/base.py` claimed to import all models and imported none, so Alembic autogenerate saw
+  an empty schema. Fixed in F2 with `tests/db/test_metadata_registry.py` guarding it.
+- Next.js standalone output inlines `next.config.mjs` at build time, so the rewrite destination
+  is fixed per image. It is the compose service name, so this is fine; do not try to make it a
+  runtime env var without switching off standalone output.
 
 ## Next action
-MVP-F1 is in flight on `fix/mvp-f1-green-ci-secrets`. Once its PR is merged, two steps are
-operator-only (force push is deny-listed for the agent). Do them in this order.
-
-1. Rotate on the homelab, before anything else: new password for `kyokki_user`
-   (`ALTER USER kyokki_user PASSWORD '...'`), new key on the LLM endpoint if it enforces one,
-   update the homelab's `stack.env`, restart the prod stack.
-2. Purge `stack.env` from history (it has been public since commit 0509841, 2026-03-31):
-   ```bash
-   py -3.12 -m pip install git-filter-repo
-   git clone --mirror https://github.com/TKontu/kyokki.git kyokki-purge.git
-   cd kyokki-purge.git
-   git filter-repo --invert-paths --path stack.env
-   git push --force --mirror https://github.com/TKontu/kyokki.git
-   ```
-   Then re-clone the working repository. Delete or archive local branches that still carry
-   the old blobs (`backup/local-main-2026-09-13`, `chore/claude-scaffold-kit`, `frontend`).
-   Verify on the fresh clone: `git log --all --oneline -- stack.env` prints nothing.
-3. Then MVP-F2 (parametrized prod compose, `docs/DEPLOY.md`, iPad loads inventory).
+1. **Operator, after the F2 PR merges:** on the homelab, back up `stack.env`, `git pull`
+   (restore `stack.env` if the pull removed it), `docker compose -f
+   docker-compose.prod.yml up -d --build`, `... run --rm kyokki-api alembic upgrade head`,
+   `... run --rm kyokki-api python -m app.db.seed_categories`, then open `http://<host>:17301`
+   on the iPad. Report back; that ticks MVP-F2. `ALLOWED_ORIGINS` may be removed from `stack.env`.
+2. **Operator, still outstanding from F1:** rotate the Postgres password and LLM key, then purge
+   `stack.env` from history (runbook in PR #24's description).
+3. **Decisions before Wave 2** (from `docs/PLAN_REVIEW_2026-09-13.md` section 7): unit
+   vocabulary (`ml|g|pcs` recommended), JSON numbers vs strings for quantities (numbers
+   recommended), and the fallback order if the LLM spike (proposed MVP-R0) fails.
+4. Then Wave 2: backend MVP-S1, MVP-R1, MVP-R2 in parallel with frontend MVP-C1, MVP-C2.

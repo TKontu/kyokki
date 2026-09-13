@@ -43,20 +43,24 @@ Most food inventory apps fail because managing the system is more work than the 
 - Docker & Docker Compose
 - Homelab server (16GB+ RAM)
 - MinerU OCR running on homelab
-- Ollama (optional, for AI fallback)
+- OpenAI-compatible LLM endpoint (vLLM or Ollama) on the homelab
 - iPad for primary interface
 
 ### Installation
 
+Full runbook: [DEPLOY.md](./DEPLOY.md). In short:
+
 ```bash
-git clone https://github.com/yourusername/fridge-logger.git
-cd fridge-logger
-cp .env.example .env
-# Edit .env: POSTGRES_PASSWORD, MINERU_HOST, OLLAMA_HOST
-docker compose up -d
+git clone https://github.com/TKontu/kyokki.git
+cd kyokki
+cp stack.env.example stack.env
+# Edit stack.env: POSTGRES_PASSWORD, MINERU_BASE_URL, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
+docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml run --rm kyokki-api alembic upgrade head
+docker compose -f docker-compose.prod.yml run --rm kyokki-api python -m app.db.seed_categories
 ```
 
-Open `https://your-server-ip` on iPad, add to Home Screen.
+Open `http://<host>:17301` on the iPad and add it to the Home Screen.
 
 ## Usage
 
@@ -80,9 +84,11 @@ Open `https://your-server-ip` on iPad, add to Home Screen.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MINERU_HOST` | MinerU OCR endpoint | required |
-| `OLLAMA_HOST` | Ollama API (optional) | `http://192.168.0.247:11434` |
 | `POSTGRES_PASSWORD` | Database password | required |
+| `MINERU_BASE_URL` | MinerU OCR endpoint | required |
+| `LLM_BASE_URL` | OpenAI-compatible chat endpoint (vLLM/Ollama) | required |
+| `LLM_API_KEY` | Key for that endpoint (`ollama` if none) | required |
+| `LLM_MODEL` | Model name for receipt extraction | see `stack.env.example` |
 
 ### Category Expiry Defaults
 ```python
