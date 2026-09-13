@@ -275,7 +275,8 @@ class TestScanBarcodeConsume:
         assert response.status_code == 200
         data = response.json()
         assert data["action"] == "inventory_consumed"
-        assert data["inventory_item"]["current_quantity"] == "750"
+        # Numeric(10, 2) column: the API serializes with two decimals
+        assert data["inventory_item"]["current_quantity"] == "750.00"
 
     async def test_scan_consume_capped_message_when_quantity_exceeds_stock(
         self,

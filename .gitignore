@@ -45,6 +45,9 @@ htmlcov/
 .env
 .env.*
 !.env.example
+stack.env
+local.env
+!stack.env.example
 
 # Logs
 *.log

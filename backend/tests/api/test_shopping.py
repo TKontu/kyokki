@@ -262,7 +262,9 @@ class TestShoppingListAPI:
         assert data["id"] == str(item.id)
         assert data["name"] == "Test Item"
 
-    async def test_get_shopping_item_not_found(self, client: AsyncClient):
+    async def test_get_shopping_item_not_found(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
         """Test getting non-existent item returns 404."""
         fake_id = "00000000-0000-0000-0000-000000000000"
         response = await client.get(f"/api/shopping/{fake_id}")
