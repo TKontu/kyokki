@@ -1,43 +1,38 @@
 # Handoff
 
-Create a handoff document summarizing current session progress for context continuity.
+Write a bounded delta for the next fresh session. Do not restate the project.
 
-## Context
+1. Inspect the current SHA of the integration branch, recent merges, open PRs, and the
+   `## Current frontier` section of `docs/backlog.md`.
 
-```bash
-git status --short
-```
-
-```bash
-git log --oneline -10
-```
-
-```bash
-git diff --stat HEAD~3..HEAD 2>/dev/null || git diff --stat
-```
-
-## Instructions
-
-Create `HANDOFF.md` documenting:
+2. Write `HANDOFF.md` from `.claude/templates/HANDOFF-template.md` (gitignore it — a handoff is
+   session state, not project canon):
 
 ```markdown
-# Handoff: [Brief Title]
+# Handoff
+Generated-UTC: YYYY-MM-DDTHH:MM:SSZ
+Base-SHA: <full 40-character SHA>
 
-## Completed
-- [What was accomplished this session]
-
-## In Progress
-- [Current state of incomplete work]
-
-## Next Steps
-- [ ] [Specific actionable tasks to continue]
-
-## Key Files
-- `path/to/file.py` - [why it matters]
-
-## Context
-[Any important decisions, blockers, or notes for next session]
+## Round delta
+## Active PRs and conflicts
+## Non-obvious decisions or blockers
+## Next action
 ```
 
-Keep it concise. Focus on what the next session needs to know to continue effectively.
-After creating, suggest running `/clear` to start fresh.
+**At most 50 lines and 500 words.** Include only:
+
+- what changed this round;
+- conflicts that are *not* obvious from PR metadata;
+- decisions and blockers that are expensive to rediscover;
+- one exact next action, with the authoritative path or link.
+
+**Exclude:** architecture summaries, full PR narratives, test logs, infrastructure addresses,
+durable safety rules (those belong in `CLAUDE.md`), and the frontier section itself — the next
+session reads that from the backlog.
+
+3. Check it against the limits: line count, word count, both header fields present, the SHA full
+   and real. If `docs/conventions.md` declares a handoff validator under "Round tooling", run it
+   and fix every error.
+
+4. State that the handoff is advisory and that canonical architecture, backlog, and source outrank
+   it. Then recommend clearing context.
