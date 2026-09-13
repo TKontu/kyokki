@@ -1,113 +1,24 @@
-# Assign Agent
+# Assign an executor
 
-Create a complete task assignment for a Sonnet executor agent.
+Produce one bounded, decision-complete prompt for an isolated executor. Use this for a single task
+outside a round; use `/plan-round` for a parallel batch.
 
-## Context
-```bash
-cat docs/TODO*.md 2>/dev/null | head -100
-```
-```bash
-git log --oneline -5
-```
-```bash
-ls .claude/templates/
-```
+1. Follow `CLAUDE.md` and `docs/conventions.md` if it exists. Start from a fast-forwarded
+   integration branch and record its full SHA — the executor cuts from that commit.
 
-## Instructions
+2. Confirm the item is `ready` in `docs/backlog.md` and that its stated owned paths match the
+   source. Verify; do not take the row's word for it.
 
-### 1. Identify Agent and Task
+3. Write the spec from `.claude/templates/TODO-agent-template.md`. It must stand alone: the
+   executor's workspace has none of your context, so every scope link, path, and already-made
+   decision goes in the spec itself.
 
-- Choose agent ID: `agent-{descriptive-name}` (e.g., `agent-auth`, `agent-api`)
-- Define the task scope - must be independently completable
+4. Resolve the scoped test and lint commands from the **Project Commands** table in `CLAUDE.md`
+   and write the concrete commands into the spec.
 
-### 2. Create TODO File
+5. Check it against the completeness bar in `.claude/templates/CLAUDE-orchestrator.md`: could you
+   build exactly the right thing from this spec and nothing else?
 
-Read `.claude/templates/TODO-agent-template.md` and create `docs/TODO-{agent-id}.md`:
-
-**Required sections:**
-- **Context** - What the agent needs to know (no implicit knowledge)
-- **Objective** - Single clear sentence
-- **Tasks** - Numbered, with file paths and test cases
-- **Constraints** - What NOT to do
-- **Verification** - How to confirm it's done
-
-**Quality checklist before creating:**
-- [ ] Can agent complete this without asking questions?
-- [ ] Are file paths explicit?
-- [ ] Are test cases specified?
-- [ ] Are edge cases mentioned?
-- [ ] Would YOU know what to build from this spec?
-
-### 3. Commit and Push
-
-```bash
-git add docs/TODO-{agent-id}.md
-git commit -m "docs: assign {task-description} to {agent-id}"
-git push origin main
-```
-
-### 4. Output Agent Setup Instructions
-
-**If agent folder doesn't exist yet:**
-
-```markdown
-## Setup Agent Workspace: {agent-id}
-
-### One-Time Setup
-```bash
-# Create agent folder (adjust path as needed)
-cp -r /mnt/c/code/knowledge_extraction /mnt/c/code/knowledge_extraction-{agent-id}
-
-# Replace CLAUDE.md with executor version
-cp /mnt/c/code/knowledge_extraction/.claude/templates/CLAUDE-executor.md \
-   /mnt/c/code/knowledge_extraction-{agent-id}/CLAUDE.md
-
-# Navigate to agent folder
-cd /mnt/c/code/knowledge_extraction-{agent-id}
-```
-
-### Start Agent Session
-Open new Claude Code session in the agent folder.
-
-**Startup prompt:**
-```
-I am executor agent {agent-id}.
-git pull origin main
-Read docs/TODO-{agent-id}.md
-Execute tasks using TDD. Create PR when done.
-```
-```
-
-**If agent folder already exists:**
-
-```markdown
-## Start Agent: {agent-id}
-
-In agent workspace `/mnt/c/code/knowledge_extraction-{agent-id}`:
-
-**Startup prompt:**
-```
-I am executor agent {agent-id}.
-git pull origin main
-Read docs/TODO-{agent-id}.md
-Execute tasks using TDD. Create PR when done.
-```
-```
-
-## Agent Naming Convention
-
-| ID | Use For |
-|----|---------|
-| `agent-auth` | Authentication features |
-| `agent-api` | API endpoints |
-| `agent-models` | Database models |
-| `agent-extract` | Extraction logic |
-| `agent-tests` | Test coverage |
-| `agent-1`, `agent-2` | Generic when no clear domain |
-
-## Common Mistakes
-
-- **Vague specs**: "Add validation" → "Add email format validation returning error 'Invalid email format' for non-matching inputs"
-- **Missing files**: "Update the service" → "Update `src/services/extraction.py` function `extract_entities`"
-- **No test cases**: Always specify what tests to write
-- **Implicit knowledge**: Agent doesn't know what you know. Spell it out.
+6. Hand the operator the prompt path and tell them to paste it into one fresh executor session
+   using `.claude/templates/CLAUDE-executor.md` as that workspace's `CLAUDE.md`. Do not launch the
+   executor yourself.

@@ -1,18 +1,32 @@
 # Lint and Fix
 
-Run ruff to check and fix code issues, then format.
+Autofix what the linter can, format, then resolve what is left by hand.
 
-## Instructions
+## Resolve the commands
 
-Run the following in sequence:
+From the **Project Commands** table in `CLAUDE.md`: `lint-fix`, `format`, `lint`. Any key that is
+absent or `n/a` is skipped and reported as skipped — never substitute a linter the project does not
+use.
 
-1. `ruff check . --fix` - Fix auto-fixable lint issues
-2. `ruff format .` - Format code
-3. `ruff check .` - Show remaining issues that need manual fixes
+## Sequence
 
-For any remaining issues:
-- Explain what each rule violation means
-- Provide the fix
-- Apply the fix
+1. `lint-fix` — apply the automatic fixes
+2. `format` — format the code
+3. `lint` — report what still needs a human decision
 
-After all fixes, run `git diff --stat` to summarize changes made.
+## For each remaining issue
+
+- Name the rule and explain what it is actually complaining about.
+- Apply the fix.
+- If a rule is wrong for this codebase, say so and suggest configuring an exception in the linter
+  config — do not scatter inline suppressions to reach a clean run.
+
+## Verify
+
+Re-run `lint` after your manual fixes, then summarize:
+
+```bash
+git diff --stat
+```
+
+Report the actual final linter output, not "should be clean now".
