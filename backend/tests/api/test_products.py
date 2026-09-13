@@ -178,6 +178,11 @@ class TestCreateProduct:
         assert product["category"] == "dairy"
         assert "id" in product
         assert UUID(product["id"])  # Valid UUID
+        # DEC-2: Decimal fields travel as JSON numbers, not strings
+        assert product["default_quantity"] == 1000
+        assert product["min_stock_quantity"] == 2000
+        assert product["reorder_quantity"] == 4000
+        assert isinstance(product["default_quantity"], int | float)
 
     async def test_create_product_minimal_fields(
         self, client: AsyncClient, seeded_db: AsyncSession

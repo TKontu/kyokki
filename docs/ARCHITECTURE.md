@@ -15,8 +15,9 @@
 >   `/api/receipts/batch`, `/api/inventory/reconcile`,
 >   `/api/scanner/input` (the real endpoint is `/api/scanner/scan`), GS1 parsing, shopping
 >   list UI, Home Assistant, offline mode, service worker.
-> - **Written but unused:** `store_product_alias` and `consumption_log` tables; nothing
->   reads or writes them yet. Both get their first writers in the MVP plan (R1/R2 and S1).
+> - **Written but unused:** `store_product_alias` table; nothing reads or writes it yet. It
+>   gets its first writers in the MVP plan (R1/R2). `consumption_log` is written on consume
+>   and discard since MVP-S1; nothing reads it yet.
 > - **MVP decisions (see `docs/TODO.md`):** polling instead of WebSockets on the iPad,
 >   FastAPI `BackgroundTasks` instead of Celery, `<input type="file" capture>` instead of
 >   `getUserMedia`, LLM-based extraction stays the general core with a generic heuristic

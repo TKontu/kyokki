@@ -1,8 +1,9 @@
 from datetime import datetime
-from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from app.schemas.types import JsonDecimal
 
 
 class ConsumptionLogBase(BaseModel):
@@ -13,7 +14,7 @@ class ConsumptionLogBase(BaseModel):
     action: str = Field(
         ..., description="Action: use_partial, use_full, discard, adjust"
     )
-    quantity_consumed: Decimal = Field(..., gt=0, description="Quantity consumed")
+    quantity_consumed: JsonDecimal = Field(..., gt=0, description="Quantity consumed")
     consumption_context: str | None = Field(
         None, description="Context: breakfast, lunch, dinner, snack, cooking"
     )
@@ -29,7 +30,7 @@ class ConsumptionLogUpdate(BaseModel):
     """Schema for updating a consumption log entry."""
 
     action: str | None = None
-    quantity_consumed: Decimal | None = Field(None, gt=0)
+    quantity_consumed: JsonDecimal | None = Field(None, gt=0)
     consumption_context: str | None = None
 
 

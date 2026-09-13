@@ -58,3 +58,22 @@ class InventoryItem(Base):
     product_master = relationship("ProductMaster", back_populates="inventory_items")
     receipt = relationship("Receipt", back_populates="inventory_items")
     consumption_logs = relationship("ConsumptionLog", back_populates="inventory_item")
+
+    # Read-only product details for API responses. Callers must eager-load
+    # product_master and product_master.category_rel (see crud.inventory_item);
+    # an unloaded relationship raises in async code instead of lazy-loading.
+    @property
+    def product_name(self) -> str:
+        return self.product_master.canonical_name
+
+    @property
+    def category(self) -> str:
+        return self.product_master.category
+
+    @property
+    def category_name(self) -> str:
+        return self.product_master.category_rel.display_name
+
+    @property
+    def category_icon(self) -> str | None:
+        return self.product_master.category_rel.icon

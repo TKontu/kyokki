@@ -84,8 +84,8 @@ Operator-gated. An agent may lay out options but must not pick one and proceed.
 
 | ID | Question | Blocks | Recommended | Status |
 | --- | --- | --- | --- | --- |
-| DEC-1 | Canonical unit vocabulary: `ml \| g \| pcs` with R1 normalising `kg→g`, `l→ml`, `unit→pcs`, or keep receipt-native units with display conversion | R1, C2, S3 | `ml \| g \| pcs` | open |
-| DEC-2 | Quantities on the wire: backend serialises `Decimal` as JSON number, or frontend types become `string` and parse at the API boundary (today the API sends `"750.00"` and the TS types say `number`) | S1, C2 | JSON number | open |
+| DEC-1 | Canonical unit vocabulary: `ml \| g \| pcs` with R1 normalising `kg→g`, `l→ml`, `unit→pcs`, or keep receipt-native units with display conversion | R1, C2, S3 | `ml \| g \| pcs` | **decided 2026-09-13**: `dl \| tsp \| tbsp \| g \| pcs`. ml, l and kg are not canonical; conversion factors for R1 still to confirm (see R1) |
+| DEC-2 | Quantities on the wire: backend serialises `Decimal` as JSON number, or frontend types become `string` and parse at the API boundary (today the API sends `"750.00"` and the TS types say `number`) | S1, C2 | JSON number | **decided 2026-09-13**: JSON number, applied to every Decimal field in API schemas in MVP-S1 |
 | DEC-3 | Frontend→API path: same-origin Next.js rewrite `/api/*` → `kyokki-api:8000` (no CORS, no build-time LAN IP), or keep `NEXT_PUBLIC_API_URL` + `ALLOWED_ORIGINS` | F2 | rewrite | **decided 2026-09-13**: rewrite; shipped in MVP-F2 (#26) |
 | DEC-4 | If the R0 spike cannot finish a 60-line receipt: heuristic parser becomes primary with the LLM only categorising; switch model; or accept chunked multi-call extraction | R1, R4 | decide the fallback order now | open |
 
@@ -178,6 +178,18 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
   once S2 lands (keep it optional until then).
 - **Acceptance:** `GET /api/inventory` returns names without an extra products request;
   inactive items hidden by default; quantity JSON type asserted; existing inventory tests extended.
+- As built (branch `feat/mvp-s1-inventory-product-fields`):
+  - [x] Response gains `product_name`, `category`, `category_icon` and also `category_name`
+    (display text for the card subtitle, so S2 needs no categories fetch). Every create,
+    update, consume and get path eager-loads product and category.
+  - [x] DEC-2 via one shared `JsonDecimal` type in `schemas/types.py`, applied to inventory,
+    product, shopping list and consumption log schemas. Scanner responses and WebSocket
+    payloads still send quantities as strings; they build their own dicts. Follow-up debt.
+  - [x] `include_inactive` query parameter. An explicit `status` filter always wins.
+  - [x] `consumption_log` rows: `use_partial` / `use_full` on consume (API and scanner),
+    `discard` once on the transition to `discarded`, staged in the same transaction.
+  - [x] Frontend types mirror the new fields; `InventoryList` prefers `item.product_name` and
+    shows the category name. The `productNames` prop and products fetch go in S2.
 
 #### MVP-R1 — Typed extracted items with per-item match and suggested category
 - New schema `ExtractedItem` in `schemas/receipt.py`: `name`, `name_en`, `quantity`, `unit`,
@@ -190,6 +202,9 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
   `store_product_alias` by normalised `receipt_name` (scoped to `store_chain` when known);
   a hit is `exact`. Alias names also join the fuzzy candidate set so OCR-noise variants of a
   known line still land on the right product. The table and model exist and are unused today.
+- DEC-1 ruling is `dl | tsp | tbsp | g | pcs`, so the examples below are out of date. Before
+  R1 starts, confirm with the operator: `l→dl×10`, `ml→dl÷100`, `kg→g×1000`, `unit→pcs`,
+  and whether tsp/tbsp ever come from receipts or only from manual entry.
 - Unit normalisation per DEC-1 in one backend function with tests (`kg→g×1000`,
   `l→ml×1000`, `unit→pcs`). `ExtractedItem.unit` and `ConfirmedItemCreate.unit` use it.
 - One `ReceiptStatus` enum in `schemas/receipt.py`: `uploaded | processing | completed |
@@ -498,8 +513,8 @@ Ordered by expected value once MVP is live.
 ### 🚧 Sprint 5: MVP on the iPad (IN PROGRESS, started 2026-09-13)
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [ ] R0
-- Decisions: [ ] DEC-1  [ ] DEC-2  [x] DEC-3 (same-origin rewrite, shipped in F2)  [ ] DEC-4 (if R0 fails)
-- Wave 2: [ ] S1  [ ] R1  [ ] R2  [ ] C1  [ ] C2
+- Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [ ] DEC-4 (if R0 fails)
+- Wave 2: [ ] S1 (PR open)  [ ] R1  [ ] R2  [ ] C1  [ ] C2
 - Wave 3: [ ] S2  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2

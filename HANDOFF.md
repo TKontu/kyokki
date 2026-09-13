@@ -1,59 +1,39 @@
 # Handoff
-Generated-UTC: 2026-09-13T18:45:00Z
-Base-SHA: 83b2e62
+Generated-UTC: 2026-09-13T21:30:00Z
+Base-SHA: 8ae8ac8e9dc4a2f5353fae4875b7c8dad90f4f89
 
 ## Round delta
-- PR #24 merged (MVP-F1): `stack.env` untracked and ignored, `stack.env.example` added, ruff
-  pinned, backend CI green for the first time (fixture collision, engine/Redis clients leaking
-  across pytest-asyncio loops, `requires_ollama` deselected, real 500 in `POST /api/shopping/`
-  from `extra={"name": ...}`). Details in the PR description.
-- MVP-F2 in flight on `feat/mvp-f2-deployable-stack`: same-origin `/api` rewrite in
-  `next.config.mjs` (`API_INTERNAL_URL` build arg, default `http://kyokki-api:8000`), client
-  default base URL `/api`; `celery-worker` removed from both compose files and `celery_app.py`
-  deleted (it referenced a non-existent `app.tasks` and crash-looped); Postgres/Redis host ports
-  unpublished in prod; migration `7c1f2a9d4b30` adds the missing unique constraint and CI runs
-  `alembic check`; `python -m app.db.seed_categories` entry point; `docs/DEPLOY.md` runbook.
-- `docs/PLAN_REVIEW_2026-09-13.md` (untracked, user-authored) reviews the MVP plan. Its F2
-  amendments were adopted; the rest (R0 spike, alias learning, unit/serialisation decisions)
-  are pending operator decisions listed in its section 7.
+- #24 MVP-F1 and #26 MVP-F2 merged; #25 plan-review amendments merged (see git log).
+- Operator rulings this session: DEC-1 unit vocabulary `dl | tsp | tbsp | g | pcs`;
+  DEC-2 quantities are JSON numbers. Both recorded in `docs/TODO.md`.
+- MVP-S1 on `feat/mvp-s1-inventory-product-fields` (PR open): inventory responses carry
+  `product_name`, `category`, `category_name`, `category_icon`; every Decimal schema field
+  serialises as a JSON number via `schemas/types.py`; `GET /api/inventory` hides empty and
+  discarded unless `include_inactive=true` or an explicit `status`; `consumption_log` written on
+  consume (API and scanner) and on the transition to `discarded`. Frontend types and
+  `InventoryList` follow; the products fetch in `page.tsx` stays until S2.
 
 ## Active PRs and conflicts
-- MVP-F2 PR (see git log / `gh pr list`). No other open PRs.
-- `chore/claude-scaffold-kit` and `fix/mvp-f1-green-ci-secrets` are merged; safe to delete.
+- MVP-S1 PR. Touches `crud/inventory_item.py`, which R1/R2 do not; no expected conflicts.
+- Worktree `C:/code/Kyokki-docs` still holds merged `docs/mvp-plan-review-amendments`; removable.
+- `HANDOFF.md` stays git-tracked by project practice; do not `git rm` it casually.
 
 ## Non-obvious decisions or blockers
-- Local backend tests: Python 3.12 venv at `backend/.venv`, `docker compose up -d postgres
-  redis`, env vars `POSTGRES_SERVER=localhost ... KYOKKI_TEST_REQUIRE_DB=1`, and move the root
-  `.env` aside first: it still carries legacy prototype keys (`gemini_api_key`, `db_password`,
-  `database_url`, `ollama_host`) that the strict `Settings` rejects. Those look like real
-  credentials and should be deleted from `.env`.
-- Many committed backend files are CRLF in git while docs are LF. Preserve the existing ending
-  and stage CRLF files with `git -c core.autocrlf=false add`, or the diff becomes the whole file.
-- `mypy backend/app/` has 171 strict-mode errors; the CI step is `continue-on-error`. Post-MVP debt.
-- `git pull` of the F1 merge deletes a checkout's tracked `stack.env` (happened locally;
-  restored with `git show 6382f34:stack.env > stack.env`). The homelab checkout will hit the
-  same thing: back the file up before pulling. Documented in `docs/DEPLOY.md`.
-- Quantities are JSON strings on the wire (`"1000.00"`); the inventory page crashed on the
-  first real item. Frontend now coerces at the API boundary (`normalizeInventoryItem`). The
-  wire-format decision (review DEC 2) is still open for MVP-S1.
-- `ALLOWED_ORIGINS` as a comma-separated env value crashed `Settings` at import (pydantic-
-  settings decodes `list[str]` env values as JSON first). Fixed with `NoDecode`; the prod API
-  had not been startable that way since PR #21. Caught only by running the prod compose file.
-- `app/db/base.py` claimed to import all models and imported none, so Alembic autogenerate saw
-  an empty schema. Fixed in F2 with `tests/db/test_metadata_registry.py` guarding it.
-- Next.js standalone output inlines `next.config.mjs` at build time, so the rewrite destination
-  is fixed per image. It is the compose service name, so this is fine; do not try to make it a
-  runtime env var without switching off standalone output.
+- DEC-1 left ml, l and kg out. Before R1, confirm conversion factors with the operator
+  (`l→dl×10`, `ml→dl÷100`, `kg→g×1000`) and whether tsp/tbsp ever come from receipts.
+- Scanner responses and WebSocket payloads still send quantities as strings (hand-built dicts).
+- Inventory crud now returns items re-read with `populate_existing` and eager-loaded product and
+  category. Any new path returning `InventoryItemResponse` must go through `get_inventory_item`,
+  or the model properties hit an unloaded relationship (`MissingGreenlet`).
+- Local `alembic check` must run against a fresh database: the pytest suite drops tables but
+  leaves `alembic_version`, so checking the test DB reports every table as missing.
+- Local backend tests: 3.12 venv, `docker compose up -d postgres redis`, move root `.env` aside
+  (legacy keys, look like real credentials; user should delete them), `KYOKKI_TEST_REQUIRE_DB=1`.
+- CRLF: check `git show HEAD:<path>` per file; stage CRLF files with `-c core.autocrlf=false`.
+- `mypy backend/app/` strict errors 171 → 176 (Column-typed models); CI step non-blocking.
+- Operator items still open: rotate Postgres password + LLM key, purge `stack.env` history,
+  deploy F2 on the homelab and confirm the iPad renders inventory, run the R0 spike.
 
 ## Next action
-1. **Operator, after the F2 PR merges:** on the homelab, back up `stack.env`, `git pull`
-   (restore `stack.env` if the pull removed it), `docker compose -f
-   docker-compose.prod.yml up -d --build`, `... run --rm kyokki-api alembic upgrade head`,
-   `... run --rm kyokki-api python -m app.db.seed_categories`, then open `http://<host>:17301`
-   on the iPad. Report back; that ticks MVP-F2. `ALLOWED_ORIGINS` may be removed from `stack.env`.
-2. **Operator, still outstanding from F1:** rotate the Postgres password and LLM key, then purge
-   `stack.env` from history (runbook in PR #24's description).
-3. **Decisions before Wave 2** (from `docs/PLAN_REVIEW_2026-09-13.md` section 7): unit
-   vocabulary (`ml|g|pcs` recommended), JSON numbers vs strings for quantities (numbers
-   recommended), and the fallback order if the LLM spike (proposed MVP-R0) fails.
-4. Then Wave 2: backend MVP-S1, MVP-R1, MVP-R2 in parallel with frontend MVP-C1, MVP-C2.
+Operator merges the S1 PR. Then MVP-C1 (frontend primitives, ungated) can start, and S2/S3 are
+unblocked once C1 lands. R1 waits on the R0 spike, DEC-4, and the DEC-1 conversion follow-up.

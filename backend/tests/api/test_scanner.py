@@ -6,11 +6,13 @@ from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.seed_categories import seed_categories
 from app.db.session import get_db
 from app.main import app
+from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.services.off_service import OffApiError, OffProductNotFoundError
@@ -277,6 +279,21 @@ class TestScanBarcodeConsume:
         assert data["action"] == "inventory_consumed"
         # Numeric(10, 2) column: the API serializes with two decimals
         assert data["inventory_item"]["current_quantity"] == "750.00"
+
+        logs = (
+            (
+                await seeded_db.execute(
+                    select(ConsumptionLog).where(
+                        ConsumptionLog.inventory_item_id == inv.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [(log.action, log.quantity_consumed) for log in logs] == [
+            ("use_partial", Decimal("250"))
+        ]
 
     async def test_scan_consume_capped_message_when_quantity_exceeds_stock(
         self,

@@ -12,6 +12,10 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
 const mockInventoryItem: InventoryItem = {
   id: '123e4567-e89b-12d3-a456-426614174000',
   product_master_id: '123e4567-e89b-12d3-a456-426614174001',
+  product_name: 'Test Milk 1L',
+  category: 'dairy',
+  category_name: 'Dairy & Eggs',
+  category_icon: '🥛',
   receipt_id: null,
   initial_quantity: 1000,
   current_quantity: 750,
@@ -98,6 +102,21 @@ describe('Inventory API', () => {
       )
       expect(items).toHaveLength(2)
       expect(items[0].id).toBe(mockInventoryItem.id)
+    })
+
+    it('should send include_inactive when requested', async () => {
+      ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockInventoryItems,
+      })
+
+      await inventoryAPI.list({ include_inactive: true })
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${API_URL}/inventory?include_inactive=true`,
+        expect.objectContaining({ method: 'GET' })
+      )
     })
 
     it('should filter by location', async () => {

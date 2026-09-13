@@ -11,9 +11,13 @@ export type Unit = 'ml' | 'g' | 'pcs' | 'unit'
 export interface InventoryItem {
   id: string // UUID
   product_master_id: string // UUID
+  product_name: string // ProductMaster.canonical_name
+  category: string // Category ID, e.g. 'dairy'
+  category_name: string // Category display name
+  category_icon: string | null // Category emoji
   receipt_id: string | null // UUID
-  initial_quantity: number // Decimal
-  current_quantity: number // Decimal
+  initial_quantity: number // Decimal, sent as a JSON number (DEC-2)
+  current_quantity: number // Decimal, sent as a JSON number (DEC-2)
   unit: Unit
   status: InventoryItemStatus
   purchase_date: string | null // ISO date
@@ -61,6 +65,7 @@ export interface InventoryListParams {
   location?: InventoryLocation
   status?: InventoryItemStatus
   expiring_days?: number
+  include_inactive?: boolean // backend hides empty/discarded unless true
   context?: string // meal context filter
   category?: string // category filter
 }

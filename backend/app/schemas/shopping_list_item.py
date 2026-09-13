@@ -1,8 +1,9 @@
 from datetime import datetime
-from decimal import Decimal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
+
+from app.schemas.types import JsonDecimal
 
 
 class ShoppingListItemBase(BaseModel):
@@ -12,7 +13,7 @@ class ShoppingListItemBase(BaseModel):
         None, description="Product master ID (null for free-text items)"
     )
     name: str = Field(..., description="Display name")
-    quantity: Decimal = Field(..., gt=0, description="Quantity to purchase")
+    quantity: JsonDecimal = Field(..., gt=0, description="Quantity to purchase")
     unit: str = Field(..., description="Unit: ml, g, pcs, unit")
     priority: str = Field("normal", description="Priority: urgent, normal, low")
     source: str = Field("manual", description="Source: manual, auto_restock, recipe")
@@ -29,7 +30,7 @@ class ShoppingListItemUpdate(BaseModel):
 
     product_master_id: UUID | None = None
     name: str | None = None
-    quantity: Decimal | None = Field(None, gt=0)
+    quantity: JsonDecimal | None = Field(None, gt=0)
     unit: str | None = None
     priority: str | None = None
     is_purchased: bool | None = None

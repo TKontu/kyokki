@@ -1,7 +1,7 @@
 import React from 'react'
 import { useInventoryList } from '@/hooks/useInventory'
 import { InventoryItemCard } from './InventoryItemCard'
-import type { InventoryListParams } from '@/types/inventory'
+import type { InventoryItem, InventoryListParams } from '@/types/inventory'
 
 export interface InventoryListProps {
   params?: InventoryListParams
@@ -11,11 +11,17 @@ export interface InventoryListProps {
   className?: string
 }
 
+// The API sends product_name on every item (MVP-S1). The productNames map is a
+// legacy fallback that MVP-S2 removes together with the products fetch.
 function resolveProductName(
-  productMasterId: string,
+  item: InventoryItem,
   productNames?: Record<string, string>
 ): string {
-  return productNames?.[productMasterId] ?? `Product ${productMasterId.slice(0, 8)}`
+  return (
+    item.product_name ||
+    productNames?.[item.product_master_id] ||
+    `Product ${item.product_master_id.slice(0, 8)}`
+  )
 }
 
 export function InventoryList({
@@ -63,7 +69,8 @@ export function InventoryList({
         <li key={item.id}>
           <InventoryItemCard
             item={item}
-            productName={resolveProductName(item.product_master_id, productNames)}
+            productName={resolveProductName(item, productNames)}
+            productCategory={item.category_name}
             onConsume={onConsume}
             onEdit={onEdit}
           />
