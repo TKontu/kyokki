@@ -281,6 +281,16 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
   trap, 44 pt controls. `components/ui/Toast.tsx` + `hooks/useToast.ts`: success/error,
   auto-dismiss, stacking. React context; no Zustand needed for MVP.
 - **Acceptance:** RTL tests for open/close, focus, dismiss; used by C2, S3, S4, R7.
+- As built (branch `feat/mvp-c1-bottomsheet-toast`):
+  - [x] `BottomSheet`: portal, `role="dialog"` named by its title, ESC / backdrop / close
+    button, Tab wrap, focus restored to the trigger, body scroll lock, optional footer,
+    safe-area bottom padding. Slide-up is a CSS keyframe (`animate-sheet-up`), not a
+    frame-driven transition: a hidden tab or resuming PWA pauses `requestAnimationFrame`, and
+    the first version left the sheet stuck off-screen in that case (found in the browser check).
+  - [x] `ToastProvider` + `useToast()`: `success` / `error` with an optional action (for C2's
+    Undo), 3 s / 5 s auto-dismiss, at most 3 stacked, top centre above sheets. Mounted in
+    `app/providers.tsx` inside the query client, so any component or hook can raise toasts.
+  - [x] Demo sections in `/components-demo`. Dropped for MVP: sheet sizes, warning/info toasts.
 
 #### MVP-C2 — ConsumptionSheet
 - Tap an `InventoryItemCard` → BottomSheet with ¼ ½ ¾ Done. Amount = fraction of
@@ -514,7 +524,7 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [ ] R0
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [ ] DEC-4 (if R0 fails)
-- Wave 2: [ ] S1 (PR open)  [ ] R1  [ ] R2  [ ] C1  [ ] C2
+- Wave 2: [x] S1 (PR #27)  [ ] R1  [ ] R2  [ ] C1 (PR open)  [ ] C2
 - Wave 3: [ ] S2  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2

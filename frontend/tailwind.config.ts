@@ -104,6 +104,17 @@ const config: Config = {
       transitionDuration: {
         'ui': '150ms',
       },
+      keyframes: {
+        // Bottom sheet entrance. The resting state is the final position, so a paused
+        // animation (hidden tab, resuming PWA) still leaves the sheet on screen.
+        'sheet-up': {
+          from: { transform: 'translateY(100%)' },
+          to: { transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'sheet-up': 'sheet-up 300ms ease-out',
+      },
     },
   },
   plugins: [],

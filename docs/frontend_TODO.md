@@ -5,7 +5,7 @@
 >
 > | MVP increment | Covers here |
 > | --- | --- |
-> | MVP-C1 | 2.2 Modal (as BottomSheet), 2.4 Toast |
+> | MVP-C1 | 2.2 Modal (as BottomSheet), 2.4 Toast. Built without sizes and without warning/info toast types |
 > | MVP-C2 | 2.3 ConsumptionSheet, 2.5 Wire consumption |
 > | MVP-S2 | 3.3 CategoryFilter (as location groups), 3.4 ExpiringPanel (as pinned section) |
 > | MVP-S3, MVP-S4 | not previously planned: Quick Add and item edit |
@@ -20,7 +20,8 @@
 >
 > Two backend decisions gate frontend work and are listed in `docs/TODO.md`: DEC-1 (unit
 > vocabulary, blocks C2 and S3) and DEC-2 (quantities as JSON numbers or strings, blocks S1
-> and C2). Today the API sends `"750.00"` while `types/inventory.ts` says `number`.
+> and C2). Both were decided on 2026-09-13: `dl | tsp | tbsp | g | pcs`, and JSON numbers
+> (shipped in MVP-S1, PR #27).
 
 **Stack:** Next.js 14, TypeScript, Tailwind, PWA, Zustand, React Query
 **Approach:** 47 small increments with full test coverage from day 1

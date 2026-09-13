@@ -6,9 +6,13 @@ import Card, { CardHeader, CardTitle, CardContent, CardFooter } from '@/componen
 import Badge, { ExpiryBadge as BasicExpiryBadge, StatusBadge } from '@/components/ui/Badge';
 import Skeleton, { SkeletonInventoryItem, SkeletonCard } from '@/components/ui/Skeleton';
 import { ExpiryBadge } from '@/components/inventory/ExpiryBadge';
+import BottomSheet from '@/components/ui/BottomSheet';
+import { useToast } from '@/hooks/useToast';
 
 export default function ComponentsDemo() {
   const [darkMode, setDarkMode] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const toast = useToast();
 
   // Calculate demo dates relative to today
   const today = new Date();
@@ -259,6 +263,69 @@ export default function ComponentsDemo() {
                 <h4 className="text-sm font-semibold mb-3 text-ui-text dark:text-ui-dark-text">Skeleton Inventory Item</h4>
                 <SkeletonInventoryItem />
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Bottom Sheet */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Bottom Sheet</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-4 text-ui-text-secondary dark:text-ui-dark-text-secondary">
+              Slides up from the bottom. Closes on Escape, backdrop tap, or the close button; Tab stays inside.
+            </p>
+            <Button onClick={() => setSheetOpen(true)}>Open bottom sheet</Button>
+            <BottomSheet
+              open={sheetOpen}
+              onClose={() => setSheetOpen(false)}
+              title="Oat Milk"
+              footer={
+                <Button variant="secondary" fullWidth onClick={() => setSheetOpen(false)}>
+                  Cancel
+                </Button>
+              }
+            >
+              <div className="grid grid-cols-4 gap-3">
+                {['¼', '½', '¾', 'Done'].map((label) => (
+                  <Button
+                    key={label}
+                    size="lg"
+                    onClick={() => {
+                      setSheetOpen(false);
+                      toast.success(`Consumed ${label}`);
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </BottomSheet>
+          </CardContent>
+        </Card>
+
+        {/* Toasts */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Toasts</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={() => toast.success('Item saved')}>Success toast</Button>
+              <Button variant="danger" onClick={() => toast.error('Could not reach the server')}>
+                Error toast
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  toast.success('Consumed ½ Oat Milk', {
+                    action: { label: 'Undo', onClick: () => toast.success('Undone') },
+                  })
+                }
+              >
+                Toast with action
+              </Button>
             </div>
           </CardContent>
         </Card>
