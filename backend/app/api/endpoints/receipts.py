@@ -165,7 +165,7 @@ async def process_receipt(
 
     return ReceiptProcessingResponse(
         success=result.success,
-        items_extracted=len(result.extraction.products) if result.extraction else 0,
+        items_extracted=len(result.extraction.lines) if result.extraction else 0,
         items_matched=len(result.matched_products),
         error=result.error,
     )

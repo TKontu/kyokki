@@ -1,5 +1,6 @@
-"""Tests for receipt processing service (OCR → LLM → Matching integration)."""
+"""Tests for receipt processing service (OCR or vision → LLM extraction → matching)."""
 
+from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -10,336 +11,294 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.category import Category
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
-from app.parsers.base import ParsedProduct, ReceiptExtraction, StoreInfo
+from app.parsers.base import ExtractedLine, ReceiptExtraction
+from app.services.llm_extractor import CategoryOption, LLMExtractionError
+from app.services.ocr_service import OCRUnavailableError
 from app.services.receipt_processing import ProcessingResult, ReceiptProcessingService
 
+OCR = "app.services.receipt_processing.extract_text_from_receipt"
+TEXT = "app.services.receipt_processing.extract_from_text"
+VISION = "app.services.receipt_processing.extract_from_image"
 
-class TestReceiptProcessingService:
-    """Test receipt processing service integration."""
-
-    @pytest.fixture
-    async def sample_category(self, db_session: AsyncSession) -> Category:
-        """Create sample category for tests."""
-        category = Category(
-            id="dairy",
-            display_name="Dairy",
-            icon="🥛",
-            default_shelf_life_days=7,
-            meal_contexts=["breakfast"],
-            sort_order=1,
-        )
-        db_session.add(category)
-        await db_session.commit()
-        await db_session.refresh(category)
-        return category
-
-    @pytest.fixture
-    async def sample_product(
-        self, db_session: AsyncSession, sample_category: Category
-    ) -> ProductMaster:
-        """Create sample product for matching tests."""
-        product = ProductMaster(
-            id=uuid4(),
-            canonical_name="Valio Whole Milk 1L",
-            category="dairy",
-            storage_type="refrigerator",
-            default_shelf_life_days=7,
-            unit_type="volume",
-            default_unit="ml",
-            default_quantity=Decimal("1000"),
-        )
-        db_session.add(product)
-        await db_session.commit()
-        await db_session.refresh(product)
-        return product
-
-    @pytest.fixture
-    async def sample_receipt(self, db_session: AsyncSession) -> Receipt:
-        """Create sample receipt for tests."""
-        receipt = Receipt(
-            id=uuid4(),
-            store_chain="S-Market",
-            image_path="/fake/path/receipt.pdf",
-            processing_status="uploaded",
-            items_extracted=0,
-            items_matched=0,
-        )
-        db_session.add(receipt)
-        await db_session.commit()
-        await db_session.refresh(receipt)
-        return receipt
-
-    @pytest.fixture
-    def processing_service(self, db_session: AsyncSession) -> ReceiptProcessingService:
-        """Create processing service instance."""
-        return ReceiptProcessingService(db_session)
-
-    @pytest.fixture
-    def mock_ocr_response(self) -> str:
-        """Mock OCR text response."""
-        return """S-MARKET
+OCR_TEXT = """S-MARKET
 VALIO WHOLE MILK 1L        2.49
 ARLA BUTTER 500G           4.99
-TOTAL                      7.48
+YHTEENSÄ                   7.48
 """
 
-    @pytest.fixture
-    def mock_llm_extraction(self) -> ReceiptExtraction:
-        """Mock LLM extraction result."""
-        return ReceiptExtraction(
-            store=StoreInfo(
-                name="S-Market",
-                chain="s-group",
-                country="FI",
-                language="fi",
-                currency="EUR",
-            ),
-            products=[
-                ParsedProduct(
-                    name="Valio Whole Milk 1L",
-                    quantity=1.0,
-                    unit="pcs",
-                    price=2.49,
-                ),
-                ParsedProduct(
-                    name="Arla Butter 500g",
-                    quantity=1.0,
-                    unit="pcs",
-                    price=4.99,
-                ),
+
+def _extraction(
+    method: str = "text", lines: list[ExtractedLine] | None = None
+) -> ReceiptExtraction:
+    return ReceiptExtraction(
+        method=method,
+        store_chain="S-MARKET",
+        purchase_date=date(2026, 1, 2),
+        lines=lines
+        if lines is not None
+        else [
+            ExtractedLine(name="Valio Whole Milk 1L", quantity=1, category="dairy"),
+            ExtractedLine(name="Arla Butter 500g", quantity=1, category="dairy"),
+        ],
+    )
+
+
+@pytest.fixture
+async def sample_category(db_session: AsyncSession) -> Category:
+    category = Category(
+        id="dairy",
+        display_name="Dairy & Eggs",
+        icon="🥛",
+        default_shelf_life_days=7,
+        meal_contexts=["breakfast"],
+        sort_order=1,
+    )
+    db_session.add(category)
+    await db_session.commit()
+    return category
+
+
+@pytest.fixture
+async def sample_product(
+    db_session: AsyncSession, sample_category: Category
+) -> ProductMaster:
+    product = ProductMaster(
+        id=uuid4(),
+        canonical_name="Valio Whole Milk 1L",
+        category="dairy",
+        storage_type="refrigerator",
+        default_shelf_life_days=7,
+        unit_type="volume",
+        default_unit="ml",
+        default_quantity=Decimal("1000"),
+    )
+    db_session.add(product)
+    await db_session.commit()
+    return product
+
+
+async def _receipt(db_session: AsyncSession, image_path: str, **fields) -> Receipt:
+    receipt = Receipt(
+        id=uuid4(),
+        image_path=image_path,
+        processing_status="uploaded",
+        items_extracted=0,
+        items_matched=0,
+        **fields,
+    )
+    db_session.add(receipt)
+    await db_session.commit()
+    return receipt
+
+
+@pytest.fixture
+async def pdf_receipt(db_session: AsyncSession, tmp_path) -> Receipt:
+    path = tmp_path / "receipt.pdf"
+    path.write_bytes(b"%PDF fake")
+    return await _receipt(db_session, str(path))
+
+
+@pytest.fixture
+async def image_receipt(db_session: AsyncSession, tmp_path) -> Receipt:
+    path = tmp_path / "receipt.png"
+    path.write_bytes(b"\x89PNG fake image")
+    return await _receipt(db_session, str(path))
+
+
+@pytest.fixture
+def service(db_session: AsyncSession) -> ReceiptProcessingService:
+    return ReceiptProcessingService(db_session)
+
+
+class TestInputSelection:
+    async def test_pdf_uses_extracted_text(self, service, pdf_receipt, sample_category):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT) as ocr,
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction()) as text,
+            patch(VISION, new_callable=AsyncMock) as vision,
+        ):
+            result = await service.process_receipt(pdf_receipt)
+
+        assert result.success is True
+        ocr.assert_awaited_once_with(pdf_receipt.image_path)
+        text.assert_awaited_once_with(
+            OCR_TEXT, [CategoryOption(id="dairy", name="Dairy & Eggs")]
+        )
+        vision.assert_not_awaited()
+
+    async def test_image_with_ocr_text_uses_the_text_path(
+        self, service, image_receipt, sample_category
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction()) as text,
+            patch(VISION, new_callable=AsyncMock) as vision,
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is True
+        assert result.ocr_text == OCR_TEXT
+        text.assert_awaited_once()
+        vision.assert_not_awaited()
+
+    async def test_image_falls_back_to_vision_when_ocr_is_unavailable(
+        self, service, image_receipt, sample_category
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, side_effect=OCRUnavailableError("down")),
+            patch(TEXT, new_callable=AsyncMock) as text,
+            patch(
+                VISION, new_callable=AsyncMock, return_value=_extraction("vision")
+            ) as vision,
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is True
+        assert result.ocr_text is None
+        text.assert_not_awaited()
+        vision.assert_awaited_once_with(
+            b"\x89PNG fake image",
+            "image/png",
+            [CategoryOption(id="dairy", name="Dairy & Eggs")],
+        )
+
+    async def test_image_falls_back_to_vision_when_ocr_returns_blank_text(
+        self, service, image_receipt, sample_category
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value="  \n "),
+            patch(TEXT, new_callable=AsyncMock) as text,
+            patch(
+                VISION, new_callable=AsyncMock, return_value=_extraction("vision")
+            ) as vision,
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is True
+        text.assert_not_awaited()
+        vision.assert_awaited_once()
+
+
+class TestPersistence:
+    async def test_stores_structured_lines_method_store_and_date(
+        self, service, image_receipt, sample_product, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, side_effect=OCRUnavailableError("down")),
+            patch(VISION, new_callable=AsyncMock, return_value=_extraction("vision")),
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        await db_session.refresh(image_receipt)
+        assert image_receipt.processing_status == "completed"
+        assert image_receipt.ocr_raw_text is None
+        assert image_receipt.ocr_structured == {
+            "method": "vision",
+            "store_chain": "S-MARKET",
+            "purchase_date": "2026-01-02",
+            "lines": [
+                {
+                    "name": "Valio Whole Milk 1L",
+                    "quantity": 1.0,
+                    "weight_kg": None,
+                    "category": "dairy",
+                },
+                {
+                    "name": "Arla Butter 500g",
+                    "quantity": 1.0,
+                    "weight_kg": None,
+                    "category": "dairy",
+                },
             ],
-            confidence=0.95,
+        }
+        assert image_receipt.store_chain == "S-MARKET"
+        assert image_receipt.purchase_date == date(2026, 1, 2)
+        assert image_receipt.items_extracted == 2
+        assert image_receipt.items_matched == 1
+        assert (
+            result.matched_products[0].product.canonical_name == "Valio Whole Milk 1L"
         )
 
-    async def test_process_receipt_success(
-        self,
-        processing_service: ReceiptProcessingService,
-        sample_receipt: Receipt,
-        sample_product: ProductMaster,
-        mock_ocr_response: str,
-        mock_llm_extraction: ReceiptExtraction,
+    async def test_keeps_store_and_date_the_user_already_entered(
+        self, db_session, service, sample_category, tmp_path
     ):
-        """Test successful receipt processing pipeline."""
-        with (
-            patch(
-                "app.services.receipt_processing.extract_text_from_receipt",
-                new_callable=AsyncMock,
-                return_value=mock_ocr_response,
-            ) as mock_ocr,
-            patch(
-                "app.services.receipt_processing.extract_products_from_receipt",
-                new_callable=AsyncMock,
-                return_value=mock_llm_extraction,
-            ) as mock_llm,
-        ):
-            result = await processing_service.process_receipt(sample_receipt)
-
-            # Verify OCR was called
-            mock_ocr.assert_called_once_with(sample_receipt.image_path)
-
-            # Verify LLM extraction was called
-            mock_llm.assert_called_once_with(mock_ocr_response)
-
-            # Verify result
-            assert result.success is True
-            assert result.ocr_text == mock_ocr_response
-            assert result.extraction == mock_llm_extraction
-            assert len(result.matched_products) >= 1
-            # First product should match
-            assert (
-                result.matched_products[0].product.canonical_name
-                == "Valio Whole Milk 1L"
-            )
-
-    async def test_process_receipt_updates_database(
-        self,
-        processing_service: ReceiptProcessingService,
-        sample_receipt: Receipt,
-        sample_product: ProductMaster,
-        mock_ocr_response: str,
-        mock_llm_extraction: ReceiptExtraction,
-        db_session: AsyncSession,
-    ):
-        """Test that processing updates receipt in database."""
-        with (
-            patch(
-                "app.services.receipt_processing.extract_text_from_receipt",
-                new_callable=AsyncMock,
-                return_value=mock_ocr_response,
-            ),
-            patch(
-                "app.services.receipt_processing.extract_products_from_receipt",
-                new_callable=AsyncMock,
-                return_value=mock_llm_extraction,
-            ),
-        ):
-            await processing_service.process_receipt(sample_receipt)
-
-            # Refresh receipt from database
-            await db_session.refresh(sample_receipt)
-
-            # Verify receipt was updated
-            assert sample_receipt.processing_status == "completed"
-            assert sample_receipt.ocr_raw_text == mock_ocr_response
-            assert sample_receipt.ocr_structured is not None
-            assert sample_receipt.items_extracted == 2
-            assert sample_receipt.items_matched >= 1
-
-    async def test_process_receipt_ocr_failure(
-        self,
-        processing_service: ReceiptProcessingService,
-        sample_receipt: Receipt,
-        db_session: AsyncSession,
-    ):
-        """Test handling of OCR failure."""
-        with patch(
-            "app.services.receipt_processing.extract_text_from_receipt",
-            new_callable=AsyncMock,
-            side_effect=Exception("OCR service unavailable"),
-        ):
-            result = await processing_service.process_receipt(sample_receipt)
-
-            assert result.success is False
-            assert result.error is not None
-            assert "OCR service unavailable" in result.error
-
-            # Verify receipt status was updated
-            await db_session.refresh(sample_receipt)
-            assert sample_receipt.processing_status == "failed"
-
-    async def test_process_receipt_llm_failure(
-        self,
-        processing_service: ReceiptProcessingService,
-        sample_receipt: Receipt,
-        mock_ocr_response: str,
-        db_session: AsyncSession,
-    ):
-        """Test handling of LLM extraction failure."""
-        with (
-            patch(
-                "app.services.receipt_processing.extract_text_from_receipt",
-                new_callable=AsyncMock,
-                return_value=mock_ocr_response,
-            ),
-            patch(
-                "app.services.receipt_processing.extract_products_from_receipt",
-                new_callable=AsyncMock,
-                side_effect=Exception("LLM service timeout"),
-            ),
-        ):
-            result = await processing_service.process_receipt(sample_receipt)
-
-            assert result.success is False
-            assert result.error is not None
-            assert "LLM service timeout" in result.error
-
-            # Verify receipt status was updated
-            await db_session.refresh(sample_receipt)
-            assert sample_receipt.processing_status == "failed"
-
-    async def test_process_receipt_no_products_extracted(
-        self,
-        processing_service: ReceiptProcessingService,
-        sample_receipt: Receipt,
-        mock_ocr_response: str,
-        db_session: AsyncSession,
-    ):
-        """Test processing when no products are extracted."""
-        empty_extraction = ReceiptExtraction(
-            store=StoreInfo(),
-            products=[],
-            confidence=0.5,
+        path = tmp_path / "receipt.pdf"
+        path.write_bytes(b"%PDF fake")
+        receipt = await _receipt(
+            db_session,
+            str(path),
+            store_chain="K-Market",
+            purchase_date=date(2026, 1, 1),
         )
-
         with (
-            patch(
-                "app.services.receipt_processing.extract_text_from_receipt",
-                new_callable=AsyncMock,
-                return_value=mock_ocr_response,
-            ),
-            patch(
-                "app.services.receipt_processing.extract_products_from_receipt",
-                new_callable=AsyncMock,
-                return_value=empty_extraction,
-            ),
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction()),
         ):
-            result = await processing_service.process_receipt(sample_receipt)
+            await service.process_receipt(receipt)
 
-            # Should still succeed, just with no products
-            assert result.success is True
-            assert result.extraction == empty_extraction
-            assert len(result.matched_products) == 0
+        await db_session.refresh(receipt)
+        assert receipt.store_chain == "K-Market"
+        assert receipt.purchase_date == date(2026, 1, 1)
+        assert receipt.ocr_raw_text == OCR_TEXT
 
-            # Verify receipt status
-            await db_session.refresh(sample_receipt)
-            assert sample_receipt.processing_status == "completed"
-            assert sample_receipt.items_extracted == 0
-            assert sample_receipt.items_matched == 0
-
-    async def test_process_receipt_partial_matching(
-        self,
-        processing_service: ReceiptProcessingService,
-        sample_receipt: Receipt,
-        sample_product: ProductMaster,  # Only one product in DB
-        mock_ocr_response: str,
-        mock_llm_extraction: ReceiptExtraction,  # But extraction has 2 products
-        db_session: AsyncSession,
+    async def test_empty_extraction_still_completes(
+        self, service, pdf_receipt, sample_category, db_session
     ):
-        """Test processing when only some products can be matched."""
         with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction(lines=[])),
+        ):
+            result = await service.process_receipt(pdf_receipt)
+
+        assert result.success is True
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.processing_status == "completed"
+        assert pdf_receipt.items_extracted == 0
+        assert pdf_receipt.items_matched == 0
+
+
+class TestFailures:
+    async def test_extraction_error_marks_receipt_failed(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
             patch(
-                "app.services.receipt_processing.extract_text_from_receipt",
+                TEXT,
                 new_callable=AsyncMock,
-                return_value=mock_ocr_response,
-            ),
-            patch(
-                "app.services.receipt_processing.extract_products_from_receipt",
-                new_callable=AsyncMock,
-                return_value=mock_llm_extraction,
+                side_effect=LLMExtractionError("timed out"),
             ),
         ):
-            result = await processing_service.process_receipt(sample_receipt)
+            result = await service.process_receipt(pdf_receipt)
 
-            assert result.success is True
-            assert len(result.matched_products) >= 1  # At least one match
-            assert len(result.matched_products) <= len(mock_llm_extraction.products)
+        assert result.success is False
+        assert "timed out" in (result.error or "")
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.processing_status == "failed"
 
-            # Verify stats
-            await db_session.refresh(sample_receipt)
-            assert sample_receipt.items_extracted == 2
-            # items_matched may be less than items_extracted
-            assert sample_receipt.items_matched <= sample_receipt.items_extracted
+    async def test_non_availability_ocr_error_does_not_fall_back(
+        self, service, image_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, side_effect=ValueError("corrupt file")),
+            patch(VISION, new_callable=AsyncMock) as vision,
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is False
+        vision.assert_not_awaited()
+        await db_session.refresh(image_receipt)
+        assert image_receipt.processing_status == "failed"
 
 
 class TestProcessingResult:
-    """Test ProcessingResult data structure."""
-
-    def test_processing_result_success(self):
-        """Test creating successful processing result."""
-        extraction = ReceiptExtraction(store=StoreInfo(), products=[])
+    def test_holds_the_extraction(self):
+        extraction = _extraction(lines=[])
         result = ProcessingResult(
             success=True,
-            ocr_text="Sample text",
+            ocr_text=None,
             extraction=extraction,
             matched_products=[],
             error=None,
         )
-
-        assert result.success is True
-        assert result.ocr_text == "Sample text"
-        assert result.extraction == extraction
-        assert result.matched_products == []
-        assert result.error is None
-
-    def test_processing_result_failure(self):
-        """Test creating failed processing result."""
-        result = ProcessingResult(
-            success=False,
-            ocr_text=None,
-            extraction=None,
-            matched_products=[],
-            error="OCR failed",
-        )
-
-        assert result.success is False
-        assert result.error == "OCR failed"
+        assert result.extraction is extraction

@@ -44,3 +44,47 @@ def test_allowed_origins_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> 
 def test_database_url_built_from_parts(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _settings(monkeypatch)
     assert settings.DATABASE_URL == "postgresql+asyncpg://u:p@db/d"
+
+
+def test_llm_defaults_target_the_llama_swap_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in (
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "LLM_REASONING_STRENGTH",
+        "MINERU_TIMEOUT",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    settings = _settings(monkeypatch)
+    assert settings.LLM_BASE_URL == "http://192.168.0.94:9292/v1"
+    assert settings.LLM_MODEL == "muse-glimmer"
+    assert settings.LLM_MAX_TOKENS == 4096
+    assert settings.LLM_TIMEOUT == 180.0
+    assert settings.LLM_REASONING_STRENGTH == "low"
+    assert settings.MINERU_LANG == "latin"
+    assert settings.MINERU_TIMEOUT == 120.0
+
+
+def test_empty_mineru_timeout_uses_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The example env files ship `MINERU_TIMEOUT=` with no value."""
+    assert _settings(monkeypatch, MINERU_TIMEOUT="").MINERU_TIMEOUT == 120.0
+
+
+def test_reasoning_strength_accepts_only_documented_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert (
+        _settings(monkeypatch, LLM_REASONING_STRENGTH="medium").LLM_REASONING_STRENGTH
+        == "medium"
+    )
+    with pytest.raises(ValueError):
+        _settings(monkeypatch, LLM_REASONING_STRENGTH="minimal")
+
+
+def test_reasoning_strength_can_be_disabled_for_other_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert (
+        _settings(monkeypatch, LLM_REASONING_STRENGTH="").LLM_REASONING_STRENGTH is None
+    )

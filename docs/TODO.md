@@ -54,8 +54,10 @@ previous wave is merged. Backend and frontend increments inside a wave are indep
 | MVP-F2 | 1 | infra | Deployable prod stack + runbook, iPad loads inventory | 5h | F1 |
 | MVP-R0 | 1 | pipeline | Extraction feasibility spike: text LLM vs vision model on a real receipt | 2h | — |
 | MVP-S1 | 2 | backend | `product_name` and `category` on inventory responses | 3h | F1 |
-| MVP-R1 | 2 | backend | Typed extracted items with per-item match + suggested category | 6h | F1 |
-| MVP-R2 | 2 | backend | Confirm creates products for new items; expiry/location overrides | 5h | R1 |
+| MVP-R1a | 2 | backend | Extraction layer: R0 request on muse-glimmer, vision fallback, inline category | 4h | F1, R0 |
+| MVP-R1b | 2 | backend | Typed extracted items with per-item match, aliases, units, status enum | 5h | R1a |
+| MVP-U1 | 2 | all | Unit vocabulary migration to `dl \| tsp \| tbsp \| g \| pcs` (data, OFF parser, frontend) | 3h | R1b |
+| MVP-R2 | 2 | backend | Confirm creates products for new items; expiry/location overrides | 5h | R1b, U1 |
 | MVP-C1 | 2 | frontend | BottomSheet and Toast primitives | 5h | — |
 | MVP-C2 | 2 | frontend | ConsumptionSheet wired to consume mutation | 6h | C1 |
 | MVP-S2 | 3 | frontend | Stock view: urgency sort, location groups, hide inactive, uses `product_name` | 5h | S1 |
@@ -199,39 +201,67 @@ Amended 2026-09-13 with the deployment findings of `PLAN_REVIEW_2026-09-13.md` (
   - [x] Frontend types mirror the new fields; `InventoryList` prefers `item.product_name` and
     shows the category name. The `productNames` prop and products fetch go in S2.
 
-#### MVP-R1 — Typed extracted items with per-item match and suggested category
-- New schema `ExtractedItem` in `schemas/receipt.py`: `name`, `name_en`, `quantity`, `unit`,
-  `price`, `product_id | None`, `match_score | None`, `match_confidence | None`,
-  `suggested_category | None`. `ReceiptResponse` exposes `items: list[ExtractedItem]`
-  (derived from `ocr_structured`), plus `store` and `purchase_date` if extracted.
+#### MVP-R1 — split into R1a, R1b and U1 (operator ruling 2026-09-14)
+Rulings: two PRs; category suggested **inline** in the extraction call (a second call on
+`muse-glimmer` costs ~40 s); unit conversions `l→dl ×10`, `ml→dl ÷100`, `kg→g ×1000`,
+`unit→pcs` (tsp/tbsp only from manual entry); migrating existing `ml` data is its own
+increment U1 after R1b, before R2 creates products.
+
+#### MVP-R1a — Extraction layer (branch `feat/mvp-r1a-extraction-layer`)
+- [x] Settings: gateway `http://192.168.0.94:9292/v1`, `LLM_MODEL=muse-glimmer`,
+  `LLM_MAX_TOKENS`, `LLM_TIMEOUT`, `LLM_REASONING_STRENGTH` (`xhigh|high|medium|low`, empty to
+  omit), `MINERU_LANG=latin` (PaddleOCR has no `fi`), `MINERU_TIMEOUT=120` (empty env value
+  accepted). Example env files and `docs/DEPLOY.md` updated.
+- [x] `llm_extractor.py` rewritten to the R0 request: compact contract
+  `{"s","d","p":[{"n","q","w","c"}]}`, strict `json_schema` with `c` limited to the DB
+  category ids (listed with display names in the prompt), text pre-filter, trailing-price
+  stripping, one `LLMExtractionError`. `extract_from_text` and `extract_from_image`. The
+  store-hint duplicate and the deprecated flat extraction fields are gone.
+- [x] `ocr_service.py`: `OCRUnavailableError` on connect errors, timeouts and 5xx; real
+  content type; configurable language; pdfplumber off the event loop.
+- [x] Pipeline: PDF → text; image → MinerU text, or the vision model when MinerU is
+  unavailable or finds nothing. `ocr_structured` stores `method`, `store_chain`,
+  `purchase_date`, `lines`; store and date fill the receipt when the user left them empty.
+- Measured before committing to the schema (R0 harness with `s`, `d`, `c` added): 49/49
+  products, all quantities and weights, store and date correct; text 45–53 s, vision
+  48–52 s; household items get no category, eggs initially did because only ids were listed.
+
+#### MVP-R1b — Typed extracted items with per-item match
+- New schema `ExtractedItem` in `schemas/receipt.py`: `name`, `quantity`, `unit`,
+  `product_id | None`, `match_score | None`, `match_confidence | None`,
+  `suggested_category | None`, `location`, `storage_type`. `ReceiptResponse` exposes
+  `items: list[ExtractedItem]` (derived from `ocr_structured.lines`), plus `store_chain` and
+  `purchase_date`.
 - `ReceiptProcessingService` writes the match result *per item* (today only the count
   survives). Unmatched items keep `product_id = null`.
 - Alias-first matching (the general learning mechanism): before RapidFuzz, look up
   `store_product_alias` by normalised `receipt_name` (scoped to `store_chain` when known);
   a hit is `exact`. Alias names also join the fuzzy candidate set so OCR-noise variants of a
   known line still land on the right product. The table and model exist and are unused today.
-- DEC-1 ruling is `dl | tsp | tbsp | g | pcs`, so the examples below are out of date. Before
-  R1 starts, confirm with the operator: `l→dl×10`, `ml→dl÷100`, `kg→g×1000`, `unit→pcs`,
-  and whether tsp/tbsp ever come from receipts or only from manual entry.
-- Unit normalisation per DEC-1 in one backend function with tests (`kg→g×1000`,
-  `l→ml×1000`, `unit→pcs`). `ExtractedItem.unit` and `ConfirmedItemCreate.unit` use it.
+- Unit normalisation in one backend function with tests: weight lines → `g` (`kg ×1000`),
+  volumes → `dl` (`l ×10`, `ml ÷100`), counts → `pcs`. `ExtractedItem.unit` and
+  `ConfirmedItemCreate.unit` use it.
 - One `ReceiptStatus` enum in `schemas/receipt.py`: `uploaded | processing | completed |
   failed | confirmed`; model default and `crud/receipt.py` use it (today three values disagree).
-- Category suggestion as a separate small LLM call (names in, category ids out,
-  schema-constrained enum) rather than inside the main extraction prompt; invalid values are
-  dropped, not failed. Only unmatched items need it. This is what makes auto-created products
-  get a sane expiry.
-- `ExtractedItem` also carries pre-filled `location` and the product `storage_type` derived
-  from the category (`frozen→freezer`; `pantry`, `condiments`, `snacks`, `beverages→pantry`;
-  else `main_fridge` / `refrigerator`), so R7 shows it and the user can change it.
-- Drop the deprecated flat fields from `ReceiptExtraction`; prompt trimmed per R0's result.
-- `MINERU_LANG` setting (default `fi`, today hardcoded `en`) and a real `MINERU_TIMEOUT`
-  default (120 s, today `None`); send the file's actual content type.
+- `suggested_category` comes from the inline `c` field (R1a). `location` and
+  `storage_type` are derived from it (`frozen→freezer`; `pantry`, `condiments`, `snacks`,
+  `beverages→pantry`; else `main_fridge` / `refrigerator`); fix the existing map in
+  `crud/product_master.py`, which uses non-seeded ids (`seafood`, `bakery`, `grains`).
 - Frontend `types/receipt.ts` rewritten to mirror the schema (the current `ParsedProduct`
   type describes fields the backend never produced).
-- **Acceptance:** tests in `tests/services/test_receipt_processing.py` assert per-item
-  `product_id` and `suggested_category` round-trip through `GET /receipts/{id}`; an alias
-  hit wins over a fuzzy candidate; unit normalisation and the status enum are covered.
+- **Acceptance:** per-item `product_id` and `suggested_category` round-trip through
+  `GET /receipts/{id}`; an alias hit wins over a fuzzy candidate; unit normalisation and the
+  status enum are covered.
+
+#### MVP-U1 — Unit vocabulary migration
+- Alembic data migration for existing rows: `ml → dl` (÷100), `l → dl` (×10), `kg → g`
+  (×1000), `unit → pcs`, on `inventory_item`, `product_master.default_unit/default_quantity`
+  and `shopping_list_item`.
+- `off_service.parse_off_quantity` returns `dl`/`g`/`pcs`; `crud/product_master._unit_type`
+  knows `dl`, `tsp`, `tbsp`.
+- Frontend `Unit` type becomes `dl | tsp | tbsp | g | pcs`; fixtures and `isCountable`
+  updated; quantity display unchanged (it prints the unit string).
+- **Acceptance:** migration up/down tested on a copy with mixed units; tsc and all suites green.
 
 #### MVP-R2 — Confirm creates products for new items; overrides
 - `ConfirmedItemCreate`: `product_id: UUID | None`, `name: str | None`, `category: str | None`,
@@ -569,7 +599,7 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
-- Wave 2: [x] S1 (PR #27)  [ ] R1  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
+- Wave 2: [x] S1 (PR #27)  [ ] R1a (PR open)  [ ] R1b  [ ] U1  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
 - Wave 3: [x] S2 (PR #30)  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2

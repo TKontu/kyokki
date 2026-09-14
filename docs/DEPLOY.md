@@ -16,7 +16,9 @@ PostgreSQL and Redis are reachable only inside the compose network. Receipt uplo
 ## Prerequisites
 
 - Docker Engine with the Compose plugin on the homelab host.
-- MinerU OCR and an OpenAI-compatible LLM endpoint (vLLM or Ollama) reachable from that host.
+- An OpenAI-compatible LLM endpoint reachable from that host (the llama-swap gateway with a
+  vision-capable model such as `muse-glimmer`). MinerU OCR is optional: when it is unreachable,
+  receipt photos are read directly by the vision model.
   Their URLs go into `stack.env`.
 - Git access to the repository.
 
@@ -28,7 +30,8 @@ cd kyokki
 
 # 1. Configuration. stack.env is git-ignored; never commit it.
 cp stack.env.example stack.env
-#    Edit stack.env: POSTGRES_PASSWORD, MINERU_BASE_URL, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL.
+#    Edit stack.env: POSTGRES_PASSWORD, LLM_BASE_URL, LLM_MODEL (and LLM_REASONING_STRENGTH),
+#    MINERU_BASE_URL.
 
 # 2. Build and start (first build takes a few minutes: Python deps + Next.js build).
 docker compose -f docker-compose.prod.yml up -d --build
