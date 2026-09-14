@@ -41,7 +41,7 @@ capabilities working together on the kitchen iPad, over the LAN, with no laptop 
 **Explicitly outside MVP:** offline mode and service worker, HTTPS/Traefik, WebSocket live
 updates (polling is the MVP answer), GS1 DataMatrix, barcode camera scanning, hardware scanner
 stations, shopping list UI, minimum-stock automation, Home Assistant, batch receipts,
-analytics, Mealie, multi-user.
+analytics, Mealie, multi-user, agent interface (CLI, skill, recipes; `docs/agent_TODO.md`).
 
 ### Increment plan
 
@@ -602,6 +602,13 @@ away, with no port forwarding.
   Log friction in this file under "Post-MVP frontier". Tick the eight acceptance items above.
 
 ### Post-MVP frontier (do not start before MVP-P3)
+**First after MVP-P3: agent interface track** (`docs/agent_TODO.md`, AG0–AG7, planned
+2026-09-14). A Hermes Agent or OpenClaw agent adds and consumes stock, creates generic products
+and aliases, explores and cooks recipes, and builds shopping lists through the HTTP API, a
+`kyokki` CLI with `-h` help and a SKILL.md. No MCP server. Recipes come from Mealie or an
+alternative chosen in the AG0 spike against HowToCook granularity. It absorbs parts of items 5,
+6 and 8 below: name-based consume is shared with Home Assistant, and shopping-list generation.
+
 Ordered by expected value once MVP is live.
 1. WebSocket live updates in the PWA (`services/websockets.py` already broadcasts).
 2. "Opened" tracking: consuming from sealed sets `opened_date` and switches to
@@ -611,7 +618,8 @@ Ordered by expected value once MVP is live.
 5. Shopping list UI (API done, PR #14), minimum-stock auto-add.
 6. Home Assistant REST endpoints (`HOME_ASSISTANT_SPEC.md`).
 7. Barcode scanning in the PWA camera; Raspberry Pi scanner station.
-8. Multi-receipt batch, consumption learning, analytics, Mealie.
+8. Multi-receipt batch, consumption learning, analytics. (Mealie recipes moved to the agent
+   track's AG0/AG5; meal plans stay here.)
 9. Learned store templates (`ADAPTIVE_PARSER_SPEC.md`): chain-specific parse rules that
    skip the LLM for known formats. Generalising accelerator, not a core dependency.
 10. More receipt drop-in adapters: e-receipt e-mail (IMAP) ingestion, a watched folder, and the

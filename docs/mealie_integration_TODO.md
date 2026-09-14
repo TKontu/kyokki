@@ -1,5 +1,10 @@
 # Mealie Integration Module — Development TODO
 
+> **Superseded in part (2026-09-14).** Recipe search, "cookable", suggestions and cook-deducts-stock
+> are now planned in `docs/agent_TODO.md` (AG0 recipe-service spike: Mealie vs Tandoor against
+> HowToCook granularity; AG5 recipes behind a swappable `RecipeSource`). Meal plans and the
+> frontend recipe views below remain post-MVP backlog. "Fridge Logger" below is Kyokki's old name.
+
 ## Module Overview
 **Integration Target:** Mealie (self-hosted recipe manager, v2.x)  
 **Location:** `/backend/app/integrations/mealie/`  
