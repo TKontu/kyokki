@@ -20,6 +20,7 @@ from app.services.off_service import (
     enrich_product_from_off,
     fetch_product_from_off,
 )
+from app.services.storage import location_for_storage
 
 logger = get_logger(__name__)
 
@@ -227,13 +228,7 @@ async def _handle_add(
     shelf_life = product.default_shelf_life_days or 365
     expiry = datetime.now(UTC).date() + timedelta(days=shelf_life)
 
-    # Map storage_type to location
-    location_map = {
-        "refrigerator": "main_fridge",
-        "freezer": "freezer",
-        "pantry": "pantry",
-    }
-    location = location_map.get(product.storage_type, "main_fridge")
+    location = location_for_storage(product.storage_type)
 
     item_quantity = (
         product.default_quantity if product.default_quantity is not None else quantity

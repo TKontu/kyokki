@@ -27,9 +27,8 @@ class Receipt(Base):
     ocr_structured = Column(JSONB, nullable=True)  # Parsed items and metadata
 
     # Processing status
-    processing_status = Column(
-        String, nullable=False, default="queued", index=True
-    )  # queued, processing, completed, failed
+    # uploaded, processing, completed, failed, confirmed (schemas.receipt.ReceiptStatus)
+    processing_status = Column(String, nullable=False, default="uploaded", index=True)
     batch_id = Column(
         UUID(as_uuid=True), nullable=True, index=True
     )  # Multi-receipt batch

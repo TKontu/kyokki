@@ -16,6 +16,7 @@ from app.schemas.receipt import (
     ReceiptConfirmResponse,
     ReceiptProcessingResponse,
     ReceiptResponse,
+    ReceiptStatus,
 )
 from app.services.broadcast_helpers import broadcast_receipt_status
 from app.services.receipt_processing import ReceiptProcessingService
@@ -106,14 +107,14 @@ async def get_receipt(
 
 @router.get("", response_model=list[ReceiptResponse])
 async def list_receipts(
-    status: str | None = None,
+    status: ReceiptStatus | None = None,
     store: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[ReceiptResponse]:
     """Get all receipts with optional filtering.
 
     Args:
-        status: Optional filter by processing_status (e.g., "uploaded", "processing", "completed").
+        status: Optional filter by processing status; unknown values are rejected (422).
         store: Optional filter by store_chain.
         db: Database session.
 
@@ -241,13 +242,13 @@ async def confirm_receipt(
             items_created += 1
 
         # Update receipt status
-        receipt.processing_status = "confirmed"
+        receipt.processing_status = ReceiptStatus.CONFIRMED
         await db.commit()
 
         # Broadcast confirmed status
         await broadcast_receipt_status(
             receipt_id=receipt.id,
-            status="confirmed",
+            status=ReceiptStatus.CONFIRMED,
             items_extracted=receipt.items_extracted,
             items_matched=items_created,
         )

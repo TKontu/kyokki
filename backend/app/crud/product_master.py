@@ -181,22 +181,9 @@ async def enrich_product_from_off_data(
 
         category_defaults = await get_category(db, enriched_data["category"])
 
-        # Determine storage type based on category
-        storage_type_map = {
-            "dairy": "refrigerator",
-            "meat": "refrigerator",
-            "seafood": "refrigerator",
-            "produce": "refrigerator",
-            "frozen": "freezer",
-            "bakery": "pantry",
-            "beverages": "refrigerator",
-            "snacks": "pantry",
-            "condiments": "pantry",
-            "grains": "pantry",
-            "pantry": "pantry",
-        }
+        from app.services.storage import storage_type_for_category
 
-        storage_type = storage_type_map.get(enriched_data["category"], "pantry")
+        storage_type = storage_type_for_category(enriched_data["category"])
 
         default_unit = enriched_data.get("default_unit", "pcs")
 
