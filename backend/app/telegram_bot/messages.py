@@ -89,6 +89,11 @@ def result_text(receipt: ReceiptResponse) -> str:
         rest = len(new_names) - MAX_NEW_NAMES
         lines.append(f"New: {shown}, … (+{rest})" if rest > 0 else f"New: {shown}")
 
+    if receipt.extraction_method == "heuristic":
+        lines.append(
+            "Read without the AI model; names are as printed. "
+            "Retry on the iPad when the model is back."
+        )
     lines.append("Review on the iPad.")
     return "\n".join(lines)[:TELEGRAM_TEXT_LIMIT]
 

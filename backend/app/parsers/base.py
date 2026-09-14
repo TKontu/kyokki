@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-ExtractionMethod = Literal["text", "vision"]
+ExtractionMethod = Literal["text", "vision", "heuristic"]
 
 
 class ExtractedLine(BaseModel):

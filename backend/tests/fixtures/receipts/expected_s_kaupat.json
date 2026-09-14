@@ -1,0 +1,251 @@
+{
+ "store_chain": "s-group",
+ "purchase_date": "2026-01-02",
+ "lines": [
+  {
+   "name": "KEVYTMAITOJUOMA LAKTON",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "OMENASOSE",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "MANGO KEITT/KENT/OSTEEN",
+   "quantity": 1,
+   "weight_kg": 0.386
+  },
+  {
+   "name": "COOP FETA JUUSTO PDO LAKTON",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "GRANAATTIOMENA",
+   "quantity": 1,
+   "weight_kg": 0.3
+  },
+  {
+   "name": "CHEDDAR PUNAINEN",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "TACO SAUCE MIETO LUOMU",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "RANSKANKERMA 18% VÄHÄLAKT",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "NACHO CHIPS 475G",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "AMERIKAN PEKONI ORIGINAL",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "KEISARINNA JUUSTO",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "BARISTA KAURAJUOMA",
+   "quantity": 3,
+   "weight_kg": null
+  },
+  {
+   "name": "KOMPOSTOINTIPUSSI PAPERI",
+   "quantity": 2,
+   "weight_kg": null
+  },
+  {
+   "name": "COOP ROSKAPUSSI 30L 25KPL MUSTA",
+   "quantity": 3,
+   "weight_kg": null
+  },
+  {
+   "name": "RUISPALAT OHUT HERKKU",
+   "quantity": 2,
+   "weight_kg": null
+  },
+  {
+   "name": "TIKKUPERUNAT",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "HAPANKAALI",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "OLIIVIÖLJY EXTRAVIRGIN",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "PORKKANA 1KG",
+   "quantity": 5,
+   "weight_kg": null
+  },
+  {
+   "name": "OMENA GRANNY SMITH",
+   "quantity": 1,
+   "weight_kg": 1.59
+  },
+  {
+   "name": "PÄÄRYNÄ CONFERENCE I",
+   "quantity": 1,
+   "weight_kg": 0.484
+  },
+  {
+   "name": "PYYKKIETIKKA MARJAMETSÄ",
+   "quantity": 2,
+   "weight_kg": null
+  },
+  {
+   "name": "NESTESAIPPUA OMENA",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "DIPPI SWEET CHILI",
+   "quantity": 2,
+   "weight_kg": null
+  },
+  {
+   "name": "SIENILIINA",
+   "quantity": 2,
+   "weight_kg": null
+  },
+  {
+   "name": "KEITTIÖSUIHKE SITRUS",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "YLEISPUHDISTUSSUIHKE",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "GLÖGI TUMMA SOKEROIMATON 1L",
+   "quantity": 2,
+   "weight_kg": null
+  },
+  {
+   "name": "TURKKILAINEN JOGURTTI 10%",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "TUMMA RYPÄLE 500G",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "PUNASIPULI",
+   "quantity": 1,
+   "weight_kg": 0.33
+  },
+  {
+   "name": "SYDÄNSALAATTI 200G",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "TOMAATTIPYREE",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "NAMIVITA MONIVITAMIINI",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "KAURAJUOMA",
+   "quantity": 3,
+   "weight_kg": null
+  },
+  {
+   "name": "LIME",
+   "quantity": 1,
+   "weight_kg": 0.74
+  },
+  {
+   "name": "KANAN FILEESUIKALE MTON",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "MOZZARELLA JUUSTORASTE 150G",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "PKARKEA VEHNÄJAUHO",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "KERMAVIILI 12% VÄHÄLAKT",
+   "quantity": 2,
+   "weight_kg": null
+  },
+  {
+   "name": "PERSILJA",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "TOMAATTI SUOMI",
+   "quantity": 1,
+   "weight_kg": 1.18
+  },
+  {
+   "name": "ISOT KANANMUNAT VAPAA L15",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "OIVARIINI NORMAALISUOLAINEN",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "BANAANI",
+   "quantity": 1,
+   "weight_kg": 0.37
+  },
+  {
+   "name": "OMENA SUOMI",
+   "quantity": 1,
+   "weight_kg": 0.384
+  },
+  {
+   "name": "KIRSIKKATOMAATTI 250G",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "MONIVITAMIINI APPELSIINI",
+   "quantity": 1,
+   "weight_kg": null
+  },
+  {
+   "name": "KURKKU",
+   "quantity": 1,
+   "weight_kg": 0.325
+  }
+ ]
+}

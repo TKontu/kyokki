@@ -9,7 +9,9 @@
 >   the LAN (17301 frontend, 17300 API). Runbook: [DEPLOY.md](./DEPLOY.md).
 > - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images) → one LLM
 >   extraction call (OpenAI-compatible endpoint, vLLM or Ollama) → RapidFuzz match against
->   `product_master.canonical_name` → review → confirm. Since MVP-R3 uploads are queued in
+>   `product_master.canonical_name` → review → confirm. If the model fails or finds nothing on a
+>   text receipt, a deterministic line parser supplies the rows (MVP-R3b, method `heuristic`).
+>   Since MVP-R3 uploads are queued in
 >   Postgres and the `kyokki-worker` service (`python -m app.worker`) reads them one at a time;
 >   no request waits for extraction. Celery is not used.
 >   No store parsers, no learned templates, no alias lookup, no Ollama vision fallback.

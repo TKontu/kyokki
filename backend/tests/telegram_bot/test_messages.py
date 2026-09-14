@@ -38,6 +38,26 @@ def _line(name: str, matched: bool = False) -> dict:
 
 
 class TestResultText:
+    def test_heuristic_receipt_says_it_was_read_without_the_model(self):
+        receipt = _receipt(
+            [_line("MAITO")],
+            ocr_structured={
+                "method": "heuristic",
+                "fallback_reason": "Model unavailable: timed out",
+                "lines": [_line("MAITO")],
+            },
+        )
+
+        text = messages.result_text(receipt)
+
+        assert "Read without the AI model; names are as printed." in text
+        assert text.endswith("Review on the iPad.")
+
+    def test_model_read_receipt_has_no_fallback_note(self):
+        assert "without the AI model" not in messages.result_text(
+            _receipt([_line("MAITO")])
+        )
+
     def test_summary_lists_unmatched_names_and_the_rest_as_a_count(self):
         lines = [_line(f"PRODUCT {i}") for i in range(46)] + [
             _line(f"KNOWN {i}", matched=True) for i in range(3)
