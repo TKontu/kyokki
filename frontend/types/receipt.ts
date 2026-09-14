@@ -5,7 +5,14 @@
 
 import type { StorageType } from './product'
 
-export type ReceiptStatus = 'uploaded' | 'processing' | 'completed' | 'failed' | 'confirmed'
+/** Uploads are queued and read by the worker service; 'uploaded' only on pre-queue receipts. */
+export type ReceiptStatus =
+  | 'uploaded'
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'confirmed'
 
 /** How the receipt was read: text (PDF or OCR) or the image directly (vision model). */
 export type ExtractionMethod = 'text' | 'vision'
@@ -43,6 +50,9 @@ export interface Receipt {
   ocr_raw_text: string | null // Raw OCR or PDF text (null when read by vision)
   ocr_structured: Record<string, unknown> | null // Stored extraction (debugging)
   processing_status: ReceiptStatus
+  error: string | null // Last processing failure, if any
+  queued_at: string | null // ISO datetime it entered the queue
+  processing_started_at: string | null // ISO datetime the worker started reading it
   items_extracted: number
   items_matched: number
   extraction_method: ExtractionMethod | null

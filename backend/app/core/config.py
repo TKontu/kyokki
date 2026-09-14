@@ -78,6 +78,10 @@ class Settings(BaseSettings):
         return None if v == "" else v
 
     # Telegram receipt drop-in bot (MVP-T1). The bot is disabled while no token is set.
+    # Receipt queue worker (python -m app.worker, MVP-R3)
+    RECEIPT_WORKER_POLL_SECONDS: float = 2.0  # idle wait between queue checks
+    RECEIPT_STALE_MINUTES: int = 10  # processing longer than this is treated as failed
+
     TELEGRAM_BOT_TOKEN: SecretStr | None = None
     # Chats the bot serves; comma-separated ids. Send /start to the bot to learn yours.
     TELEGRAM_ALLOWED_CHAT_IDS: Annotated[list[int], NoDecode] = []

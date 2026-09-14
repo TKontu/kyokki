@@ -4,14 +4,40 @@
 # Only two ports are published:
 #   17301  frontend (the iPad opens this; /api/* is proxied to the backend)
 #   17300  backend API directly (diagnostics, future integrations)
-# Postgres and Redis are reachable only on the compose network. The Telegram bot publishes
-# no port: it polls Telegram outbound.
+# Postgres and Redis are reachable only on the compose network. The receipt worker and the
+# Telegram bot publish no port: the worker reads the Postgres queue, the bot polls Telegram.
 services:
   kyokki-api:
     build: ./backend
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
     ports:
       - "17300:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - stack.env
+    environment:
+      - DEBUG=false
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_USER=kyokki_user
+      - POSTGRES_DB=kyokki
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    networks:
+      - kyokki_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+  kyokki-worker:
+    # Reads queued receipts one at a time (OCR/LLM extraction, matching). Same image as the
+    # API; uploads from the iPad and the Telegram bot are queued in Postgres. No port.
+    build: ./backend
+    command: python -m app.worker
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

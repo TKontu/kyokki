@@ -13,7 +13,8 @@ from app.services.units import receipt_line_quantity
 class ReceiptStatus(StrEnum):
     """Receipt lifecycle. The column is a plain string; this is the single vocabulary."""
 
-    UPLOADED = "uploaded"
+    UPLOADED = "uploaded"  # Rows from before MVP-R3; uploads are queued now
+    QUEUED = "queued"
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -134,6 +135,11 @@ class ReceiptResponse(ReceiptBase):
         None, description="Stored extraction (debugging)"
     )
     processing_status: ReceiptStatus = Field(..., description="Processing status")
+    error: str | None = Field(None, description="Last processing failure, if any")
+    queued_at: datetime | None = Field(None, description="When it entered the queue")
+    processing_started_at: datetime | None = Field(
+        None, description="When the worker started reading it"
+    )
     items_extracted: int = Field(0, description="Number of items extracted")
     items_matched: int = Field(0, description="Number of items matched to products")
     extraction_method: Literal["text", "vision"] | None = Field(
@@ -150,15 +156,6 @@ class ReceiptResponse(ReceiptBase):
         method = (self.ocr_structured or {}).get("method")
         self.extraction_method = method if method in ("text", "vision") else None
         return self
-
-
-class ReceiptProcessingResponse(BaseModel):
-    """Schema for receipt processing result."""
-
-    success: bool = Field(..., description="Whether processing succeeded")
-    items_extracted: int = Field(0, description="Number of products extracted")
-    items_matched: int = Field(0, description="Number of products matched")
-    error: str | None = Field(None, description="Error message if processing failed")
 
 
 class ConfirmedItemCreate(BaseModel):

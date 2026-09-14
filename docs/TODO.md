@@ -364,6 +364,29 @@ increment U1 after R1b, before R2 creates products.
 - **Acceptance:** endpoint returns within 200 ms in tests with the pipeline mocked; status
   transitions and stale recovery covered; a second `/process` while processing returns 409;
   `/process` on a `failed` receipt re-runs.
+- As built (branch `feat/mvp-r3-receipt-queue-worker`), rulings of 2026-09-14:
+  - [x] **Postgres queue + one worker service** instead of `BackgroundTasks`: the model serves
+    one request at a time, the API runs two uvicorn workers, and the queue must survive
+    restarts. `services/receipt_queue.py` (enqueue, FIFO claim with `FOR UPDATE SKIP LOCKED`,
+    stale failure, queue position); `app/worker/` (`python -m app.worker`, `kyokki-worker`
+    service in both compose files).
+  - [x] **Uploads queue automatically** on both channels (`/scan` returns `queued`).
+    `/process` returns 202 and only re-queues `failed` or pre-queue `uploaded` receipts; 409 for
+    queued/processing ("already queued or processing") and completed/confirmed ("already read").
+  - [x] New status `queued`; migration `c3e9a7b5d1f2` adds `queued_at`,
+    `processing_started_at`, `error` (last failure, max 500 characters, cleared on success).
+  - [x] Stale recovery: `processing` for more than `RECEIPT_STALE_MINUTES` (10) becomes `failed`
+    with an error, checked by the worker loop and on `GET /receipts`, `GET /receipts/{id}`,
+    `/process`. Settings `RECEIPT_WORKER_POLL_SECONDS` (2) and `RECEIPT_STALE_MINUTES`.
+  - [x] Telegram bot: no in-memory processing queue; the handler reports the queue position
+    from the database and a `ResultNotifier` edits the acknowledgement when the receipt is
+    finished. A bot restart loses only pending message edits.
+  - [x] Shared `core/service_runner.py` for SIGTERM handling in the worker and the bot.
+  - [x] E2E with `muse-glimmer` (API + worker processes): two uploads answered `queued` in
+    281 ms and 32 ms and were read back to back (62 s, then 28 s); a worker killed mid-read
+    left the receipt `processing`, back-dated 11 minutes it read as `failed` with the error,
+    `/process` re-queued it (202, a second call 409), a restarted worker completed it, and
+    `/process` on the completed receipt answered 409.
 
 #### MVP-R3b — Generic heuristic fallback
 - When extraction fails or times out, a deterministic, store-agnostic line parser turns
@@ -511,8 +534,8 @@ away, with no port forwarding.
 
 #### MVP-R5 — Receipt types, API module, hooks
 - `lib/api/receipts.ts`: `scan(file, meta)` multipart upload (do not set JSON content type),
-  `get`, `list`, `process`, `confirm`. `hooks/useReceipts.ts`: `useReceipt(id)` polls every
-  3 s while `processing`, stops on `completed | failed | confirmed`; `useReceiptList`,
+  `get`, `list`, `process` (retry), `confirm`. `hooks/useReceipts.ts`: `useReceipt(id)` polls
+  every 3 s while `queued | processing`, stops on `completed | failed | confirmed`; `useReceiptList`,
   `useUploadReceipt`, `useConfirmReceipt` (invalidates inventory lists).
 - Status union copied from the single backend `ReceiptStatus` enum; quantity types follow DEC-2.
 - **Acceptance:** msw tests including polling stop conditions and multipart body.
@@ -521,7 +544,7 @@ away, with no port forwarding.
 - Re-scoped 2026-09-14: the Telegram bot (T1) is the primary drop-in from the phone, so the
   iPad page is a simple fallback upload rather than a camera flow.
 - `/scan`: one "Choose a file" input (`accept="image/*,application/pdf"`; the file picker also
-  offers the camera), optional store and date, Upload → scan → process → navigate to
+  offers the camera), optional store and date, Upload → scan (queued since R3) → navigate to
   `/receipt/[id]`. `ProcessingStatus` shows queued/processing with elapsed time and a failure
   state with retry.
 - Client-side downscale before upload (canvas, long edge ≤ 2000 px, JPEG q 0.85); a 12 MP
@@ -717,8 +740,8 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
-- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [ ] R2 (PR open)  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
+- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [x] R2 (PR #37)  [x] C1 (PR #28)  [x] C2 (PR #29)
+- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [ ] S3  [ ] S4  [ ] R3 (PR open)  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance

@@ -1,7 +1,10 @@
 """Tests for Receipt API endpoints."""
 
 import shutil
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import anyio
 import pytest
@@ -10,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
+from app.parsers.base import ExtractedLine, ReceiptExtraction
+from app.worker.receipt_worker import run_once
 
 
 @pytest.fixture
@@ -56,7 +61,7 @@ class TestUploadReceipt:
         assert "id" in receipt
         assert receipt["store_chain"] == "S-Market"
         assert receipt["purchase_date"] == "2024-01-05"
-        assert receipt["processing_status"] == "uploaded"
+        assert receipt["processing_status"] == "queued"
         assert "image_path" in receipt
         assert receipt["items_extracted"] == 0
         assert receipt["items_matched"] == 0
@@ -74,7 +79,7 @@ class TestUploadReceipt:
         assert response.status_code == 201
         receipt = response.json()
         assert receipt["store_chain"] == "K-Citymarket"
-        assert receipt["processing_status"] == "uploaded"
+        assert receipt["processing_status"] == "queued"
         assert receipt["image_path"].endswith(".pdf")
 
     async def test_upload_receipt_without_metadata(
@@ -90,7 +95,7 @@ class TestUploadReceipt:
         receipt = response.json()
         assert receipt["store_chain"] is None
         assert receipt["purchase_date"] is None
-        assert receipt["processing_status"] == "uploaded"
+        assert receipt["processing_status"] == "queued"
 
     async def test_upload_receipt_no_file(
         self, client: AsyncClient, test_db: AsyncSession
@@ -158,7 +163,7 @@ class TestGetReceipt:
         assert receipt["id"] == receipt_id
         assert receipt["store_chain"] == "Lidl"
         assert receipt["purchase_date"] == "2024-01-03"
-        assert receipt["processing_status"] == "uploaded"
+        assert receipt["processing_status"] == "queued"
 
     async def test_get_receipt_not_found(
         self, client: AsyncClient, test_db: AsyncSession
@@ -240,12 +245,12 @@ class TestListReceipts:
         files = {"file": ("receipt.jpg", BytesIO(file_content), "image/jpeg")}
         await client.post("/api/receipts/scan", files=files)
 
-        response = await client.get("/api/receipts?status=uploaded")
+        response = await client.get("/api/receipts?status=queued")
 
         assert response.status_code == 200
         receipts = response.json()
         assert len(receipts) == 1
-        assert receipts[0]["processing_status"] == "uploaded"
+        assert receipts[0]["processing_status"] == "queued"
 
     async def test_list_receipts_filter_by_store(
         self, client: AsyncClient, test_db: AsyncSession
@@ -270,25 +275,30 @@ class TestListReceipts:
 
 
 class TestProcessReceipt:
-    """Test POST /api/receipts/{id}/process endpoint."""
+    """MVP-R3: uploads are queued; the worker reads them; /process only re-queues."""
 
-    async def test_process_receipt_success(
-        self, client: AsyncClient, test_db: AsyncSession
+    async def _upload(
+        self, client: AsyncClient, content: bytes = b"fake receipt"
+    ) -> str:
+        files = {"file": ("receipt.jpg", BytesIO(content), "image/jpeg")}
+        return (await client.post("/api/receipts/scan", files=files)).json()["id"]
+
+    async def _set_status(
+        self, db: AsyncSession, receipt_id: str, status: str, **fields
+    ):
+        from app.models.receipt import Receipt
+
+        receipt = await db.get(Receipt, UUID(receipt_id))
+        receipt.processing_status = status
+        for name, value in fields.items():
+            setattr(receipt, name, value)
+        await db.commit()
+
+    async def test_queued_upload_is_read_by_the_worker(
+        self, client: AsyncClient, test_db: AsyncSession, session_factory
     ) -> None:
-        """POST /api/receipts/{id}/process should process receipt through OCR + LLM + matching."""
-        from unittest.mock import AsyncMock, patch
-
-        from app.parsers.base import ExtractedLine, ReceiptExtraction
-
-        # Create a receipt
-        file_content = b"fake receipt image"
-        files = {"file": ("receipt.jpg", BytesIO(file_content), "image/jpeg")}
-        create_response = await client.post("/api/receipts/scan", files=files)
-        receipt_id = create_response.json()["id"]
-
-        # Mock OCR and LLM services
-        mock_ocr_text = "S-MARKET\nVALIO MILK 1L  2.49\nTOTAL  2.49"
-        mock_extraction = ReceiptExtraction(
+        receipt_id = await self._upload(client)
+        extraction = ReceiptExtraction(
             method="text",
             store_chain="S-MARKET",
             lines=[ExtractedLine(name="Valio Milk 1L", quantity=1.0)],
@@ -298,67 +308,105 @@ class TestProcessReceipt:
             patch(
                 "app.services.receipt_processing.extract_text_from_receipt",
                 new_callable=AsyncMock,
-                return_value=mock_ocr_text,
+                return_value="S-MARKET\nVALIO MILK 1L  2.49\nTOTAL  2.49",
             ),
             patch(
                 "app.services.receipt_processing.extract_from_text",
                 new_callable=AsyncMock,
-                return_value=mock_extraction,
+                return_value=extraction,
             ),
+        ):
+            assert await run_once(session_factory) is True
+
+        receipt = (await client.get(f"/api/receipts/{receipt_id}")).json()
+        assert receipt["processing_status"] == "completed"
+        assert receipt["items_extracted"] == 1
+        assert receipt["ocr_raw_text"] is not None
+        assert receipt["error"] is None
+        assert receipt["processing_started_at"] is not None
+
+    async def test_process_never_runs_the_pipeline(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        receipt_id = await self._upload(client)
+        await self._set_status(test_db, receipt_id, "failed", error="LLM timed out")
+
+        with patch(
+            "app.services.receipt_processing.ReceiptProcessingService.process_receipt",
+            side_effect=AssertionError("pipeline ran inside the request"),
         ):
             response = await client.post(f"/api/receipts/{receipt_id}/process")
 
-            assert response.status_code == 200
-            result = response.json()
-            assert result["success"] is True
-            assert result["items_extracted"] == 1
-            # items_matched may be 0 if no matching products in DB
+        assert response.status_code == 202
+        body = response.json()
+        assert body["processing_status"] == "queued"
+        assert body["error"] is None
+        assert body["queued_at"] is not None
+
+    async def test_legacy_uploaded_receipt_can_be_queued(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        receipt_id = await self._upload(client)
+        await self._set_status(test_db, receipt_id, "uploaded", queued_at=None)
+
+        response = await client.post(f"/api/receipts/{receipt_id}/process")
+
+        assert response.status_code == 202
+        assert response.json()["processing_status"] == "queued"
+
+    @pytest.mark.parametrize(
+        ("status", "message"),
+        [
+            ("queued", "already queued or processing"),
+            ("processing", "already queued or processing"),
+            ("completed", "already read"),
+            ("confirmed", "already read"),
+        ],
+    )
+    async def test_process_conflicts(
+        self, client: AsyncClient, test_db: AsyncSession, status: str, message: str
+    ) -> None:
+        receipt_id = await self._upload(client)
+        fields = (
+            {"processing_started_at": datetime.now(UTC)}
+            if status == "processing"
+            else {}
+        )
+        await self._set_status(test_db, receipt_id, status, **fields)
+
+        response = await client.post(f"/api/receipts/{receipt_id}/process")
+
+        assert response.status_code == 409
+        assert message in response.json()["detail"]
 
     async def test_process_receipt_not_found(
         self, client: AsyncClient, test_db: AsyncSession
     ) -> None:
-        """POST /api/receipts/{id}/process should return 404 for non-existent receipt."""
         fake_uuid = "00000000-0000-0000-0000-000000000000"
         response = await client.post(f"/api/receipts/{fake_uuid}/process")
 
         assert response.status_code == 404
 
-    async def test_process_receipt_updates_status(
+    async def test_stale_processing_reads_as_failed_and_can_be_retried(
         self, client: AsyncClient, test_db: AsyncSession
     ) -> None:
-        """POST /api/receipts/{id}/process should update receipt processing_status."""
-        from unittest.mock import AsyncMock, patch
+        receipt_id = await self._upload(client)
+        await self._set_status(
+            test_db,
+            receipt_id,
+            "processing",
+            processing_started_at=datetime.now(UTC) - timedelta(minutes=11),
+        )
 
-        from app.parsers.base import ReceiptExtraction
+        receipt = (await client.get(f"/api/receipts/{receipt_id}")).json()
+        assert receipt["processing_status"] == "failed"
+        assert "did not finish" in receipt["error"]
 
-        # Create a receipt
-        file_content = b"fake receipt"
-        files = {"file": ("receipt.jpg", BytesIO(file_content), "image/jpeg")}
-        create_response = await client.post("/api/receipts/scan", files=files)
-        receipt_id = create_response.json()["id"]
+        listed = (await client.get("/api/receipts")).json()
+        assert listed[0]["processing_status"] == "failed"
 
-        mock_extraction = ReceiptExtraction(method="text", lines=[])
-
-        with (
-            patch(
-                "app.services.receipt_processing.extract_text_from_receipt",
-                new_callable=AsyncMock,
-                return_value="text",
-            ),
-            patch(
-                "app.services.receipt_processing.extract_from_text",
-                new_callable=AsyncMock,
-                return_value=mock_extraction,
-            ),
-        ):
-            await client.post(f"/api/receipts/{receipt_id}/process")
-
-            # Check receipt status was updated
-            get_response = await client.get(f"/api/receipts/{receipt_id}")
-            assert get_response.status_code == 200
-            receipt = get_response.json()
-            assert receipt["processing_status"] == "completed"
-            assert receipt["ocr_raw_text"] is not None
+        retry = await client.post(f"/api/receipts/{receipt_id}/process")
+        assert retry.status_code == 202
 
 
 class TestReceiptItems:
@@ -401,7 +449,7 @@ class TestReceiptItems:
         return product
 
     async def test_processed_receipt_returns_items(
-        self, client: AsyncClient, test_db: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession, session_factory
     ) -> None:
         from unittest.mock import AsyncMock, patch
 
@@ -440,7 +488,7 @@ class TestReceiptItems:
                 return_value=extraction,
             ),
         ):
-            await client.post(f"/api/receipts/{receipt_id}/process")
+            await run_once(session_factory)
 
         body = (await client.get(f"/api/receipts/{receipt_id}")).json()
 
@@ -491,7 +539,7 @@ class TestReceiptItems:
     async def test_unknown_status_filter_is_rejected(
         self, client: AsyncClient, test_db: AsyncSession
     ) -> None:
-        response = await client.get("/api/receipts?status=queued")
+        response = await client.get("/api/receipts?status=pending")
         assert response.status_code == 422
 
 

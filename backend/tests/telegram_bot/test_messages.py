@@ -101,6 +101,10 @@ class TestOtherTexts:
         receipt = _receipt([], processing_status="processing", ocr_structured=None)
         assert "still being read" in messages.duplicate_text(receipt)
 
+    def test_duplicate_still_queued(self):
+        receipt = _receipt([], processing_status="queued", ocr_structured=None)
+        assert "still being read" in messages.duplicate_text(receipt)
+
     def test_failure_is_short(self):
         text = messages.failure_text("Receipt processing failed: " + "x" * 1000)
         assert text.startswith("Could not read this receipt")

@@ -1,11 +1,9 @@
 """Fakes shared by the Telegram bot tests."""
 
 import shutil
-from contextlib import asynccontextmanager
 
 import anyio
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class FakeTelegram:
@@ -33,17 +31,6 @@ class FakeTelegram:
     async def download_file(self, file_path: str) -> bytes:
         self.downloads.append(file_path)
         return self.files[file_path.removeprefix("path/")][0]
-
-
-@pytest.fixture
-def session_factory(db_session: AsyncSession):
-    """A session factory that hands out the test session without closing it."""
-
-    @asynccontextmanager
-    async def factory():
-        yield db_session
-
-    return factory
 
 
 @pytest.fixture(autouse=True)

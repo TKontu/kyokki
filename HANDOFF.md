@@ -1,44 +1,42 @@
 # Handoff
-Generated-UTC: 2026-09-14T11:30:00Z
-Base-SHA: 217b43f
+Generated-UTC: 2026-09-14T14:10:00Z
+Base-SHA: c0ae70b
 
 ## Round delta
-- #36 MVP-T1 merged: Telegram receipt drop-in bot and SHA-256 duplicate guard.
-- MVP-R2 on `feat/mvp-r2-confirm-generic-products` (PR open): generic products, confirm creates
-  or reuses them, learns aliases. Rulings: products are generic (no brand, fat content or cut),
-  English names first; only `completed` receipts confirm (409 otherwise); aliases keyed by line
-  index. No migration.
+- #37 MVP-R2 merged: generic products, confirm creates/reuses products and learns aliases.
+- MVP-R3 on `feat/mvp-r3-receipt-queue-worker` (PR open): uploads are queued in Postgres and a new
+  `kyokki-worker` service reads them one at a time. Rulings: DB queue + one worker instead of
+  BackgroundTasks; uploads queue automatically, `/process` only retries. Migration
+  `c3e9a7b5d1f2` (queued_at, processing_started_at, error).
 
 ## Active PRs and conflicts
-- R2 PR. Wave 2 is complete once it merges. Wave 3 next: S3, S4, R3, R3b, R4 (T1 and S2 done).
+- R3 PR. Wave 3 left after it: S3, S4 (frontend), R3b (heuristic fallback), R4 (homelab
+  validation, needs MinerU and a deployed stack). R5 (frontend receipt hooks) unblocks after R3.
 
 ## Non-obvious decisions or blockers
 - LLM: llama-swap `http://192.168.0.94:9292/v1`, `muse-glimmer` (always loaded, one slot; other
   models evict it and cold-load 3-4 min). `reasoning_strength` only `xhigh|high|medium|low`; use
-  `low`. Only GPU `GPU-a8c640ca-...` is usable.
-- Contract is now `{"s","d","p":[{"n","g","q","w","c"}]}`; `g` is the generic English name and
-  the prompt lists up to 300 catalog names for reuse. A 49-line receipt needs ~3.8k completion
-  tokens, so `LLM_MAX_TOKENS` defaults to 8192. Extraction is ~40-70 s; `/process` is synchronous
-  until R3.
-- Matching order: printed-name alias → exact generic name → exact printed name → fuzzy (80).
-  The e2e second receipt with other brands matched 11/12 on generic names.
-- Confirm (`services/receipt_confirm.py`) is one transaction with `SELECT ... FOR UPDATE` on the
-  receipt; any invalid item rolls back. Product reuse is a case-insensitive name match; there is
-  no unique constraint on names or aliases (lookup upsert, serialised by the row lock).
-- Vision misreads become wrong generic names (SIENILIINA → Mushroom). R7's review screen is where
-  they get fixed; the text path (PDF, MinerU) named them correctly.
-- Pipeline input: PDF → pdfplumber; image → MinerU, falling back to vision on
-  `OCRUnavailableError` or blank text. MinerU back 2026-09-15 for R4's comparison.
-- Telegram bot: `kyokki-telegram` service, long polling, sequential in-memory queue (R3 replaces
-  it). Real-bot manual check still needs the operator's @BotFather token.
-- Identical file bytes are a duplicate upload (409 / "Already received"); tests that upload
-  several receipts must use distinct content. `tests/api/test_receipts.py` deletes
-  `backend/data/receipts`: don't run it during a manual API check.
+  `low`. Only GPU `GPU-a8c640ca-...` is usable. MinerU was still unreachable on 2026-09-14, so
+  images take the vision path.
+- Queue: status `queued → processing → completed | failed → confirmed`; `uploaded` only on old
+  rows. Claim is `UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP LOCKED)`. Stale `processing`
+  (> `RECEIPT_STALE_MINUTES`, 10) is failed by the worker loop and on receipt GET/list/process.
+  A worker killed mid-read may finish later only if restarted; the receipt otherwise waits for
+  the stale limit, then `/process` re-queues it.
+- Without `kyokki-worker` running, receipts stay `queued` forever. Local dev: run
+  `python -m app.worker` next to uvicorn.
+- Tests that need a processed receipt call `app.worker.receipt_worker.run_once(session_factory)`
+  (fixture in `tests/conftest.py`) instead of `/process`.
+- Telegram bot: enqueues via ingest; `ResultNotifier` polls pending receipts every 3 s and edits
+  the acknowledgement. Real-bot check still needs the operator's @BotFather token.
+- Products are generic (R2 ruling); contract `{"s","d","p":[{"n","g","q","w","c"}]}`,
+  `LLM_MAX_TOKENS` 8192.
+- Identical file bytes are a duplicate upload (409 / "Already received").
+  `tests/api/test_receipts.py` deletes `backend/data/receipts`: don't run it during a manual check.
 - Non-idempotent mutations need `retry: false` (frontend providers retry mutations once).
 - Operator items still open: rotate Postgres password + LLM key, purge `stack.env` history,
   deploy on the homelab and confirm the iPad renders inventory, create the Telegram bot.
 
 ## Next action
-Merge R2. Existing homelab products (if any) keep their old branded names; rename them to generic
-names by hand or let new receipts create generic ones. Then Wave 3: R3 (background processing)
-is the natural next backend step, S3/S4 on the frontend.
+Merge R3; on the homelab `up -d --build` (starts `kyokki-worker`) and `alembic upgrade head`.
+Then R5 (receipt API module and polling hooks) to open the R6/R7 path, or S3/S4 on the frontend.

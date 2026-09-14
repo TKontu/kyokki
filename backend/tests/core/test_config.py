@@ -66,6 +66,14 @@ def test_llm_defaults_target_the_llama_swap_gateway(
     assert settings.MINERU_TIMEOUT == 120.0
 
 
+def test_receipt_worker_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in ("RECEIPT_WORKER_POLL_SECONDS", "RECEIPT_STALE_MINUTES"):
+        monkeypatch.delenv(key, raising=False)
+    settings = _settings(monkeypatch)
+    assert settings.RECEIPT_WORKER_POLL_SECONDS == 2.0
+    assert settings.RECEIPT_STALE_MINUTES == 10
+
+
 def test_empty_mineru_timeout_uses_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """The example env files ship `MINERU_TIMEOUT=` with no value."""
     assert _settings(monkeypatch, MINERU_TIMEOUT="").MINERU_TIMEOUT == 120.0

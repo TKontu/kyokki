@@ -9,7 +9,9 @@
 >   the LAN (17301 frontend, 17300 API). Runbook: [DEPLOY.md](./DEPLOY.md).
 > - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images) → one LLM
 >   extraction call (OpenAI-compatible endpoint, vLLM or Ollama) → RapidFuzz match against
->   `product_master.canonical_name` → review → confirm. Synchronous; runs inside the request.
+>   `product_master.canonical_name` → review → confirm. Since MVP-R3 uploads are queued in
+>   Postgres and the `kyokki-worker` service (`python -m app.worker`) reads them one at a time;
+>   no request waits for extraction. Celery is not used.
 >   No store parsers, no learned templates, no alias lookup, no Ollama vision fallback.
 > - **Not built:** Celery worker (removed in MVP-F2; it crash-looped on a missing module),
 >   `/api/receipts/batch`, `/api/inventory/reconcile`,

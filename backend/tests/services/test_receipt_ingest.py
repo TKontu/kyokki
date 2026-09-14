@@ -38,7 +38,8 @@ async def test_new_file_creates_a_receipt_with_its_hash(db_session: AsyncSession
 
     assert result.duplicate is False
     assert result.receipt.content_sha256 == hashlib.sha256(PDF).hexdigest()
-    assert result.receipt.processing_status == "uploaded"
+    assert result.receipt.processing_status == "queued"
+    assert result.receipt.queued_at is not None
     assert await anyio.Path(result.receipt.image_path).read_bytes() == PDF
 
 
@@ -56,6 +57,21 @@ async def test_same_bytes_under_another_name_is_a_duplicate(db_session: AsyncSes
     assert second.duplicate is True
     assert second.receipt.id == first.receipt.id
     assert await _count(db_session) == 1
+
+
+async def test_duplicate_is_not_queued_again(db_session: AsyncSession):
+    first = await ingest_receipt_file(
+        db_session, content=PDF, filename="order.pdf", content_type="application/pdf"
+    )
+    first.receipt.processing_status = "completed"
+    await db_session.commit()
+
+    second = await ingest_receipt_file(
+        db_session, content=PDF, filename="again.pdf", content_type="application/pdf"
+    )
+
+    assert second.duplicate is True
+    assert second.receipt.processing_status == "completed"
 
 
 @pytest.mark.parametrize("content_type", ["text/plain", "application/zip", ""])

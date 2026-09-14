@@ -12,13 +12,11 @@ from app.db.session import get_db
 from app.schemas.receipt import (
     ReceiptConfirmRequest,
     ReceiptConfirmResponse,
-    ReceiptProcessingResponse,
     ReceiptResponse,
     ReceiptStatus,
 )
-from app.services import receipt_confirm
+from app.services import receipt_confirm, receipt_queue
 from app.services.receipt_ingest import UnsupportedReceiptType, ingest_receipt_file
-from app.services.receipt_processing import ReceiptProcessingService
 
 router = APIRouter()
 
@@ -90,6 +88,8 @@ async def get_receipt(
     Raises:
         HTTPException 404: If receipt not found.
     """
+    # A receipt stuck in processing (worker down) reads as failed so it can be retried
+    await receipt_queue.fail_stale(db)
     receipt = await crud_receipt.get_receipt(db, receipt_id)
     if not receipt:
         raise HTTPException(
@@ -115,6 +115,7 @@ async def list_receipts(
     Returns:
         List of receipts sorted by created_at (most recent first).
     """
+    await receipt_queue.fail_stale(db)
     receipts = await crud_receipt.get_receipts(
         db,
         status=status,
@@ -123,47 +124,44 @@ async def list_receipts(
     return receipts
 
 
-@router.post("/{receipt_id}/process", response_model=ReceiptProcessingResponse)
+@router.post(
+    "/{receipt_id}/process",
+    response_model=ReceiptResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def process_receipt(
     receipt_id: UUID,
     db: AsyncSession = Depends(get_db),
-) -> ReceiptProcessingResponse:
-    """Process a receipt through OCR → LLM extraction → product matching pipeline.
+) -> ReceiptResponse:
+    """Queue a failed (or pre-queue ``uploaded``) receipt to be read again.
 
-    This endpoint triggers the full receipt processing workflow:
-    1. Extract text via OCR (pdfplumber for PDFs, MinerU for images)
-    2. Extract products via LLM (vLLM with structured output)
-    3. Match extracted products to canonical products using fuzzy matching
-    4. Update receipt record with results
-
-    Args:
-        receipt_id: Receipt UUID to process.
-        db: Database session.
-
-    Returns:
-        Processing result with extraction and matching statistics.
+    Uploads are queued automatically; the worker service (``python -m app.worker``) reads
+    queued receipts one at a time. This endpoint never runs the pipeline itself.
 
     Raises:
-        HTTPException 404: If receipt not found.
+        HTTPException 404: Receipt not found.
+        HTTPException 409: Receipt is queued, processing, or was already read.
     """
-    # Get receipt
+    await receipt_queue.fail_stale(db)
     receipt = await crud_receipt.get_receipt(db, receipt_id)
     if not receipt:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Receipt '{receipt_id}' not found",
         )
+    if receipt.processing_status in (ReceiptStatus.QUEUED, ReceiptStatus.PROCESSING):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Receipt is already queued or processing",
+        )
+    if receipt.processing_status in (ReceiptStatus.COMPLETED, ReceiptStatus.CONFIRMED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Receipt was already read",
+        )
 
-    # Process receipt
-    processing_service = ReceiptProcessingService(db)
-    result = await processing_service.process_receipt(receipt)
-
-    return ReceiptProcessingResponse(
-        success=result.success,
-        items_extracted=len(result.extraction.lines) if result.extraction else 0,
-        items_matched=len(result.matched_products),
-        error=result.error,
-    )
+    await receipt_queue.enqueue(db, receipt)
+    return ReceiptResponse.model_validate(receipt)
 
 
 @router.post("/{receipt_id}/confirm", response_model=ReceiptConfirmResponse)

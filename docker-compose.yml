@@ -32,6 +32,22 @@ services:
       - postgres
       - redis
 
+  kyokki-worker:
+    # Reads queued receipts one at a time (python -m app.worker)
+    build: ./backend
+    command: python -m app.worker
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    networks:
+      - kyokki_net
+    depends_on:
+      - postgres
+      - redis
+
   kyokki-telegram:
     # Receipt drop-in bot; idles unless TELEGRAM_BOT_TOKEN is set in .env
     build: ./backend
