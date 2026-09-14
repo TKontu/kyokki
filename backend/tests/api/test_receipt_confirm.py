@@ -367,3 +367,95 @@ class TestConfirmCanonicalUnits:
             },
         )
         assert response.status_code == 422
+
+
+class TestConfirmNewProducts:
+    """MVP-R2: confirm creates generic products, rejects repeats and unread receipts."""
+
+    async def test_new_item_creates_a_product(
+        self, client: AsyncClient, test_db: AsyncSession, processed_receipt: dict
+    ):
+        response = await client.post(
+            f"/api/receipts/{processed_receipt['id']}/confirm",
+            json={
+                "items": [
+                    {
+                        "name": "Ground beef",
+                        "category": "dairy",
+                        "quantity": 400,
+                        "unit": "g",
+                        "purchase_date": "2024-01-06",
+                        "location": "freezer",
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["success"] is True
+        assert (body["items_created"], body["products_created"]) == (1, 1)
+        assert body["aliases_learned"] == 0
+
+    async def test_second_confirm_is_a_conflict(
+        self, client: AsyncClient, test_db: AsyncSession, processed_receipt: dict
+    ):
+        url = f"/api/receipts/{processed_receipt['id']}/confirm"
+        item = {
+            "product_id": processed_receipt["product_id"],
+            "quantity": 1,
+            "unit": "pcs",
+            "purchase_date": "2024-01-06",
+        }
+
+        first = await client.post(url, json={"items": [item]})
+        second = await client.post(url, json={"items": [item]})
+
+        assert first.status_code == 200
+        assert second.status_code == 409
+        assert "already confirmed" in second.json()["detail"]
+
+    async def test_unread_receipt_is_a_conflict(
+        self, client: AsyncClient, test_db: AsyncSession, sample_category: Category
+    ):
+        files = {"file": ("r.jpg", BytesIO(b"unread receipt"), "image/jpeg")}
+        receipt_id = (await client.post("/api/receipts/scan", files=files)).json()["id"]
+
+        response = await client.post(
+            f"/api/receipts/{receipt_id}/confirm", json={"items": []}
+        )
+
+        assert response.status_code == 409
+        assert "not ready" in response.json()["detail"]
+
+    async def test_new_item_without_category_is_rejected(
+        self, client: AsyncClient, test_db: AsyncSession, processed_receipt: dict
+    ):
+        response = await client.post(
+            f"/api/receipts/{processed_receipt['id']}/confirm",
+            json={
+                "items": [
+                    {
+                        "name": "Plastic bag",
+                        "quantity": 1,
+                        "unit": "pcs",
+                        "purchase_date": "2024-01-06",
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Category required" in response.json()["detail"]
+
+    async def test_item_without_product_name_or_line_is_invalid(
+        self, client: AsyncClient, test_db: AsyncSession, processed_receipt: dict
+    ):
+        response = await client.post(
+            f"/api/receipts/{processed_receipt['id']}/confirm",
+            json={
+                "items": [{"quantity": 1, "unit": "pcs", "purchase_date": "2024-01-06"}]
+            },
+        )
+
+        assert response.status_code == 422

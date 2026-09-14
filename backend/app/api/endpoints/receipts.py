@@ -1,16 +1,14 @@
 """API endpoints for Receipt upload and management."""
 
-from datetime import date, timedelta
+from datetime import date
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.exceptions import handle_integrity_errors
 from app.crud import receipt as crud_receipt
 from app.db.session import get_db
-from app.models.inventory_item import InventoryItem
-from app.models.product_master import ProductMaster
 from app.schemas.receipt import (
     ReceiptConfirmRequest,
     ReceiptConfirmResponse,
@@ -18,7 +16,7 @@ from app.schemas.receipt import (
     ReceiptResponse,
     ReceiptStatus,
 )
-from app.services.broadcast_helpers import broadcast_receipt_status
+from app.services import receipt_confirm
 from app.services.receipt_ingest import UnsupportedReceiptType, ingest_receipt_file
 from app.services.receipt_processing import ReceiptProcessingService
 
@@ -174,94 +172,31 @@ async def confirm_receipt(
     confirm_request: ReceiptConfirmRequest,
     db: AsyncSession = Depends(get_db),
 ) -> ReceiptConfirmResponse:
-    """Confirm extracted receipt items and create inventory.
+    """Confirm reviewed receipt items: create inventory, generic products and store aliases.
 
-    This endpoint allows the user to review, edit, and confirm the items
-    extracted from a receipt. Confirmed items are then added to inventory
-    with calculated expiry dates.
-
-    Args:
-        receipt_id: Receipt UUID to confirm.
-        confirm_request: List of confirmed items to add to inventory.
-        db: Database session.
-
-    Returns:
-        Confirmation result with number of inventory items created.
+    Items not sent are skipped. The whole confirm is one transaction.
 
     Raises:
-        HTTPException 404: If receipt not found.
-        HTTPException 400: If product not found or validation fails.
+        HTTPException 404: Receipt not found.
+        HTTPException 409: Receipt already confirmed or not read yet.
+        HTTPException 400: An item names an unknown product, line or category.
     """
-    # Get receipt
-    receipt = await crud_receipt.get_receipt(db, receipt_id)
-    if not receipt:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Receipt '{receipt_id}' not found",
-        )
-
     try:
-        items_created = 0
-
-        for item in confirm_request.items:
-            # Validate product exists
-            stmt = select(ProductMaster).where(ProductMaster.id == item.product_id)
-            result = await db.execute(stmt)
-            product = result.scalar_one_or_none()
-
-            if not product:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Product '{item.product_id}' not found",
-                )
-
-            # Calculate expiry date
-            expiry_date = item.purchase_date + timedelta(
-                days=product.default_shelf_life_days
+        async with handle_integrity_errors():
+            result = await receipt_confirm.confirm_receipt(
+                db, receipt_id, confirm_request.items
             )
+    except receipt_confirm.ReceiptNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except receipt_confirm.ReceiptNotConfirmable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except receipt_confirm.InvalidConfirmItem as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-            # Create inventory item
-            inventory_item = InventoryItem(
-                product_master_id=item.product_id,
-                receipt_id=receipt_id,
-                initial_quantity=item.quantity,
-                current_quantity=item.quantity,
-                unit=item.unit,
-                status="sealed",
-                purchase_date=item.purchase_date,
-                expiry_date=expiry_date,
-                expiry_source="calculated",
-                location="main_fridge",  # Default location
-            )
-
-            db.add(inventory_item)
-            items_created += 1
-
-        # Update receipt status
-        receipt.processing_status = ReceiptStatus.CONFIRMED
-        await db.commit()
-
-        # Broadcast confirmed status
-        await broadcast_receipt_status(
-            receipt_id=receipt.id,
-            status=ReceiptStatus.CONFIRMED,
-            items_extracted=receipt.items_extracted,
-            items_matched=items_created,
-        )
-
-        return ReceiptConfirmResponse(
-            success=True,
-            items_created=items_created,
-            error=None,
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        error_msg = f"Failed to confirm receipt: {str(e)}"
-        return ReceiptConfirmResponse(
-            success=False,
-            items_created=0,
-            error=error_msg,
-        )
+    return ReceiptConfirmResponse(
+        success=True,
+        items_created=result.items_created,
+        products_created=result.products_created,
+        aliases_learned=result.aliases_learned,
+        error=None,
+    )

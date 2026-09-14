@@ -27,6 +27,9 @@ class ExtractedItem(BaseModel):
         ..., description="Position on the receipt; items are addressed by it"
     )
     name: str = Field(..., description="Product name as printed")
+    generic_name: str | None = Field(
+        None, description="Brand-free generic name suggested for a new product"
+    )
     quantity: float = Field(..., description="Amount in `unit`")
     unit: Literal["dl", "tsp", "tbsp", "g", "pcs"] = Field(
         ..., description="Canonical unit"
@@ -78,6 +81,7 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
             ExtractedItem(
                 index=index,
                 name=line["name"],
+                generic_name=line.get("generic_name"),
                 quantity=quantity,
                 unit=unit,
                 product_id=line.get("product_id"),
@@ -158,14 +162,40 @@ class ReceiptProcessingResponse(BaseModel):
 
 
 class ConfirmedItemCreate(BaseModel):
-    """Schema for a confirmed receipt item to add to inventory."""
+    """One reviewed receipt item to add to inventory.
 
-    product_id: UUID = Field(..., description="Product master ID")
+    Give ``product_id`` for an existing product. Otherwise a generic product is reused by name
+    or created: ``name`` and ``category`` default to the receipt line's generic name and
+    category. ``index`` names the receipt line, so its printed name is learned as an alias.
+    """
+
+    index: int | None = Field(
+        None, ge=0, description="Receipt line; its printed name is learned as an alias"
+    )
+    product_id: UUID | None = Field(None, description="Existing product")
+    name: str | None = Field(
+        None, description="Generic product name when product_id is not given"
+    )
+    category: str | None = Field(None, description="Category id for a new product")
     quantity: float = Field(..., gt=0, description="Quantity to add")
     unit: str = Field(
         ..., description="Unit: dl, tsp, tbsp, g, pcs (others convert on write)"
     )
     purchase_date: date = Field(..., description="Purchase date for expiry calculation")
+    expiry_date: date | None = Field(
+        None, description="Override; default is purchase date + shelf life"
+    )
+    location: Literal["main_fridge", "freezer", "pantry"] | None = Field(
+        None, description="Override; default follows the product's storage type"
+    )
+
+    @model_validator(mode="after")
+    def identifies_a_product(self) -> "ConfirmedItemCreate":
+        if self.name is not None and not self.name.strip():
+            self.name = None
+        if self.product_id is None and self.name is None and self.index is None:
+            raise ValueError("Each item needs a product_id, name or index")
+        return self
 
     @model_validator(mode="after")
     def canonical_units(self) -> "ConfirmedItemCreate":
@@ -191,4 +221,6 @@ class ReceiptConfirmResponse(BaseModel):
 
     success: bool = Field(..., description="Whether confirmation succeeded")
     items_created: int = Field(0, description="Number of inventory items created")
+    products_created: int = Field(0, description="New generic products created")
+    aliases_learned: int = Field(0, description="Printed names learned or reinforced")
     error: str | None = Field(None, description="Error message if confirmation failed")

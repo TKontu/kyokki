@@ -48,10 +48,17 @@ _TRAILING_PRICE = re.compile(r"\s+-?\d+[,.]\d{2}(\s*€)?$")
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 
+# Catalog names offered to the model so equivalent products keep one name; bounds the prompt
+MAX_KNOWN_PRODUCTS = 300
+
 _INSTRUCTIONS = """Extract every purchased product from this grocery receipt.
 
 Rules:
 - One entry per product line. n = the product name exactly as written, without the price.
+- g = the simple generic English name a home cook would write on a shopping list. No brand,
+  size, fat content or percentage, or flavour-neutral variant, and the same name for equivalent
+  cuts. Examples: SNELLMAN NAUDAN JAUHELIHA 10% -> "Ground beef"; ATRIA KANAN FILEESUIKALE ->
+  "Chicken fillet"; VALIO KEVYTMAITOJUOMA 1L -> "Milk".{known_products}
 - A following line like "3 KPL 1,88 €/KPL" means q = 3 for the product above it.
 - A following line like "0,386 KG 3,89 €/KG" means w = 0.386 (kg) for the product above it.
 - Otherwise q = 1 and w = null.
@@ -62,7 +69,7 @@ Rules:
 - Skip store header, totals, discounts (NORM., ALENNUS), fees, deposits, payment and VAT
   lines as products.
 
-Return only compact JSON: {{"s": chain, "d": date, "p": [{{"n": name, "q": quantity, "w": weight_kg or null, "c": category or null}}]}}."""
+Return only compact JSON: {{"s": chain, "d": date, "p": [{{"n": name, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null}}]}}."""
 
 
 def prefilter_receipt_text(text: str) -> str:
@@ -77,9 +84,30 @@ def prefilter_receipt_text(text: str) -> str:
     )
 
 
-def build_instructions(categories: Sequence[CategoryOption]) -> str:
+def build_instructions(
+    categories: Sequence[CategoryOption], known_products: Sequence[str] = ()
+) -> str:
     listed = ", ".join(f"{c.id} ({c.name})" for c in categories) or "none"
-    return _INSTRUCTIONS.format(categories=listed)
+    first_spelling: dict[str, str] = {}
+    for name in known_products:
+        tidy = " ".join(name.split())
+        if tidy:
+            first_spelling.setdefault(tidy.casefold(), tidy)
+    unique = sorted(first_spelling.values(), key=str.casefold)[:MAX_KNOWN_PRODUCTS]
+    known = (
+        "\n  When an equivalent product is listed here, use its name exactly. "
+        f"Known products: {', '.join(unique)}."
+        if unique
+        else ""
+    )
+    return _INSTRUCTIONS.format(categories=listed, known_products=known)
+
+
+def _generic_name(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    tidy = " ".join(value.split())
+    return tidy[:1].upper() + tidy[1:] if tidy else None
 
 
 def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
@@ -95,11 +123,12 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
                     "type": "object",
                     "properties": {
                         "n": {"type": "string"},
+                        "g": {"type": "string"},
                         "q": {"type": "number"},
                         "w": {"type": ["number", "null"]},
                         "c": {"enum": [*category_ids, None]},
                     },
-                    "required": ["n", "q", "w", "c"],
+                    "required": ["n", "g", "q", "w", "c"],
                 },
             },
         },
@@ -159,6 +188,7 @@ def parse_completion(
             lines.append(
                 ExtractedLine(
                     name=name,
+                    generic_name=_generic_name(entry.get("g")),
                     quantity=1.0 if quantity is None else quantity,
                     weight_kg=entry.get("w"),
                     category=category if category in category_ids else None,
@@ -236,22 +266,26 @@ async def _complete(
 
 
 async def extract_from_text(
-    text: str, categories: Sequence[CategoryOption]
+    text: str,
+    categories: Sequence[CategoryOption],
+    known_products: Sequence[str] = (),
 ) -> ReceiptExtraction:
     """Extract products from OCR or PDF text."""
-    prompt = (
-        f"{build_instructions(categories)}\n\nReceipt:\n{prefilter_receipt_text(text)}"
-    )
+    instructions = build_instructions(categories, known_products)
+    prompt = f"{instructions}\n\nReceipt:\n{prefilter_receipt_text(text)}"
     return await _complete(prompt, categories, method="text")
 
 
 async def extract_from_image(
-    image: bytes, content_type: str, categories: Sequence[CategoryOption]
+    image: bytes,
+    content_type: str,
+    categories: Sequence[CategoryOption],
+    known_products: Sequence[str] = (),
 ) -> ReceiptExtraction:
     """Extract products by reading the receipt image with a vision-capable model."""
     data_url = f"data:{content_type};base64,{base64.b64encode(image).decode()}"
     content: list[dict[str, Any]] = [
-        {"type": "text", "text": build_instructions(categories)},
+        {"type": "text", "text": build_instructions(categories, known_products)},
         {"type": "image_url", "image_url": {"url": data_url}},
     ]
     return await _complete(content, categories, method="vision")

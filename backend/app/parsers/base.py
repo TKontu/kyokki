@@ -18,6 +18,10 @@ class ExtractedLine(BaseModel):
     name: str = Field(
         ..., min_length=1, description="Product name as printed, without price"
     )
+    generic_name: str | None = Field(
+        default=None,
+        description="Brand-free generic English name, e.g. 'Ground beef' (MVP-R2)",
+    )
     quantity: float = Field(default=1.0, ge=0, description="Count from an 'n KPL' line")
     weight_kg: float | None = Field(
         default=None, ge=0, description="Weight from an 'x,xxx KG' line"

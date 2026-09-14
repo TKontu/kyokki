@@ -65,7 +65,8 @@ class Settings(BaseSettings):
     )
     LLM_MODEL: str = "muse-glimmer"  # always-loaded; validated in MVP-R0
     LLM_TEMPERATURE: float = 0.1
-    LLM_MAX_TOKENS: int = 4096  # reasoning plus a ~50-line receipt fits with margin
+    # Reasoning plus a 49-line receipt with generic names took 3758 tokens (MVP-R2 e2e)
+    LLM_MAX_TOKENS: int = 8192
     LLM_TIMEOUT: float = 180.0  # seconds; extraction takes ~40-55 s on muse-glimmer
     # Sent as chat_template_kwargs.reasoning_strength (Muse Glimmer accepts only these values).
     # Set to an empty value for models whose template has no such argument.

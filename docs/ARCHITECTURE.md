@@ -15,8 +15,14 @@
 >   `/api/receipts/batch`, `/api/inventory/reconcile`,
 >   `/api/scanner/input` (the real endpoint is `/api/scanner/scan`), GS1 parsing, shopping
 >   list UI, Home Assistant, offline mode, service worker.
-> - **Partly used:** `store_product_alias` is read by receipt matching since MVP-R1b (alias hit
->   first, alias names in the fuzzy candidates); R2 adds the writer on confirm.
+> - **Products are generic (MVP-R2 ruling, 2026-09-14):** one `product_master` row per thing
+>   a household buys ("Ground beef", "Oat drink"), never per brand, size, fat content or cut.
+>   Extraction returns a brand-free English name per line; matching tries a learned alias of the
+>   printed name, then that generic name, then fuzzy. Names are English for now; language options
+>   come later.
+> - **Aliases:** `store_product_alias` is read by receipt matching since MVP-R1b and written by
+>   confirm since MVP-R2: each confirmed line's printed name (per chain, `unknown` without a
+>   store) points at the chosen generic product.
 >   `consumption_log` is written on consume and discard since MVP-S1; nothing reads it yet.
 > - **MVP decisions (see `docs/TODO.md`):** polling instead of WebSockets on the iPad,
 >   FastAPI `BackgroundTasks` instead of Celery, `<input type="file" capture>` instead of

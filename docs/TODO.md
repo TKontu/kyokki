@@ -324,6 +324,32 @@ increment U1 after R1b, before R2 creates products.
 - **Acceptance:** confirm with a mix of matched, new, and skipped items yields the right
   product, inventory and alias rows with category-derived locations; duplicate confirm of
   the same receipt is rejected (409).
+- As built (branch `feat/mvp-r2-confirm-generic-products`), rulings of 2026-09-14:
+  - [x] **Products are generic.** SNELLMAN and ATRIA NAUDAN JAUHELIHA are one product; brand,
+    fat content and cut do not matter. Names are **English** first (language options later).
+  - [x] Extraction contract gains `g` (generic English name, required in the schema) with
+    examples in the prompt; the catalog's product names (up to 300) are listed so the model
+    reuses them. Stored per line as `generic_name`; `ExtractedItem.generic_name`.
+  - [x] Matching: alias of the printed name → exact generic name → exact printed name → best
+    fuzzy of generic-vs-products and printed-vs-products-and-aliases (threshold 80).
+  - [x] `services/receipt_confirm.py`; the endpoint maps its errors (404, 409, 400). One
+    transaction with a row lock on the receipt; any invalid item writes nothing.
+  - [x] Items: `index` (line; learns the alias), `product_id`, or `name` (defaults to the line's
+    generic name) with `category` (defaults to the line's). A name is reused
+    case-insensitively, including within one confirm; new products take shelf life from the
+    category, storage from the category mapping, units from the confirmed unit.
+  - [x] `expiry_date` (source `manual`) and `location` overrides; default location follows the
+    product's storage type.
+  - [x] **Only `completed` receipts can be confirmed**; confirmed → 409 "already confirmed",
+    others → 409 "not ready". The `200 success: false` error path is gone.
+  - [x] Aliases keyed by printed name and chain: created verified, or reinforced
+    (`occurrence_count + 1`) and corrected to the chosen product.
+  - [x] Broadcasts after commit: `inventory created` per item, then the receipt status.
+  - [x] `LLM_MAX_TOKENS` default 8192: the 49-line receipt with generic names used 3758.
+  - [x] Frontend types: `generic_name`, `ConfirmedItemCreate`, `ReceiptConfirmRequest`,
+    `ReceiptConfirmResponse` (no UI; R7).
+  - [x] E2E with `muse-glimmer` recorded in `docs/vLLM_MANUAL_TEST.md`: a second receipt with
+    other brands arrived 11/12 pre-matched.
 
 #### MVP-R3 — Background receipt processing
 - `POST /receipts/{id}/process` sets `processing_status = "processing"`, schedules the
@@ -556,6 +582,8 @@ Ordered by expected value once MVP is live.
     broadcast, Redis optional (scanner mode state moves to Postgres).
 12. Undo for consume: a backend endpoint that reverses a consume (quantity, status,
     `opened_date`) and removes its `consumption_log` row, then an Undo action on C2's toast.
+13. Product name languages: generic names are English since MVP-R2; offer Finnish (or any
+    language) names, e.g. a per-product display name or translation at extraction time.
 
 ---
 
@@ -689,8 +717,8 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
-- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [x] S2 (PR #30)  [ ] T1 (PR open)  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
+- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [ ] R2 (PR open)  [x] C1 (PR #28)  [x] C2 (PR #29)
+- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance

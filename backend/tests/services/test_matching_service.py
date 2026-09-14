@@ -507,3 +507,119 @@ class TestAliasFirstMatching:
             event.remove(engine, "before_cursor_execute", count)
 
         assert statements == []
+
+
+class TestGenericNameMatching:
+    """Products are generic (MVP-R2 ruling): the brand-free name reaches the product."""
+
+    @pytest.fixture
+    async def generic_catalog(
+        self, db_session: AsyncSession
+    ) -> dict[str, ProductMaster]:
+        from app.models.store_product_alias import StoreProductAlias
+
+        db_session.add(
+            Category(
+                id="meat",
+                display_name="Meat",
+                icon="🥩",
+                default_shelf_life_days=3,
+                meal_contexts=["dinner"],
+                sort_order=1,
+            )
+        )
+        await db_session.flush()
+
+        def product(name: str) -> ProductMaster:
+            return ProductMaster(
+                id=uuid4(),
+                canonical_name=name,
+                category="meat",
+                storage_type="refrigerator",
+                default_shelf_life_days=3,
+                unit_type="weight",
+                default_unit="g",
+            )
+
+        products = {
+            "beef": product("Ground beef"),
+            "chicken": product("Chicken fillet"),
+            "pork": product("Ground pork"),
+        }
+        db_session.add_all(products.values())
+        await db_session.flush()
+        db_session.add(
+            StoreProductAlias(
+                product_master_id=products["pork"].id,
+                store_chain="s-group",
+                receipt_name="HK SEKAJAUHELIHA",
+                manually_verified=True,
+            )
+        )
+        await db_session.commit()
+        return products
+
+    async def test_generic_name_matches_exactly_when_the_printed_name_is_unrelated(
+        self, db_session, generic_catalog
+    ):
+        service = MatchingService(db_session)
+        await service.prepare("s-group")
+
+        for printed in ("SNELLMAN NAUDAN JAUHELIHA 10%", "ATRIA NAUDAN JAUHELIHA 17%"):
+            result = service.match_line(
+                printed, "s-group", min_score=80, generic_name="ground  beef"
+            )
+            assert result is not None
+            assert result.product.id == generic_catalog["beef"].id
+            assert result.source == "exact"
+            assert result.score == 100.0
+
+    async def test_printed_name_alias_wins_over_the_generic_name(
+        self, db_session, generic_catalog
+    ):
+        service = MatchingService(db_session)
+        await service.prepare("s-group")
+
+        result = service.match_line(
+            "HK SEKAJAUHELIHA", "s-group", min_score=80, generic_name="Ground beef"
+        )
+
+        assert result is not None
+        assert result.product.id == generic_catalog["pork"].id
+        assert result.source == "alias"
+
+    async def test_fuzzy_generic_match_above_the_threshold(
+        self, db_session, generic_catalog
+    ):
+        service = MatchingService(db_session)
+        await service.prepare("s-group")
+
+        result = service.match_line(
+            "KARIVARI KANAN FILEESUIKALE", "s-group", 80, generic_name="Chicken fillets"
+        )
+
+        assert result is not None
+        assert result.product.id == generic_catalog["chicken"].id
+        assert result.source == "fuzzy"
+
+    async def test_fuzzy_generic_match_respects_min_score(
+        self, db_session, generic_catalog
+    ):
+        service = MatchingService(db_session)
+        await service.prepare("s-group")
+
+        result = service.match_line(
+            "PIRKKA LOHIFILEE", "s-group", min_score=80, generic_name="Salmon"
+        )
+
+        assert result is None
+
+    async def test_without_a_generic_name_matching_is_unchanged(
+        self, db_session, generic_catalog
+    ):
+        service = MatchingService(db_session)
+        await service.prepare("s-group")
+
+        assert (
+            service.match_line("SNELLMAN NAUDAN JAUHELIHA 10%", "s-group", 80) is None
+        )
