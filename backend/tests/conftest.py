@@ -166,6 +166,21 @@ async def _dispose_app_engine() -> AsyncGenerator[None, None]:
 
 
 @pytest.fixture
+def session_factory(db_session: AsyncSession):
+    """A session factory handing out the test session without closing it.
+
+    For code that opens its own sessions (the receipt worker, the Telegram bot).
+    """
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def factory():
+        yield db_session
+
+    return factory
+
+
+@pytest.fixture
 def mock_redis_client():
     """Mock Redis client for testing broadcasts."""
     from unittest.mock import AsyncMock

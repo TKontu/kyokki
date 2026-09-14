@@ -1,6 +1,5 @@
-"""Turn one Telegram update into a reply, an ingested receipt and a queued processing job."""
+"""Turn one Telegram update into a reply and a receipt queued for the worker service."""
 
-import asyncio
 from collections.abc import Callable, Iterable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -11,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.schemas.receipt import ReceiptResponse
+from app.services import receipt_queue
 from app.services.receipt_ingest import (
     ALLOWED_CONTENT_TYPES,
     UnsupportedReceiptType,
@@ -36,13 +36,8 @@ class BotApi(Protocol):
     async def download_file(self, file_path: str) -> bytes: ...
 
 
-@dataclass(frozen=True)
-class Job:
-    """A receipt waiting to be read; ``message_id`` is the acknowledgement to edit."""
-
-    receipt_id: UUID
-    chat_id: int
-    message_id: int
+class Notifier(Protocol):
+    def watch(self, receipt_id: UUID, chat_id: int, message_id: int) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -58,12 +53,12 @@ class BotHandler:
         self,
         client: BotApi,
         session_factory: SessionFactory,
-        queue: "asyncio.Queue[Job]",
+        notifier: Notifier,
         allowed_chat_ids: Iterable[int],
     ):
         self.client = client
         self.session_factory = session_factory
-        self.queue = queue
+        self.notifier = notifier
         self.allowed_chat_ids = frozenset(allowed_chat_ids)
 
     async def handle_update(self, update: dict[str, Any]) -> None:
@@ -125,6 +120,11 @@ class BotHandler:
                 await self.client.send_message(chat_id, messages.unsupported_text())
                 return
             receipt = ReceiptResponse.model_validate(result.receipt)
+            ahead = (
+                0
+                if result.duplicate
+                else await receipt_queue.queue_position(db, result.receipt)
+            )
 
         if result.duplicate:
             logger.info(
@@ -133,13 +133,11 @@ class BotHandler:
             await self.client.send_message(chat_id, messages.duplicate_text(receipt))
             return
 
-        ahead = self.queue.qsize()
         message_id = await self.client.send_message(
             chat_id, messages.received_text(ahead)
         )
-        await self.queue.put(
-            Job(receipt_id=receipt.id, chat_id=chat_id, message_id=message_id)
-        )
+        # The worker service reads it from the queue; the notifier edits the acknowledgement
+        self.notifier.watch(receipt.id, chat_id, message_id)
         logger.info(
             "Receipt received from Telegram",
             extra={"receipt_id": str(receipt.id), "queued_ahead": ahead},

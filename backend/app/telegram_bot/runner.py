@@ -1,16 +1,15 @@
-"""Bot process: long-poll Telegram and run the receipt worker alongside."""
+"""Bot process: long-poll Telegram and report results of receipts read by the worker."""
 
 import asyncio
-import contextlib
 import logging
-import signal
 from typing import Any, Protocol
 
 from app.core.config import Settings
 from app.core.logging import get_logger, setup_logging
+from app.core.service_runner import run_service
 from app.telegram_bot.client import TelegramClient
-from app.telegram_bot.handlers import BotHandler, Job
-from app.telegram_bot.worker import ReceiptWorker
+from app.telegram_bot.handlers import BotHandler
+from app.telegram_bot.notifier import ResultNotifier
 
 logger = get_logger(__name__)
 
@@ -90,14 +89,13 @@ async def run(settings: Settings) -> None:
         token=settings.TELEGRAM_BOT_TOKEN.get_secret_value(),
         base_url=settings.TELEGRAM_API_BASE,
     )
-    queue: asyncio.Queue[Job] = asyncio.Queue()
+    notifier = ResultNotifier(client, AsyncSessionLocal)
     handler = BotHandler(
         client=client,
         session_factory=AsyncSessionLocal,
-        queue=queue,
+        notifier=notifier,
         allowed_chat_ids=settings.TELEGRAM_ALLOWED_CHAT_IDS,
     )
-    worker = ReceiptWorker(client, AsyncSessionLocal)
     logger.info(
         "Telegram bot started",
         extra={"allowed_chats": len(settings.TELEGRAM_ALLOWED_CHAT_IDS)},
@@ -107,7 +105,7 @@ async def run(settings: Settings) -> None:
             tasks.create_task(
                 poll_loop(client, handler, poll_seconds=settings.TELEGRAM_POLL_TIMEOUT)
             )
-            tasks.create_task(worker.run(queue))
+            tasks.create_task(notifier.run())
     finally:
         await client.aclose()
 
@@ -116,17 +114,4 @@ def main() -> None:
     from app.core.config import settings
 
     configure_logging()
-
-    async def _main() -> None:
-        task = asyncio.create_task(run(settings))
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            # Not supported on Windows, where Ctrl+C still raises KeyboardInterrupt
-            with contextlib.suppress(NotImplementedError, RuntimeError):
-                loop.add_signal_handler(sig, task.cancel)
-        try:
-            await task
-        except asyncio.CancelledError:
-            logger.info("Telegram bot stopped")
-
-    asyncio.run(_main())
+    run_service(lambda: run(settings), "Telegram bot")

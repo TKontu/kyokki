@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.crud import receipt as crud_receipt
 from app.models.receipt import Receipt
+from app.services import receipt_queue
 
 logger = get_logger(__name__)
 
@@ -75,4 +76,6 @@ async def ingest_receipt_file(
             raise
         return IngestResult(receipt=existing, duplicate=True)
 
+    # Every new upload goes straight to the worker queue (MVP-R3)
+    await receipt_queue.enqueue(db, receipt)
     return IngestResult(receipt=receipt, duplicate=False)

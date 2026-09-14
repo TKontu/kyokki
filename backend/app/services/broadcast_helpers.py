@@ -102,7 +102,9 @@ async def publish_message(message: dict[str, Any]) -> None:
 
 async def broadcast_receipt_status(
     receipt_id: UUID,
-    status: Literal["uploaded", "processing", "completed", "failed", "confirmed"],
+    status: Literal[
+        "uploaded", "queued", "processing", "completed", "failed", "confirmed"
+    ],
     items_extracted: int = 0,
     items_matched: int = 0,
     error: str | None = None,

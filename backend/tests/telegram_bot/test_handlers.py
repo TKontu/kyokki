@@ -1,14 +1,16 @@
 """One Telegram update in, the right reply and ingest out."""
 
-import asyncio
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.receipt import Receipt
+from app.schemas.receipt import ReceiptStatus
 from app.telegram_bot import messages
 from app.telegram_bot.client import TelegramError
-from app.telegram_bot.handlers import BotHandler, Job
+from app.telegram_bot.handlers import BotHandler
 
 from .conftest import FakeTelegram
 
@@ -34,17 +36,30 @@ def _document(file_id: str = "doc-1", mime: str = "application/pdf", size: int =
     }
 
 
+class FakeNotifier:
+    """Records which acknowledgements the handler asked to update later."""
+
+    def __init__(self):
+        self.watched: list[tuple] = []
+
+    def watch(self, receipt_id, chat_id: int, message_id: int) -> None:
+        self.watched.append((receipt_id, chat_id, message_id))
+
+    def empty(self) -> bool:
+        return not self.watched
+
+
 def _handler(
     telegram: FakeTelegram, session_factory
-) -> tuple[BotHandler, asyncio.Queue]:
-    queue: asyncio.Queue[Job] = asyncio.Queue()
+) -> tuple[BotHandler, FakeNotifier]:
+    notifier = FakeNotifier()
     handler = BotHandler(
         client=telegram,
         session_factory=session_factory,
-        queue=queue,
+        notifier=notifier,
         allowed_chat_ids=[ALLOWED],
     )
-    return handler, queue
+    return handler, notifier
 
 
 async def _receipt_count(db: AsyncSession) -> int:
@@ -103,9 +118,32 @@ class TestFiles:
 
         receipt = (await db_session.execute(select(Receipt))).scalar_one()
         assert receipt.image_path.endswith(".pdf")
+        # The worker service reads it from the database queue (MVP-R3)
+        assert receipt.processing_status == ReceiptStatus.QUEUED
         assert telegram.sent == [(ALLOWED, messages.received_text(0))]
-        job = queue.get_nowait()
-        assert job == Job(receipt_id=receipt.id, chat_id=ALLOWED, message_id=101)
+        assert queue.watched == [(receipt.id, ALLOWED, 101)]
+
+    async def test_queue_position_comes_from_the_database(
+        self, session_factory, db_session
+    ):
+        db_session.add(
+            Receipt(
+                id=uuid4(),
+                image_path="data/receipts/other.pdf",
+                processing_status=ReceiptStatus.PROCESSING,
+                queued_at=datetime.now(UTC) - timedelta(minutes=1),
+                processing_started_at=datetime.now(UTC),
+                items_extracted=0,
+                items_matched=0,
+            )
+        )
+        await db_session.commit()
+        telegram = FakeTelegram({"doc-1": (PDF, len(PDF))})
+        handler, _ = _handler(telegram, session_factory)
+
+        await handler.handle_update(_update(ALLOWED, document=_document("doc-1")))
+
+        assert telegram.sent == [(ALLOWED, messages.received_text(1))]
 
     async def test_queue_position_is_reported(self, session_factory):
         telegram = FakeTelegram(
@@ -177,7 +215,7 @@ class TestFiles:
         await handler.handle_update(_update(ALLOWED, document=_document("doc-again")))
 
         assert await _receipt_count(db_session) == 1
-        assert queue.qsize() == 1
+        assert len(queue.watched) == 1
         assert telegram.sent[1][1].startswith("Already received")
 
     async def test_download_failure_replies_and_queues_nothing(

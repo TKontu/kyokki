@@ -9,6 +9,8 @@ Pipeline:
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 import anyio
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +37,8 @@ from app.services.ocr_service import (
 from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)
+
+MAX_ERROR_CHARS = 500  # stored on the receipt and shown to the user
 
 
 @dataclass
@@ -95,13 +99,17 @@ class ReceiptProcessingService:
 
     async def process_receipt(self, receipt: Receipt) -> ProcessingResult:
         """Process a receipt through the full pipeline and update the record."""
+        row: Any = receipt  # Column-typed model: assign plain values
         try:
-            receipt.processing_status = ReceiptStatus.PROCESSING
-            await self.db.commit()
+            if receipt.processing_status != ReceiptStatus.PROCESSING:
+                # Called directly rather than through the queue worker, which already claimed it
+                row.processing_status = ReceiptStatus.PROCESSING
+                row.processing_started_at = datetime.now(UTC)
+                await self.db.commit()
+                await broadcast_receipt_status(
+                    receipt_id=receipt.id, status=ReceiptStatus.PROCESSING
+                )
             logger.info(f"Starting processing for receipt {receipt.id}")
-            await broadcast_receipt_status(
-                receipt_id=receipt.id, status=ReceiptStatus.PROCESSING
-            )
 
             categories = [
                 CategoryOption(id=str(c.id), name=str(c.display_name))
@@ -141,9 +149,10 @@ class ReceiptProcessingService:
                 if match:
                     matched_products.append(match)
 
-            receipt.processing_status = ReceiptStatus.COMPLETED
-            receipt.ocr_raw_text = ocr_text
-            receipt.ocr_structured = {
+            row.processing_status = ReceiptStatus.COMPLETED
+            row.error = None
+            row.ocr_raw_text = ocr_text
+            row.ocr_structured = {
                 "method": extraction.method,
                 "store_chain": extraction.store_chain,
                 "purchase_date": extraction.purchase_date.isoformat()
@@ -151,13 +160,13 @@ class ReceiptProcessingService:
                 else None,
                 "lines": stored_lines,
             }
-            receipt.items_extracted = len(extraction.lines)
-            receipt.items_matched = len(matched_products)
+            row.items_extracted = len(extraction.lines)
+            row.items_matched = len(matched_products)
             # Values the user entered at upload win over what was read from the receipt
             if chain and not receipt.store_chain:
-                receipt.store_chain = chain
+                row.store_chain = chain
             if extraction.purchase_date and not receipt.purchase_date:
-                receipt.purchase_date = extraction.purchase_date
+                row.purchase_date = extraction.purchase_date
 
             await self.db.commit()
             await self.db.refresh(receipt)
@@ -182,9 +191,13 @@ class ReceiptProcessingService:
             )
 
         except Exception as e:
-            error_msg = f"Receipt processing failed: {str(e)}"
+            error_msg = f"Receipt processing failed: {str(e)}"[:MAX_ERROR_CHARS]
 
-            receipt.processing_status = ReceiptStatus.FAILED
+            # The session may hold a failed flush; start clean before recording the failure
+            await self.db.rollback()
+            await self.db.refresh(receipt)
+            row.processing_status = ReceiptStatus.FAILED
+            row.error = error_msg
             await self.db.commit()
 
             await broadcast_receipt_status(

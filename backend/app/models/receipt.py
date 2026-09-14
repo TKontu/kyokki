@@ -29,8 +29,13 @@ class Receipt(Base):
     ocr_structured = Column(JSONB, nullable=True)  # Parsed items and metadata
 
     # Processing status
-    # uploaded, processing, completed, failed, confirmed (schemas.receipt.ReceiptStatus)
+    # queued, processing, completed, failed, confirmed; uploaded on rows from before MVP-R3
+    # (schemas.receipt.ReceiptStatus)
     processing_status = Column(String, nullable=False, default="uploaded", index=True)
+    # Queue (MVP-R3): FIFO by queued_at; processing_started_at detects stale work
+    queued_at = Column(DateTime(timezone=True), nullable=True)
+    processing_started_at = Column(DateTime(timezone=True), nullable=True)
+    error = Column(Text, nullable=True)  # Last failure reason, cleared on success
     batch_id = Column(
         UUID(as_uuid=True), nullable=True, index=True
     )  # Multi-receipt batch

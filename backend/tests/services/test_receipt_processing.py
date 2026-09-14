@@ -373,6 +373,62 @@ class TestPersistence:
         assert pdf_receipt.items_matched == 0
 
 
+class TestQueueFields:
+    """MVP-R3: the worker has already claimed the receipt; failures are stored."""
+
+    async def test_claimed_receipt_is_not_marked_processing_again(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        pdf_receipt.processing_status = ReceiptStatus.PROCESSING
+        await db_session.commit()
+
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction()),
+            patch(
+                "app.services.receipt_processing.broadcast_receipt_status",
+                new_callable=AsyncMock,
+            ) as broadcast,
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        statuses = [call.kwargs["status"] for call in broadcast.await_args_list]
+        assert statuses == [ReceiptStatus.COMPLETED]
+
+    async def test_success_clears_a_previous_error(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        pdf_receipt.error = "LLM timed out"
+        await db_session.commit()
+
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction()),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.error is None
+        assert pdf_receipt.processing_started_at is not None
+
+    async def test_failure_stores_a_bounded_error(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                side_effect=LLMExtractionError("timed out " + "x" * 2000),
+            ),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.error.startswith("Receipt processing failed: timed out")
+        assert len(pdf_receipt.error) <= 500
+
+
 class TestFailures:
     async def test_extraction_error_marks_receipt_failed(
         self, service, pdf_receipt, sample_category, db_session

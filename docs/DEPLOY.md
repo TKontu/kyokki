@@ -13,6 +13,13 @@ Follow it top to bottom on a fresh host; the "Updating" section covers later rel
 PostgreSQL and Redis are reachable only inside the compose network. Receipt uploads land in
 `./data`, logs in `./logs`, and the database in the `postgres_data` volume.
 
+Two more services publish no port:
+- **`kyokki-worker`** reads uploaded receipts (OCR or vision, LLM extraction, matching) one at a
+  time from a queue in Postgres. Uploads return immediately with status `queued`; the receipt
+  moves to `processing` and then `completed` or `failed`. Without the worker, receipts stay
+  queued.
+- **`kyokki-telegram`** is the receipt drop-in bot (see "Telegram bot" below).
+
 ## Prerequisites
 
 - Docker Engine with the Compose plugin on the homelab host.
@@ -43,7 +50,7 @@ docker compose -f docker-compose.prod.yml run --rm kyokki-api python -m app.db.s
 # 4. Verify.
 curl -s http://localhost:17300/api/health      # backend directly
 curl -s http://localhost:17301/api/health      # through the frontend proxy
-docker compose -f docker-compose.prod.yml ps   # api, frontend, postgres, redis all "Up"
+docker compose -f docker-compose.prod.yml ps   # api, worker, telegram, frontend, postgres, redis "Up"
 ```
 
 `POSTGRES_PASSWORD` in `stack.env` is used both by the `postgres` container (on first start it
@@ -63,6 +70,13 @@ too (`ALTER USER kyokki_user PASSWORD '...'`).
 > untracked it deletes the file from any checkout that still has the old version when you
 > `git pull`. Copy it aside first (`cp stack.env /tmp/stack.env.bak`) and restore it after the
 > pull. Later updates do not touch it.
+
+> **Receipt queue (MVP-R3, revision `c3e9a7b5d1f2`):** the migration adds `queued_at`,
+> `processing_started_at` and `error` to receipts, and the new `kyokki-worker` service reads the
+> queue; `up -d --build` starts it. Receipts uploaded before this release keep status `uploaded`;
+> queue one with `curl -X POST http://localhost:17300/api/receipts/<id>/process`. A receipt
+> left `processing` for more than `RECEIPT_STALE_MINUTES` (default 10), for example after the
+> worker was restarted mid-read, is shown as `failed` and can be queued again the same way.
 
 > **Unit migration (MVP-U1, revision `a4f8c2d91e37`):** `alembic upgrade head` converts stored
 > quantities to `dl | tsp | tbsp | g | pcs` (e.g. 1000 ml becomes 10 dl). It prints a warning for
@@ -95,15 +109,16 @@ It long-polls Telegram, so the homelab needs no open port.
    people) and restart the bot:
    `docker compose -f docker-compose.prod.yml up -d kyokki-telegram`.
 5. Share a receipt to the bot. It answers "Received", then edits that message with the summary
-   after about a minute. Receipts are read one at a time; the rest wait in a queue.
+   after about a minute. `kyokki-worker` reads receipts one at a time; the rest wait in the
+   queue and the reply says how many are ahead.
 
 Behaviour worth knowing:
 - Sending the same file again (on Telegram or through the upload API) is rejected as already
   received, so a receipt is never imported twice. The API answers 409 with the existing id.
 - Photos sent the normal way are compressed by Telegram; send them **as a file** for better OCR.
   Files over 20 MB cannot be downloaded by bots.
-- Queued receipts that were not read yet when the bot restarts stay "uploaded"; process them
-  from the iPad.
+- Receipts are queued in the database, so a bot restart loses nothing; they are still read.
+  Only the "Received" messages sent before the restart are not edited with the result.
 - Without a token the service logs "Telegram bot disabled" and idles.
 
 **Privacy:** receipts pass through Telegram's servers, and a receipt shows what you bought, where
@@ -117,6 +132,7 @@ Keep the token secret: anyone with it can read what is sent to the bot. If it le
 ```bash
 docker compose -f docker-compose.prod.yml logs -f kyokki-api      # backend logs
 docker compose -f docker-compose.prod.yml logs -f frontend        # Next.js logs
+docker compose -f docker-compose.prod.yml logs -f kyokki-worker   # receipt reading logs
 docker compose -f docker-compose.prod.yml logs -f kyokki-telegram # receipt bot logs
 docker compose -f docker-compose.prod.yml exec postgres \
   pg_dump -U kyokki_user kyokki > backup-$(date +%F).sql          # database backup
