@@ -25,8 +25,10 @@ capabilities working together on the kitchen iPad, over the LAN, with no laptop 
    or deleted. Each action reflects in the list within one second.
 3. An item can be added by hand: pick an existing product or type a new name and category;
    expiry is pre-filled from category shelf life and can be overridden.
-4. A receipt photo can be uploaded from the camera. Processing runs in the background; the
-   app shows status and the receipt can be reopened later from a Receipts list.
+4. A receipt (e-receipt PDF, loyalty-app receipt or screenshot, or a photo of a paper receipt)
+   can be shared from the phone to the Kyokki Telegram bot, or uploaded from the iPad.
+   Processing runs in the background; the bot replies when it is done, and the receipt can be
+   reopened later from the iPad Receipts list.
 5. The review screen lists each extracted item with its matched product (or "new"), quantity
    and unit. Every field is editable, items can be skipped, a different product can be picked.
 6. Confirm creates inventory items for all kept rows, auto-creating products for new ones with
@@ -64,10 +66,11 @@ previous wave is merged. Backend and frontend increments inside a wave are indep
 | MVP-S3 | 3 | frontend | Quick Add item (product search or new product) | 8h | C1, S1 |
 | MVP-S4 | 3 | frontend | Item edit sheet: adjust quantity/expiry/location, mark gone, delete | 5h | C1 |
 | MVP-R3 | 3 | backend | Background receipt processing, status transitions, 202 response | 5h | R1 |
+| MVP-T1 | 3 | backend | Telegram receipt drop-in bot (share PDF, screenshot or photo from the phone) | 5h | R1a |
 | MVP-R3b | 3 | backend | Generic heuristic line-parser fallback when extraction fails | 3h | R1 |
 | MVP-R4 | 3 | pipeline | Real-receipt validation on the homelab, LLM settings that finish | 6h | F2, R0, R1 |
 | MVP-R5 | 4 | frontend | Receipt types, API module, hooks with status polling | 5h | R1, R2, R3 |
-| MVP-R6 | 4 | frontend | Scan page: camera capture, upload, processing status | 6h | R5 |
+| MVP-R6 | 4 | frontend | Upload page on the iPad: file picker (PDF or image), processing status | 3h | R5 |
 | MVP-R7 | 4 | frontend | Receipt review page: edit, re-match, skip, confirm | 12h | R5, R6, C1 |
 | MVP-R8 | 4 | frontend | Receipts list: reopen unconfirmed receipts | 3h | R5 |
 | MVP-P1 | 5 | frontend | AppShell: navigation, persistent Scan button, landscape layout | 5h | S2, R6 |
@@ -304,6 +307,35 @@ increment U1 after R1b, before R2 creates products.
 - **Acceptance:** the 60-line S-kaupat text yields ≥ 80 % of product lines with no LLM
   call; a failing LLM call degrades to heuristic rows rather than `failed`.
 
+#### MVP-T1 — Telegram receipt drop-in bot
+Operator input 2026-09-14: receipts are mostly digital (online grocery order PDFs, S-Group /
+K-Plussa app receipts) plus some photos of paper receipts; the phone is Android. The easiest
+drop-in is sharing the file to a private Telegram bot from the phone's share sheet, at home or
+away, with no port forwarding.
+- Separate compose service `kyokki-telegram` running `python -m app.telegram_bot` from the API
+  image: Telegram Bot API over `httpx` with `getUpdates` long polling (outbound only, no new
+  dependency). Starts only when `TELEGRAM_BOT_TOKEN` is set.
+- Settings: `TELEGRAM_BOT_TOKEN` (secret, `stack.env` only, never logged),
+  `TELEGRAM_ALLOWED_CHAT_IDS` (comma-separated). Messages from other chats are ignored except
+  `/start`, which replies with the chat id so setup needs no guessing.
+- Accepts documents (`application/pdf`, `image/*`) and photos (largest size). Telegram
+  recompresses photos, so the `/start` help says to send paper-receipt photos "as file" for best
+  OCR. Files are downloaded with `getFile` (Bot API limit 20 MB) and stored through the same
+  path as `POST /api/receipts/scan` (`crud/receipt.create_receipt`).
+- Duplicate guard: a SHA-256 of the file content is stored on the receipt (migration adds
+  `content_sha256`, indexed); sharing the same file twice replies "already received" with the
+  earlier result instead of creating a second receipt.
+- Processing: calls `ReceiptProcessingService` (after R3, schedules the background job
+  instead). Replies immediately "Received, reading the receipt…", then edits or follows up with
+  the result: store, date, `n` items (`m` matched) and a pointer to review on the iPad; on
+  failure a short reason. Loyalty-app screenshots are clean images and take the MinerU/vision
+  path; PDFs take the pdfplumber text path.
+- Privacy note in `docs/DEPLOY.md`: receipts pass through Telegram's servers (they include the
+  last card digits); the allowlist keeps the bot private.
+- **Acceptance:** tests with a mocked Bot API for allowlist, `/start`, PDF and photo handling,
+  duplicate detection and failure replies; manual check sharing an S-kaupat order PDF and a
+  loyalty-app screenshot from the Android phone to the bot on the homelab stack.
+
 #### MVP-R4 — Real-receipt validation on the homelab
 - Run at least five real receipts through the deployed stack via the API. Record per receipt:
   OCR time, LLM time, items extracted, items matched, failures. Append to
@@ -401,13 +433,12 @@ increment U1 after R1b, before R2 creates products.
 - **Acceptance:** msw tests including polling stop conditions and multipart body.
 
 #### MVP-R6 — Scan page
-- `/scan`: `<input type="file" accept="image/*" capture="environment">` (works over plain
-  HTTP on iOS; `getUserMedia` does not), preview thumbnail, optional store and date, Upload →
-  scan → process → navigate to `/receipt/[id]`. `ProcessingStatus` shows queued/processing
-  with elapsed time and a failure state with retry.
-- Second button "Choose a file" (`accept="image/*,application/pdf"`, no `capture`) so a
-  digital e-receipt PDF saved to the iPad Files app can be uploaded; the backend already
-  routes PDFs to pdfplumber, so this is the whole digital-receipt path for MVP.
+- Re-scoped 2026-09-14: the Telegram bot (T1) is the primary drop-in from the phone, so the
+  iPad page is a simple fallback upload rather than a camera flow.
+- `/scan`: one "Choose a file" input (`accept="image/*,application/pdf"`; the file picker also
+  offers the camera), optional store and date, Upload → scan → process → navigate to
+  `/receipt/[id]`. `ProcessingStatus` shows queued/processing with elapsed time and a failure
+  state with retry.
 - Client-side downscale before upload (canvas, long edge ≤ 2000 px, JPEG q 0.85); a 12 MP
   camera capture is 3–5 MB and inflates OCR time and prompt length.
 - **Acceptance:** tests for the happy path and the failure path; manual test on the iPad.
@@ -460,8 +491,8 @@ Ordered by expected value once MVP is live.
 8. Multi-receipt batch, consumption learning, analytics, Mealie.
 9. Learned store templates (`ADAPTIVE_PARSER_SPEC.md`): chain-specific parse rules that
    skip the LLM for known formats. Generalising accelerator, not a core dependency.
-10. Digital receipt import adapters: loyalty-app exports, e-receipt e-mail ingestion, PDF
-    watch folder. MVP covers PDF upload via the file picker (R6).
+10. More receipt drop-in adapters: e-receipt e-mail (IMAP) ingestion, a watched folder, and the
+    Kyokki PWA as an Android share target. MVP covers the Telegram bot (T1) and iPad upload (R6).
 11. Runtime simplification for single-node installs: one uvicorn worker with in-process
     broadcast, Redis optional (scanner mode state moves to Postgres).
 12. Undo for consume: a backend endpoint that reverses a consume (quantity, status,
@@ -599,8 +630,8 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
-- Wave 2: [x] S1 (PR #27)  [ ] R1a (PR open)  [ ] R1b  [ ] U1  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [x] S2 (PR #30)  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
+- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [ ] R1b  [ ] U1  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
+- Wave 3: [x] S2 (PR #30)  [ ] T1  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance

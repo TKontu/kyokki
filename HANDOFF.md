@@ -1,17 +1,16 @@
 # Handoff
 Generated-UTC: 2026-09-14T09:00:00Z
-Base-SHA: 7e957b1
+Base-SHA: 5266dee
 
 ## Round delta
 - #31 R0 spike docs merged (passed on `muse-glimmer`).
-- MVP-R1a on `feat/mvp-r1a-extraction-layer` (PR open): extraction rewritten to the R0 request,
+- #32 MVP-R1a merged: extraction rewritten to the R0 request,
   vision fallback when MinerU is down, inline category, new settings. Rulings this round: R1 split
   into R1a/R1b, category inline (no second LLM call), conversions `l→dl ×10`, `ml→dl ÷100`,
   `kg→g ×1000`, `unit→pcs`, existing-data migration as its own increment U1 after R1b.
 
 ## Active PRs and conflicts
-- R1a PR. R1b builds on it (per-item matching in `receipt_processing.py`, `schemas/receipt.py`,
-  `matching_service.py`), so start R1b from main after R1a merges.
+- Plan-update docs PR (Telegram drop-in, T1). No code.
 
 ## Non-obvious decisions or blockers
 - LLM: llama-swap `http://192.168.0.94:9292/v1`, `muse-glimmer` (always loaded; other models evict
@@ -32,6 +31,10 @@ Base-SHA: 7e957b1
 - Operator items still open: rotate Postgres password + LLM key, purge `stack.env` history,
   deploy on the homelab and confirm the iPad renders inventory.
 
+- Plan update 2026-09-14: receipts are mostly digital (order PDFs, S-Group/K-Plussa app receipts)
+  plus some paper photos, Android phone. New MVP-T1: private Telegram bot as the primary drop-in
+  (long polling, chat-id allowlist, SHA-256 duplicate guard). R6 re-scoped to an iPad file picker.
+
 ## Next action
-Merge R1a. Then R1b (typed `ExtractedItem`, per-item + alias-first matching, units helper,
+R1b (typed `ExtractedItem`, per-item + alias-first matching, units helper,
 `ReceiptStatus`, category → location, API `items`, frontend `types/receipt.ts`), then U1.
