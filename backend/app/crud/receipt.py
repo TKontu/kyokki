@@ -45,6 +45,12 @@ async def get_receipts(
     return list(result.scalars().all())
 
 
+async def get_receipt_by_sha256(db: AsyncSession, sha256: str) -> Receipt | None:
+    """Get the receipt whose uploaded file has this SHA-256, if any."""
+    result = await db.execute(select(Receipt).where(Receipt.content_sha256 == sha256))
+    return result.scalar_one_or_none()
+
+
 async def get_receipt(db: AsyncSession, receipt_id: UUID) -> Receipt | None:
     """Get a receipt by ID.
 
@@ -67,6 +73,7 @@ async def create_receipt(
     store_chain: str | None = None,
     purchase_date: date | None = None,
     batch_id: UUID | None = None,
+    content_sha256: str | None = None,
 ) -> Receipt:
     """Create a new receipt with file storage.
 
@@ -103,6 +110,7 @@ async def create_receipt(
         image_path=str(file_path),
         processing_status=ReceiptStatus.UPLOADED,
         batch_id=batch_id,
+        content_sha256=content_sha256,
         items_extracted=0,
         items_matched=0,
     )

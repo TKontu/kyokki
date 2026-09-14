@@ -32,6 +32,22 @@ services:
       - postgres
       - redis
 
+  kyokki-telegram:
+    # Receipt drop-in bot; idles unless TELEGRAM_BOT_TOKEN is set in .env
+    build: ./backend
+    command: python -m app.telegram_bot
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    networks:
+      - kyokki_net
+    depends_on:
+      - postgres
+      - redis
+
   # Development runs the frontend with `npm run dev` on the host (see docs/DEPLOY.md);
   # the production frontend container lives in docker-compose.prod.yml.
 

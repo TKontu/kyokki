@@ -23,6 +23,8 @@ class Receipt(Base):
 
     # OCR processing
     image_path = Column(String, nullable=False)  # Path to receipt image
+    # SHA-256 of the uploaded file; the same file cannot be ingested twice (MVP-T1)
+    content_sha256 = Column(String(64), nullable=True, unique=True, index=True)
     ocr_raw_text = Column(Text, nullable=True)  # Raw OCR output
     ocr_structured = Column(JSONB, nullable=True)  # Parsed items and metadata
 

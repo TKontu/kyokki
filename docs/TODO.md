@@ -376,6 +376,24 @@ away, with no port forwarding.
 - **Acceptance:** tests with a mocked Bot API for allowlist, `/start`, PDF and photo handling,
   duplicate detection and failure replies; manual check sharing an S-kaupat order PDF and a
   loyalty-app screenshot from the Android phone to the bot on the homelab stack.
+- As built (branch `feat/mvp-t1-telegram-bot`), rulings of 2026-09-14:
+  - [x] **Shared ingest** `services/receipt_ingest.py` for both channels: allowed types (PDF,
+    JPEG, PNG, WebP), SHA-256, duplicate lookup; a unique-index race returns the existing receipt.
+    Migration `b7d3e5f1a2c4` adds `receipt.content_sha256` (unique, nullable for old rows).
+  - [x] **Duplicates rejected on both channels**: `POST /api/receipts/scan` answers 409 with
+    `{"message": "Receipt already uploaded", "receipt_id": ...}`; the bot answers "Already
+    received" plus the earlier summary when it was read.
+  - [x] **Reply** is a summary plus unmatched names: "S-group, 2.1.2026: 49 items, 3 matched.
+    New: … (+38). Review on the iPad." Up to 8 names; the "Received" message is edited in place.
+  - [x] Package `app/telegram_bot/` (client, messages, handlers, worker, runner). One sequential
+    worker because the model serves one request at a time; the acknowledgement reports the queue
+    position. Queued jobs are in memory: receipts not read before a restart stay `uploaded`.
+  - [x] Token is a `SecretStr`; `httpx`/`httpcore` loggers set to WARNING because Bot API URLs
+    carry the token; `TelegramError` messages never include the URL. Strangers get only their
+    chat id on `/start`, and their messages are not logged.
+  - [x] `kyokki-telegram` service in both compose files (no port; idles without a token);
+    `.env.example`, `stack.env.example` and the `docs/DEPLOY.md` "Telegram bot" section.
+  - [ ] Manual check with a real bot on the homelab (needs the operator's @BotFather token).
 
 #### MVP-R4 — Real-receipt validation on the homelab
 - Run at least five real receipts through the deployed stack via the API. Record per receipt:
@@ -671,8 +689,8 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
-- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [ ] U1 (PR open)  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [x] S2 (PR #30)  [ ] T1  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
+- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
+- Wave 3: [x] S2 (PR #30)  [ ] T1 (PR open)  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance

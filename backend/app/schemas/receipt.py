@@ -125,6 +125,7 @@ class ReceiptResponse(ReceiptBase):
 
     id: UUID
     ocr_raw_text: str | None = Field(None, description="Raw OCR or PDF text")
+    content_sha256: str | None = Field(None, description="SHA-256 of the uploaded file")
     ocr_structured: dict[str, Any] | None = Field(
         None, description="Stored extraction (debugging)"
     )

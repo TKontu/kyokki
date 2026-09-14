@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, computed_field, field_validator
+from pydantic import ConfigDict, SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, NoDecode
 
 # Get project root directory (two levels up from this file: backend/app/core/config.py -> project root)
@@ -75,6 +75,25 @@ class Settings(BaseSettings):
     @classmethod
     def empty_reasoning_strength_means_none(cls, v: object) -> object:
         return None if v == "" else v
+
+    # Telegram receipt drop-in bot (MVP-T1). The bot is disabled while no token is set.
+    TELEGRAM_BOT_TOKEN: SecretStr | None = None
+    # Chats the bot serves; comma-separated ids. Send /start to the bot to learn yours.
+    TELEGRAM_ALLOWED_CHAT_IDS: Annotated[list[int], NoDecode] = []
+    TELEGRAM_API_BASE: str = "https://api.telegram.org"
+    TELEGRAM_POLL_TIMEOUT: int = 50  # getUpdates long-poll seconds
+
+    @field_validator("TELEGRAM_BOT_TOKEN", mode="before")
+    @classmethod
+    def empty_token_means_disabled(cls, v: object) -> object:
+        return None if v == "" else v
+
+    @field_validator("TELEGRAM_ALLOWED_CHAT_IDS", mode="before")
+    @classmethod
+    def parse_chat_ids(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [int(part) for part in v.split(",") if part.strip()]
+        return v
 
     # Open Food Facts API
     OPENFOODFACTS_API_URL: str = "https://world.openfoodfacts.org/api/v2"
