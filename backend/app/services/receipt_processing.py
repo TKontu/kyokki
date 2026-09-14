@@ -20,10 +20,12 @@ from app.core.logging import get_logger
 from app.crud.category import get_categories
 from app.models.receipt import Receipt
 from app.parsers.base import ReceiptExtraction
+from app.parsers.heuristic import parse_receipt_text
 from app.schemas.receipt import ReceiptStatus
 from app.services.broadcast_helpers import broadcast_receipt_status
 from app.services.llm_extractor import (
     CategoryOption,
+    LLMExtractionError,
     extract_from_image,
     extract_from_text,
 )
@@ -64,15 +66,13 @@ class ReceiptProcessingService:
         receipt: Receipt,
         categories: list[CategoryOption],
         known_products: list[str],
-    ) -> tuple[str | None, ReceiptExtraction]:
-        """Return (OCR text if any, extraction), choosing text or vision input."""
+    ) -> tuple[str | None, ReceiptExtraction, str | None]:
+        """Return (OCR text if any, extraction, fallback reason), choosing text or vision input."""
         path = str(receipt.image_path)
 
         if is_pdf(path):
             pdf_text = await extract_text_from_receipt(path)
-            return pdf_text, await extract_from_text(
-                pdf_text, categories, known_products
-            )
+            return await self._read_text(receipt, pdf_text, categories, known_products)
 
         text: str | None
         try:
@@ -85,7 +85,7 @@ class ReceiptProcessingService:
             text = None
 
         if text and text.strip():
-            return text, await extract_from_text(text, categories, known_products)
+            return await self._read_text(receipt, text, categories, known_products)
 
         if text is not None:
             logger.warning(
@@ -93,9 +93,45 @@ class ReceiptProcessingService:
                 extra={"receipt_id": str(receipt.id)},
             )
         image = await anyio.Path(path).read_bytes()
-        return None, await extract_from_image(
+        # No text to fall back on: a failing vision call fails the receipt
+        extraction = await extract_from_image(
             image, content_type_for(path), categories, known_products
         )
+        return None, extraction, None
+
+    async def _read_text(
+        self,
+        receipt: Receipt,
+        text: str,
+        categories: list[CategoryOption],
+        known_products: list[str],
+    ) -> tuple[str, ReceiptExtraction, str | None]:
+        """Extract with the model; if it fails or finds nothing, use the heuristic parser.
+
+        The parser only helps when the text has product lines; otherwise the model's error
+        stands and the receipt fails as before (MVP-R3b).
+        """
+        try:
+            extraction = await extract_from_text(text, categories, known_products)
+        except LLMExtractionError as exc:
+            fallback = parse_receipt_text(text)
+            if not fallback.lines:
+                raise
+            logger.warning(
+                "LLM extraction failed, using the heuristic parser",
+                extra={"receipt_id": str(receipt.id), "error": str(exc)},
+            )
+            return text, fallback, f"Model unavailable: {exc}"[:MAX_ERROR_CHARS]
+
+        if not extraction.lines:
+            fallback = parse_receipt_text(text)
+            if fallback.lines:
+                logger.warning(
+                    "LLM found no products, using the heuristic parser",
+                    extra={"receipt_id": str(receipt.id)},
+                )
+                return text, fallback, "Model found no products"
+        return text, extraction, None
 
     async def process_receipt(self, receipt: Receipt) -> ProcessingResult:
         """Process a receipt through the full pipeline and update the record."""
@@ -117,7 +153,7 @@ class ReceiptProcessingService:
             ]
             # Load the catalog first: its generic names are offered to the model for reuse
             await self.matching_service.prepare(None)
-            ocr_text, extraction = await self._read_receipt(
+            ocr_text, extraction, fallback_reason = await self._read_receipt(
                 receipt, categories, self.matching_service.product_names
             )
 
@@ -160,6 +196,8 @@ class ReceiptProcessingService:
                 else None,
                 "lines": stored_lines,
             }
+            if fallback_reason:
+                row.ocr_structured["fallback_reason"] = fallback_reason
             row.items_extracted = len(extraction.lines)
             row.items_matched = len(matched_products)
             # Values the user entered at upload win over what was read from the receipt

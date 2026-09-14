@@ -379,6 +379,48 @@ class TestProcessReceipt:
         assert response.status_code == 409
         assert message in response.json()["detail"]
 
+    async def test_heuristic_receipt_reports_its_method_and_can_be_reread(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        """MVP-R3b: a receipt read by the fallback parser can be queued for the model again."""
+        receipt_id = await self._upload(client)
+        await self._set_status(
+            test_db,
+            receipt_id,
+            "completed",
+            ocr_structured={
+                "method": "heuristic",
+                "fallback_reason": "Model unavailable: timed out",
+                "lines": [{"name": "MAITO", "quantity": 1}],
+            },
+        )
+
+        body = (await client.get(f"/api/receipts/{receipt_id}")).json()
+        assert body["extraction_method"] == "heuristic"
+        assert body["fallback_reason"] == "Model unavailable: timed out"
+        assert [item["name"] for item in body["items"]] == ["MAITO"]
+
+        retry = await client.post(f"/api/receipts/{receipt_id}/process")
+        assert retry.status_code == 202
+        assert retry.json()["processing_status"] == "queued"
+
+    @pytest.mark.parametrize(
+        ("status", "method"),
+        [("completed", "text"), ("confirmed", "heuristic")],
+    )
+    async def test_only_unconfirmed_heuristic_receipts_can_be_reread(
+        self, client: AsyncClient, test_db: AsyncSession, status: str, method: str
+    ) -> None:
+        receipt_id = await self._upload(client)
+        await self._set_status(
+            test_db, receipt_id, status, ocr_structured={"method": method, "lines": []}
+        )
+
+        response = await client.post(f"/api/receipts/{receipt_id}/process")
+
+        assert response.status_code == 409
+        assert "already read" in response.json()["detail"]
+
     async def test_process_receipt_not_found(
         self, client: AsyncClient, test_db: AsyncSession
     ) -> None:

@@ -15,7 +15,7 @@ export type ReceiptStatus =
   | 'confirmed'
 
 /** How the receipt was read: text (PDF or OCR) or the image directly (vision model). */
-export type ExtractionMethod = 'text' | 'vision'
+export type ExtractionMethod = 'text' | 'vision' | 'heuristic'
 
 /** Receipt quantities: weight lines in grams, everything else in pieces (volumes in dl). */
 export type ReceiptUnit = 'g' | 'dl' | 'pcs'
@@ -56,6 +56,7 @@ export interface Receipt {
   items_extracted: number
   items_matched: number
   extraction_method: ExtractionMethod | null
+  fallback_reason: string | null // Why the heuristic parser was used instead of the model
   items: ExtractedItem[]
   created_at: string // ISO datetime
 }
