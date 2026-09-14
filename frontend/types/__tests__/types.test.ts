@@ -79,12 +79,29 @@ describe('TypeScript Types', () => {
         batch_id: null,
         ocr_raw_text: null,
         ocr_structured: null,
-        processing_status: 'queued',
-        items_extracted: 0,
-        items_matched: 0,
+        processing_status: 'completed',
+        items_extracted: 1,
+        items_matched: 1,
+        extraction_method: 'vision',
+        items: [
+          {
+            index: 0,
+            name: 'PUNASIPULI',
+            quantity: 330,
+            unit: 'g',
+            product_id: '123e4567-e89b-12d3-a456-426614174001',
+            product_name: 'Punasipuli',
+            match_score: 100,
+            match_confidence: 'exact',
+            match_source: 'alias',
+            suggested_category: 'produce',
+            storage_type: 'refrigerator',
+            location: 'main_fridge',
+          },
+        ],
         created_at: '2024-01-01T00:00:00Z',
       }
-      expect(receipt.id).toBeDefined()
+      expect(receipt.items[0].unit).toBe('g')
     })
   })
 

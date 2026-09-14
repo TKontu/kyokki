@@ -1,16 +1,15 @@
 # Handoff
 Generated-UTC: 2026-09-14T09:00:00Z
-Base-SHA: 5266dee
+Base-SHA: 7e1f805
 
 ## Round delta
-- #31 R0 spike docs merged (passed on `muse-glimmer`).
-- #32 MVP-R1a merged: extraction rewritten to the R0 request,
-  vision fallback when MinerU is down, inline category, new settings. Rulings this round: R1 split
-  into R1a/R1b, category inline (no second LLM call), conversions `l→dl ×10`, `ml→dl ÷100`,
-  `kg→g ×1000`, `unit→pcs`, existing-data migration as its own increment U1 after R1b.
+- #32 R1a merged; #33 plan update merged (Telegram bot T1 as primary drop-in).
+- MVP-R1b on `feat/mvp-r1b-receipt-items` (PR open): `GET /receipts/{id}` returns typed `items`
+  with per-line matches, units (g/pcs), storage and location; alias-first matching; one
+  `ReceiptStatus`; frontend receipt types. Ruling: pack sizes in names are not parsed (2 KPL = 2 pcs).
 
 ## Active PRs and conflicts
-- Plan-update docs PR (Telegram drop-in, T1). No code.
+- R1b PR. U1 (unit migration) and T1 (bot) start from main after it merges.
 
 ## Non-obvious decisions or blockers
 - LLM: llama-swap `http://192.168.0.94:9292/v1`, `muse-glimmer` (always loaded; other models evict
@@ -26,7 +25,10 @@ Base-SHA: 5266dee
   category}]}`; nothing in the app read the old shape.
 - E2E check that passed: rendered 49-line receipt uploaded via `/scan` + `/process` → vision,
   49/49 lines, 11/11 quantities, 10/10 weights, store and date filled, 40 categorised.
-- `receipt.image_path` is relative to the API's working directory (`backend/data/receipts`).
+- `receipt.image_path` is relative to the API's working directory (`backend/data/receipts`), and
+  `tests/api/test_receipts.py` deletes that directory: don't run it during a manual API check.
+- Receipt matching stores only matches >= `FUZZY_MATCH_THRESHOLD` (80); weaker fuzzy guesses were
+  wrong in the e2e run. Matching loads the catalog once per receipt (`prepare()` + `match_line()`).
 - Non-idempotent mutations need `retry: false` (frontend providers retry mutations once).
 - Operator items still open: rotate Postgres password + LLM key, purge `stack.env` history,
   deploy on the homelab and confirm the iPad renders inventory.
@@ -36,5 +38,5 @@ Base-SHA: 5266dee
   (long polling, chat-id allowlist, SHA-256 duplicate guard). R6 re-scoped to an iPad file picker.
 
 ## Next action
-R1b (typed `ExtractedItem`, per-item + alias-first matching, units helper,
-`ReceiptStatus`, category → location, API `items`, frontend `types/receipt.ts`), then U1.
+Merge R1b. Then U1 (ml → dl data migration, OFF parser, frontend `Unit`), then T1 (Telegram bot),
+then R2 (confirm creates products and writes aliases).

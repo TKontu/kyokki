@@ -358,3 +358,131 @@ class TestProcessReceipt:
             receipt = get_response.json()
             assert receipt["processing_status"] == "completed"
             assert receipt["ocr_raw_text"] is not None
+
+
+class TestReceiptItems:
+    """MVP-R1b: GET /api/receipts/{id} exposes typed, matched items."""
+
+    async def _catalog(self, db: AsyncSession):
+        from uuid import uuid4
+
+        from app.models.category import Category
+        from app.models.product_master import ProductMaster
+
+        for cid, name in [
+            ("dairy", "Dairy & Eggs"),
+            ("produce", "Vegetables"),
+            ("frozen", "Frozen"),
+        ]:
+            db.add(
+                Category(
+                    id=cid,
+                    display_name=name,
+                    icon=None,
+                    default_shelf_life_days=7,
+                    meal_contexts=[],
+                    sort_order=1,
+                )
+            )
+        await db.flush()
+        # Stored as pantry on purpose: a matched item's location follows the product
+        product = ProductMaster(
+            id=uuid4(),
+            canonical_name="BARISTA KAURAJUOMA",
+            category="dairy",
+            storage_type="pantry",
+            default_shelf_life_days=90,
+            unit_type="count",
+            default_unit="pcs",
+        )
+        db.add(product)
+        await db.commit()
+        return product
+
+    async def test_processed_receipt_returns_items(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from app.parsers.base import ExtractedLine, ReceiptExtraction
+
+        product = await self._catalog(test_db)
+        files = {"file": ("receipt.pdf", BytesIO(b"%PDF fake"), "application/pdf")}
+        receipt_id = (await client.post("/api/receipts/scan", files=files)).json()["id"]
+
+        extraction = ReceiptExtraction(
+            method="text",
+            store_chain="Prisma ruoan verkkokauppa",
+            lines=[
+                ExtractedLine(name="BARISTA KAURAJUOMA", quantity=3, category="dairy"),
+                ExtractedLine(
+                    name="PUNASIPULI", quantity=1, weight_kg=0.33, category="produce"
+                ),
+                ExtractedLine(name="PAKASTEHERNE", quantity=1, category="frozen"),
+                ExtractedLine(name="SIENILIINA", quantity=2, category=None),
+            ],
+        )
+        with (
+            patch(
+                "app.services.receipt_processing.extract_text_from_receipt",
+                new_callable=AsyncMock,
+                return_value="text",
+            ),
+            patch(
+                "app.services.receipt_processing.extract_from_text",
+                new_callable=AsyncMock,
+                return_value=extraction,
+            ),
+        ):
+            await client.post(f"/api/receipts/{receipt_id}/process")
+
+        body = (await client.get(f"/api/receipts/{receipt_id}")).json()
+
+        assert body["processing_status"] == "completed"
+        assert body["store_chain"] == "s-group"
+        assert body["extraction_method"] == "text"
+        oat, onion, peas, cloth = body["items"]
+
+        assert oat == {
+            "index": 0,
+            "name": "BARISTA KAURAJUOMA",
+            "quantity": 3.0,
+            "unit": "pcs",
+            "product_id": str(product.id),
+            "product_name": "BARISTA KAURAJUOMA",
+            "match_score": 100.0,
+            "match_confidence": "exact",
+            "match_source": "exact",
+            "suggested_category": "dairy",
+            "storage_type": "pantry",
+            "location": "pantry",
+        }
+        assert (onion["quantity"], onion["unit"]) == (330.0, "g")
+        assert onion["product_id"] is None
+        assert (onion["storage_type"], onion["location"]) == (
+            "refrigerator",
+            "main_fridge",
+        )
+        assert (peas["storage_type"], peas["location"]) == ("freezer", "freezer")
+        assert cloth["suggested_category"] is None
+        assert (cloth["quantity"], cloth["unit"], cloth["location"]) == (
+            2.0,
+            "pcs",
+            "main_fridge",
+        )
+        assert [item["index"] for item in body["items"]] == [0, 1, 2, 3]
+
+    async def test_unprocessed_receipt_has_no_items(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        files = {"file": ("receipt.jpg", BytesIO(b"img"), "image/jpeg")}
+        body = (await client.post("/api/receipts/scan", files=files)).json()
+
+        assert body["items"] == []
+        assert body["extraction_method"] is None
+
+    async def test_unknown_status_filter_is_rejected(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        response = await client.get("/api/receipts?status=queued")
+        assert response.status_code == 422

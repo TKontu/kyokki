@@ -255,6 +255,34 @@ increment U1 after R1b, before R2 creates products.
 - **Acceptance:** per-item `product_id` and `suggested_category` round-trip through
   `GET /receipts/{id}`; an alias hit wins over a fuzzy candidate; unit normalisation and the
   status enum are covered.
+- As built (branch `feat/mvp-r1b-receipt-items`), rulings of 2026-09-14:
+  - [x] **Pack sizes are not parsed from names**: a weight line becomes grams, everything else
+    pieces (`GLÖGI 1L` ×2 → 2 pcs). Pack size becomes the product default quantity in R2/U1.
+  - [x] Pure rule modules: `services/units.py` (`to_canonical`: kg/g → g, l/dl/cl/ml → dl,
+    pcs/kpl/unit/st → pcs), `services/storage.py` (category → storage → location, every
+    seeded id explicit; unknown → fridge; `crud/product_master.py` and the scanner use it, which
+    fixes the non-seeded `seafood`/`bakery`/`grains` ids), `services/store_chain.py`
+    (`S-KAUPAT`/`Prisma`/… → `s-group`, `K-Citymarket`/… → `k-group`, else a slug).
+  - [x] `MatchingService.prepare()` loads products and aliases once per receipt; `match_line()`
+    runs without queries: store alias exact (same chain, then any chain, verified and most
+    seen first) → canonical exact → WRatio over canonical **and alias** names keyed by index.
+    `MatchResult.source` is `alias | exact | fuzzy | fuzzy_alias`. Aliases are only **read**
+    here; R2 writes them on confirm.
+  - [x] Each stored line carries `product_id`, `product_name`, `product_storage_type`,
+    `match_score`, `match_confidence`, `match_source`; `receipt.store_chain` gets the chain key.
+  - [x] `ReceiptStatus` enum everywhere (model default `uploaded`, crud, processing, confirm,
+    broadcast type, list filter rejects unknown values with 422). No migration: the column stays
+    a string.
+  - [x] `ReceiptResponse.items: list[ExtractedItem]` and `extraction_method`, derived from
+    `ocr_structured` and tolerant of older shapes. `name_en`/`price` dropped (not extracted).
+  - [x] Frontend `types/receipt.ts` mirrors the schema (`ExtractedItem`, `ReceiptStatus`, …).
+  - [x] Only matches scoring at least `FUZZY_MATCH_THRESHOLD` (80, previously unused) are stored.
+    Found in the end-to-end run: without it `CHEDDAR PUNAINEN` matched `PUNASIPULI` at 50 and
+    `LIME` at 60. With it, the rendered receipt kept exactly the three right matches (canonical
+    exact, a vision misread at 97.8, a misread alias at 98.2). R7 can still offer weaker
+    candidates through `match_all` when the user searches.
+  - Known, not fixed here: a failed re-process keeps the previous run's `ocr_structured`, so the
+    items of a `failed` receipt can be stale; R3 owns error persistence and retries.
 
 #### MVP-U1 — Unit vocabulary migration
 - Alembic data migration for existing rows: `ml → dl` (÷100), `l → dl` (×10), `kg → g`
@@ -630,7 +658,7 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
-- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [ ] R1b  [ ] U1  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
+- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [ ] R1b (PR open)  [ ] U1  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
 - Wave 3: [x] S2 (PR #30)  [ ] T1  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2

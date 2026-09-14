@@ -12,6 +12,7 @@ from app.models.category import Category
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
 from app.parsers.base import ExtractedLine, ReceiptExtraction
+from app.schemas.receipt import ReceiptStatus
 from app.services.llm_extractor import CategoryOption, LLMExtractionError
 from app.services.ocr_service import OCRUnavailableError
 from app.services.receipt_processing import ProcessingResult, ReceiptProcessingService
@@ -190,34 +191,109 @@ class TestPersistence:
             result = await service.process_receipt(image_receipt)
 
         await db_session.refresh(image_receipt)
-        assert image_receipt.processing_status == "completed"
+        assert image_receipt.processing_status == ReceiptStatus.COMPLETED
         assert image_receipt.ocr_raw_text is None
-        assert image_receipt.ocr_structured == {
-            "method": "vision",
-            "store_chain": "S-MARKET",
-            "purchase_date": "2026-01-02",
-            "lines": [
-                {
-                    "name": "Valio Whole Milk 1L",
-                    "quantity": 1.0,
-                    "weight_kg": None,
-                    "category": "dairy",
-                },
-                {
-                    "name": "Arla Butter 500g",
-                    "quantity": 1.0,
-                    "weight_kg": None,
-                    "category": "dairy",
-                },
-            ],
+        structured = image_receipt.ocr_structured
+        assert structured["method"] == "vision"
+        assert structured["store_chain"] == "S-MARKET"
+        assert structured["purchase_date"] == "2026-01-02"
+        milk, butter = structured["lines"]
+        assert milk == {
+            "name": "Valio Whole Milk 1L",
+            "quantity": 1.0,
+            "weight_kg": None,
+            "category": "dairy",
+            "product_id": str(sample_product.id),
+            "product_name": "Valio Whole Milk 1L",
+            "product_storage_type": "refrigerator",
+            "match_score": 100.0,
+            "match_confidence": "exact",
+            "match_source": "exact",
         }
-        assert image_receipt.store_chain == "S-MARKET"
+        assert butter["product_id"] is None
+        assert butter["product_name"] is None
+        assert butter["match_score"] is None
+        assert butter["match_confidence"] is None
+        assert butter["match_source"] is None
+        # The raw header text stays in ocr_structured; the receipt gets the chain key
+        assert image_receipt.store_chain == "s-group"
         assert image_receipt.purchase_date == date(2026, 1, 2)
         assert image_receipt.items_extracted == 2
         assert image_receipt.items_matched == 1
         assert (
             result.matched_products[0].product.canonical_name == "Valio Whole Milk 1L"
         )
+
+    async def test_weak_fuzzy_guesses_are_not_stored_as_matches(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        """Found in the R1b end-to-end run: CHEDDAR PUNAINEN scored 50 against PUNASIPULI and
+        LIME 60. Only matches at or above FUZZY_MATCH_THRESHOLD may pre-select a product."""
+        onion = ProductMaster(
+            id=uuid4(),
+            canonical_name="PUNASIPULI",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=14,
+            unit_type="weight",
+            default_unit="g",
+        )
+        db_session.add(onion)
+        await db_session.commit()
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(name="CHEDDAR PUNAINEN", quantity=1, category="dairy"),
+                ExtractedLine(
+                    name="LIME", quantity=1, weight_kg=0.74, category="dairy"
+                ),
+                ExtractedLine(
+                    name="PUNASIPULI", quantity=1, weight_kg=0.33, category="dairy"
+                ),
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        await db_session.refresh(pdf_receipt)
+        cheddar, lime, red_onion = pdf_receipt.ocr_structured["lines"]
+        assert cheddar["product_id"] is None
+        assert lime["product_id"] is None
+        assert red_onion["product_id"] == str(onion.id)
+        assert pdf_receipt.items_matched == 1
+
+    async def test_alias_match_is_stored_per_line(
+        self, service, pdf_receipt, sample_product, db_session
+    ):
+        from app.models.store_product_alias import StoreProductAlias
+
+        db_session.add(
+            StoreProductAlias(
+                product_master_id=sample_product.id,
+                store_chain="s-group",
+                receipt_name="VALIO TÄYSMAITO 1L",
+                manually_verified=True,
+            )
+        )
+        await db_session.commit()
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(name="VALIO TÄYSMAITO 1L", quantity=2, category="dairy")
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        await db_session.refresh(pdf_receipt)
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["product_id"] == str(sample_product.id)
+        assert line["match_source"] == "alias"
+        assert pdf_receipt.items_matched == 1
 
     async def test_keeps_store_and_date_the_user_already_entered(
         self, db_session, service, sample_category, tmp_path
@@ -252,7 +328,7 @@ class TestPersistence:
 
         assert result.success is True
         await db_session.refresh(pdf_receipt)
-        assert pdf_receipt.processing_status == "completed"
+        assert pdf_receipt.processing_status == ReceiptStatus.COMPLETED
         assert pdf_receipt.items_extracted == 0
         assert pdf_receipt.items_matched == 0
 
@@ -274,7 +350,7 @@ class TestFailures:
         assert result.success is False
         assert "timed out" in (result.error or "")
         await db_session.refresh(pdf_receipt)
-        assert pdf_receipt.processing_status == "failed"
+        assert pdf_receipt.processing_status == ReceiptStatus.FAILED
 
     async def test_non_availability_ocr_error_does_not_fall_back(
         self, service, image_receipt, sample_category, db_session
@@ -288,7 +364,7 @@ class TestFailures:
         assert result.success is False
         vision.assert_not_awaited()
         await db_session.refresh(image_receipt)
-        assert image_receipt.processing_status == "failed"
+        assert image_receipt.processing_status == ReceiptStatus.FAILED
 
 
 class TestProcessingResult:

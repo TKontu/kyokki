@@ -13,10 +13,12 @@ from dataclasses import dataclass
 import anyio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.crud.category import get_categories
 from app.models.receipt import Receipt
 from app.parsers.base import ReceiptExtraction
+from app.schemas.receipt import ReceiptStatus
 from app.services.broadcast_helpers import broadcast_receipt_status
 from app.services.llm_extractor import (
     CategoryOption,
@@ -30,6 +32,7 @@ from app.services.ocr_service import (
     extract_text_from_receipt,
     is_pdf,
 )
+from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)
 
@@ -86,10 +89,12 @@ class ReceiptProcessingService:
     async def process_receipt(self, receipt: Receipt) -> ProcessingResult:
         """Process a receipt through the full pipeline and update the record."""
         try:
-            receipt.processing_status = "processing"
+            receipt.processing_status = ReceiptStatus.PROCESSING
             await self.db.commit()
             logger.info(f"Starting processing for receipt {receipt.id}")
-            await broadcast_receipt_status(receipt_id=receipt.id, status="processing")
+            await broadcast_receipt_status(
+                receipt_id=receipt.id, status=ReceiptStatus.PROCESSING
+            )
 
             categories = [
                 CategoryOption(id=str(c.id), name=str(c.display_name))
@@ -97,30 +102,47 @@ class ReceiptProcessingService:
             ]
             ocr_text, extraction = await self._read_receipt(receipt, categories)
 
-            matched_products: list[MatchResult] = []
-            for line in extraction.lines:
-                match_result = await self.matching_service.match_product(line.name)
-                if match_result:
-                    matched_products.append(match_result)
-                    logger.info(
-                        f"Matched '{line.name}' to "
-                        f"'{match_result.product.canonical_name}' "
-                        f"(confidence: {match_result.confidence.value}, "
-                        f"score: {match_result.score:.1f})"
-                    )
-                else:
-                    logger.debug(f"No match found for '{line.name}'")
+            chain = normalize_store_chain(
+                str(receipt.store_chain) if receipt.store_chain else None
+            ) or normalize_store_chain(extraction.store_chain)
+            await self.matching_service.prepare(chain)
 
-            receipt.processing_status = "completed"
+            matched_products: list[MatchResult] = []
+            stored_lines = []
+            for line in extraction.lines:
+                # Only confident matches pre-select a product; weaker fuzzy guesses (the R1b
+                # end-to-end run paired CHEDDAR PUNAINEN with PUNASIPULI at 50) stay unmatched
+                match = self.matching_service.match_line(
+                    line.name, chain, min_score=settings.FUZZY_MATCH_THRESHOLD
+                )
+                stored = line.model_dump(mode="json")
+                stored.update(
+                    product_id=str(match.product.id) if match else None,
+                    product_name=match.product.canonical_name if match else None,
+                    product_storage_type=match.product.storage_type if match else None,
+                    match_score=round(match.score, 1) if match else None,
+                    match_confidence=match.confidence.value if match else None,
+                    match_source=match.source if match else None,
+                )
+                stored_lines.append(stored)
+                if match:
+                    matched_products.append(match)
+
+            receipt.processing_status = ReceiptStatus.COMPLETED
             receipt.ocr_raw_text = ocr_text
-            receipt.ocr_structured = extraction.model_dump(
-                mode="json", include={"method", "store_chain", "purchase_date", "lines"}
-            )
+            receipt.ocr_structured = {
+                "method": extraction.method,
+                "store_chain": extraction.store_chain,
+                "purchase_date": extraction.purchase_date.isoformat()
+                if extraction.purchase_date
+                else None,
+                "lines": stored_lines,
+            }
             receipt.items_extracted = len(extraction.lines)
             receipt.items_matched = len(matched_products)
             # Values the user entered at upload win over what was read from the receipt
-            if extraction.store_chain and not receipt.store_chain:
-                receipt.store_chain = extraction.store_chain
+            if chain and not receipt.store_chain:
+                receipt.store_chain = chain
             if extraction.purchase_date and not receipt.purchase_date:
                 receipt.purchase_date = extraction.purchase_date
 
@@ -129,7 +151,7 @@ class ReceiptProcessingService:
 
             await broadcast_receipt_status(
                 receipt_id=receipt.id,
-                status="completed",
+                status=ReceiptStatus.COMPLETED,
                 items_extracted=receipt.items_extracted,
                 items_matched=receipt.items_matched,
             )
@@ -149,11 +171,11 @@ class ReceiptProcessingService:
         except Exception as e:
             error_msg = f"Receipt processing failed: {str(e)}"
 
-            receipt.processing_status = "failed"
+            receipt.processing_status = ReceiptStatus.FAILED
             await self.db.commit()
 
             await broadcast_receipt_status(
-                receipt_id=receipt.id, status="failed", error=error_msg
+                receipt_id=receipt.id, status=ReceiptStatus.FAILED, error=error_msg
             )
             logger.error(error_msg, exc_info=True)
 

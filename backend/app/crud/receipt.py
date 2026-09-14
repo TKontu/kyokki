@@ -11,13 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.receipt import Receipt
-from app.schemas.receipt import ReceiptUpdate
+from app.schemas.receipt import ReceiptStatus, ReceiptUpdate
 
 
 async def get_receipts(
     db: AsyncSession,
     *,
-    status: str | None = None,
+    status: ReceiptStatus | None = None,
     store_chain: str | None = None,
 ) -> list[Receipt]:
     """Get all receipts with optional filtering.
@@ -101,7 +101,7 @@ async def create_receipt(
         store_chain=store_chain,
         purchase_date=purchase_date,
         image_path=str(file_path),
-        processing_status="uploaded",
+        processing_status=ReceiptStatus.UPLOADED,
         batch_id=batch_id,
         items_extracted=0,
         items_matched=0,
