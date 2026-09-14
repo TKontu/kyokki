@@ -28,7 +28,7 @@ class InventoryItem(Base):
     # Quantity (approximate tracking)
     initial_quantity = Column(Numeric(10, 2), nullable=False)
     current_quantity = Column(Numeric(10, 2), nullable=False)
-    unit = Column(String, nullable=False)  # ml, g, pcs, unit
+    unit = Column(String, nullable=False)  # dl, tsp, tbsp, g, pcs (MVP-U1)
 
     # Status
     status = Column(

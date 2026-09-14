@@ -1,15 +1,15 @@
 # Handoff
 Generated-UTC: 2026-09-14T09:00:00Z
-Base-SHA: 7e1f805
+Base-SHA: e9b1d4c
 
 ## Round delta
-- #32 R1a merged; #33 plan update merged (Telegram bot T1 as primary drop-in).
-- MVP-R1b on `feat/mvp-r1b-receipt-items` (PR open): `GET /receipts/{id}` returns typed `items`
-  with per-line matches, units (g/pcs), storage and location; alias-first matching; one
-  `ReceiptStatus`; frontend receipt types. Ruling: pack sizes in names are not parsed (2 KPL = 2 pcs).
+- #34 MVP-R1b merged: typed receipt items, alias-first matching, match threshold 80.
+- MVP-U1 on `feat/mvp-u1-unit-migration` (PR open): canonical units `dl | tsp | tbsp | g | pcs`
+  everywhere. Rulings: convert on write (422 for unknown units); tsp/tbsp not converted to dl.
+  Data migration `a4f8c2d91e37` (lossy downgrade: dl → ml only).
 
 ## Active PRs and conflicts
-- R1b PR. U1 (unit migration) and T1 (bot) start from main after it merges.
+- U1 PR. T1 (Telegram bot) and R2 (confirm creates products) start from main after it merges.
 
 ## Non-obvious decisions or blockers
 - LLM: llama-swap `http://192.168.0.94:9292/v1`, `muse-glimmer` (always loaded; other models evict
@@ -38,5 +38,5 @@ Base-SHA: 7e1f805
   (long polling, chat-id allowlist, SHA-256 duplicate guard). R6 re-scoped to an iPad file picker.
 
 ## Next action
-Merge R1b. Then U1 (ml → dl data migration, OFF parser, frontend `Unit`), then T1 (Telegram bot),
-then R2 (confirm creates products and writes aliases).
+Merge U1 and run `alembic upgrade head` wherever a database exists (homelab: take a backup first).
+Then T1 (Telegram bot), then R2 (confirm creates products and writes aliases).

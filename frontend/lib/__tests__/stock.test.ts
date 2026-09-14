@@ -25,7 +25,7 @@ function makeItem(overrides: Partial<InventoryItem> = {}): InventoryItem {
     receipt_id: null,
     initial_quantity: 1000,
     current_quantity: 1000,
-    unit: 'ml',
+    unit: 'dl',
     status: 'sealed',
     purchase_date: TODAY,
     expiry_date: dateIn(30),

@@ -18,7 +18,7 @@ function makeItem(overrides: Partial<InventoryItem> = {}): InventoryItem {
     receipt_id: null,
     initial_quantity: 1000,
     current_quantity: 1000,
-    unit: 'ml',
+    unit: 'dl',
     status: 'sealed',
     purchase_date: '2024-01-01',
     expiry_date: '2024-03-01',
@@ -52,10 +52,10 @@ describe('consumption', () => {
   })
 
   describe('isCountable', () => {
-    it('treats pcs and unit as countable', () => {
+    it('treats only pcs as countable', () => {
       expect(isCountable('pcs')).toBe(true)
-      expect(isCountable('unit')).toBe(true)
-      expect(isCountable('ml')).toBe(false)
+      expect(isCountable('unit')).toBe(false) // legacy unit; migrated to pcs in MVP-U1
+      expect(isCountable('dl')).toBe(false)
       expect(isCountable('g')).toBe(false)
     })
   })
@@ -65,7 +65,7 @@ describe('consumption', () => {
       expect(consumptionOptions(makeItem()).map((o) => o.label)).toEqual(['¼', '½', '¾', 'Done'])
     })
 
-    it('computes a quarter of 1000 ml as 250 ml', () => {
+    it('computes a quarter of 1000 dl as 250 dl', () => {
       expect(byKey(makeItem()).quarter.amount).toBe(250)
       expect(byKey(makeItem()).half.amount).toBe(500)
       expect(byKey(makeItem()).threeQuarters.amount).toBe(750)

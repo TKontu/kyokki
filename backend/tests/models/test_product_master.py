@@ -35,7 +35,7 @@ class TestProductMasterModel:
             default_shelf_life_days=7,
             opened_shelf_life_days=4,
             unit_type="volume",
-            default_unit="ml",
+            default_unit="dl",
             default_quantity=Decimal("1000"),
             min_stock_quantity=Decimal("2000"),
             reorder_quantity=Decimal("2000"),
@@ -67,7 +67,7 @@ class TestProductMasterModel:
             storage_type="refrigerator",
             default_shelf_life_days=7,
             unit_type="volume",
-            default_unit="ml",
+            default_unit="dl",
             off_product_id="1234567890123",
             off_data=off_data,
         )
@@ -88,7 +88,7 @@ class TestProductMasterModel:
             storage_type="refrigerator",
             default_shelf_life_days=7,
             unit_type="volume",
-            default_unit="ml",
+            default_unit="dl",
         )
         db_session.add(product)
         await db_session.commit()
@@ -112,7 +112,7 @@ class TestProductMasterModel:
             storage_type="refrigerator",
             default_shelf_life_days=7,
             unit_type="volume",
-            default_unit="ml",
+            default_unit="dl",
         )
         db_session.add(product)
         await db_session.commit()
@@ -137,7 +137,7 @@ class TestProductMasterModel:
                 storage_type="refrigerator",
                 default_shelf_life_days=7,
                 unit_type="volume",
-                default_unit="ml",
+                default_unit="dl",
             ),
             ProductMaster(
                 canonical_name="Cheese",
@@ -170,7 +170,7 @@ class TestProductMasterModel:
             storage_type="refrigerator",
             default_shelf_life_days=7,
             unit_type="volume",
-            default_unit="ml",
+            default_unit="dl",
         )
         db_session.add(product)
         await db_session.commit()

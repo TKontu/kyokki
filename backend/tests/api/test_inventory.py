@@ -46,7 +46,7 @@ async def test_product(client: AsyncClient, seeded_db: AsyncSession) -> dict:
         "storage_type": "refrigerator",
         "default_shelf_life_days": 7,
         "unit_type": "volume",
-        "default_unit": "ml",
+        "default_unit": "dl",
     }
     response = await client.post("/api/products", json=product_data)
     return response.json()
@@ -76,7 +76,7 @@ class TestListInventory:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=7)),
             "location": "main_fridge",
         }
@@ -84,7 +84,7 @@ class TestListInventory:
             "product_master_id": test_product["id"],
             "initial_quantity": 500,
             "current_quantity": 250,
-            "unit": "ml",
+            "unit": "dl",
             "status": "opened",
             "expiry_date": str(today + timedelta(days=5)),
             "location": "main_fridge",
@@ -108,7 +108,7 @@ class TestListInventory:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=7)),
             "location": "main_fridge",
         }
@@ -140,7 +140,7 @@ class TestListInventory:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "status": "sealed",
             "expiry_date": str(today + timedelta(days=7)),
         }
@@ -148,7 +148,7 @@ class TestListInventory:
             "product_master_id": test_product["id"],
             "initial_quantity": 500,
             "current_quantity": 250,
-            "unit": "ml",
+            "unit": "dl",
             "status": "opened",
             "expiry_date": str(today + timedelta(days=5)),
         }
@@ -172,14 +172,14 @@ class TestListInventory:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=2)),
         }
         not_expiring = {
             "product_master_id": test_product["id"],
             "initial_quantity": 500,
             "current_quantity": 500,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=30)),
         }
 
@@ -206,7 +206,7 @@ class TestGetInventoryItem:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 750,
-            "unit": "ml",
+            "unit": "dl",
             "status": "opened",
             "expiry_date": str(today + timedelta(days=7)),
             "location": "main_fridge",
@@ -245,7 +245,7 @@ class TestCreateInventoryItem:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "status": "sealed",
             "purchase_date": str(today),
             "expiry_date": str(today + timedelta(days=7)),
@@ -293,7 +293,7 @@ class TestCreateInventoryItem:
             "product_master_id": fake_uuid,
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=7)),
         }
 
@@ -327,7 +327,7 @@ class TestUpdateInventoryItem:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=7)),
         }
 
@@ -402,7 +402,7 @@ class TestDeleteInventoryItem:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=7)),
         }
 
@@ -440,7 +440,7 @@ class TestConsumeInventoryItem:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "status": "sealed",
             "expiry_date": str(today + timedelta(days=7)),
         }
@@ -469,7 +469,7 @@ class TestConsumeInventoryItem:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "status": "sealed",
             "expiry_date": str(today + timedelta(days=7)),
         }
@@ -498,7 +498,7 @@ class TestConsumeInventoryItem:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "status": "sealed",
             "expiry_date": str(today + timedelta(days=7)),
         }
@@ -528,7 +528,7 @@ class TestConsumeInventoryItem:
             "product_master_id": test_product["id"],
             "initial_quantity": 1000,
             "current_quantity": 500,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=7)),
         }
 
@@ -565,7 +565,7 @@ async def _create_item(client: AsyncClient, product_id: str, **overrides) -> dic
         "product_master_id": product_id,
         "initial_quantity": 1000,
         "current_quantity": 1000,
-        "unit": "ml",
+        "unit": "dl",
         "expiry_date": str(date.today() + timedelta(days=7)),
     }
     item.update(overrides)
@@ -801,3 +801,66 @@ class TestConsumptionLogWrites:
         await client.patch(f"/api/inventory/{item['id']}", json={"location": "pantry"})
 
         assert await _logs_for(seeded_db, item["id"]) == []
+
+
+class TestCanonicalUnitsOnWrite:
+    """MVP-U1: requests may use any known unit; stored and returned in dl | tsp | tbsp | g | pcs."""
+
+    async def test_millilitres_are_stored_as_decilitres(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client,
+            test_product["id"],
+            unit="ml",
+            initial_quantity=330,
+            current_quantity=330,
+        )
+        assert (item["unit"], item["initial_quantity"], item["current_quantity"]) == (
+            "dl",
+            3.3,
+            3.3,
+        )
+
+    async def test_kilograms_and_legacy_unit_convert(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        cheese = await _create_item(
+            client,
+            test_product["id"],
+            unit="kg",
+            initial_quantity=0.4,
+            current_quantity=0.4,
+        )
+        eggs = await _create_item(
+            client,
+            test_product["id"],
+            unit="unit",
+            initial_quantity=6,
+            current_quantity=6,
+        )
+        spice = await _create_item(
+            client,
+            test_product["id"],
+            unit="tbsp",
+            initial_quantity=3,
+            current_quantity=3,
+        )
+        assert (cheese["unit"], cheese["initial_quantity"]) == ("g", 400)
+        assert (eggs["unit"], eggs["initial_quantity"]) == ("pcs", 6)
+        assert (spice["unit"], spice["initial_quantity"]) == ("tbsp", 3)
+
+    async def test_unknown_unit_is_rejected(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        response = await client.post(
+            "/api/inventory",
+            json={
+                "product_master_id": test_product["id"],
+                "initial_quantity": 12,
+                "current_quantity": 12,
+                "unit": "oz",
+                "expiry_date": str(date.today() + timedelta(days=7)),
+            },
+        )
+        assert response.status_code == 422

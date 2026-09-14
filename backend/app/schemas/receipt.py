@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
@@ -27,7 +28,9 @@ class ExtractedItem(BaseModel):
     )
     name: str = Field(..., description="Product name as printed")
     quantity: float = Field(..., description="Amount in `unit`")
-    unit: Literal["g", "dl", "pcs"] = Field(..., description="Canonical unit")
+    unit: Literal["dl", "tsp", "tbsp", "g", "pcs"] = Field(
+        ..., description="Canonical unit"
+    )
     product_id: UUID | None = Field(None, description="Matched product")
     product_name: str | None = Field(
         None, description="Matched product's canonical name"
@@ -158,8 +161,20 @@ class ConfirmedItemCreate(BaseModel):
 
     product_id: UUID = Field(..., description="Product master ID")
     quantity: float = Field(..., gt=0, description="Quantity to add")
-    unit: str = Field(..., description="Unit (g, dl or pcs)")
+    unit: str = Field(
+        ..., description="Unit: dl, tsp, tbsp, g, pcs (others convert on write)"
+    )
     purchase_date: date = Field(..., description="Purchase date for expiry calculation")
+
+    @model_validator(mode="after")
+    def canonical_units(self) -> "ConfirmedItemCreate":
+        from app.services.units import canonical_factor, to_canonical_decimal
+
+        _, canonical = canonical_factor(self.unit)
+        converted = to_canonical_decimal(Decimal(str(self.quantity)), self.unit)
+        self.quantity = float(converted) if converted is not None else self.quantity
+        self.unit = canonical
+        return self
 
 
 class ReceiptConfirmRequest(BaseModel):

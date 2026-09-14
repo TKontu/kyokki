@@ -293,6 +293,19 @@ increment U1 after R1b, before R2 creates products.
 - Frontend `Unit` type becomes `dl | tsp | tbsp | g | pcs`; fixtures and `isCountable`
   updated; quantity display unchanged (it prints the unit string).
 - **Acceptance:** migration up/down tested on a copy with mixed units; tsc and all suites green.
+- As built (branch `feat/mvp-u1-unit-migration`), rulings of 2026-09-14:
+  - [x] **Convert on write**: inventory, product (create and update), shopping list (create and
+    update) and receipt-confirm requests accept `ml`, `cl`, `l`, `kg`, `kpl`, `unit`, `st` and the
+    canonical units; amounts are scaled and stored canonical; unknown units return 422. Product
+    `unit_type` is derived from the unit (`volume | weight | count`). Response schemas never
+    convert, so a stray legacy row cannot break reads.
+  - [x] **tsp and tbsp are canonical on their own**, never converted to dl.
+  - [x] One conversion table in `services/units.py` (`canonical_factor`,
+    `to_canonical_decimal`, `unit_type_for`); OFF barcode quantities use it (`1 L` → 10 dl).
+  - [x] Data migration `a4f8c2d91e37` scales `consumption_log` (via its item's unit, first),
+    `inventory_item`, `product_master` (amounts, unit, unit_type) and `shopping_list_item`;
+    unknown units are left and reported. Downgrade only restores `dl → ml` (lossy by design).
+    Tested in pytest and up/down/up on a throwaway database with legacy rows.
 
 #### MVP-R2 — Confirm creates products for new items; overrides
 - `ConfirmedItemCreate`: `product_id: UUID | None`, `name: str | None`, `category: str | None`,
@@ -395,7 +408,7 @@ away, with no port forwarding.
   `initial_quantity`, capped at `current_quantity`; Done = `current_quantity`.
 - Calls `useConsumeInventoryItem` (optimistic update exists), toast on success, rollback plus
   error toast on failure. Wire `onConsume` from `page.tsx` through `InventoryList`.
-- **Acceptance:** calculation tests (¼ of 1000 ml = 250 ml; cap when 100 ml left), flow test
+- **Acceptance:** calculation tests (¼ of 10 dl = 2.5 dl; cap when 1 dl left), flow test
   with msw, rollback test.
 - As built (branch `feat/mvp-c2-consumption-sheet`), with operator rulings of 2026-09-13:
   - [x] `components/inventory/ConsumptionSheet.tsx` opened from the card's Consume button (the
@@ -658,7 +671,7 @@ Ordered by expected value once MVP is live.
 Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP frontier" enters.
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
-- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [ ] R1b (PR open)  [ ] U1  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
+- Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [ ] U1 (PR open)  [ ] R2  [x] C1 (PR #28)  [x] C2 (PR #29)
 - Wave 3: [x] S2 (PR #30)  [ ] T1  [ ] S3  [ ] S4  [ ] R3  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2

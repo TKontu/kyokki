@@ -6,7 +6,8 @@
 export type InventoryItemStatus = 'sealed' | 'opened' | 'partial' | 'empty' | 'discarded'
 export type InventoryLocation = 'main_fridge' | 'freezer' | 'pantry'
 export type ExpirySource = 'scanned' | 'calculated' | 'manual'
-export type Unit = 'ml' | 'g' | 'pcs' | 'unit'
+/** Canonical units (DEC-1, MVP-U1). The API converts other units on write. */
+export type Unit = 'dl' | 'tsp' | 'tbsp' | 'g' | 'pcs'
 
 export interface InventoryItem {
   id: string // UUID

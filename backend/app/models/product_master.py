@@ -38,8 +38,8 @@ class ProductMaster(Base):
     opened_shelf_life_days = Column(Integer, nullable=True)  # after opening
 
     # Quantity tracking
-    unit_type = Column(String, nullable=False)  # volume, weight, count, unit
-    default_unit = Column(String, nullable=False)  # ml, g, pcs
+    unit_type = Column(String, nullable=False)  # volume, weight, count
+    default_unit = Column(String, nullable=False)  # dl, tsp, tbsp, g, pcs (MVP-U1)
     default_quantity = Column(Numeric(10, 2), nullable=True)  # 1000, 500, 6
 
     # Auto-restock

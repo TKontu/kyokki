@@ -19,7 +19,7 @@ const MILK: InventoryItem = {
   receipt_id: null,
   initial_quantity: 1000,
   current_quantity: 750,
-  unit: 'ml',
+  unit: 'dl',
   status: 'opened',
   purchase_date: '2024-01-01',
   expiry_date: '2024-03-01',
@@ -73,7 +73,7 @@ describe('ConsumptionSheet', () => {
     it('shows the product name and what is left', () => {
       renderSheet(MILK)
       expect(screen.getByRole('dialog', { name: 'Oat Milk' })).toBeInTheDocument()
-      expect(screen.getByText('750 / 1000 ml left')).toBeInTheDocument()
+      expect(screen.getByText('750 / 1000 dl left')).toBeInTheDocument()
     })
 
     it('offers fractions for measured items', () => {

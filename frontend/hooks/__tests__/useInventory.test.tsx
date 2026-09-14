@@ -29,7 +29,7 @@ const mockInventoryItem: InventoryItem = {
   receipt_id: null,
   initial_quantity: 1000,
   current_quantity: 750,
-  unit: 'ml',
+  unit: 'dl',
   status: 'opened',
   purchase_date: '2024-01-01',
   expiry_date: '2024-01-15',
@@ -132,7 +132,7 @@ describe('useInventory Hooks', () => {
         product_master_id: mockInventoryItem.product_master_id,
         initial_quantity: 1000,
         current_quantity: 1000,
-        unit: 'ml',
+        unit: 'dl',
         expiry_date: '2024-02-01',
       }
 

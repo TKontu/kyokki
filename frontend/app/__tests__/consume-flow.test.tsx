@@ -22,7 +22,7 @@ const MILK: InventoryItem = {
   receipt_id: null,
   initial_quantity: 1000,
   current_quantity: 1000,
-  unit: 'ml',
+  unit: 'dl',
   status: 'sealed',
   purchase_date: '2024-01-01',
   expiry_date: '2099-03-01',
@@ -82,12 +82,12 @@ describe('Consume flow', () => {
     )
 
     renderHome()
-    expect(await screen.findByRole('progressbar', { name: '1000 of 1000 ml remaining' })).toBeInTheDocument()
+    expect(await screen.findByRole('progressbar', { name: '1000 of 1000 dl remaining' })).toBeInTheDocument()
 
     await openSheetAndTap('½')
 
     // Optimistic: the list shows the new amount while the request is still pending
-    await waitFor(() => expect(remaining('500 of 1000 ml remaining')).toBeInTheDocument())
+    await waitFor(() => expect(remaining('500 of 1000 dl remaining')).toBeInTheDocument())
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     await waitFor(() =>
       expect(consumeBodies).toEqual([{ id: 'item-milk', body: { quantity: 500 } }])
@@ -97,7 +97,7 @@ describe('Consume flow', () => {
     releaseConsume()
 
     expect(await screen.findByRole('status')).toHaveTextContent('Consumed ½ · Oat Milk')
-    expect(remaining('500 of 1000 ml remaining')).toBeInTheDocument()
+    expect(remaining('500 of 1000 dl remaining')).toBeInTheDocument()
   })
 
   it('removes a used-up item from the list as soon as Done is tapped', async () => {
@@ -135,7 +135,7 @@ describe('Consume flow', () => {
     )
 
     renderHome()
-    expect(await screen.findByRole('progressbar', { name: '1000 of 1000 ml remaining' })).toBeInTheDocument()
+    expect(await screen.findByRole('progressbar', { name: '1000 of 1000 dl remaining' })).toBeInTheDocument()
 
     await openSheetAndTap('½')
 
@@ -143,8 +143,8 @@ describe('Consume flow', () => {
       'Cannot consume 500 - only 100 available'
     )
     await waitFor(() =>
-      expect(remaining('1000 of 1000 ml remaining')).toBeInTheDocument()
+      expect(remaining('1000 of 1000 dl remaining')).toBeInTheDocument()
     )
-    expect(remaining('500 of 1000 ml remaining')).not.toBeInTheDocument()
+    expect(remaining('500 of 1000 dl remaining')).not.toBeInTheDocument()
   })
 })

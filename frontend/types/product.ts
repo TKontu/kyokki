@@ -6,7 +6,7 @@
 import type { Unit } from './inventory'
 
 export type StorageType = 'refrigerator' | 'freezer' | 'pantry'
-export type UnitType = 'volume' | 'weight' | 'count' | 'unit'
+export type UnitType = 'volume' | 'weight' | 'count'
 
 export interface ProductMaster {
   id: string // UUID

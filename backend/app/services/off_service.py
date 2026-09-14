@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.services.units import canonical_factor, to_canonical_decimal
 
 # Matches the leading number and optional unit in an OFF quantity string.
 # e.g. "1 L", "500g", "33 cl", "1,5 L", "6 x 250 ml" (matches first group)
@@ -159,9 +160,9 @@ def map_off_category_to_system(off_category: str | None) -> str:
 def parse_off_quantity(quantity_str: str | None) -> tuple[Decimal | None, str]:
     """Parse an OFF quantity string into a (amount, unit) pair.
 
-    Normalises to system units: L→ml (×1000), kg→g (×1000),
-    cl→ml (×10), dl→ml (×100).  Returns (None, "pcs") when the string
-    is absent, empty, or contains no recognisable unit.
+    Normalises to the canonical units (DEC-1, MVP-U1) via ``app.services.units``: L→dl (×10),
+    cl→dl (×0.1), ml→dl (×0.01), kg→g (×1000). Returns (None, "pcs") when the string is
+    absent, empty, or contains no recognisable unit.
 
     Args:
         quantity_str: Raw quantity string from OFF, e.g. "1 L", "500g", "33 cl".
@@ -179,20 +180,11 @@ def parse_off_quantity(quantity_str: str | None) -> tuple[Decimal | None, str]:
     raw = Decimal(m.group("n").replace(",", "."))
     unit_raw = (m.group("u") or "").lower().replace(" ", "").replace(".", "")
 
-    if unit_raw == "l":
-        return raw * 1000, "ml"
-    if unit_raw == "cl":
-        return raw * 10, "ml"
-    if unit_raw == "dl":
-        return raw * 100, "ml"
-    if unit_raw == "ml":
-        return raw, "ml"
-    if unit_raw == "kg":
-        return raw * 1000, "g"
-    if unit_raw == "g":
-        return raw, "g"
-    # oz / fl oz — not in system units; fall back
-    return None, "pcs"
+    if unit_raw not in {"l", "cl", "dl", "ml", "kg", "g"}:
+        # oz / fl oz and bare counts: not a measurable pack size in system units
+        return None, "pcs"
+    _, canonical = canonical_factor(unit_raw)
+    return to_canonical_decimal(raw, unit_raw), canonical
 
 
 async def enrich_product_from_off(barcode: str) -> dict[str, Any]:
@@ -208,7 +200,7 @@ async def enrich_product_from_off(barcode: str) -> dict[str, Any]:
         - off_product_id: The barcode
         - off_data: Full product data from OFF for caching
         - default_quantity: Parsed numeric quantity (or None)
-        - default_unit: Normalised unit string ("ml", "g", or "pcs")
+        - default_unit: Canonical unit string ("dl", "g", or "pcs")
 
     Raises:
         OffProductNotFoundError: If product not found in OFF.
