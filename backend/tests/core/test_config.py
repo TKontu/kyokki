@@ -88,3 +88,28 @@ def test_reasoning_strength_can_be_disabled_for_other_models(
     assert (
         _settings(monkeypatch, LLM_REASONING_STRENGTH="").LLM_REASONING_STRENGTH is None
     )
+
+
+def test_telegram_allowed_chat_ids_comma_separated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(monkeypatch, TELEGRAM_ALLOWED_CHAT_IDS="12345, -1009876")
+    assert settings.TELEGRAM_ALLOWED_CHAT_IDS == [12345, -1009876]
+
+
+def test_telegram_defaults_disable_the_bot(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_CHAT_IDS"):
+        monkeypatch.delenv(key, raising=False)
+    settings = _settings(monkeypatch)
+    assert settings.TELEGRAM_BOT_TOKEN is None
+    assert settings.TELEGRAM_ALLOWED_CHAT_IDS == []
+    assert settings.TELEGRAM_API_BASE == "https://api.telegram.org"
+
+
+def test_telegram_token_is_never_rendered(monkeypatch: pytest.MonkeyPatch) -> None:
+    token = "123456:SECRET-token-value"
+    settings = _settings(monkeypatch, TELEGRAM_BOT_TOKEN=token)
+    assert settings.TELEGRAM_BOT_TOKEN is not None
+    assert settings.TELEGRAM_BOT_TOKEN.get_secret_value() == token
+    assert token not in repr(settings)
+    assert token not in str(settings.model_dump())

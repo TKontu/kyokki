@@ -46,7 +46,7 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_entry, ensure_ascii=False)
 
 
-def setup_logging():
+def setup_logging() -> None:
     """Setup structured logging configuration"""
 
     # Get project root and create logs directory

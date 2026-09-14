@@ -79,11 +79,45 @@ docker compose -f docker-compose.prod.yml run --rm kyokki-api alembic upgrade he
 The frontend image bakes in the backend address (`API_INTERNAL_URL`, the compose service name),
 so it only needs rebuilding when the code changes, never when the LAN IP changes.
 
+## Telegram bot
+
+Share receipts to a private Telegram bot from the phone: order PDFs, S-Group and K-Plussa app
+receipts or screenshots, and photos of paper receipts. The `kyokki-telegram` service reads each
+one and replies with a summary, for example
+`S-group, 2.1.2026: 49 items, 3 matched. New: … (+37). Review on the iPad.`
+It long-polls Telegram, so the homelab needs no open port.
+
+1. In Telegram, open **@BotFather**, send `/newbot` and pick a name. Copy the token.
+2. Put it in `stack.env` as `TELEGRAM_BOT_TOKEN=...` and start the stack
+   (`docker compose -f docker-compose.prod.yml up -d --build`).
+3. Send `/start` to the bot. It answers "This bot is private. Your chat id is …".
+4. Add that id to `TELEGRAM_ALLOWED_CHAT_IDS` in `stack.env` (comma-separated for several
+   people) and restart the bot:
+   `docker compose -f docker-compose.prod.yml up -d kyokki-telegram`.
+5. Share a receipt to the bot. It answers "Received", then edits that message with the summary
+   after about a minute. Receipts are read one at a time; the rest wait in a queue.
+
+Behaviour worth knowing:
+- Sending the same file again (on Telegram or through the upload API) is rejected as already
+  received, so a receipt is never imported twice. The API answers 409 with the existing id.
+- Photos sent the normal way are compressed by Telegram; send them **as a file** for better OCR.
+  Files over 20 MB cannot be downloaded by bots.
+- Queued receipts that were not read yet when the bot restarts stay "uploaded"; process them
+  from the iPad.
+- Without a token the service logs "Telegram bot disabled" and idles.
+
+**Privacy:** receipts pass through Telegram's servers, and a receipt shows what you bought, where
+and when, and often the last digits of the payment card. Only allowlisted chats are served;
+other chats get no reply except their chat id on `/start`, and nothing they send is logged.
+Keep the token secret: anyone with it can read what is sent to the bot. If it leaks, use
+`/revoke` in @BotFather and update `stack.env`.
+
 ## Operations
 
 ```bash
 docker compose -f docker-compose.prod.yml logs -f kyokki-api      # backend logs
 docker compose -f docker-compose.prod.yml logs -f frontend        # Next.js logs
+docker compose -f docker-compose.prod.yml logs -f kyokki-telegram # receipt bot logs
 docker compose -f docker-compose.prod.yml exec postgres \
   pg_dump -U kyokki_user kyokki > backup-$(date +%F).sql          # database backup
 docker compose -f docker-compose.prod.yml down                    # stop (data volumes stay)

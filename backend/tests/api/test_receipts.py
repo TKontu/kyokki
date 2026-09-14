@@ -252,8 +252,9 @@ class TestListReceipts:
     ) -> None:
         """GET /api/receipts should support filtering by store_chain."""
         # Create receipts from different stores
-        for store in ["S-Market", "K-Citymarket", "S-Market"]:
-            file_content = f"fake image {store}".encode()
+        # Distinct bytes per upload: identical files are rejected as duplicates (MVP-T1)
+        for n, store in enumerate(["S-Market", "K-Citymarket", "S-Market"]):
+            file_content = f"fake image {store} {n}".encode()
             files = {
                 "file": (f"receipt_{store}.jpg", BytesIO(file_content), "image/jpeg")
             }
@@ -486,3 +487,28 @@ class TestReceiptItems:
     ) -> None:
         response = await client.get("/api/receipts?status=queued")
         assert response.status_code == 422
+
+
+class TestDuplicateUploads:
+    """MVP-T1: the same file uploaded twice returns the existing receipt."""
+
+    async def test_second_upload_of_the_same_file_is_409_with_existing_id(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        content = b"%PDF-1.4 order 1089366829"
+        first = await client.post(
+            "/api/receipts/scan",
+            files={"file": ("order.pdf", BytesIO(content), "application/pdf")},
+        )
+        second = await client.post(
+            "/api/receipts/scan",
+            files={"file": ("order-copy.pdf", BytesIO(content), "application/pdf")},
+        )
+
+        assert first.status_code == 201
+        assert first.json()["content_sha256"]
+        assert second.status_code == 409
+        assert second.json()["detail"] == {
+            "message": "Receipt already uploaded",
+            "receipt_id": first.json()["id"],
+        }

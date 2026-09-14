@@ -19,18 +19,10 @@ from app.schemas.receipt import (
     ReceiptStatus,
 )
 from app.services.broadcast_helpers import broadcast_receipt_status
+from app.services.receipt_ingest import UnsupportedReceiptType, ingest_receipt_file
 from app.services.receipt_processing import ReceiptProcessingService
 
 router = APIRouter()
-
-# Allowed file types for receipt upload
-ALLOWED_CONTENT_TYPES = {
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-    "image/webp",
-    "application/pdf",
-}
 
 
 @router.post(
@@ -55,28 +47,32 @@ async def upload_receipt(
 
     Raises:
         HTTPException 400: If file type is not supported.
+        HTTPException 409: If the same file was already uploaded (detail has receipt_id).
     """
-    # Validate file type
-    if file.content_type not in ALLOWED_CONTENT_TYPES:
+    try:
+        result = await ingest_receipt_file(
+            db,
+            content=await file.read(),
+            filename=file.filename or "receipt",
+            content_type=file.content_type or "",
+            store_chain=store_chain,
+            purchase_date=purchase_date,
+        )
+    except UnsupportedReceiptType as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type: {file.content_type}. "
-            f"Allowed types: {', '.join(ALLOWED_CONTENT_TYPES)}",
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+    if result.duplicate:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "Receipt already uploaded",
+                "receipt_id": str(result.receipt.id),
+            },
         )
 
-    # Read file content
-    file_content = await file.read()
-
-    # Create receipt with file storage
-    receipt = await crud_receipt.create_receipt(
-        db,
-        file_content=file_content,
-        filename=file.filename or "receipt",
-        store_chain=store_chain,
-        purchase_date=purchase_date,
-    )
-
-    return receipt
+    return result.receipt
 
 
 @router.get("/{receipt_id}", response_model=ReceiptResponse)
