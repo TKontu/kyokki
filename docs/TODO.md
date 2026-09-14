@@ -526,6 +526,21 @@ away, with no port forwarding.
 - New product → `POST /api/products` then `POST /api/inventory`. `lib/api/categories.ts`,
   `hooks/useCategories.ts`, `hooks/useProducts.ts` create mutation.
 - **Acceptance:** add existing and add new both land in the list; validation for quantity > 0.
+- As built (branch `feat/mvp-s3-quick-add`), rulings of 2026-09-14:
+  - [x] **One backend call** `POST /api/inventory/quick-add` instead of `POST /products` then
+    `POST /inventory` (no orphan products, no "milk"/"Milk" duplicates). Takes `product_id` or
+    `name` (+ `category` for a new product), quantity, unit (convert on write), optional
+    location, purchase date (default today) and expiry (source `manual`).
+  - [x] R2's product rules moved to `services/generic_products.py` (`ProductResolver`,
+    `build_inventory_item`) and are shared by confirm and quick add. New hand-typed names get a
+    capital first letter ("oat drink" -> "Oat drink").
+  - [x] `GET /api/categories` returns `default_storage`, so the sheet preselects the location
+    without a frontend copy of the mapping.
+  - [x] `QuickAddSheet` from "+ Add" on the home page: debounced product search with
+    "Create new: <name>", category grid, quantity (must be > 0), unit, location, expiry
+    prefilled from shelf life (sent only when edited). Errors keep the sheet open.
+  - [x] E2E in Chrome against a throwaway DB: new product, reuse by different case, new frozen
+    product with edited expiry landing in the Freezer group, quantity 0 blocked.
 
 #### MVP-S4 — Item edit sheet
 - Long-press or "⋯" on a card: adjust current quantity, change expiry date, move location,
@@ -710,7 +725,7 @@ Ordered by expected value once MVP is live.
 - [ ] "Mark as Gone" swipe action
 - [ ] "Clear All Expired" batch action
 - [ ] Quick quantity adjustment UI
-- [ ] "Just Bought" manual add flow
+- [x] "Just Bought" manual add flow — MVP-S3 Quick Add
 
 ### Consumption Learning
 - [ ] Track consumption patterns by product + context
@@ -741,7 +756,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
 - Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [x] R2 (PR #37)  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [ ] S3  [ ] S4  [ ] R3 (PR open)  [ ] R3b  [ ] R4
+- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [ ] S3 (PR open)  [ ] S4  [x] R3 (PR #38)  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance

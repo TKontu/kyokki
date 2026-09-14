@@ -66,6 +66,7 @@ describe('TypeScript Types', () => {
         default_shelf_life_days: 7,
         meal_contexts: ['breakfast', 'lunch'],
         sort_order: 0,
+        default_storage: 'refrigerator',
       }
       expect(category.id).toBeDefined()
     })

@@ -17,3 +17,6 @@ export type { InventoryListProps } from './InventoryList'
 
 export { ConsumptionSheet } from './ConsumptionSheet'
 export type { ConsumptionSheetProps } from './ConsumptionSheet'
+
+export { QuickAddSheet } from './QuickAddSheet'
+export type { QuickAddSheetProps } from './QuickAddSheet'

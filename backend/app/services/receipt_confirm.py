@@ -2,7 +2,7 @@
 
 Products are generic (operator ruling 2026-09-14): SNELLMAN and ATRIA NAUDAN JAUHELIHA are
 both "Ground beef". A confirmed item names an existing product, or a generic name that is reused
-case-insensitively or created. Each printed receipt name is learned as a store alias, so the next
+case-insensitively or created (rules in ``services/generic_products.py``). Each printed receipt name is learned as a store alias, so the next
 receipt from that store arrives pre-matched.
 
 Everything is written in one transaction; any invalid item rolls the whole confirm back.
@@ -10,17 +10,15 @@ Everything is written in one transaction; any invalid item rolls the whole confi
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.crud.category import get_category
-from app.models.category import Category
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
@@ -30,10 +28,13 @@ from app.services.broadcast_helpers import (
     broadcast_inventory_update,
     broadcast_receipt_status,
 )
+from app.services.generic_products import (
+    InvalidProductRequest,
+    ProductResolver,
+    build_inventory_item,
+)
 from app.services.matching_service import normalize_receipt_name
-from app.services.storage import location_for_storage, storage_type_for_category
 from app.services.store_chain import normalize_store_chain
-from app.services.units import unit_type_for
 
 logger = get_logger(__name__)
 
@@ -63,10 +64,6 @@ class ConfirmResult:
     )
 
 
-def _name_key(name: str) -> str:
-    return " ".join(name.split()).casefold()
-
-
 class _Confirmation:
     def __init__(self, db: AsyncSession, receipt: Receipt):
         self.db = db
@@ -83,8 +80,7 @@ class _Confirmation:
             )
             or UNKNOWN_CHAIN
         )
-        self.products_by_name: dict[str, ProductMaster] = {}
-        self.categories: dict[str, Category | None] = {}
+        self.resolver = ProductResolver(db)
         self.aliases: dict[str, StoreProductAlias] = {}
 
     def line(self, position: int, item: ConfirmedItemCreate) -> dict[str, Any]:
@@ -97,69 +93,21 @@ class _Confirmation:
             )
         return line
 
-    async def category(self, category_id: str) -> Category | None:
-        if category_id not in self.categories:
-            self.categories[category_id] = await get_category(self.db, category_id)
-        return self.categories[category_id]
-
     async def product(
         self, position: int, item: ConfirmedItemCreate, line: dict[str, Any]
     ) -> ProductMaster:
-        if item.product_id is not None:
-            product = await self.db.get(ProductMaster, item.product_id)
-            if product is None:
-                raise InvalidConfirmItem(
-                    f"Item {position}: product '{item.product_id}' not found"
-                )
-            return product
-
-        name = " ".join(
-            (item.name or line.get("generic_name") or line.get("name") or "").split()
-        )
-        if not name:
-            raise InvalidConfirmItem(f"Item {position}: no product name")
-        key = _name_key(name)
-        if key in self.products_by_name:
-            return self.products_by_name[key]
-
-        existing = (
-            (
-                await self.db.execute(
-                    select(ProductMaster)
-                    .where(func.lower(ProductMaster.canonical_name) == name.lower())
-                    .order_by(ProductMaster.created_at)
-                    .limit(1)
-                )
+        try:
+            product, created = await self.resolver.resolve(
+                product_id=item.product_id,
+                name=item.name or line.get("generic_name") or line.get("name"),
+                category=item.category or line.get("category"),
+                unit=item.unit,
+                quantity=item.quantity,
             )
-            .scalars()
-            .first()
-        )
-        if existing is not None:
-            self.products_by_name[key] = existing
-            return existing
-
-        category_id = item.category or line.get("category")
-        if not category_id:
-            raise InvalidConfirmItem(f"Category required for new product '{name}'")
-        category = await self.category(str(category_id))
-        if category is None:
-            raise InvalidConfirmItem(
-                f"Unknown category '{category_id}' for new product '{name}'"
-            )
-
-        product = ProductMaster(
-            canonical_name=name,
-            category=category.id,
-            storage_type=storage_type_for_category(str(category.id)),
-            default_shelf_life_days=category.default_shelf_life_days,
-            unit_type=unit_type_for(item.unit),
-            default_unit=item.unit,
-            default_quantity=item.quantity,
-        )
-        self.db.add(product)
-        await self.db.flush()
-        self.products_by_name[key] = product
-        self.result.products_created += 1
+        except InvalidProductRequest as exc:
+            raise InvalidConfirmItem(f"Item {position}: {exc}") from exc
+        if created:
+            self.result.products_created += 1
         return product
 
     async def learn_alias(self, line: dict[str, Any], product: ProductMaster) -> None:
@@ -209,24 +157,14 @@ class _Confirmation:
     async def add(self, position: int, item: ConfirmedItemCreate) -> None:
         line = self.line(position, item)
         product = await self.product(position, item, line)
-        if item.expiry_date is not None:
-            expiry, source = item.expiry_date, "manual"
-        else:
-            expiry = item.purchase_date + timedelta(
-                days=int(product.default_shelf_life_days)
-            )
-            source = "calculated"
-        inventory_item = InventoryItem(
-            product_master_id=product.id,
-            receipt_id=self.receipt.id,
-            initial_quantity=item.quantity,
-            current_quantity=item.quantity,
+        inventory_item = build_inventory_item(
+            product,
+            quantity=item.quantity,
             unit=item.unit,
-            status="sealed",
             purchase_date=item.purchase_date,
-            expiry_date=expiry,
-            expiry_source=source,
-            location=item.location or location_for_storage(str(product.storage_type)),
+            expiry_date=item.expiry_date,
+            location=item.location,
+            receipt_id=cast(UUID, self.receipt.id),
         )
         self.db.add(inventory_item)
         self.result.inventory_items.append((inventory_item, product))

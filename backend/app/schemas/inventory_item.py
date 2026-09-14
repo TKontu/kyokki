@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -40,6 +41,44 @@ class InventoryItemCreate(InventoryItemBase):
     @model_validator(mode="after")
     def canonical_units(self) -> "InventoryItemCreate":
         canonicalize_units(self, "unit", ["initial_quantity", "current_quantity"])
+        return self
+
+
+class QuickAddRequest(BaseModel):
+    """Add stock by hand: an existing product, or a generic product found or created by name.
+
+    A new product needs ``category``; its shelf life and storage come from the category
+    (the same rules as receipt confirm). Expiry and location default from the product.
+    """
+
+    product_id: UUID | None = Field(None, description="Existing product")
+    name: str | None = Field(
+        None, description="Generic product name, reused case-insensitively or created"
+    )
+    category: str | None = Field(None, description="Category id for a new product")
+    quantity: JsonDecimal = Field(..., gt=0, description="Amount in unit")
+    unit: str = Field(
+        ..., description="Unit: dl, tsp, tbsp, g, pcs (others convert on write)"
+    )
+    location: Literal["main_fridge", "freezer", "pantry"] | None = Field(
+        None, description="Default follows the product's storage type"
+    )
+    purchase_date: date | None = Field(None, description="Default today")
+    expiry_date: date | None = Field(
+        None, description="Override; default purchase date + shelf life"
+    )
+
+    @model_validator(mode="after")
+    def identifies_a_product(self) -> "QuickAddRequest":
+        if self.name is not None and not self.name.strip():
+            self.name = None
+        if self.product_id is None and self.name is None:
+            raise ValueError("Give a product_id or name")
+        return self
+
+    @model_validator(mode="after")
+    def canonical_units(self) -> "QuickAddRequest":
+        canonicalize_units(self, "unit", ["quantity"])
         return self
 
 
