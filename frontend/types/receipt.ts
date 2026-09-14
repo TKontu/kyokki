@@ -21,6 +21,7 @@ export type MatchSource = 'alias' | 'exact' | 'fuzzy' | 'fuzzy_alias'
 export interface ExtractedItem {
   index: number // Position on the receipt; confirm and review address items by it
   name: string // Product name as printed
+  generic_name: string | null // Brand-free generic name suggested for a new product
   quantity: number
   unit: ReceiptUnit
   product_id: string | null // Matched product UUID
@@ -64,4 +65,34 @@ export interface ReceiptUpdate {
 export interface ReceiptListParams {
   status?: ReceiptStatus
   store?: string
+}
+
+/**
+ * One reviewed receipt item. Give product_id for an existing product; otherwise a generic
+ * product is reused by name or created (name and category default to the receipt line).
+ * index names the receipt line so its printed name is learned as a store alias.
+ * At least one of product_id, name or index is required.
+ */
+export interface ConfirmedItemCreate {
+  index?: number | null
+  product_id?: string | null
+  name?: string | null
+  category?: string | null
+  quantity: number
+  unit: string // dl, tsp, tbsp, g, pcs (ml, l, kg, kpl convert on write)
+  purchase_date: string // ISO date
+  expiry_date?: string | null // Override; default purchase date + shelf life
+  location?: 'main_fridge' | 'freezer' | 'pantry' | null // Override; default from storage type
+}
+
+export interface ReceiptConfirmRequest {
+  items: ConfirmedItemCreate[] // Lines not sent are skipped
+}
+
+export interface ReceiptConfirmResponse {
+  success: boolean
+  items_created: number
+  products_created: number
+  aliases_learned: number
+  error: string | null
 }

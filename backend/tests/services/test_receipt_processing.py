@@ -123,7 +123,7 @@ class TestInputSelection:
         assert result.success is True
         ocr.assert_awaited_once_with(pdf_receipt.image_path)
         text.assert_awaited_once_with(
-            OCR_TEXT, [CategoryOption(id="dairy", name="Dairy & Eggs")]
+            OCR_TEXT, [CategoryOption(id="dairy", name="Dairy & Eggs")], []
         )
         vision.assert_not_awaited()
 
@@ -161,6 +161,7 @@ class TestInputSelection:
             b"\x89PNG fake image",
             "image/png",
             [CategoryOption(id="dairy", name="Dairy & Eggs")],
+            [],
         )
 
     async def test_image_falls_back_to_vision_when_ocr_returns_blank_text(
@@ -200,6 +201,7 @@ class TestPersistence:
         milk, butter = structured["lines"]
         assert milk == {
             "name": "Valio Whole Milk 1L",
+            "generic_name": None,
             "quantity": 1.0,
             "weight_kg": None,
             "category": "dairy",
@@ -263,6 +265,44 @@ class TestPersistence:
         assert lime["product_id"] is None
         assert red_onion["product_id"] == str(onion.id)
         assert pdf_receipt.items_matched == 1
+
+    async def test_generic_name_is_stored_and_used_for_matching(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        beef = ProductMaster(
+            id=uuid4(),
+            canonical_name="Ground beef",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=3,
+            unit_type="weight",
+            default_unit="g",
+        )
+        db_session.add(beef)
+        await db_session.commit()
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(
+                    name="SNELLMAN NAUDAN JAUHELIHA 10%",
+                    generic_name="Ground beef",
+                    quantity=1,
+                    category="dairy",
+                )
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction) as text,
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        # The catalog's names are offered to the model so it reuses them
+        assert text.await_args.args[2] == ["Ground beef"]
+        await db_session.refresh(pdf_receipt)
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["generic_name"] == "Ground beef"
+        assert line["product_id"] == str(beef.id)
+        assert line["match_source"] == "exact"
 
     async def test_alias_match_is_stored_per_line(
         self, service, pdf_receipt, sample_product, db_session

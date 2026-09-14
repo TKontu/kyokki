@@ -56,14 +56,19 @@ class ReceiptProcessingService:
         self.matching_service = MatchingService(db)
 
     async def _read_receipt(
-        self, receipt: Receipt, categories: list[CategoryOption]
+        self,
+        receipt: Receipt,
+        categories: list[CategoryOption],
+        known_products: list[str],
     ) -> tuple[str | None, ReceiptExtraction]:
         """Return (OCR text if any, extraction), choosing text or vision input."""
         path = str(receipt.image_path)
 
         if is_pdf(path):
             pdf_text = await extract_text_from_receipt(path)
-            return pdf_text, await extract_from_text(pdf_text, categories)
+            return pdf_text, await extract_from_text(
+                pdf_text, categories, known_products
+            )
 
         text: str | None
         try:
@@ -76,7 +81,7 @@ class ReceiptProcessingService:
             text = None
 
         if text and text.strip():
-            return text, await extract_from_text(text, categories)
+            return text, await extract_from_text(text, categories, known_products)
 
         if text is not None:
             logger.warning(
@@ -84,7 +89,9 @@ class ReceiptProcessingService:
                 extra={"receipt_id": str(receipt.id)},
             )
         image = await anyio.Path(path).read_bytes()
-        return None, await extract_from_image(image, content_type_for(path), categories)
+        return None, await extract_from_image(
+            image, content_type_for(path), categories, known_products
+        )
 
     async def process_receipt(self, receipt: Receipt) -> ProcessingResult:
         """Process a receipt through the full pipeline and update the record."""
@@ -100,12 +107,15 @@ class ReceiptProcessingService:
                 CategoryOption(id=str(c.id), name=str(c.display_name))
                 for c in await get_categories(self.db)
             ]
-            ocr_text, extraction = await self._read_receipt(receipt, categories)
+            # Load the catalog first: its generic names are offered to the model for reuse
+            await self.matching_service.prepare(None)
+            ocr_text, extraction = await self._read_receipt(
+                receipt, categories, self.matching_service.product_names
+            )
 
             chain = normalize_store_chain(
                 str(receipt.store_chain) if receipt.store_chain else None
             ) or normalize_store_chain(extraction.store_chain)
-            await self.matching_service.prepare(chain)
 
             matched_products: list[MatchResult] = []
             stored_lines = []
@@ -113,7 +123,10 @@ class ReceiptProcessingService:
                 # Only confident matches pre-select a product; weaker fuzzy guesses (the R1b
                 # end-to-end run paired CHEDDAR PUNAINEN with PUNASIPULI at 50) stay unmatched
                 match = self.matching_service.match_line(
-                    line.name, chain, min_score=settings.FUZZY_MATCH_THRESHOLD
+                    line.name,
+                    chain,
+                    min_score=settings.FUZZY_MATCH_THRESHOLD,
+                    generic_name=line.generic_name,
                 )
                 stored = line.model_dump(mode="json")
                 stored.update(

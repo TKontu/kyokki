@@ -415,7 +415,12 @@ class TestReceiptItems:
             method="text",
             store_chain="Prisma ruoan verkkokauppa",
             lines=[
-                ExtractedLine(name="BARISTA KAURAJUOMA", quantity=3, category="dairy"),
+                ExtractedLine(
+                    name="BARISTA KAURAJUOMA",
+                    generic_name="Oat drink",
+                    quantity=3,
+                    category="dairy",
+                ),
                 ExtractedLine(
                     name="PUNASIPULI", quantity=1, weight_kg=0.33, category="produce"
                 ),
@@ -447,6 +452,7 @@ class TestReceiptItems:
         assert oat == {
             "index": 0,
             "name": "BARISTA KAURAJUOMA",
+            "generic_name": "Oat drink",
             "quantity": 3.0,
             "unit": "pcs",
             "product_id": str(product.id),

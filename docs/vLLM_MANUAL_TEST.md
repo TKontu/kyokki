@@ -488,3 +488,28 @@ instructions as a `text` part plus an `image_url` part (`data:image/png;base64,.
   endpoint `192.168.0.247:9003` with `LLM_MODEL=qwen3-8B`; `llm_extractor.py` still sends
   `max_tokens: 16384`, no schema, and the full-key prompt. The request above replaces that.
   Receipt processing must allow ~60 s per call (R3 runs it in the background).
+
+## MVP-R2 generic product names (2026-09-14)
+
+`muse-glimmer` on the llama-swap gateway, `reasoning_strength: low`, the compact contract with
+the new `g` field. Harness: the R0 receipt text and renderer (`docs/spikes/r0_extraction_spike.py`).
+
+**Text path, direct call:** 63.8 s, 49/49 lines, finish `stop`, **3758 completion tokens** of the
+old 4096 `max_tokens` (1467 prompt). The default is now 8192. Generic names were brand- and
+size-free: KEVYTMAITOJUOMA LAKTON → Milk, AMERIKAN PEKONI ORIGINAL → Bacon, KANAN FILEESUIKALE
+MTON → Chicken fillet, ISOT KANANMUNAT VAPAA L15 → Eggs, PORKKANA 1KG → Carrot. Household lines
+got a name and no category.
+
+**Through the API (vision, rendered image), empty catalog, throwaway DB:**
+
+| Step | Result |
+| --- | --- |
+| Receipt 1 process | 72.2 s, 49 lines, every line with a generic name, 0 matched (empty catalog) |
+| Confirm receipt 1 | 41 food lines sent by `index` (8 without category skipped): 41 items, 38 products (Apple, Oat drink, Tomato reused within the confirm), 41 verified `s-group` aliases |
+| Locations | 26 main_fridge, 14 pantry, 1 freezer (Potato sticks), all from the category |
+| Confirm again | 409 "Receipt already confirmed" |
+| Receipt 2 (K-Citymarket, other brands: ARLA, SNELLMAN, VALIO, PIRKKA, HK, RAINBOW, ELOVENA) | 28.0 s, **11/12 matched**, all `exact` on the generic name; the unmatched line (ATRIA NAUDAN JAUHELIHA → Ground beef) was not on receipt 1 |
+
+Vision misreads carried into generic names: SIENILIINA (cleaning cloth) → Mushroom in
+`produce`, TUMMA RYPÄLE (grapes) → Raisins; the text path named both correctly. KIRSIKKATOMAATTI
+became "Tomato" on the image path. The review screen (R7) is where such lines get corrected.

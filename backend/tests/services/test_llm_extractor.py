@@ -11,8 +11,10 @@ import pytest
 from app.core.config import settings
 from app.parsers.base import ExtractedLine, ReceiptExtraction
 from app.services.llm_extractor import (
+    MAX_KNOWN_PRODUCTS,
     CategoryOption,
     LLMExtractionError,
+    build_instructions,
     build_response_schema,
     extract_from_image,
     extract_from_text,
@@ -64,8 +66,14 @@ def _compact(**overrides) -> str:
         "s": "S-KAUPAT",
         "d": "2026-01-02",
         "p": [
-            {"n": "KEVYTMAITOJUOMA LAKTON", "q": 1, "w": None, "c": "dairy"},
-            {"n": "PUNASIPULI", "q": 1, "w": 0.33, "c": "produce"},
+            {
+                "n": "KEVYTMAITOJUOMA LAKTON",
+                "g": "Lactose-free milk",
+                "q": 1,
+                "w": None,
+                "c": "dairy",
+            },
+            {"n": "PUNASIPULI", "g": "Red onion", "q": 1, "w": 0.33, "c": "produce"},
         ],
     }
     body.update(overrides)
@@ -133,7 +141,8 @@ class TestResponseSchema:
         schema = build_response_schema(["dairy", "produce"])
         item = schema["properties"]["p"]["items"]
         assert item["properties"]["c"]["enum"] == ["dairy", "produce", None]
-        assert item["required"] == ["n", "q", "w", "c"]
+        assert item["properties"]["g"] == {"type": "string"}
+        assert item["required"] == ["n", "g", "q", "w", "c"]
         assert schema["required"] == ["s", "d", "p"]
 
 
@@ -147,14 +156,62 @@ class TestParseCompletion:
         assert result.lines == [
             ExtractedLine(
                 name="KEVYTMAITOJUOMA LAKTON",
+                generic_name="Lactose-free milk",
                 quantity=1,
                 weight_kg=None,
                 category="dairy",
             ),
             ExtractedLine(
-                name="PUNASIPULI", quantity=1, weight_kg=0.33, category="produce"
+                name="PUNASIPULI",
+                generic_name="Red onion",
+                quantity=1,
+                weight_kg=0.33,
+                category="produce",
             ),
         ]
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("  ground   beef ", "Ground beef"),
+            ("Low-fat milk", "Low-fat milk"),
+            ("", None),
+            ("   ", None),
+            (None, None),
+        ],
+    )
+    def test_generic_name_is_tidied(self, raw, expected):
+        content = json.dumps(
+            {"s": None, "d": None, "p": [{"n": "SNELLMAN JAUHELIHA", "g": raw, "q": 1}]}
+        )
+        result = parse_completion(content, CATEGORY_IDS, method="text")
+        assert result.lines[0].generic_name == expected
+
+    def test_missing_generic_name_is_none(self):
+        content = json.dumps({"s": None, "d": None, "p": [{"n": "PUNASIPULI", "q": 1}]})
+        result = parse_completion(content, CATEGORY_IDS, method="text")
+        assert result.lines[0].generic_name is None
+
+
+class TestInstructions:
+    def test_ask_for_a_generic_english_name(self):
+        text = build_instructions(CATEGORIES)
+        assert "g = " in text
+        assert "English" in text
+        assert "Ground beef" in text
+
+    def test_list_known_products_to_reuse_their_names(self):
+        text = build_instructions(CATEGORIES, ["Milk", "Ground beef", "milk"])
+        assert "Known products: Ground beef, Milk." in text
+
+    def test_without_known_products_the_list_is_omitted(self):
+        assert "Known products" not in build_instructions(CATEGORIES)
+
+    def test_known_products_are_capped(self):
+        names = [f"Product {i:04d}" for i in range(MAX_KNOWN_PRODUCTS + 50)]
+        text = build_instructions(CATEGORIES, names)
+        assert f"Product {MAX_KNOWN_PRODUCTS - 1:04d}" in text
+        assert f"Product {MAX_KNOWN_PRODUCTS:04d}" not in text
 
     def test_strips_reasoning_and_code_fences(self):
         content = f"<think>let me read the receipt</think>\n```json\n{_compact()}\n```"
@@ -231,6 +288,14 @@ class TestExtractFromText:
         assert "KEVYTMAITOJUOMA LAKTON 1,28" in prompt
         assert "YHTEENSÄ" not in prompt
         assert "dairy (Dairy & Eggs)" in prompt
+
+    async def test_known_products_reach_the_prompt(self):
+        patcher, post = _mock_client()
+        with patcher:
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES, ["Red onion"])
+
+        prompt = post.call_args.kwargs["json"]["messages"][0]["content"]
+        assert "Known products: Red onion." in prompt
 
     async def test_reasoning_kwargs_omitted_when_unset(self, monkeypatch):
         monkeypatch.setattr(settings, "LLM_REASONING_STRENGTH", None)

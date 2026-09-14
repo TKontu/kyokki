@@ -88,13 +88,28 @@ class MatchingService:
         self._aliases = [a for a in self._aliases if a.product_master_id in by_id]
         self._product_by_id = by_id
 
+    @property
+    def product_names(self) -> list[str]:
+        """Canonical names of the prepared catalog (offered to extraction for reuse)."""
+        if self._products is None:
+            raise RuntimeError(
+                "MatchingService.prepare() must be awaited before product_names"
+            )
+        return [str(p.canonical_name) for p in self._products]
+
     def match_line(
         self,
         product_name: str,
         store_chain: str | None = None,
         min_score: float = LOW_THRESHOLD,
+        generic_name: str | None = None,
     ) -> MatchResult | None:
-        """Best match for one receipt line. Requires ``prepare()``; runs no queries."""
+        """Best match for one receipt line. Requires ``prepare()``; runs no queries.
+
+        ``generic_name`` is the brand-free name from extraction ("Ground beef"). Products are
+        generic, so it reaches the product even when the printed name shares no words with it.
+        A learned alias for the printed name still wins.
+        """
         if self._products is None:
             raise RuntimeError(
                 "MatchingService.prepare() must be awaited before match_line()"
@@ -115,6 +130,17 @@ class MatchingService:
                 source="alias",
             )
 
+        generic_key = normalize_receipt_name(generic_name) if generic_name else ""
+        if generic_key:
+            generic = self._exact_canonical(generic_key)
+            if generic is not None:
+                return MatchResult(
+                    product=generic,
+                    score=100.0,
+                    confidence=MatchConfidence.EXACT,
+                    source="exact",
+                )
+
         exact = self._exact_canonical(key)
         if exact is not None:
             return MatchResult(
@@ -132,6 +158,24 @@ class MatchingService:
             processor=str.upper,
             score_cutoff=min_score,
         )
+        generic_best = None
+        if generic_key:
+            # Generic names are compared with product names only: aliases are printed names
+            generic_best = process.extractOne(
+                generic_key,
+                [str(p.canonical_name) for p in self._products],
+                scorer=fuzz.WRatio,
+                processor=str.upper,
+                score_cutoff=min_score,
+            )
+        if generic_best and (not best or generic_best[1] > best[1]):
+            _, score, index = generic_best
+            return MatchResult(
+                product=self._products[index],
+                score=float(score),
+                confidence=self._calculate_confidence(score),
+                source="fuzzy",
+            )
         if not best:
             return None
         _, score, index = best

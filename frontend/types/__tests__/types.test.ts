@@ -87,6 +87,7 @@ describe('TypeScript Types', () => {
           {
             index: 0,
             name: 'PUNASIPULI',
+            generic_name: 'Red onion',
             quantity: 330,
             unit: 'g',
             product_id: '123e4567-e89b-12d3-a456-426614174001',
