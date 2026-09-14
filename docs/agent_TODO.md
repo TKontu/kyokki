@@ -75,6 +75,15 @@ the operator's translation project.
 - **API:** token auth, search by name and by ingredient, and read recipes with structured
   ingredients.
 - **Ops:** runs on the homelab stack (its own Postgres database or SQLite), plus the backup story.
+- **Licence** (checked 2026-09-14): both allow free self-hosting and integration over their HTTP
+  APIs. Kyokki runs them unmodified as separate services and never copies their code, so neither
+  licence reaches Kyokki's own code.
+  - **Mealie:** AGPL-3.0. Modifying Mealie and offering it over a network requires publishing
+    those changes.
+  - **Tandoor:** AGPL-3.0 with a Commons Clause selling restriction. Selling the software, or a
+    paid hosting or support service whose value comes substantially from it, is not allowed. It
+    is therefore not OSI open source, although personal self-hosting is explicitly free.
+  - Only matters if Kyokki were ever sold as a hosted product bundling Tandoor.
 - **Fallback:** a thin native model in Kyokki (recipe, step, ingredient) only if neither service
   holds the granularity. The operator prefers to avoid this.
 - **Output:** a filled comparison table in this file, and the operator's pick. AG5 follows it.
