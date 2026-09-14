@@ -4,7 +4,7 @@
  */
 
 import { calculateDaysUntilExpiry } from '@/lib/dates'
-import type { InventoryItem } from '@/types/inventory'
+import type { InventoryItem, InventoryLocation } from '@/types/inventory'
 
 /** Items expiring within this many days (expired included) are pinned on top. */
 export const EXPIRING_SOON_DAYS = 3
@@ -16,6 +16,13 @@ const LOCATION_GROUPS: { key: string; label: string }[] = [
 ]
 
 const OTHER_GROUP = { key: 'other', label: 'Other' }
+
+/** Location choices for forms, labelled as the stock groups are. */
+export const LOCATION_OPTIONS: { value: InventoryLocation; label: string }[] = [
+  { value: 'main_fridge', label: 'Fridge' },
+  { value: 'freezer', label: 'Freezer' },
+  { value: 'pantry', label: 'Pantry' },
+]
 
 export interface StockGroup {
   key: string

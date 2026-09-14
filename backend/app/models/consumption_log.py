@@ -19,7 +19,11 @@ class ConsumptionLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     inventory_item_id = Column(
-        UUID(as_uuid=True), ForeignKey("inventory_item.id"), nullable=False, index=True
+        UUID(as_uuid=True),
+        # Deleting an item (entered by mistake, MVP-S4) removes its history too
+        ForeignKey("inventory_item.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     product_master_id = Column(
         UUID(as_uuid=True), ForeignKey("product_master.id"), nullable=False, index=True

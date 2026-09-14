@@ -8,6 +8,8 @@
 import React, { useMemo, useState } from 'react'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Button from '@/components/ui/Button'
+import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
+import { fieldErrorClass, fieldInputClass, fieldLabelClass } from '@/components/ui/formStyles'
 import { useCategories } from '@/hooks/useCategories'
 import { useQuickAddInventoryItem } from '@/hooks/useInventory'
 import { useProductSearch } from '@/hooks/useProducts'
@@ -15,6 +17,7 @@ import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { formatQuantity } from '@/lib/consumption'
 import { addDaysISO } from '@/lib/dates'
+import { LOCATION_OPTIONS } from '@/lib/stock'
 import type { Category } from '@/types/category'
 import type { InventoryLocation, QuickAddRequest, Unit } from '@/types/inventory'
 import type { ProductMaster, StorageType } from '@/types/product'
@@ -28,47 +31,10 @@ type Selection = { kind: 'existing'; product: ProductMaster } | { kind: 'new'; n
 
 const UNITS: Unit[] = ['pcs', 'g', 'dl', 'tsp', 'tbsp']
 
-const LOCATIONS: { value: InventoryLocation; label: string }[] = [
-  { value: 'main_fridge', label: 'Fridge' },
-  { value: 'freezer', label: 'Freezer' },
-  { value: 'pantry', label: 'Pantry' },
-]
-
 const STORAGE_LOCATION: Record<StorageType, InventoryLocation> = {
   refrigerator: 'main_fridge',
   freezer: 'freezer',
   pantry: 'pantry',
-}
-
-const inputClass =
-  'w-full min-h-touch rounded-ui border border-ui-border dark:border-ui-dark-border ' +
-  'bg-white dark:bg-ui-dark-bg px-3 text-base text-ui-text dark:text-ui-dark-text'
-
-const labelClass = 'block text-sm font-medium text-ui-text-secondary dark:text-ui-dark-text-secondary'
-
-function Choice({
-  name,
-  checked,
-  onChange,
-  children,
-}: {
-  name: string
-  checked: boolean
-  onChange: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <label
-      className={`relative flex min-h-touch cursor-pointer items-center justify-center rounded-ui border px-3 text-sm ${
-        checked
-          ? 'border-ui-text bg-ui-text text-white dark:border-ui-dark-text dark:bg-ui-dark-text dark:text-ui-dark-bg'
-          : 'border-ui-border text-ui-text dark:border-ui-dark-border dark:text-ui-dark-text'
-      }`}
-    >
-      <input type="radio" name={name} className="sr-only" checked={checked} onChange={onChange} />
-      {children}
-    </label>
-  )
 }
 
 function QuickAddForm({ onClose }: { onClose: () => void }) {
@@ -163,7 +129,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
   if (!selection) {
     return (
       <BottomSheet open onClose={onClose} title="Add to stock">
-        <label htmlFor="quick-add-search" className={labelClass}>
+        <label htmlFor="quick-add-search" className={fieldLabelClass}>
           Product
         </label>
         <input
@@ -173,7 +139,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
           value={term}
           onChange={(event) => setTerm(event.target.value)}
           placeholder="Milk, ground beef, apples…"
-          className={`${inputClass} mt-1`}
+          className={`${fieldInputClass} mt-1`}
         />
         <ul className="mt-3 flex flex-col gap-2">
           {results.map((product) => (
@@ -230,31 +196,31 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
               New product
             </p>
             <div>
-              <span id="quick-add-category" className={labelClass}>
+              <span className={fieldLabelClass} aria-hidden="true">
                 Category
               </span>
-              <div
-                role="radiogroup"
-                aria-labelledby="quick-add-category"
-                className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-3"
-              >
-                {sortedCategories.map((category) => (
-                  <Choice
-                    key={category.id}
-                    name="quick-add-category"
-                    checked={categoryId === category.id}
-                    onChange={() => pickCategory(category)}
-                  >
-                    {`${category.icon ?? ''} ${category.display_name}`.trim()}
-                  </Choice>
-                ))}
+              <div className="mt-1">
+                <ChoiceGroup
+                  label="Category"
+                  name="quick-add-category"
+                  className="grid-cols-2 sm:grid-cols-3"
+                  value={categoryId}
+                  options={sortedCategories.map((category) => ({
+                    value: category.id,
+                    label: `${category.icon ?? ''} ${category.display_name}`.trim(),
+                  }))}
+                  onChange={(id) => {
+                    const category = categoryById.get(id)
+                    if (category) pickCategory(category)
+                  }}
+                />
               </div>
             </div>
           </>
         )}
 
         <div>
-          <label htmlFor="quick-add-quantity" className={labelClass}>
+          <label htmlFor="quick-add-quantity" className={fieldLabelClass}>
             Quantity
           </label>
           <input
@@ -265,43 +231,34 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
             step="any"
             value={quantity}
             onChange={(event) => setQuantity(event.target.value)}
-            className={`${inputClass} mt-1`}
+            className={`${fieldInputClass} mt-1`}
           />
           {!quantityValid && (
-            <p role="alert" className="mt-1 text-sm text-red-700 dark:text-red-400">
+            <p role="alert" className={fieldErrorClass}>
               Enter a quantity above 0
             </p>
           )}
         </div>
 
-        <div role="radiogroup" aria-label="Unit" className="grid grid-cols-5 gap-2">
-          {UNITS.map((option) => (
-            <Choice
-              key={option}
-              name="quick-add-unit"
-              checked={unit === option}
-              onChange={() => setUnit(option)}
-            >
-              {option}
-            </Choice>
-          ))}
-        </div>
+        <ChoiceGroup
+          label="Unit"
+          name="quick-add-unit"
+          className="grid-cols-5"
+          value={unit}
+          options={UNITS.map((option) => ({ value: option, label: option }))}
+          onChange={setUnit}
+        />
 
-        <div role="radiogroup" aria-label="Location" className="grid grid-cols-3 gap-2">
-          {LOCATIONS.map((option) => (
-            <Choice
-              key={option.value}
-              name="quick-add-location"
-              checked={location === option.value}
-              onChange={() => setLocation(option.value)}
-            >
-              {option.label}
-            </Choice>
-          ))}
-        </div>
+        <ChoiceGroup
+          label="Location"
+          name="quick-add-location"
+          value={location}
+          options={LOCATION_OPTIONS}
+          onChange={setLocation}
+        />
 
         <div>
-          <label htmlFor="quick-add-expiry" className={labelClass}>
+          <label htmlFor="quick-add-expiry" className={fieldLabelClass}>
             Expiry
           </label>
           <input
@@ -312,7 +269,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
               setExpiry(event.target.value)
               setExpiryTouched(true)
             }}
-            className={`${inputClass} mt-1`}
+            className={`${fieldInputClass} mt-1`}
           />
         </div>
       </div>

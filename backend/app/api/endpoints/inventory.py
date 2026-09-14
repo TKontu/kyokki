@@ -152,7 +152,8 @@ async def delete_inventory_item(
         )
 
     product_name = item.product_name
-    await crud_inventory.delete_inventory_item(db, item_id)
+    async with handle_integrity_errors():
+        await crud_inventory.delete_inventory_item(db, item_id)
     await broadcast_inventory_update(
         inventory_item_id=item_id, action="deleted", product_name=product_name
     )
