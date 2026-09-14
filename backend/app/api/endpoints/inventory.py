@@ -1,5 +1,7 @@
 """API endpoints for Inventory CRUD operations."""
 
+from decimal import Decimal
+from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,8 +15,11 @@ from app.schemas.inventory_item import (
     InventoryItemCreate,
     InventoryItemResponse,
     InventoryItemUpdate,
+    QuickAddRequest,
 )
 from app.services.broadcast_helpers import broadcast_inventory_update
+from app.services.generic_products import InvalidProductRequest
+from app.services.quick_add import quick_add
 
 router = APIRouter()
 
@@ -67,14 +72,44 @@ async def create_inventory_item(
         created_item = await crud_inventory.create_inventory_item(db, item)
 
     await broadcast_inventory_update(
-        inventory_item_id=created_item.id,
+        inventory_item_id=cast(UUID, created_item.id),
         action="created",
-        current_quantity=created_item.current_quantity,
-        status=created_item.status,
+        current_quantity=cast(Decimal, created_item.current_quantity),
+        status=str(created_item.status),
         product_name=created_item.product_name,
     )
 
     return created_item
+
+
+@router.post(
+    "/quick-add",
+    response_model=InventoryItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def quick_add_inventory_item(
+    request: QuickAddRequest, db: AsyncSession = Depends(get_db)
+) -> InventoryItemResponse:
+    """Add stock by hand for an existing or new generic product in one call.
+
+    Raises:
+        HTTPException 400: Unknown product, or a new product without a valid category.
+    """
+    try:
+        async with handle_integrity_errors():
+            result = await quick_add(db, request)
+    except InvalidProductRequest as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    item = result.item
+    await broadcast_inventory_update(
+        inventory_item_id=cast(UUID, item.id),
+        action="created",
+        current_quantity=cast(Decimal, item.current_quantity),
+        status=str(item.status),
+        product_name=item.product_name,
+    )
+    return InventoryItemResponse.model_validate(item)
 
 
 @router.patch("/{item_id}", response_model=InventoryItemResponse)

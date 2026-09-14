@@ -10,6 +10,7 @@ import type {
   InventoryItemUpdate,
   ConsumeRequest,
   InventoryListParams,
+  QuickAddRequest,
 } from '@/types/inventory'
 
 /**
@@ -51,6 +52,15 @@ export async function create(data: InventoryItemCreate): Promise<InventoryItem> 
 }
 
 /**
+ * Add stock for an existing or new generic product in one call (MVP-S3)
+ */
+export async function quickAdd(data: QuickAddRequest): Promise<InventoryItem> {
+  return normalizeInventoryItem(
+    await apiClient.post<InventoryItem>('/inventory/quick-add', data)
+  )
+}
+
+/**
  * Update an existing inventory item
  */
 export async function update(id: string, data: InventoryItemUpdate): Promise<InventoryItem> {
@@ -80,6 +90,7 @@ const inventoryAPI = {
   list,
   get,
   create,
+  quickAdd,
   update,
   delete: deleteItem,
   consume,

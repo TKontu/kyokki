@@ -1,4 +1,6 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
+
+from app.services.storage import StorageType, storage_type_for_category
 
 
 class CategoryBase(BaseModel):
@@ -36,3 +38,9 @@ class CategoryResponse(CategoryBase):
     """Schema for category API responses."""
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def default_storage(self) -> StorageType:
+        """Where products of this category are kept by default (MVP-S3)."""
+        return storage_type_for_category(self.id)

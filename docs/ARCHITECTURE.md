@@ -24,7 +24,8 @@
 >   come later.
 > - **Aliases:** `store_product_alias` is read by receipt matching since MVP-R1b and written by
 >   confirm since MVP-R2: each confirmed line's printed name (per chain, `unknown` without a
->   store) points at the chosen generic product.
+>   store) points at the chosen generic product. Quick add (`POST /api/inventory/quick-add`,
+  MVP-S3) uses the same product rules (`services/generic_products.py`).
 >   `consumption_log` is written on consume and discard since MVP-S1; nothing reads it yet.
 > - **MVP decisions (see `docs/TODO.md`):** polling instead of WebSockets on the iPad,
 >   FastAPI `BackgroundTasks` instead of Celery, `<input type="file" capture>` instead of

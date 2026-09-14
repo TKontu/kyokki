@@ -48,6 +48,21 @@ export interface InventoryItemCreate {
   notes?: string | null
 }
 
+/**
+ * POST /inventory/quick-add (MVP-S3): an existing product, or a generic product found or
+ * created by name (case-insensitive). A new product needs `category`.
+ */
+export interface QuickAddRequest {
+  product_id?: string // UUID
+  name?: string
+  category?: string // Category id, required for a new product
+  quantity: number // > 0
+  unit: string // dl, tsp, tbsp, g, pcs (ml, l, kg, kpl convert on write)
+  location?: InventoryLocation // default from the product's storage type
+  purchase_date?: string // ISO date, default today
+  expiry_date?: string // ISO date; omit to calculate from shelf life
+}
+
 export interface InventoryItemUpdate {
   current_quantity?: number // >= 0
   status?: InventoryItemStatus

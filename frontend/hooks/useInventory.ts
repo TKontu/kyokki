@@ -5,6 +5,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import inventoryAPI from '@/lib/api/inventory'
+import { productKeys } from '@/hooks/useProducts'
 import { applyConsume } from '@/lib/consumption'
 import type {
   InventoryItem,
@@ -12,6 +13,7 @@ import type {
   InventoryItemUpdate,
   ConsumeRequest,
   InventoryListParams,
+  QuickAddRequest,
 } from '@/types/inventory'
 
 // Query keys factory
@@ -55,6 +57,24 @@ export function useCreateInventoryItem() {
     onSuccess: () => {
       // Invalidate all list queries to refetch
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+    },
+  })
+}
+
+/**
+ * Mutation: Quick add stock, creating the generic product when needed (MVP-S3)
+ */
+export function useQuickAddInventoryItem() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: QuickAddRequest) => inventoryAPI.quickAdd(data),
+    // Adding is not idempotent: a retry after a lost response would add the stock twice.
+    retry: false,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+      // The call may have created a product that searches should now find
+      queryClient.invalidateQueries({ queryKey: productKeys.all })
     },
   })
 }

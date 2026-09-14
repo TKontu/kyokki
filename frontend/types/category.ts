@@ -3,6 +3,8 @@
  * Mirror backend schema: /backend/app/schemas/category.py
  */
 
+import type { StorageType } from './product'
+
 export interface Category {
   id: string // Category identifier (e.g., 'dairy', 'meat', 'produce')
   display_name: string // Human-readable name
@@ -10,6 +12,7 @@ export interface Category {
   default_shelf_life_days: number // > 0
   meal_contexts: string[] | null // e.g., ["breakfast", "lunch"]
   sort_order: number // Display order (default: 0)
+  default_storage: StorageType // Where its products are kept by default (response only)
 }
 
 export interface CategoryCreate {
