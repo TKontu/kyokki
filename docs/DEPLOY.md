@@ -64,6 +64,11 @@ too (`ALTER USER kyokki_user PASSWORD '...'`).
 > `git pull`. Copy it aside first (`cp stack.env /tmp/stack.env.bak`) and restore it after the
 > pull. Later updates do not touch it.
 
+> **Unit migration (MVP-U1, revision `a4f8c2d91e37`):** `alembic upgrade head` converts stored
+> quantities to `dl | tsp | tbsp | g | pcs` (e.g. 1000 ml becomes 10 dl). It prints a warning for
+> rows with units it does not know and leaves them unchanged. Downgrading only turns `dl` back
+> into `ml`; take a database backup before upgrading if you might need to roll back.
+
 ```bash
 cd kyokki
 git pull

@@ -108,8 +108,8 @@ product_master (
   storage_type VARCHAR,            -- refrigerator, freezer, pantry
   default_shelf_life_days INT,     -- 7 (unopened)
   opened_shelf_life_days INT,      -- 4 (after opening)
-  unit_type VARCHAR,               -- volume, weight, count, unit
-  default_unit VARCHAR,            -- ml, g, pcs
+  unit_type VARCHAR,               -- volume, weight, count
+  default_unit VARCHAR,            -- dl, tsp, tbsp, g, pcs (MVP-U1)
   default_quantity DECIMAL,        -- 1000, 500, 6
   min_stock_quantity DECIMAL,      -- NULL or threshold for auto-shopping-list
   reorder_quantity DECIMAL,        -- How much to add to shopping list

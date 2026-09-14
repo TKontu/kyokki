@@ -1,9 +1,10 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.types import JsonDecimal
+from app.schemas.types import JsonDecimal, canonicalize_units
+from app.services.units import unit_type_for
 
 
 class ProductMasterBase(BaseModel):
@@ -20,8 +21,13 @@ class ProductMasterBase(BaseModel):
     opened_shelf_life_days: int | None = Field(
         None, gt=0, description="Shelf life after opening"
     )
-    unit_type: str = Field(..., description="Unit type: volume, weight, count, unit")
-    default_unit: str = Field(..., description="Default unit: ml, g, pcs")
+    unit_type: str = Field(
+        ...,
+        description="Unit type: volume, weight, count (derived from default_unit on write)",
+    )
+    default_unit: str = Field(
+        ..., description="Default unit: dl, tsp, tbsp, g, pcs (others convert on write)"
+    )
     default_quantity: JsonDecimal | None = Field(
         None, gt=0, description="Default quantity"
     )
@@ -37,7 +43,16 @@ class ProductMasterBase(BaseModel):
 class ProductMasterCreate(ProductMasterBase):
     """Schema for creating a new product."""
 
-    pass
+    @model_validator(mode="after")
+    def canonical_units(self) -> "ProductMasterCreate":
+        unit = canonicalize_units(
+            self,
+            "default_unit",
+            ["default_quantity", "min_stock_quantity", "reorder_quantity"],
+        )
+        if unit:
+            self.unit_type = unit_type_for(unit)
+        return self
 
 
 class ProductMasterUpdate(BaseModel):
@@ -54,6 +69,17 @@ class ProductMasterUpdate(BaseModel):
     min_stock_quantity: JsonDecimal | None = Field(None, ge=0)
     reorder_quantity: JsonDecimal | None = Field(None, gt=0)
     off_product_id: str | None = None
+
+    @model_validator(mode="after")
+    def canonical_units(self) -> "ProductMasterUpdate":
+        unit = canonicalize_units(
+            self,
+            "default_unit",
+            ["default_quantity", "min_stock_quantity", "reorder_quantity"],
+        )
+        if unit:
+            self.unit_type = unit_type_for(unit)
+        return self
 
 
 class ProductMasterResponse(ProductMasterBase):

@@ -59,7 +59,7 @@ class TestListProducts:
             "storage_type": "refrigerator",
             "default_shelf_life_days": 7,
             "unit_type": "volume",
-            "default_unit": "ml",
+            "default_unit": "dl",
         }
         product2 = {
             "canonical_name": "Chicken Breast",
@@ -90,7 +90,7 @@ class TestListProducts:
                 "storage_type": "refrigerator",
                 "default_shelf_life_days": 7,
                 "unit_type": "volume",
-                "default_unit": "ml",
+                "default_unit": "dl",
             },
             {
                 "canonical_name": "Chicken Breast",
@@ -126,7 +126,7 @@ class TestGetProduct:
             "storage_type": "refrigerator",
             "default_shelf_life_days": 7,
             "unit_type": "volume",
-            "default_unit": "ml",
+            "default_unit": "dl",
         }
 
         create_response = await client.post("/api/products", json=product_data)
@@ -164,7 +164,7 @@ class TestCreateProduct:
             "default_shelf_life_days": 7,
             "opened_shelf_life_days": 3,
             "unit_type": "volume",
-            "default_unit": "ml",
+            "default_unit": "dl",
             "default_quantity": 1000,
             "min_stock_quantity": 2000,
             "reorder_quantity": 4000,
@@ -211,7 +211,7 @@ class TestCreateProduct:
             "storage_type": "refrigerator",
             "default_shelf_life_days": 7,
             "unit_type": "volume",
-            "default_unit": "ml",
+            "default_unit": "dl",
         }
 
         response = await client.post("/api/products", json=invalid_product)
@@ -246,7 +246,7 @@ class TestUpdateProduct:
             "storage_type": "refrigerator",
             "default_shelf_life_days": 7,
             "unit_type": "volume",
-            "default_unit": "ml",
+            "default_unit": "dl",
         }
 
         create_response = await client.post("/api/products", json=product_data)
@@ -332,7 +332,7 @@ class TestLookupByBarcode:
             "storage_type": "refrigerator",
             "default_shelf_life_days": 7,
             "unit_type": "volume",
-            "default_unit": "ml",
+            "default_unit": "dl",
             "off_product_id": "1234567890123",
         }
 
@@ -479,3 +479,95 @@ class TestEnrichProduct:
         response = await client.post("/api/products/enrich")
 
         assert response.status_code == 422  # Validation error
+
+
+class TestProductCanonicalUnits:
+    """MVP-U1: product default quantities convert to canonical units; unit_type follows."""
+
+    async def test_kilograms_become_grams_and_weight(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        response = await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "Emmental 1kg",
+                "category": "cheese",
+                "storage_type": "refrigerator",
+                "default_shelf_life_days": 25,
+                "unit_type": "count",
+                "default_unit": "kg",
+                "default_quantity": 1,
+                "min_stock_quantity": 0.25,
+            },
+        )
+        assert response.status_code == 201
+        body = response.json()
+        assert (body["default_unit"], body["unit_type"]) == ("g", "weight")
+        assert (body["default_quantity"], body["min_stock_quantity"]) == (1000, 250)
+
+    async def test_millilitres_become_decilitres_and_volume(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        response = await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "Oat drink 1L",
+                "category": "beverages",
+                "storage_type": "pantry",
+                "default_shelf_life_days": 90,
+                "unit_type": "volume",
+                "default_unit": "ml",
+                "default_quantity": 1000,
+            },
+        )
+        body = response.json()
+        assert (body["default_unit"], body["unit_type"], body["default_quantity"]) == (
+            "dl",
+            "volume",
+            10,
+        )
+
+    async def test_update_with_unit_converts_amounts(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        created = await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "Rice",
+                "category": "pantry",
+                "storage_type": "pantry",
+                "default_shelf_life_days": 365,
+                "unit_type": "weight",
+                "default_unit": "g",
+                "default_quantity": 500,
+            },
+        )
+        product_id = created.json()["id"]
+
+        updated = await client.patch(
+            f"/api/products/{product_id}",
+            json={"default_unit": "kg", "default_quantity": 2},
+        )
+
+        body = updated.json()
+        assert (body["default_unit"], body["default_quantity"], body["unit_type"]) == (
+            "g",
+            2000,
+            "weight",
+        )
+
+    async def test_unknown_unit_is_rejected(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        response = await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "Imported syrup",
+                "category": "condiments",
+                "storage_type": "pantry",
+                "default_shelf_life_days": 365,
+                "unit_type": "volume",
+                "default_unit": "floz",
+            },
+        )
+        assert response.status_code == 422

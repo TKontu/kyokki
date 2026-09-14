@@ -1,9 +1,9 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.types import JsonDecimal
+from app.schemas.types import JsonDecimal, canonicalize_units
 
 
 class InventoryItemBase(BaseModel):
@@ -13,7 +13,9 @@ class InventoryItemBase(BaseModel):
     receipt_id: UUID | None = Field(None, description="Source receipt ID")
     initial_quantity: JsonDecimal = Field(..., gt=0, description="Initial quantity")
     current_quantity: JsonDecimal = Field(..., ge=0, description="Current quantity")
-    unit: str = Field(..., description="Unit: ml, g, pcs, unit")
+    unit: str = Field(
+        ..., description="Unit: dl, tsp, tbsp, g, pcs (others convert on write)"
+    )
     status: str = Field(
         "sealed", description="Status: sealed, opened, partial, empty, discarded"
     )
@@ -35,7 +37,10 @@ class InventoryItemBase(BaseModel):
 class InventoryItemCreate(InventoryItemBase):
     """Schema for creating a new inventory item."""
 
-    pass
+    @model_validator(mode="after")
+    def canonical_units(self) -> "InventoryItemCreate":
+        canonicalize_units(self, "unit", ["initial_quantity", "current_quantity"])
+        return self
 
 
 class InventoryItemUpdate(BaseModel):

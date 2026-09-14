@@ -34,7 +34,7 @@ class TestReceiptStatusBroadcasts:
             "storage_type": "refrigerator",
             "default_shelf_life_days": 7,
             "unit_type": "volume",
-            "default_unit": "ml",
+            "default_unit": "dl",
         }
         product_response = await client.post("/api/products", json=product_data)
         assert product_response.status_code == 201
@@ -105,7 +105,7 @@ class TestInventoryUpdateBroadcasts:
             "storage_type": "refrigerator",
             "default_shelf_life_days": 7,
             "unit_type": "volume",
-            "default_unit": "ml",
+            "default_unit": "dl",
         }
         product_response = await client.post("/api/products", json=product_data)
         assert product_response.status_code == 201
@@ -117,7 +117,7 @@ class TestInventoryUpdateBroadcasts:
             "product_master_id": product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=7)),
         }
 
@@ -197,7 +197,7 @@ class TestInventoryUpdateBroadcasts:
             "storage_type": "refrigerator",
             "default_shelf_life_days": 7,
             "unit_type": "volume",
-            "default_unit": "ml",
+            "default_unit": "dl",
         }
         product_response = await client.post("/api/products", json=product_data)
         product = product_response.json()
@@ -208,7 +208,7 @@ class TestInventoryUpdateBroadcasts:
             "product_master_id": product["id"],
             "initial_quantity": 1000,
             "current_quantity": 1000,
-            "unit": "ml",
+            "unit": "dl",
             "expiry_date": str(today + timedelta(days=7)),
         }
         create_response = await client.post("/api/inventory", json=item_data)

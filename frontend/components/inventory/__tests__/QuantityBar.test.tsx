@@ -10,14 +10,14 @@ import { QuantityBar } from '../QuantityBar'
 describe('QuantityBar', () => {
   describe('Basic rendering', () => {
     it('should render with current and initial quantity', () => {
-      render(<QuantityBar current={750} initial={1000} unit="ml" />)
+      render(<QuantityBar current={750} initial={1000} unit="dl" />)
       expect(screen.getByText(/750/)).toBeInTheDocument()
       expect(screen.getByText(/1000/)).toBeInTheDocument()
     })
 
     it('should display unit label', () => {
-      render(<QuantityBar current={750} initial={1000} unit="ml" />)
-      expect(screen.getByText(/ml/)).toBeInTheDocument()
+      render(<QuantityBar current={750} initial={1000} unit="dl" />)
+      expect(screen.getByText(/dl/)).toBeInTheDocument()
     })
 
     it('should render with custom className', () => {
@@ -30,7 +30,7 @@ describe('QuantityBar', () => {
 
   describe('Quantity display formatting', () => {
     it('should format whole numbers without decimals', () => {
-      render(<QuantityBar current={500} initial={1000} unit="ml" />)
+      render(<QuantityBar current={500} initial={1000} unit="dl" />)
       expect(screen.getByText(/500/)).toBeInTheDocument()
     })
 
@@ -40,7 +40,7 @@ describe('QuantityBar', () => {
     })
 
     it('should handle zero current quantity', () => {
-      render(<QuantityBar current={0} initial={1000} unit="ml" />)
+      render(<QuantityBar current={0} initial={1000} unit="dl" />)
       expect(screen.getByText(/0 \/ 1000/)).toBeInTheDocument()
     })
 
@@ -53,7 +53,7 @@ describe('QuantityBar', () => {
   describe('Progress bar percentage', () => {
     it('should show 100% width when full', () => {
       const { container } = render(
-        <QuantityBar current={1000} initial={1000} unit="ml" />
+        <QuantityBar current={1000} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar).toHaveStyle({ width: '100%' })
@@ -61,7 +61,7 @@ describe('QuantityBar', () => {
 
     it('should show 75% width for 75% remaining', () => {
       const { container } = render(
-        <QuantityBar current={750} initial={1000} unit="ml" />
+        <QuantityBar current={750} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar).toHaveStyle({ width: '75%' })
@@ -69,7 +69,7 @@ describe('QuantityBar', () => {
 
     it('should show 50% width for half remaining', () => {
       const { container } = render(
-        <QuantityBar current={500} initial={1000} unit="ml" />
+        <QuantityBar current={500} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar).toHaveStyle({ width: '50%' })
@@ -77,7 +77,7 @@ describe('QuantityBar', () => {
 
     it('should show 0% width when empty', () => {
       const { container } = render(
-        <QuantityBar current={0} initial={1000} unit="ml" />
+        <QuantityBar current={0} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar).toHaveStyle({ width: '0%' })
@@ -85,7 +85,7 @@ describe('QuantityBar', () => {
 
     it('should cap at 100% even if current exceeds initial', () => {
       const { container } = render(
-        <QuantityBar current={1200} initial={1000} unit="ml" />
+        <QuantityBar current={1200} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar).toHaveStyle({ width: '100%' })
@@ -95,7 +95,7 @@ describe('QuantityBar', () => {
   describe('Color coding based on percentage', () => {
     it('should apply green color for 75-100% remaining', () => {
       const { container } = render(
-        <QuantityBar current={800} initial={1000} unit="ml" />
+        <QuantityBar current={800} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar?.className).toContain('bg-green')
@@ -103,7 +103,7 @@ describe('QuantityBar', () => {
 
     it('should apply yellow color for 50-74% remaining', () => {
       const { container } = render(
-        <QuantityBar current={600} initial={1000} unit="ml" />
+        <QuantityBar current={600} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar?.className).toContain('bg-yellow')
@@ -111,7 +111,7 @@ describe('QuantityBar', () => {
 
     it('should apply orange color for 25-49% remaining', () => {
       const { container } = render(
-        <QuantityBar current={300} initial={1000} unit="ml" />
+        <QuantityBar current={300} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar?.className).toContain('bg-orange')
@@ -119,7 +119,7 @@ describe('QuantityBar', () => {
 
     it('should apply red color for <25% remaining', () => {
       const { container } = render(
-        <QuantityBar current={100} initial={1000} unit="ml" />
+        <QuantityBar current={100} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar?.className).toContain('bg-red')
@@ -127,7 +127,7 @@ describe('QuantityBar', () => {
 
     it('should apply red color for empty', () => {
       const { container } = render(
-        <QuantityBar current={0} initial={1000} unit="ml" />
+        <QuantityBar current={0} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar?.className).toContain('bg-red')
@@ -137,14 +137,14 @@ describe('QuantityBar', () => {
   describe('Visual structure', () => {
     it('should render as a div element', () => {
       const { container } = render(
-        <QuantityBar current={500} initial={1000} unit="ml" />
+        <QuantityBar current={500} initial={1000} unit="dl" />
       )
       expect(container.firstChild?.nodeName).toBe('DIV')
     })
 
     it('should have progress bar background track', () => {
       const { container } = render(
-        <QuantityBar current={500} initial={1000} unit="ml" />
+        <QuantityBar current={500} initial={1000} unit="dl" />
       )
       const track = container.querySelector('[data-testid="quantity-track"]')
       expect(track).toBeInTheDocument()
@@ -153,7 +153,7 @@ describe('QuantityBar', () => {
 
     it('should have proper sizing classes', () => {
       const { container } = render(
-        <QuantityBar current={500} initial={1000} unit="ml" />
+        <QuantityBar current={500} initial={1000} unit="dl" />
       )
       const track = container.querySelector('[data-testid="quantity-track"]')
       expect(track?.className).toContain('h-')
@@ -164,22 +164,22 @@ describe('QuantityBar', () => {
   describe('Compact mode', () => {
     it('should render smaller when compact is true', () => {
       const { container } = render(
-        <QuantityBar current={500} initial={1000} unit="ml" compact />
+        <QuantityBar current={500} initial={1000} unit="dl" compact />
       )
       const track = container.querySelector('[data-testid="quantity-track"]')
       expect(track?.className).toContain('h-1')
     })
 
     it('should hide text label in compact mode', () => {
-      render(<QuantityBar current={500} initial={1000} unit="ml" compact />)
+      render(<QuantityBar current={500} initial={1000} unit="dl" compact />)
       expect(screen.queryByText(/500/)).not.toBeInTheDocument()
     })
   })
 
   describe('Different units', () => {
-    it('should display ml units', () => {
-      render(<QuantityBar current={500} initial={1000} unit="ml" />)
-      expect(screen.getByText(/ml/)).toBeInTheDocument()
+    it('should display dl units', () => {
+      render(<QuantityBar current={500} initial={1000} unit="dl" />)
+      expect(screen.getByText(/dl/)).toBeInTheDocument()
     })
 
     it('should display L units', () => {
@@ -201,7 +201,7 @@ describe('QuantityBar', () => {
   describe('Edge cases', () => {
     it('should handle very small percentages', () => {
       const { container } = render(
-        <QuantityBar current={1} initial={1000} unit="ml" />
+        <QuantityBar current={1} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       // Should still show some width, even if tiny
@@ -209,14 +209,14 @@ describe('QuantityBar', () => {
     })
 
     it('should handle large quantities', () => {
-      render(<QuantityBar current={5000} initial={10000} unit="ml" />)
+      render(<QuantityBar current={5000} initial={10000} unit="dl" />)
       expect(screen.getByText(/5000/)).toBeInTheDocument()
       expect(screen.getByText(/10000/)).toBeInTheDocument()
     })
 
     it('should handle initial quantity of zero gracefully', () => {
       const { container } = render(
-        <QuantityBar current={0} initial={0} unit="ml" />
+        <QuantityBar current={0} initial={0} unit="dl" />
       )
       const progressBar = container.querySelector('[data-testid="quantity-progress"]')
       expect(progressBar).toHaveStyle({ width: '0%' })
@@ -226,7 +226,7 @@ describe('QuantityBar', () => {
   describe('Accessibility', () => {
     it('should have proper aria attributes', () => {
       const { container } = render(
-        <QuantityBar current={750} initial={1000} unit="ml" />
+        <QuantityBar current={750} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[role="progressbar"]')
       expect(progressBar).toBeInTheDocument()
@@ -237,10 +237,10 @@ describe('QuantityBar', () => {
 
     it('should have descriptive aria-label', () => {
       const { container } = render(
-        <QuantityBar current={750} initial={1000} unit="ml" />
+        <QuantityBar current={750} initial={1000} unit="dl" />
       )
       const progressBar = container.querySelector('[role="progressbar"]')
-      expect(progressBar).toHaveAttribute('aria-label', '750 of 1000 ml remaining')
+      expect(progressBar).toHaveAttribute('aria-label', '750 of 1000 dl remaining')
     })
   })
 })

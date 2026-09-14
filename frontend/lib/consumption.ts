@@ -37,9 +37,9 @@ const COUNTS: { key: ConsumptionOptionKey; label: string; count: number }[] = [
 /** Below this share of the initial quantity an item is "partial" (backend rule). */
 const PARTIAL_THRESHOLD = 0.75
 
-/** Units counted in whole pieces rather than portions. */
+/** Units counted in whole pieces rather than portions (only pcs since MVP-U1). */
 export function isCountable(unit: Unit | string): boolean {
-  return unit === 'pcs' || unit === 'unit'
+  return unit === 'pcs'
 }
 
 /** Round to two decimals, matching the backend Numeric(10, 2) columns. */

@@ -20,7 +20,7 @@ const MOCK_ITEM_A: InventoryItem = {
   receipt_id: null,
   initial_quantity: 1000,
   current_quantity: 750,
-  unit: 'ml',
+  unit: 'dl',
   status: 'opened',
   purchase_date: '2024-01-01',
   expiry_date: '2024-03-01',

@@ -59,7 +59,7 @@ async def sample_product(
         storage_type="refrigerator",
         default_shelf_life_days=7,
         unit_type="volume",
-        default_unit="ml",
+        default_unit="dl",
         default_quantity=Decimal("1000"),
     )
     test_db.add(product)
@@ -314,3 +314,56 @@ class TestConfirmReceipt:
         # Should be purchase_date + default_shelf_life_days (7 days)
         assert inventory_item.expiry_date == date(2024, 1, 13)
         assert inventory_item.expiry_source == "calculated"
+
+
+class TestConfirmCanonicalUnits:
+    """MVP-U1: confirmed receipt quantities are stored in canonical units."""
+
+    async def test_confirmed_kilograms_become_grams(
+        self, client: AsyncClient, test_db: AsyncSession, processed_receipt: dict
+    ):
+        response = await client.post(
+            f"/api/receipts/{processed_receipt['id']}/confirm",
+            json={
+                "items": [
+                    {
+                        "product_id": processed_receipt["product_id"],
+                        "quantity": 0.386,
+                        "unit": "kg",
+                        "purchase_date": "2024-01-06",
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200
+
+        from sqlalchemy import select
+
+        from app.models.inventory_item import InventoryItem
+
+        item = (
+            await test_db.execute(
+                select(InventoryItem).where(
+                    InventoryItem.receipt_id == processed_receipt["id"]
+                )
+            )
+        ).scalar_one()
+        assert (item.unit, float(item.initial_quantity)) == ("g", 386.0)
+
+    async def test_unknown_unit_is_rejected(
+        self, client: AsyncClient, test_db: AsyncSession, processed_receipt: dict
+    ):
+        response = await client.post(
+            f"/api/receipts/{processed_receipt['id']}/confirm",
+            json={
+                "items": [
+                    {
+                        "product_id": processed_receipt["product_id"],
+                        "quantity": 1,
+                        "unit": "oz",
+                        "purchase_date": "2024-01-06",
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 422

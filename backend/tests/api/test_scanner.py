@@ -252,7 +252,7 @@ class TestScanBarcodeConsume:
             product_master_id=sample_product.id,
             initial_quantity=Decimal("1000"),
             current_quantity=Decimal("1000"),
-            unit="ml",
+            unit="dl",
             status="sealed",
             expiry_date=date.today() + timedelta(days=7),
         )
@@ -313,7 +313,7 @@ class TestScanBarcodeConsume:
             product_master_id=sample_product.id,
             initial_quantity=Decimal("100"),
             current_quantity=Decimal("100"),
-            unit="ml",
+            unit="dl",
             status="sealed",
             expiry_date=date.today() + timedelta(days=7),
         )

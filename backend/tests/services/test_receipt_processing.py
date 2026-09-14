@@ -70,7 +70,7 @@ async def sample_product(
         storage_type="refrigerator",
         default_shelf_life_days=7,
         unit_type="volume",
-        default_unit="ml",
+        default_unit="dl",
         default_quantity=Decimal("1000"),
     )
     db_session.add(product)

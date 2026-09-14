@@ -333,8 +333,8 @@ class TestEnrichProductFromOff:
         ):
             result = await enrich_product_from_off(barcode)
 
-            assert result["default_unit"] == "ml"
-            assert result["default_quantity"] == Decimal("1000")
+            assert result["default_unit"] == "dl"
+            assert result["default_quantity"] == Decimal("10.00")
 
     async def test_returns_parsed_quantity_for_weight(self):
         """Should parse '500g' into default_quantity=500 and default_unit='g'."""
@@ -375,38 +375,38 @@ class TestParseOffQuantity:
 
     def test_litre_uppercase(self):
         qty, unit = parse_off_quantity("1 L")
-        assert qty == Decimal("1000")
-        assert unit == "ml"
+        assert qty == Decimal("10.00")
+        assert unit == "dl"
 
     def test_litre_lowercase(self):
         qty, unit = parse_off_quantity("1l")
-        assert qty == Decimal("1000")
-        assert unit == "ml"
+        assert qty == Decimal("10.00")
+        assert unit == "dl"
 
     def test_litre_decimal_comma(self):
         qty, unit = parse_off_quantity("1,5 L")
-        assert qty == Decimal("1500")
-        assert unit == "ml"
+        assert qty == Decimal("15.00")
+        assert unit == "dl"
 
     def test_litre_decimal_dot(self):
         qty, unit = parse_off_quantity("1.5 L")
-        assert qty == Decimal("1500")
-        assert unit == "ml"
+        assert qty == Decimal("15.00")
+        assert unit == "dl"
 
     def test_ml(self):
         qty, unit = parse_off_quantity("500 ml")
-        assert qty == Decimal("500")
-        assert unit == "ml"
+        assert qty == Decimal("5.00")
+        assert unit == "dl"
 
     def test_cl(self):
         qty, unit = parse_off_quantity("33 cl")
-        assert qty == Decimal("330")
-        assert unit == "ml"
+        assert qty == Decimal("3.30")
+        assert unit == "dl"
 
     def test_dl(self):
         qty, unit = parse_off_quantity("5 dl")
-        assert qty == Decimal("500")
-        assert unit == "ml"
+        assert qty == Decimal("5.00")
+        assert unit == "dl"
 
     def test_grams(self):
         qty, unit = parse_off_quantity("500 g")

@@ -459,3 +459,40 @@ class TestShoppingListAPI:
         response = await client.get("/api/shopping/?skip=10&limit=10")
         assert response.status_code == 200
         assert len(response.json()) == 5
+
+
+@pytest.mark.asyncio
+class TestShoppingCanonicalUnits:
+    """MVP-U1: shopping list quantities convert to canonical units."""
+
+    async def test_litres_become_decilitres(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        response = await client.post(
+            "/api/shopping/",
+            json={"name": "Milk", "quantity": "1.5", "unit": "l"},
+        )
+        assert response.status_code == 201
+        assert (response.json()["quantity"], response.json()["unit"]) == (15, "dl")
+
+    async def test_update_with_unit_converts(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        created = await client.post(
+            "/api/shopping/", json={"name": "Flour", "quantity": "1", "unit": "pcs"}
+        )
+        item_id = created.json()["id"]
+
+        response = await client.patch(
+            f"/api/shopping/{item_id}", json={"quantity": "2", "unit": "kg"}
+        )
+
+        assert (response.json()["quantity"], response.json()["unit"]) == (2000, "g")
+
+    async def test_unknown_unit_is_rejected(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        response = await client.post(
+            "/api/shopping/", json={"name": "Syrup", "quantity": "1", "unit": "gallon"}
+        )
+        assert response.status_code == 422

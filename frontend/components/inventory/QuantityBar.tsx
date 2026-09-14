@@ -18,7 +18,7 @@ export interface QuantityBarProps {
   initial: number
 
   /**
-   * Unit of measurement (e.g., "ml", "g", "L", "pcs")
+   * Unit of measurement: dl, tsp, tbsp, g or pcs
    */
   unit: string
 

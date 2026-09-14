@@ -8,17 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.product_master import ProductMaster
 from app.schemas.product_master import ProductMasterCreate, ProductMasterUpdate
+from app.services.units import unit_type_for
 
 
 def _unit_type(unit: str) -> str:
-    """Derive SQLAlchemy unit_type from a unit string."""
-    if unit in ("ml", "cl", "l"):
-        return "volume"
-    if unit in ("g", "kg"):
-        return "weight"
-    if unit == "pcs":
+    """volume, weight or count for a unit; unknown units fall back to count."""
+    try:
+        return unit_type_for(unit)
+    except ValueError:
         return "count"
-    return "unit"
 
 
 async def get_products(

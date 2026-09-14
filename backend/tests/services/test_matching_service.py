@@ -41,7 +41,7 @@ class TestMatchingService:
                 storage_type="refrigerator",
                 default_shelf_life_days=7,
                 unit_type="volume",
-                default_unit="ml",
+                default_unit="dl",
                 default_quantity=Decimal("1000"),
             ),
             ProductMaster(
@@ -51,7 +51,7 @@ class TestMatchingService:
                 storage_type="refrigerator",
                 default_shelf_life_days=7,
                 unit_type="volume",
-                default_unit="ml",
+                default_unit="dl",
                 default_quantity=Decimal("1000"),
             ),
             ProductMaster(
@@ -71,7 +71,7 @@ class TestMatchingService:
                 storage_type="refrigerator",
                 default_shelf_life_days=5,
                 unit_type="volume",
-                default_unit="ml",
+                default_unit="dl",
                 default_quantity=Decimal("1000"),
             ),
         ]
