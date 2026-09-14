@@ -57,7 +57,12 @@ class InventoryItem(Base):
     # Relationships
     product_master = relationship("ProductMaster", back_populates="inventory_items")
     receipt = relationship("Receipt", back_populates="inventory_items")
-    consumption_logs = relationship("ConsumptionLog", back_populates="inventory_item")
+    consumption_logs = relationship(
+        "ConsumptionLog",
+        back_populates="inventory_item",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     # Read-only product details for API responses. Callers must eager-load
     # product_master and product_master.category_rel (see crud.inventory_item);

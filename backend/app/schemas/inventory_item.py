@@ -85,12 +85,16 @@ class QuickAddRequest(BaseModel):
 class InventoryItemUpdate(BaseModel):
     """Schema for updating an inventory item."""
 
-    current_quantity: JsonDecimal | None = Field(None, ge=0)
-    status: str | None = None
-    expiry_date: date | None = None
-    expiry_source: str | None = None
+    current_quantity: JsonDecimal | None = Field(
+        None, ge=0, description="Correction: 0 empties; above the full amount raises it"
+    )
+    status: Literal["sealed", "opened", "partial", "empty", "discarded"] | None = None
+    expiry_date: date | None = Field(
+        None, description="Sets expiry_source to manual unless expiry_source is given"
+    )
+    expiry_source: Literal["scanned", "calculated", "manual"] | None = None
     opened_date: date | None = None
-    location: str | None = None
+    location: Literal["main_fridge", "freezer", "pantry"] | None = None
     notes: str | None = None
 
 

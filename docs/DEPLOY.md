@@ -71,6 +71,10 @@ too (`ALTER USER kyokki_user PASSWORD '...'`).
 > `git pull`. Copy it aside first (`cp stack.env /tmp/stack.env.bak`) and restore it after the
 > pull. Later updates do not touch it.
 
+> **Item history on delete (MVP-S4, revision `d5f1b8c2e4a6`):** deleting an inventory item now
+> also deletes its consumption history (it is meant for items entered by mistake). Use
+> "Mark as gone" on the iPad for things that were thrown away; that keeps the history.
+
 > **Receipt queue (MVP-R3, revision `c3e9a7b5d1f2`):** the migration adds `queued_at`,
 > `processing_started_at` and `error` to receipts, and the new `kyokki-worker` service reads the
 > queue; `up -d --build` starts it. Receipts uploaded before this release keep status `uploaded`;

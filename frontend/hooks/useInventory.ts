@@ -162,6 +162,8 @@ export function useDeleteInventoryItem() {
 
   return useMutation({
     mutationFn: (id: string) => inventoryAPI.delete(id),
+    // A retried DELETE after a lost response would only 404; report the first outcome instead.
+    retry: false,
     onMutate: async (id) => {
       // Cancel outgoing refetches
       await queryClient.cancelQueries({ queryKey: inventoryKeys.detail(id) })
@@ -182,8 +184,11 @@ export function useDeleteInventoryItem() {
         queryClient.setQueryData(inventoryKeys.detail(id), context.previousItem)
       }
     },
-    onSuccess: () => {
-      // Invalidate lists to reflect deletion
+    onSuccess: (_data, id) => {
+      // Drop it from every cached list right away, then refetch to match the server
+      queryClient.setQueriesData<InventoryItem[]>({ queryKey: inventoryKeys.lists() }, (list) =>
+        list?.filter((item) => item.id !== id)
+      )
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
     },
   })

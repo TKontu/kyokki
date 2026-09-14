@@ -546,6 +546,24 @@ away, with no port forwarding.
 - Long-press or "⋯" on a card: adjust current quantity, change expiry date, move location,
   "Mark as gone" (`PATCH status=discarded`), "Delete" (confirmation step, then `DELETE`).
 - **Acceptance:** each action has a test; list refreshes; gone items disappear from default view.
+- As built (branch `feat/mvp-s4-item-edit-sheet`), rulings of 2026-09-14:
+  - [x] "Edit" on each card opens `ItemEditSheet`: quantity (in the item's unit), expiry,
+    location, Save (only changed fields), Mark as gone (`status=discarded`, logged once),
+    Delete with a confirmation step. Errors keep the sheet open. No long-press: the visible
+    button is enough on the iPad.
+  - [x] **Delete removes the item and its history**: `consumption_log` FK is now
+    `ON DELETE CASCADE` (migration `d5f1b8c2e4a6`). Before this, deleting any consumed or
+    discarded item returned 500. "Mark as gone" is the path that keeps history.
+  - [x] **A quantity change is a correction, not logged**: 0 makes the item `empty`; lower
+    amounts use the consume status rules (shared `apply_quantity_status`); an empty item
+    brought back becomes active; above the full amount raises `initial_quantity`.
+  - [x] A new expiry date without `expiry_source` becomes `manual`. `InventoryItemUpdate`
+    rejects unknown `status`, `location` and `expiry_source` (422).
+  - [x] Shared `components/ui/ChoiceGroup` (radio buttons, hidden inputs kept inside labels)
+    and `LOCATION_OPTIONS`, used by Quick Add and the edit sheet. Delete removes the item from
+    cached lists at once and is never retried.
+  - [x] E2E in Chrome: consume ½ then delete (item and log gone), correct to 0 (empty, hidden),
+    correct 4 -> 6 pcs + Pantry + expiry (initial 6, manual), mark as gone (one discard log).
 
 #### MVP-R5 — Receipt types, API module, hooks
 - `lib/api/receipts.ts`: `scan(file, meta)` multipart upload (do not set JSON content type),
@@ -730,9 +748,9 @@ Ordered by expected value once MVP is live.
 - [ ] Distinct visual for auto-added items
 
 ### Sync Recovery
-- [ ] "Mark as Gone" swipe action
+- [x] "Mark as Gone" — MVP-S4 edit sheet (button, not a swipe)
 - [ ] "Clear All Expired" batch action
-- [ ] Quick quantity adjustment UI
+- [x] Quick quantity adjustment UI — MVP-S4 edit sheet
 - [x] "Just Bought" manual add flow — MVP-S3 Quick Add
 
 ### Consumption Learning
@@ -764,7 +782,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
 - Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [x] R2 (PR #37)  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [ ] S3 (PR open)  [ ] S4  [x] R3 (PR #38)  [ ] R3b  [ ] R4
+- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [x] S3 (PR #39)  [ ] S4 (PR open)  [x] R3 (PR #38)  [ ] R3b  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance

@@ -20,3 +20,6 @@ export type { ConsumptionSheetProps } from './ConsumptionSheet'
 
 export { QuickAddSheet } from './QuickAddSheet'
 export type { QuickAddSheetProps } from './QuickAddSheet'
+
+export { ItemEditSheet } from './ItemEditSheet'
+export type { ItemEditSheetProps } from './ItemEditSheet'

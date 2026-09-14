@@ -864,3 +864,169 @@ class TestCanonicalUnitsOnWrite:
             },
         )
         assert response.status_code == 422
+
+
+class TestItemCorrections:
+    """MVP-S4: the edit sheet corrects quantity, expiry and location, marks gone, deletes."""
+
+    async def _patch(self, client: AsyncClient, item_id: str, **fields) -> dict:
+        response = await client.patch(f"/api/inventory/{item_id}", json=fields)
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    async def test_delete_after_consume_removes_item_and_history(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 5})
+        assert len(await _logs_for(seeded_db, item["id"])) == 1
+
+        response = await client.delete(f"/api/inventory/{item['id']}")
+
+        assert response.status_code == 204
+        assert (await client.get(f"/api/inventory/{item['id']}")).status_code == 404
+        assert await _logs_for(seeded_db, item["id"]) == []
+
+    async def test_delete_after_discard_removes_item_and_history(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"])
+        await self._patch(client, item["id"], status="discarded")
+
+        response = await client.delete(f"/api/inventory/{item['id']}")
+
+        assert response.status_code == 204
+        assert await _logs_for(seeded_db, item["id"]) == []
+
+    async def test_correcting_to_zero_empties_and_hides_the_item(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        body = await self._patch(client, item["id"], current_quantity=0)
+
+        assert body["status"] == "empty"
+        listed = (await client.get("/api/inventory")).json()
+        assert item["id"] not in [i["id"] for i in listed]
+
+    @pytest.mark.parametrize(
+        ("quantity", "status"), [(4, "partial"), (9, "opened"), (10, "sealed")]
+    )
+    async def test_correcting_below_full_follows_the_consume_rules(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        test_product: dict,
+        quantity: int,
+        status: str,
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        body = await self._patch(client, item["id"], current_quantity=quantity)
+
+        assert body["status"] == status
+        assert (body["opened_date"] is not None) == (status != "sealed")
+        assert body["initial_quantity"] == 10
+
+    async def test_correcting_above_full_raises_the_full_amount(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        body = await self._patch(client, item["id"], current_quantity=15)
+
+        assert (body["initial_quantity"], body["current_quantity"]) == (15, 15)
+        assert body["status"] == "sealed"
+
+    async def test_correcting_an_empty_item_makes_it_active_again(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 10})
+
+        body = await self._patch(client, item["id"], current_quantity=3)
+
+        assert body["status"] == "partial"
+        listed = (await client.get("/api/inventory")).json()
+        assert item["id"] in [i["id"] for i in listed]
+
+    async def test_a_correction_is_not_logged(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        await self._patch(client, item["id"], current_quantity=2)
+
+        assert await _logs_for(seeded_db, item["id"]) == []
+
+    async def test_explicit_status_wins_over_the_quantity_rules(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        body = await self._patch(
+            client, item["id"], current_quantity=2, status="opened"
+        )
+
+        assert body["status"] == "opened"
+
+    async def test_new_expiry_date_is_marked_manual(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"])
+        assert item["expiry_source"] == "calculated"
+
+        body = await self._patch(client, item["id"], expiry_date="2030-01-31")
+
+        assert (body["expiry_date"], body["expiry_source"]) == ("2030-01-31", "manual")
+
+    async def test_given_expiry_source_is_kept(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"])
+
+        body = await self._patch(
+            client, item["id"], expiry_date="2030-01-31", expiry_source="scanned"
+        )
+
+        assert body["expiry_source"] == "scanned"
+
+    async def test_location_change_keeps_expiry_source(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"])
+
+        body = await self._patch(client, item["id"], location="freezer")
+
+        assert (body["location"], body["expiry_source"]) == ("freezer", "calculated")
+
+    @pytest.mark.parametrize(
+        "fields",
+        [{"location": "garage"}, {"status": "gone"}, {"expiry_source": "guess"}],
+    )
+    async def test_unknown_values_are_rejected(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        test_product: dict,
+        fields: dict,
+    ) -> None:
+        item = await _create_item(client, test_product["id"])
+
+        response = await client.patch(f"/api/inventory/{item['id']}", json=fields)
+
+        assert response.status_code == 422

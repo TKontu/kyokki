@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Select, select
@@ -111,6 +112,24 @@ async def create_inventory_item(
     return await _reload(db, db_item.id)
 
 
+def apply_quantity_status(item: InventoryItem, new_quantity: Decimal) -> None:
+    """Status after the remaining quantity changes, for consume and for corrections.
+
+    0 is empty; below the full amount an item is opened (75 % or more left) or partial, and a
+    sealed item gets its opened date. An empty item brought back to full counts as opened.
+    """
+    row: Any = item  # Column-typed model: compare and assign plain values
+    if new_quantity == 0:
+        row.status = "empty"
+    elif new_quantity < row.initial_quantity:
+        if row.status == "sealed":
+            row.opened_date = date.today()
+        remaining_percentage = (new_quantity / row.initial_quantity) * 100
+        row.status = "partial" if remaining_percentage < 75 else "opened"
+    elif row.status == "empty":
+        row.status = "opened"
+
+
 async def update_inventory_item(
     db: AsyncSession, item_id: UUID, item_update: InventoryItemUpdate
 ) -> InventoryItem | None:
@@ -135,6 +154,25 @@ async def update_inventory_item(
         add_consumption_log(
             db, item=db_item, action="discard", quantity=db_item.current_quantity
         )
+
+    row: Any = db_item
+    new_quantity = update_data.pop("current_quantity", None)
+    if new_quantity is not None:
+        # A correction (MVP-S4): not logged as consumption; raising above the full amount
+        # makes the new amount full, so the quantity bar stays sensible
+        if new_quantity > row.initial_quantity:
+            row.initial_quantity = new_quantity
+        row.current_quantity = new_quantity
+        if "status" not in update_data:
+            apply_quantity_status(db_item, new_quantity)
+
+    if (
+        "expiry_date" in update_data
+        and "expiry_source" not in update_data
+        and update_data["expiry_date"] != row.expiry_date
+    ):
+        # A date set by hand, so the badge no longer claims it was calculated
+        update_data["expiry_source"] = "manual"
 
     for field, value in update_data.items():
         setattr(db_item, field, value)
@@ -224,20 +262,7 @@ async def consume_inventory_item(
         quantity=quantity,
     )
 
-    # Update status based on quantity
-    if new_quantity == 0:
-        db_item.status = "empty"
-    elif new_quantity < db_item.initial_quantity:
-        # If item was sealed and we're consuming from it, mark as opened and set date
-        if db_item.status == "sealed":
-            db_item.opened_date = date.today()
-
-        # Determine if partial or just opened based on remaining percentage
-        remaining_percentage = (new_quantity / db_item.initial_quantity) * 100
-        if remaining_percentage < 75:  # Less than 75% remaining
-            db_item.status = "partial"
-        else:
-            db_item.status = "opened"
+    apply_quantity_status(db_item, new_quantity)
 
     await db.commit()
     return await _reload(db, db_item.id)
