@@ -17,6 +17,9 @@ A Hermes Agent or OpenClaw agent runs the kitchen through Kyokki the way a perso
 - **"Product variants" means new generic products plus aliases.** The generic-product ruling of
   MVP-R2 stands: no brand, fat content or cut variants. An agent creates "Oat drink" and teaches
   names that map to it ("ARLA BARISTA", "kaurajuoma").
+- **The agent runs on the local network** (operator, 2026-09-14). It reaches the API at
+  `http://<homelab>:17300/api` directly, with no HTTPS, tunnel or public exposure needed.
+  AG1 tokens still apply, so only the agent (and the iPad proxy) can write.
 - **Recipes live in an existing recipe service if one fits.** The operator leans towards Mealie
   or an alternative, and would rather not maintain a native recipe model. The requirement is
   HowToCook-level granularity. AG0 decides.
@@ -33,7 +36,7 @@ The API is usable by an agent already, but it was built for the iPad screens.
 | Receipts | upload, queue, confirm | Usable, but confirm needs line indexes from a GET first |
 | Shopping list | CRUD + purchase (`/api/shopping`) | No generation from low stock or recipes; no link from purchase to stock |
 | Recipes | none (`mealie_integration_TODO.md` is unbuilt) | Everything |
-| Auth | none; the API is open on the LAN | Agents on another host need tokens; the iPad must keep working |
+| Auth | none; the API is open on the LAN | The agent runs on the LAN too: a token keeps writes to known clients; the iPad must keep working |
 | Discoverability | OpenAPI at `/docs` | Errors are free text, with no stable codes, candidates or next steps |
 
 ## Design principles
@@ -134,7 +137,8 @@ All of these are thin endpoints over services, shared with the iPad where the be
 ### AG3 — `kyokki` CLI
 A Python package in `cli/`, installable with `pipx install ./cli` on the agent host. It uses
 httpx plus argparse or Typer, with no backend imports.
-- **Config:** `KYOKKI_URL` and `KYOKKI_TOKEN` (or `--url`/`--token`).
+- **Config:** `KYOKKI_URL` (e.g. `http://<homelab>:17300`, LAN) and `KYOKKI_TOKEN` (or
+  `--url`/`--token`).
 - **`kyokki doctor`** checks reachability, the token and its scopes.
 - **Output:** JSON when stdout is not a TTY or `--json` is given; short tables for humans
   otherwise. `--dry-run` on every mutation. `--idempotency-key` is optional; by default the CLI
@@ -251,8 +255,6 @@ AG0 can run in parallel with AG1–AG4. AG6's `low_stock` source does not need r
 ship before AG5.
 
 ## Open questions (decide in the named increment)
-- AG1: the agent host. Is Hermes or OpenClaw on the homelab network or remote? Remote access
-  needs HTTPS (Traefik, post-MVP item 4) or a tunnel.
 - AG0: recipe service choice, and whether difficulty or calories need custom fields.
 - AG2: whether consume should also mark items `opened` (post-MVP "Opened tracking").
 - AG5: how cooking handles `pcs` ingredients against weight stock (e.g. "2 tomatoes" vs 500 g).
