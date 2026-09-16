@@ -8,6 +8,7 @@ import {
   ItemEditSheet,
   QuickAddSheet,
 } from '@/components/inventory'
+import { ReceiptsBanner } from '@/components/receipts'
 import Button from '@/components/ui/Button'
 import { useInventoryList } from '@/hooks/useInventory'
 import type { InventoryItem } from '@/types/inventory'
@@ -41,6 +42,7 @@ export default function Home() {
         </div>
       </header>
       <main className="px-6 py-4">
+        <ReceiptsBanner />
         <InventoryList onConsume={setConsumingId} onEdit={startEditing} />
       </main>
       <ConsumptionSheet

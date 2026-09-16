@@ -72,7 +72,8 @@ describe('Consume flow', () => {
     const consumeBodies: unknown[] = []
 
     server.use(
-      http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
+      http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
+    http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
       http.post(`${API_URL}/inventory/:id/consume`, async ({ request, params }) => {
         consumeBodies.push({ id: params.id, body: await request.json() })
         await consumeReleased
@@ -106,6 +107,7 @@ describe('Consume flow', () => {
       releaseConsume = resolve
     })
     server.use(
+    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
       http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
       http.post(`${API_URL}/inventory/:id/consume`, async () => {
         await consumeReleased
@@ -128,6 +130,7 @@ describe('Consume flow', () => {
 
   it('rolls the list back and shows the server error when consuming fails', async () => {
     server.use(
+    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
       http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
       http.post(`${API_URL}/inventory/:id/consume`, () =>
         HttpResponse.json({ detail: 'Cannot consume 500 - only 100 available' }, { status: 400 })

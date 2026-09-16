@@ -42,6 +42,7 @@ afterAll(() => server.close())
 it('adds a new product from the home page and shows it in the list', async () => {
   let stock: InventoryItem[] = []
   server.use(
+    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
     http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
     http.get(`${API_URL}/products`, () => HttpResponse.json([])),
     http.get(`${API_URL}/categories`, () =>

@@ -597,6 +597,12 @@ away, with no port forwarding.
   `useUploadReceipt`, `useConfirmReceipt` (invalidates inventory lists).
 - Status union copied from the single backend `ReceiptStatus` enum; quantity types follow DEC-2.
 - **Acceptance:** msw tests including polling stop conditions and multipart body.
+- As built (branch `feat/mvp-r5-r7-receipt-review`), 2026-09-16:
+  - [x] `lib/api/receipts.ts` (`list`, `get`, `confirm`, `process`) and `hooks/useReceipts.ts`
+    (`useReceipt`, `useReceiptList`, `useConfirmReceipt` with `retry: false`,
+    `useReprocessReceipt`). Polling lives in pure helpers (`detailPollInterval`,
+    `listPollInterval`): 3 s while a receipt is queued or processing, off once it is finished,
+    30 s heartbeat for the list. `scan()` waits for R6, which is the only thing that uploads.
 
 #### MVP-R6 — Scan page
 - Re-scoped 2026-09-14: the Telegram bot (T1) is the primary drop-in from the phone, so the
@@ -617,8 +623,29 @@ away, with no port forwarding.
 - Confirmed receipts open read-only with a summary.
 - A receipt with `extraction_method = "heuristic"` shows a hint ("read without the AI model",
   `fallback_reason`) and a "Read again with the model" action (`POST /process`).
-- **Acceptance:** tests for editing, re-matching, skipping, payload shape sent to confirm,
-  and the read-only state.
+- **Acceptance (as built covers all of this but re-matching):** tests for editing, re-matching,
+  skipping, payload shape sent to confirm, and the read-only state.
+
+- As built (branch `feat/mvp-r5-r7-receipt-review`), rulings of 2026-09-16:
+  - [x] `/receipt/[id]`: one row per read line with the generic name (printed name beneath),
+    quantity, unit and a category picker; include/skip per row; sticky footer with "Add n items"
+    and the skipped count. A matched line shows "→ product" with its confidence and needs no
+    category.
+  - [x] **Lines with no category start skipped** and say why; choosing a category includes them.
+    Household items stay out unless the cook wants them.
+  - [x] Confirm sends `product_id` for matched lines and `name` + `category` for new ones, with
+    the receipt's date (today when it has none); success toasts and returns to the stock list.
+    Errors (409 included) keep the page with the edits intact.
+  - [x] States: reading, failed with "Read again", confirmed read-only, not found. A heuristic
+    receipt (MVP-R3b) says so and offers a re-read with the model.
+  - [x] `ReceiptsBanner` on the home page: "n receipts waiting to review" links to the newest,
+    "Reading a receipt…" while the worker has one, and a failed receipt links to its page.
+  - [x] Not built here: per-line search to attach an existing product (needs a catalog first),
+    the receipts list (R8) and the iPad upload page (R6); the Telegram bot covers drop-off.
+  - [x] E2E in Chrome against a local stack: a 49-line receipt showed 40 included and 9 skipped;
+    giving a compost bag a category made it 41; confirm created 41 items from 39 products
+    (duplicate names merged), the banner disappeared, the receipt became read-only, and
+    consuming an item from the list worked.
 
 #### MVP-R8 — Receipts list
 - `/receipts`: recent receipts with status chip, item counts, date; tap opens review. Lets the
@@ -809,8 +836,8 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
 - Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [x] R2 (PR #37)  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [x] S3 (PR #39)  [x] S4 (PR #41)  [x] R3 (PR #38)  [ ] R3b (PR open)  [ ] R4
-- Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
+- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [x] S3 (PR #39)  [x] S4 (PR #41)  [x] R3 (PR #38)  [x] R3b (PR #42)  [ ] R4
+- Wave 4: [x] R5 (PR open)  [ ] R6  [x] R7 (PR open)  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance
 
