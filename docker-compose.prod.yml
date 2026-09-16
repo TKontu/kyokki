@@ -1,29 +1,76 @@
-# Production stack for the homelab. Reads secrets and service URLs from stack.env
-# (copy stack.env.example). See docs/DEPLOY.md for the runbook.
+# Production stack for the homelab, deployable straight from GitHub (Portainer: Stacks ->
+# Add stack -> Repository). Nothing is built here: the images come from GHCR, published by
+# .github/workflows/images.yml on every push to main.
+#
+# Configuration comes from environment variables, which Portainer takes from the stack's
+# environment list (paste stack.env.example and fill it in). See docs/DEPLOY.md.
 #
 # Only two ports are published:
 #   17301  frontend (the iPad opens this; /api/* is proxied to the backend)
 #   17300  backend API directly (diagnostics, future integrations)
-# Postgres and Redis are reachable only on the compose network. The receipt worker and the
-# Telegram bot publish no port: the worker reads the Postgres queue, the bot polls Telegram.
+# Postgres and Redis are reachable only on the compose network. The migration job, the receipt
+# worker and the Telegram bot publish no port.
+
+x-backend-image: &backend-image
+  image: ${KYOKKI_BACKEND_IMAGE:-ghcr.io/tkontu/kyokki-backend:latest}
+
+x-backend-env: &backend-env
+  DEBUG: ${DEBUG:-false}
+  POSTGRES_SERVER: ${POSTGRES_SERVER:-postgres}
+  POSTGRES_USER: ${POSTGRES_USER:-kyokki_user}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the stack environment}
+  POSTGRES_DB: ${POSTGRES_DB:-kyokki}
+  REDIS_HOST: ${REDIS_HOST:-redis}
+  REDIS_PORT: ${REDIS_PORT:-6379}
+  MINERU_BASE_URL: ${MINERU_BASE_URL:-http://192.168.0.94:8008}
+  MINERU_TIMEOUT: ${MINERU_TIMEOUT:-120}
+  MINERU_LANG: ${MINERU_LANG:-latin}
+  MINERU_ENABLE_TABLE: ${MINERU_ENABLE_TABLE:-true}
+  MINERU_ENABLE_FORMULA: ${MINERU_ENABLE_FORMULA:-false}
+  LLM_BASE_URL: ${LLM_BASE_URL:-http://192.168.0.94:9292/v1}
+  LLM_API_KEY: ${LLM_API_KEY:-ollama}
+  LLM_MODEL: ${LLM_MODEL:-c2.muse-glimmer}
+  LLM_TEMPERATURE: ${LLM_TEMPERATURE:-0.1}
+  LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-8192}
+  LLM_TIMEOUT: ${LLM_TIMEOUT:-180}
+  LLM_REASONING_STRENGTH: ${LLM_REASONING_STRENGTH:-low}
+  OPENFOODFACTS_API_URL: ${OPENFOODFACTS_API_URL:-https://world.openfoodfacts.org/api/v2}
+  FUZZY_MATCH_THRESHOLD: ${FUZZY_MATCH_THRESHOLD:-80}
+  RECEIPT_WORKER_POLL_SECONDS: ${RECEIPT_WORKER_POLL_SECONDS:-2}
+  RECEIPT_STALE_MINUTES: ${RECEIPT_STALE_MINUTES:-10}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+
+x-backend-volumes: &backend-volumes
+  - kyokki_data:/app/data
+  - kyokki_logs:/app/logs
+
 services:
+  kyokki-migrate:
+    # One-shot: brings the schema to head and seeds the categories, then exits. Both steps are
+    # idempotent, so it runs again on every deploy. The other services wait for it to succeed.
+    <<: *backend-image
+    command: >-
+      sh -c "alembic upgrade head && python -m app.db.seed_categories"
+    volumes: *backend-volumes
+    environment:
+      <<: *backend-env
+    networks:
+      - kyokki_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   kyokki-api:
-    build: ./backend
+    <<: *backend-image
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
     ports:
-      - "17300:8000"
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    env_file:
-      - stack.env
+      - "${API_PORT:-17300}:8000"
+    volumes: *backend-volumes
     environment:
-      - DEBUG=false
-      - POSTGRES_SERVER=postgres
-      - POSTGRES_USER=kyokki_user
-      - POSTGRES_DB=kyokki
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      <<: *backend-env
     networks:
       - kyokki_net
     depends_on:
@@ -31,25 +78,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      kyokki-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   kyokki-worker:
     # Reads queued receipts one at a time (OCR/LLM extraction, matching). Same image as the
     # API; uploads from the iPad and the Telegram bot are queued in Postgres. No port.
-    build: ./backend
+    <<: *backend-image
     command: python -m app.worker
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    env_file:
-      - stack.env
+    volumes: *backend-volumes
     environment:
-      - DEBUG=false
-      - POSTGRES_SERVER=postgres
-      - POSTGRES_USER=kyokki_user
-      - POSTGRES_DB=kyokki
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      <<: *backend-env
     networks:
       - kyokki_net
     depends_on:
@@ -57,25 +97,18 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      kyokki-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   kyokki-telegram:
     # Receipt drop-in bot (docs/DEPLOY.md, "Telegram bot"). Same image as the API; it
     # long-polls Telegram, so no port is published. Idles when TELEGRAM_BOT_TOKEN is unset.
-    build: ./backend
+    <<: *backend-image
     command: python -m app.telegram_bot
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    env_file:
-      - stack.env
+    volumes: *backend-volumes
     environment:
-      - DEBUG=false
-      - POSTGRES_SERVER=postgres
-      - POSTGRES_USER=kyokki_user
-      - POSTGRES_DB=kyokki
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      <<: *backend-env
     networks:
       - kyokki_net
     depends_on:
@@ -83,17 +116,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      kyokki-migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        # Where the Next.js server proxies /api/* to (compose service name).
-        - API_INTERNAL_URL=http://kyokki-api:8000
+    # The backend address is baked in at build time (Next.js standalone output) and points at
+    # the kyokki-api service on this network.
+    image: ${KYOKKI_FRONTEND_IMAGE:-ghcr.io/tkontu/kyokki-frontend:latest}
     ports:
-      - "17301:3000"
+      - "${FRONTEND_PORT:-17301}:3000"
     networks:
       - kyokki_net
     depends_on:
@@ -102,19 +134,16 @@ services:
 
   postgres:
     image: postgres:15
-    # POSTGRES_PASSWORD comes from stack.env via env_file (not ${...} interpolation,
-    # which Compose would read from the shell or a .env file instead).
-    env_file:
-      - stack.env
     environment:
-      POSTGRES_DB: kyokki
-      POSTGRES_USER: kyokki_user
+      POSTGRES_DB: ${POSTGRES_DB:-kyokki}
+      POSTGRES_USER: ${POSTGRES_USER:-kyokki_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the stack environment}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - kyokki_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kyokki_user -d kyokki"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kyokki_user} -d ${POSTGRES_DB:-kyokki}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -128,6 +157,8 @@ services:
 
 volumes:
   postgres_data:
+  kyokki_data:
+  kyokki_logs:
 
 networks:
   kyokki_net:

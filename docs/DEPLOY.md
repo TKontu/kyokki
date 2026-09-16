@@ -1,7 +1,9 @@
 # Deploying Kyokki on the homelab
 
 This is the runbook for the production Docker Compose stack (`docker-compose.prod.yml`).
-Follow it top to bottom on a fresh host; the "Updating" section covers later releases.
+**Nothing is built on the homelab:** every push to `main` publishes two images to GHCR
+(`.github/workflows/images.yml`), and the stack pulls them. Deploy it straight from GitHub with
+Portainer, or with `docker compose` on the host. The "Updating" section covers later releases.
 
 ## What you get
 
@@ -22,42 +24,56 @@ Two more services publish no port:
 
 ## Prerequisites
 
-- Docker Engine with the Compose plugin on the homelab host.
+- Docker Engine with the Compose plugin on the homelab host (Portainer optional but assumed
+  below).
+- The two packages public, once: GitHub → your profile → **Packages** → `kyokki-backend`, then
+  `kyokki-frontend` → *Package settings* → *Change visibility* → **Public**. Private packages
+  would need a registry login on the host instead.
 - An OpenAI-compatible LLM endpoint reachable from that host (the llama-swap gateway with a
   vision-capable model such as `muse-glimmer`). Name the copy pinned to the GPU Kyokki may use
   (the gateway lists `c0.*` and `c2.*` copies; Kyokki defaults to `c2.muse-glimmer`).
   MinerU OCR is optional: when it is unreachable,
   receipt photos are read directly by the vision model.
   Their URLs go into `stack.env`.
-- Git access to the repository.
+- Git access to the repository (public, so no credentials needed).
 
-## First deployment
+## First deployment with Portainer (from GitHub)
+
+1. **Stacks → Add stack → Repository.**
+   - Repository URL: `https://github.com/TKontu/kyokki`
+   - Reference: `refs/heads/main`
+   - Compose path: `docker-compose.prod.yml`
+   - *Automatic updates* are optional; see "Updating".
+2. **Environment variables.** Open *Advanced mode* and paste the contents of
+   `stack.env.example`, then fill in `POSTGRES_PASSWORD` (and `TELEGRAM_BOT_TOKEN` if you have
+   a bot). Every other key already carries the value this homelab uses.
+3. **Deploy the stack.** Portainer pulls the two GHCR images, starts Postgres, waits for it to
+   be healthy, runs `kyokki-migrate` (schema + default categories, both idempotent) and only
+   then starts the API, worker, Telegram bot and frontend.
+4. **Verify.**
+   - `http://<host>:17300/api/health` and `http://<host>:17301/api/health` both return healthy.
+   - In Portainer the stack shows `kyokki-migrate` **Exited (0)** and the other five services
+     **running**. That exit is expected: it is a one-shot job.
+
+`POSTGRES_PASSWORD` is used both by the `postgres` container (on first start it creates the
+database with it) and by the API. Changing it later means changing it in Postgres too
+(`ALTER USER kyokki_user PASSWORD '...'`).
+
+### Or with docker compose on the host
 
 ```bash
 git clone https://github.com/TKontu/kyokki.git
 cd kyokki
-
-# 1. Configuration. stack.env is git-ignored; never commit it.
-cp stack.env.example stack.env
-#    Edit stack.env: POSTGRES_PASSWORD, LLM_BASE_URL, LLM_MODEL (and LLM_REASONING_STRENGTH),
-#    MINERU_BASE_URL (the MinerU compose maps host 8008 -> container 8000).
-
-# 2. Build and start (first build takes a few minutes: Python deps + Next.js build).
-docker compose -f docker-compose.prod.yml up -d --build
-
-# 3. Database schema, then the default categories (idempotent, safe to rerun).
-docker compose -f docker-compose.prod.yml run --rm kyokki-api alembic upgrade head
-docker compose -f docker-compose.prod.yml run --rm kyokki-api python -m app.db.seed_categories
-
-# 4. Verify.
-curl -s http://localhost:17300/api/health      # backend directly
-curl -s http://localhost:17301/api/health      # through the frontend proxy
-docker compose -f docker-compose.prod.yml ps   # api, worker, telegram, frontend, postgres, redis "Up"
+cp stack.env.example stack.env      # fill in POSTGRES_PASSWORD; stack.env is git-ignored
+docker compose -f docker-compose.prod.yml --env-file stack.env up -d
+docker compose -f docker-compose.prod.yml --env-file stack.env ps
 ```
 
-`POSTGRES_PASSWORD` in `stack.env` is used both by the `postgres` container (on first start it
-creates the database with it) and by the API. Changing it later means changing it in Postgres
-too (`ALTER USER kyokki_user PASSWORD '...'`).
+To build the images locally instead of pulling them, add the build override:
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file stack.env up -d --build
+```
 
 ## On the iPad
 
@@ -89,15 +105,28 @@ too (`ALTER USER kyokki_user PASSWORD '...'`).
 > rows with units it does not know and leaves them unchanged. Downgrading only turns `dl` back
 > into `ml`; take a database backup before upgrading if you might need to roll back.
 
+**Portainer:** open the stack → **Pull and redeploy** (tick *re-pull image*). That fetches the
+newest `latest` images and re-runs `kyokki-migrate`, so the schema is migrated before the
+services come back. Portainer's *Automatic updates* (polling or webhook) does the same on a
+schedule.
+
+**On the host:**
+
 ```bash
 cd kyokki
 git pull
-docker compose -f docker-compose.prod.yml up -d --build
-docker compose -f docker-compose.prod.yml run --rm kyokki-api alembic upgrade head
+docker compose -f docker-compose.prod.yml --env-file stack.env pull
+docker compose -f docker-compose.prod.yml --env-file stack.env up -d
 ```
 
+Migrations are no longer a separate step: `kyokki-migrate` runs `alembic upgrade head` and the
+category seed on every deploy.
+
+To roll back, set `KYOKKI_BACKEND_IMAGE` and `KYOKKI_FRONTEND_IMAGE` to a `sha-<commit>` tag
+(every build publishes one alongside `latest`) and redeploy.
+
 The frontend image bakes in the backend address (`API_INTERNAL_URL`, the compose service name),
-so it only needs rebuilding when the code changes, never when the LAN IP changes.
+so it never needs rebuilding when the LAN IP changes.
 
 ## Telegram bot
 
@@ -140,10 +169,15 @@ docker compose -f docker-compose.prod.yml logs -f kyokki-api      # backend logs
 docker compose -f docker-compose.prod.yml logs -f frontend        # Next.js logs
 docker compose -f docker-compose.prod.yml logs -f kyokki-worker   # receipt reading logs
 docker compose -f docker-compose.prod.yml logs -f kyokki-telegram # receipt bot logs
+docker compose -f docker-compose.prod.yml logs kyokki-migrate      # schema + seed job
 docker compose -f docker-compose.prod.yml exec postgres \
   pg_dump -U kyokki_user kyokki > backup-$(date +%F).sql          # database backup
 docker compose -f docker-compose.prod.yml down                    # stop (data volumes stay)
 ```
+
+Receipt files and logs live in the named volumes `kyokki_data` and `kyokki_logs` (the database
+in `postgres_data`), so they survive redeploys and there is no host path to keep in sync. Copy a
+receipt out with `docker compose -f docker-compose.prod.yml cp kyokki-api:/app/data/receipts/<id>.pdf .`
 
 ## Development on a workstation
 

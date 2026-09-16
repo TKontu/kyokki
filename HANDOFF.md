@@ -37,3 +37,18 @@ Base-SHA: d77c849
 ## Next action
 Merge R3b. Then R4 on the homelab (deploy, MinerU, five real receipts), or ask the operator to
 start Wave 4 (R5 receipt API module and polling hooks) while R4 waits for the homelab.
+
+## Deployment (2026-09-16)
+- `.github/workflows/images.yml` publishes `ghcr.io/tkontu/kyokki-backend` and `-frontend` on
+  every push to main (`latest` + `sha-<commit>`). The packages must be public once.
+- `docker-compose.prod.yml` builds nothing: it pulls those images and takes configuration from
+  environment variables (Portainer stack env; `stack.env.example` is the paste-ready list).
+  `docker-compose.build.yml` is the local-build override.
+- A one-shot `kyokki-migrate` service runs `alembic upgrade head` + the category seed before the
+  API, worker and bot start, so a Portainer redeploy needs no console step. It shows as
+  `Exited (0)`.
+- Receipt files and logs are named volumes (`kyokki_data`, `kyokki_logs`), not host paths.
+- Verified locally with the build override: migrations ran, all services came up, and a receipt
+  went through MinerU + `c2.muse-glimmer` in 65 s.
+- The repo is public, so GitHub-hosted Actions minutes are free; a self-hosted runner with a
+  mounted Docker socket would be a security risk on a public repo (fork PRs run arbitrary code).
