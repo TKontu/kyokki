@@ -1,6 +1,7 @@
 """API endpoints for Receipt upload and management."""
 
 from datetime import date
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -135,6 +136,9 @@ async def process_receipt(
 ) -> ReceiptResponse:
     """Queue a failed (or pre-queue ``uploaded``) receipt to be read again.
 
+    A receipt read by the heuristic fallback (MVP-R3b) can also be re-queued for the model
+    until it is confirmed.
+
     Uploads are queued automatically; the worker service (``python -m app.worker``) reads
     queued receipts one at a time. This endpoint never runs the pipeline itself.
 
@@ -154,7 +158,17 @@ async def process_receipt(
             status_code=status.HTTP_409_CONFLICT,
             detail="Receipt is already queued or processing",
         )
-    if receipt.processing_status in (ReceiptStatus.COMPLETED, ReceiptStatus.CONFIRMED):
+    structured: dict[str, Any] = (
+        receipt.ocr_structured if isinstance(receipt.ocr_structured, dict) else {}
+    )
+    reread_heuristic = (
+        receipt.processing_status == ReceiptStatus.COMPLETED
+        and structured.get("method") == "heuristic"
+    )
+    if (
+        receipt.processing_status in (ReceiptStatus.COMPLETED, ReceiptStatus.CONFIRMED)
+        and not reread_heuristic
+    ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Receipt was already read",

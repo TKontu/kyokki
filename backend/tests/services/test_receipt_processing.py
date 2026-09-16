@@ -21,6 +21,9 @@ OCR = "app.services.receipt_processing.extract_text_from_receipt"
 TEXT = "app.services.receipt_processing.extract_from_text"
 VISION = "app.services.receipt_processing.extract_from_image"
 
+# Text with no product lines: the heuristic fallback finds nothing to read
+UNREADABLE_TEXT = "S-MARKET\n~~ blurred ~~\nYHTEENSÄ 7,48"
+
 OCR_TEXT = """S-MARKET
 VALIO WHOLE MILK 1L        2.49
 ARLA BUTTER 500G           4.99
@@ -361,7 +364,7 @@ class TestPersistence:
         self, service, pdf_receipt, sample_category, db_session
     ):
         with (
-            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(OCR, new_callable=AsyncMock, return_value=UNREADABLE_TEXT),
             patch(TEXT, new_callable=AsyncMock, return_value=_extraction(lines=[])),
         ):
             result = await service.process_receipt(pdf_receipt)
@@ -415,7 +418,7 @@ class TestQueueFields:
         self, service, pdf_receipt, sample_category, db_session
     ):
         with (
-            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(OCR, new_callable=AsyncMock, return_value=UNREADABLE_TEXT),
             patch(
                 TEXT,
                 new_callable=AsyncMock,
@@ -433,8 +436,9 @@ class TestFailures:
     async def test_extraction_error_marks_receipt_failed(
         self, service, pdf_receipt, sample_category, db_session
     ):
+        """No readable product lines either: the heuristic cannot help and the receipt fails."""
         with (
-            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(OCR, new_callable=AsyncMock, return_value=UNREADABLE_TEXT),
             patch(
                 TEXT,
                 new_callable=AsyncMock,
@@ -461,6 +465,122 @@ class TestFailures:
         vision.assert_not_awaited()
         await db_session.refresh(image_receipt)
         assert image_receipt.processing_status == ReceiptStatus.FAILED
+
+
+class TestHeuristicFallback:
+    """MVP-R3b: when the model fails or finds nothing, readable text still yields rows."""
+
+    async def test_model_failure_on_text_falls_back_to_the_parser(
+        self, service, pdf_receipt, sample_product, db_session
+    ):
+        from app.models.store_product_alias import StoreProductAlias
+
+        db_session.add(
+            StoreProductAlias(
+                product_master_id=sample_product.id,
+                store_chain="s-group",
+                receipt_name="VALIO WHOLE MILK 1L",
+                manually_verified=True,
+            )
+        )
+        await db_session.commit()
+
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                side_effect=LLMExtractionError("LLM request failed: ConnectError"),
+            ),
+        ):
+            result = await service.process_receipt(pdf_receipt)
+
+        assert result.success is True
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.processing_status == ReceiptStatus.COMPLETED
+        assert pdf_receipt.error is None
+        structured = pdf_receipt.ocr_structured
+        assert structured["method"] == "heuristic"
+        assert structured["fallback_reason"].startswith(
+            "Model unavailable: LLM request failed: ConnectError"
+        )
+        milk, butter = structured["lines"]
+        assert (milk["name"], milk["generic_name"], milk["category"]) == (
+            "VALIO WHOLE MILK 1L",
+            None,
+            None,
+        )
+        assert milk["match_source"] == "alias"
+        assert butter["name"] == "ARLA BUTTER 500G"
+        assert pdf_receipt.store_chain == "s-group"
+        assert (pdf_receipt.items_extracted, pdf_receipt.items_matched) == (2, 1)
+
+    async def test_model_finding_nothing_falls_back_to_the_parser(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction(lines=[])),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.ocr_structured["method"] == "heuristic"
+        assert (
+            pdf_receipt.ocr_structured["fallback_reason"] == "Model found no products"
+        )
+        assert pdf_receipt.items_extracted == 2
+
+    async def test_image_ocr_text_also_falls_back(
+        self, service, image_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                side_effect=LLMExtractionError("timed out"),
+            ),
+            patch(VISION, new_callable=AsyncMock) as vision,
+        ):
+            await service.process_receipt(image_receipt)
+
+        vision.assert_not_awaited()
+        await db_session.refresh(image_receipt)
+        assert image_receipt.processing_status == ReceiptStatus.COMPLETED
+        assert image_receipt.ocr_structured["method"] == "heuristic"
+
+    async def test_vision_failure_has_no_text_to_parse(
+        self, service, image_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, side_effect=OCRUnavailableError("down")),
+            patch(
+                VISION,
+                new_callable=AsyncMock,
+                side_effect=LLMExtractionError("timed out"),
+            ),
+            patch("app.services.receipt_processing.parse_receipt_text") as parser,
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is False
+        parser.assert_not_called()
+        await db_session.refresh(image_receipt)
+        assert image_receipt.processing_status == ReceiptStatus.FAILED
+
+    async def test_model_success_records_no_fallback(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction()),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.ocr_structured["method"] == "text"
+        assert "fallback_reason" not in pdf_receipt.ocr_structured
 
 
 class TestProcessingResult:

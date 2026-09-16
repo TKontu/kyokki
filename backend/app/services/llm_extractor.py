@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.parsers.base import ExtractedLine, ExtractionMethod, ReceiptExtraction
+from app.parsers.receipt_lines import is_skip_line
 
 logger = get_logger(__name__)
 
@@ -38,12 +39,6 @@ class CategoryOption:
 
 
 # Lines that are never products: separators, totals, payment, VAT table, discounts, fees.
-_SKIP_LINE = re.compile(
-    r"^(-{5,}|={5,}|VÄLISUMMA|YHTEENSÄ|BONUSTA|MAKSUTAPA|KORTTI\b|\*{4,}|Veloitus:|"
-    r"Autentisointi:|Viite:|Aika:|ALV\b|\d+,\d+\s*%|YHT\.|NORM\.|ALENNUS|TOIMITUSMAKSU|"
-    r"VERKKOK\.PAKKAUS|PANTTI\s+YHT)",
-    re.IGNORECASE,
-)
 _TRAILING_PRICE = re.compile(r"\s+-?\d+[,.]\d{2}(\s*€)?$")
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
@@ -78,9 +73,7 @@ def prefilter_receipt_text(text: str) -> str:
     Shrinks the prompt and removes totals and VAT numbers the model might mistake for items.
     """
     return "\n".join(
-        line
-        for line in text.splitlines()
-        if line.strip() and not _SKIP_LINE.match(line.strip())
+        line for line in text.splitlines() if line.strip() and not is_skip_line(line)
     )
 
 

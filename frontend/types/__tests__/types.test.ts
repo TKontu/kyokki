@@ -87,6 +87,7 @@ describe('TypeScript Types', () => {
         items_extracted: 1,
         items_matched: 1,
         extraction_method: 'vision',
+        fallback_reason: null,
         items: [
           {
             index: 0,
