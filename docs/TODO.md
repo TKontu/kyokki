@@ -467,8 +467,16 @@ away, with no port forwarding.
   OCR time, LLM time, items extracted, items matched, failures. Append to
   `docs/vLLM_MANUAL_TEST.md`.
 - Apply R0's winning settings in `llm_extractor.py`. Whatever works becomes the single
-  documented default in `config.py`, `.env.example` and `stack.env.example` (today `.env.example`
-  says `Qwen3-4B-Instruct` while `config.py` and `stack.env.example` say `qwen3-8B`). Include OCR language as a measured variable.
+  documented default in `config.py`, `.env.example` and `stack.env.example`. Include OCR
+  language as a measured variable.
+- Settled 2026-09-16: **the model drift is gone.** `config.py`, `.env.example`,
+  `stack.env.example` and `docker-compose.prod.yml` all say `c2.muse-glimmer`,
+  `http://192.168.0.94:9292/v1`, MinerU `http://192.168.0.94:8008`, `MINERU_LANG=latin`,
+  `LLM_MAX_TOKENS=8192`. Only older design docs still name Qwen; do not chase them.
+- Measurement is in place (branch `feat/mvp-p1-r6-r8-app-shell`): every read logs one line with
+  `receipt_id`, `ocr_seconds`, `llm_seconds`, `total_seconds`, `method`, `items_extracted` and
+  `items_matched`. `JSONFormatter` used to drop unknown extras, so nothing could be timed from
+  the logs before this. What is left for R4 is five real receipts and the write-up.
 - **Acceptance:** 5/5 receipts reach `completed` in under 120 s each with ≥ 80 % of line
   items extracted. If this cannot be met, stop and file a DEC before building R6/R7.
 - Prep done 2026-09-16 (branch `fix/homelab-endpoints-and-generic-naming`): MinerU is back at
@@ -614,6 +622,17 @@ away, with no port forwarding.
 - Client-side downscale before upload (canvas, long edge ≤ 2000 px, JPEG q 0.85); a 12 MP
   camera capture is 3–5 MB and inflates OCR time and prompt length.
 - **Acceptance:** tests for the happy path and the failure path; manual test on the iPad.
+- As built (branch `feat/mvp-p1-r6-r8-app-shell`), 2026-09-16:
+  - [x] `/scan`: one file input (`image/*,application/pdf`), optional store and purchase date,
+    Upload. Success goes straight to `/receipt/[id]`, which already shows the reading state and
+    polls, so **no separate `ProcessingStatus` component was needed**.
+  - [x] `lib/images.ts` downscales a photo to a 2000 px long edge at JPEG q 0.85 before upload
+    and returns the original for PDFs, for images that already fit, and on any failure. The
+    endpoint has no size limit of its own, so this is the only guard.
+  - [x] Uploading a file already in the system opens the receipt that is there instead of
+    reporting an error: the 409 carries `receipt_id`. `errorMessage()` in `lib/api/client.ts`
+    learned to read an object `detail`, and `APIError.details` now carries it.
+  - [x] `apiClient.upload` already existed and was called by nothing; it is now used and tested.
 
 #### MVP-R7 — Receipt review page
 - `/receipt/[id]`: one row per `ExtractedItem`: name (editable), quantity + unit (editable),
@@ -651,12 +670,33 @@ away, with no port forwarding.
 - `/receipts`: recent receipts with status chip, item counts, date; tap opens review. Lets the
   user leave during processing and come back.
 - **Acceptance:** list renders all statuses; completed-unconfirmed are visually flagged.
+- As built (branch `feat/mvp-p1-r6-r8-app-shell`), 2026-09-16:
+  - [x] `/receipts`: store and date, what was read ("41 items, 3 already known") or the failure
+    reason, and a `ReceiptStatusChip`. A receipt that has been read but not confirmed says
+    **"Waiting for review"** in warning colours; the rest are Reading / Could not read / Added
+    to stock. The whole row opens the receipt.
+  - [x] **The list response was slimmed** (`ReceiptSummary`): no `ocr_raw_text`, no
+    `ocr_structured`, no `items`, plus `limit` (1-200, default 50) and `offset`. The home banner
+    polls this endpoint every 30 s, so it was shipping every receipt's full OCR text to the iPad.
+  - [x] `ReceiptsBanner` now sends you here when more than one receipt is waiting; a single one
+    still opens directly.
 
 #### MVP-P1 — AppShell
 - Persistent header/side rail: Inventory, Scan (primary, always visible), Receipts. Remove the
   `/components-demo` link from the header (page may stay for development). Landscape-first
   layout with a two-column inventory grid on iPad width; 44 pt targets everywhere.
 - **Acceptance:** navigation tests; every MVP flow reachable within two taps from home.
+- As built (branch `feat/mvp-p1-r6-r8-app-shell`), ruling of 2026-09-16 (**left side rail**):
+  - [x] `components/layout/AppShell.tsx` in `app/layout.tsx`, so every route has it: Stock,
+    Scan, Receipts, 56 pt targets, `aria-current` on the open one, and `/receipt/[id]` counting
+    as Receipts. A rail down the left from `lg` (where the stock grid goes two-column), a bar
+    across the top below it.
+  - [x] Pages keep their own header and their own actions: the home "+ Add" did not move.
+  - [x] `app/layout.tsx` gained `viewport: { viewportFit: 'cover' }`. Without it
+    `env(safe-area-inset-*)` resolves to 0, so the safe-area padding already written into the
+    sheets, the toasts and the receipt footer was doing nothing on the iPad.
+  - [x] The "Components" link is gone from the home header; `/components-demo` still answers.
+    `/receipt/[id]` now offers "Back to receipts".
 
 #### MVP-P2 — PWA manifest and always-on refresh
 - `app/manifest.ts` (Next 14 metadata route): name, icons 192/512, `display: standalone`,
@@ -702,6 +742,34 @@ Ordered by expected value once MVP is live.
     `opened_date`) and removes its `consumption_log` row, then an Undo action on C2's toast.
 13. Product name languages: generic names are English since MVP-R2; offer Finnish (or any
     language) names, e.g. a per-product display name or translation at extraction time.
+
+#### Operator friction log — the quantity and consumption model is too crude (2026-09-16)
+Raised while MVP-P1/R6/R8 was in flight. These six belong together: today a product carries one
+unit and a category-wide shelf life, and consuming offers the same buttons whatever the item is.
+**Not before MVP-P3**, and "cooking staples" (flour, salt, oil as pantry constants) is explicitly
+*not* now.
+
+- **F1 — Keep non-food off the stock list.** Towels, compost bags and cleaning supplies should
+  not enter the food inventory by default. Partly covered: MVP-R7 starts a line with no category
+  skipped, and the extraction prompt names household products. What is missing is the system
+  *knowing* a line is non-food rather than leaning on a missing category, so the cook is not
+  asked about the same paper towels every week.
+- **F2 — Count fruit and veg in pieces, not grams.** A receipt says 1000 g of apples; the cook
+  eats apples one at a time. Store a per-product average piece weight (~125 g for an apple) and
+  convert at confirm, so stock reads "8 apples". A rough estimate is enough.
+- **F3 — Remember the right unit per product, not per category.** A small yoghurt is a piece; a
+  1 kg tub is a weight. The unit belongs to the product (and possibly to the pack size), and the
+  system should learn it from how the cook actually logs and consumes it.
+- **F4 — Consumption options that fit the item and the stock on hand.** C2 ships ¼ ½ ¾ Done for
+  measured units and −1 −2 −3 Done for pieces, with no idea what the item is. For 8 apples the
+  common case is one apple: a large "eat 1" with smaller 2/3/… beside it. The options should be
+  derived from the item, its unit and how much is left.
+- **F5 — Opened versus unopened should drive shelf life.** Already on this list as item 2
+  (`opened_date` + `opened_shelf_life_days`); F5 is the same ask from the kitchen side and
+  raises its priority. Matters most for the big packs.
+- **F6 — Shelf life per produce, not per category.** `default_shelf_life_days` is a category
+  constant today, so bananas and carrots expire together. Needs per-product defaults, seeded
+  with sensible values and correctable by hand.
 
 ---
 
@@ -836,9 +904,9 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
 - Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [x] R2 (PR #37)  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [x] S3 (PR #39)  [x] S4 (PR #41)  [x] R3 (PR #38)  [x] R3b (PR #42)  [ ] R4
-- Wave 4: [x] R5 (PR open)  [ ] R6  [x] R7 (PR open)  [ ] R8
-- Wave 5: [ ] P1  [ ] P2
+- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [x] S3 (PR #39)  [x] S4 (PR #41)  [x] R3 (PR #38)  [x] R3b (PR #42)  [ ] R4 (measurable now; needs 5 real receipts)
+- Wave 4: [x] R5 (PR #45)  [x] R6 (PR open)  [x] R7 (PR #45)  [x] R8 (PR open)
+- Wave 5: [x] P1 (PR open)  [ ] P2
 - Wave 6: [ ] P3 acceptance
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)

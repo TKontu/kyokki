@@ -63,3 +63,23 @@ start Wave 4 (R5 receipt API module and polling hooks) while R4 waits for the ho
   product and need no category.
 - Still open in Wave 4: R6 (iPad upload page) and R8 (receipts list). Attaching an existing
   product per line is also deferred until the catalog is worth searching.
+
+## App shell, scan and receipts list (2026-09-16)
+- `AppShell` (`components/layout/`) is mounted in `app/layout.tsx`, so navigation is everywhere:
+  Stock, Scan, Receipts. Pages still own their header and their actions. Add a route by adding
+  it to `DESTINATIONS`.
+- `/scan` uploads from the iPad; `/receipts` is how you get back to a receipt you left. Both the
+  Telegram bot and `/scan` land in the same queue.
+- `GET /api/receipts` now answers with `ReceiptSummary` (no OCR text, no items) and takes
+  `limit`/`offset`. Anything that needs the items must fetch the receipt itself.
+- Uploading a file that is already in the system is not an error: the 409 carries `receipt_id`
+  and `/scan` opens that receipt. `APIError.details` now carries an object `detail`.
+- **MVP-R4 is ready to measure.** Each read logs `ocr_seconds`, `llm_seconds`, `total_seconds`,
+  `method` and the counts; `JSONFormatter` publishes extras instead of dropping them. Five real
+  receipts through the deployed stack and R4 is done. Local dry run: OCR 0.1 s, model 60.2 s,
+  49 items.
+- The operator raised six quantity/consumption issues (pieces vs weight, per-product units and
+  shelf life, better consume buttons, non-food filtering, opened tracking). They are logged in
+  `docs/TODO.md` under the post-MVP frontier as F1-F6; not before MVP-P3.
+- Rotate the legacy root `.env` keys: starting a backend process with it in place makes
+  pydantic print the forbidden extras *with their values*. Always move it aside first.

@@ -46,14 +46,14 @@ describe('ReceiptsBanner', () => {
     expect(link).toHaveAttribute('href', '/receipt/r1')
   })
 
-  it('counts several waiting receipts and links to the newest', async () => {
+  it('counts several waiting receipts and sends you to the list to choose', async () => {
     renderBanner([
       receipt('new', 'completed', { created_at: '2026-09-16T12:00:00Z' }),
       receipt('old', 'completed', { created_at: '2026-09-15T12:00:00Z' }),
     ])
 
     const link = await screen.findByRole('link', { name: /2 receipts waiting to review/i })
-    expect(link).toHaveAttribute('href', '/receipt/new')
+    expect(link).toHaveAttribute('href', '/receipts')
   })
 
   it('says a receipt is being read, without a link', async () => {

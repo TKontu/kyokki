@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
+import { AppShell } from "@/components/layout";
 import { Providers } from "./providers";
 
 const geistSans = localFont({
@@ -19,6 +20,14 @@ export const metadata: Metadata = {
   description: "Smart kitchen inventory management - track all your groceries, dry goods, and consumables with receipt scanning",
 };
 
+// viewportFit: without it env(safe-area-inset-*) resolves to 0 on the iPad, so the safe-area
+// padding in the sheets, the toasts and the receipt footer would do nothing.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -29,7 +38,9 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <Providers>{children}</Providers>
+        <Providers>
+          <AppShell>{children}</AppShell>
+        </Providers>
       </body>
     </html>
   );

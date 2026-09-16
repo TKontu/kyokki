@@ -17,25 +17,8 @@ import { useConfirmReceipt, useReceipt, useReprocessReceipt } from '@/hooks/useR
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { toISODate } from '@/lib/dates'
-import type { ConfirmedItemCreate, ExtractedItem, Receipt } from '@/types/receipt'
-
-const STORE_NAMES: Record<string, string> = {
-  's-group': 'S-group',
-  'k-group': 'K-group',
-  lidl: 'Lidl',
-  tokmanni: 'Tokmanni',
-}
-
-function storeName(receipt: Receipt): string {
-  if (!receipt.store_chain) return 'Unknown store'
-  return STORE_NAMES[receipt.store_chain] ?? receipt.store_chain
-}
-
-function receiptDate(receipt: Receipt): string {
-  if (!receipt.purchase_date) return 'date not read'
-  const [year, month, day] = receipt.purchase_date.split('-')
-  return `${Number(day)}.${Number(month)}.${year}`
-}
+import { receiptDate, storeName } from '@/lib/receipts'
+import type { ConfirmedItemCreate, ExtractedItem } from '@/types/receipt'
 
 function initialRow(item: ExtractedItem): ReviewRow {
   const name = item.generic_name ?? item.name
@@ -51,19 +34,18 @@ function initialRow(item: ExtractedItem): ReviewRow {
   }
 }
 
-const pageClass = 'min-h-screen bg-ui-bg dark:bg-ui-dark-bg'
 const mainClass = 'px-6 py-4'
 
 function Frame({ children }: { children: React.ReactNode }) {
   return (
-    <div className={pageClass}>
+    <div>
       <header className="flex items-center justify-between border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
         <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">Receipt</h1>
         <Link
-          href="/"
+          href="/receipts"
           className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
         >
-          Back to stock
+          Back to receipts
         </Link>
       </header>
       <main className={mainClass}>{children}</main>
@@ -211,17 +193,17 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   const quantitiesValid = included.every(({ row }) => Number(row.quantity) > 0)
 
   return (
-    <div className={pageClass}>
+    <div>
       <header className="border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">
             {`${storeName(receipt)}, ${receiptDate(receipt)}`}
           </h1>
           <Link
-            href="/"
+            href="/receipts"
             className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
           >
-            Back to stock
+            Back to receipts
           </Link>
         </div>
         <p className="mt-1 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">

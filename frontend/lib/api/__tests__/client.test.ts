@@ -232,6 +232,66 @@ describe('APIClient', () => {
     })
   })
 
+  describe('upload (MVP-R6)', () => {
+    const file = new File(['receipt bytes'], 'receipt.pdf', { type: 'application/pdf' })
+
+    it('posts the file as multipart and lets the browser set the boundary', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: true, status: 201, json: async () => ({ id: 'r1' }) })
+
+      const result = await client.upload<{ id: string }>('/receipts/scan', file, {
+        store_chain: 's-group',
+      })
+
+      expect(result).toEqual({ id: 'r1' })
+      const [url, init] = mockFetch.mock.calls[0]
+      expect(url).toBe(`${BASE_URL}/receipts/scan`)
+      expect(init.method).toBe('POST')
+      // A Content-Type of our own would lose the multipart boundary
+      expect(init.headers).toBeUndefined()
+      const body = init.body as FormData
+      expect(body.get('file')).toBe(file)
+      expect(body.get('store_chain')).toBe('s-group')
+    })
+
+    it('reports an unsupported file type with the message the API gave', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => ({ detail: 'Unsupported file type: text/plain' }),
+      })
+
+      await expect(client.upload('/receipts/scan', file)).rejects.toMatchObject({
+        status: 400,
+        message: 'Unsupported file type: text/plain',
+      })
+    })
+
+    it('keeps the receipt id when the same receipt was already uploaded', async () => {
+      // FastAPI returns an object detail here, which used to fall through to statusText
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        json: async () => ({
+          detail: { message: 'Receipt already uploaded', receipt_id: 'r-existing' },
+        }),
+      })
+
+      await expect(client.upload('/receipts/scan', file)).rejects.toMatchObject({
+        status: 409,
+        message: 'Receipt already uploaded',
+        details: { message: 'Receipt already uploaded', receipt_id: 'r-existing' },
+      })
+    })
+
+    it('turns a dropped connection into a NetworkError', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('connection reset'))
+
+      await expect(client.upload('/receipts/scan', file)).rejects.toBeInstanceOf(NetworkError)
+    })
+  })
+
   describe('Type guards', () => {
     it('should identify APIError', async () => {
       mockFetch.mockResolvedValueOnce({

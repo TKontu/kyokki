@@ -98,6 +98,21 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
     return items
 
 
+def method_from_structured(
+    structured: dict[str, Any] | None,
+) -> tuple[Literal["text", "vision", "heuristic"] | None, str | None]:
+    """Read how a receipt was extracted out of ``receipt.ocr_structured``.
+
+    Neither value is a column: the pipeline stores them inside the structured blob.
+    """
+    method = (structured or {}).get("method")
+    reason = (structured or {}).get("fallback_reason")
+    return (
+        method if method in ("text", "vision", "heuristic") else None,
+        reason if isinstance(reason, str) else None,
+    )
+
+
 class ReceiptBase(BaseModel):
     """Base receipt schema with common fields."""
 
@@ -157,12 +172,43 @@ class ReceiptResponse(ReceiptBase):
     @model_validator(mode="after")
     def derive_items(self) -> "ReceiptResponse":
         self.items = items_from_structured(self.ocr_structured)
-        method = (self.ocr_structured or {}).get("method")
-        self.extraction_method = (
-            method if method in ("text", "vision", "heuristic") else None
+        self.extraction_method, self.fallback_reason = method_from_structured(
+            self.ocr_structured
         )
-        reason = (self.ocr_structured or {}).get("fallback_reason")
-        self.fallback_reason = reason if isinstance(reason, str) else None
+        return self
+
+
+class ReceiptSummary(BaseModel):
+    """One receipt as the receipts list shows it (MVP-R8).
+
+    The iPad polls the list, so it deliberately leaves out ``ocr_raw_text``,
+    ``ocr_structured`` and the derived ``items``: on a real receipt those are tens of
+    kilobytes each, and the list only renders counts and a status.
+    """
+
+    id: UUID
+    store_chain: str | None = None
+    purchase_date: date | None = None
+    processing_status: ReceiptStatus
+    error: str | None = None
+    queued_at: datetime | None = None
+    processing_started_at: datetime | None = None
+    items_extracted: int = 0
+    items_matched: int = 0
+    extraction_method: Literal["text", "vision", "heuristic"] | None = None
+    fallback_reason: str | None = None
+    created_at: datetime
+
+    # Read to derive the two fields above; never serialised
+    ocr_structured: dict[str, Any] | None = Field(None, exclude=True)
+
+    model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def derive_method(self) -> "ReceiptSummary":
+        self.extraction_method, self.fallback_reason = method_from_structured(
+            self.ocr_structured
+        )
         return self
 
 

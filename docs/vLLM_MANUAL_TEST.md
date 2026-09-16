@@ -563,3 +563,38 @@ run to run: one pipeline run returned 0 categories and the repeat returned 40. T
 Receipt photo -> MinerU -> `c2.muse-glimmer` -> matching, on a throwaway DB with the worker
 running: `completed` in 70-73 s, method `text`, 49 items, 49 generic names, store `s-group`,
 date 2026-01-02.
+
+
+## MVP-R4 real-receipt validation (open, 2026-09-16)
+
+**Acceptance:** 5/5 real receipts reach `completed` in under 120 s each, with at least 80 % of
+their line items extracted. Five receipts still have to go through the deployed stack.
+
+### Reading the numbers
+Since `feat/mvp-p1-r6-r8-app-shell`, every read logs one line per receipt, and `JSONFormatter`
+now publishes the extras it used to drop. On the homelab:
+
+```
+docker logs kyokki-worker 2>&1 | grep '"ocr_seconds"'
+```
+
+Each line carries `receipt_id`, `method` (`text` / `vision` / `heuristic`), `ocr_seconds`,
+`llm_seconds`, `total_seconds`, `items_extracted` and `items_matched`. A failure logs the same
+timings plus `error`. `items_extracted` against the printed line count gives the extraction rate;
+no counting by hand.
+
+### Runs
+
+| # | Store | Method | OCR s | Model s | Total s | Extracted | Of printed | Matched | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | — | — | — | — | — | — | — | — | waiting for a real receipt |
+
+Local dry run on the same pipeline (throwaway DB, the S-kaupat fixture rendered to PDF), to show
+the shape of the record rather than to count towards the five:
+
+| # | Store | Method | OCR s | Model s | Total s | Extracted | Matched | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| — | s-group | text | 0.1 | 60.2 | 60.4 | 49 | 0 | completed, confirmed to 40 items |
+
+OCR is nothing on a digital PDF (pdfplumber, no MinerU call); the model is the whole cost. OCR
+language only becomes a measured variable once a photographed receipt goes through MinerU.
