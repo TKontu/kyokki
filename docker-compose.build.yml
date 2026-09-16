@@ -1,0 +1,32 @@
+# Build the production stack locally instead of pulling the published images.
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml up -d --build
+#
+# The homelab does not use this file: it deploys docker-compose.prod.yml from GitHub and pulls
+# the images GHCR already has (.github/workflows/images.yml).
+
+services:
+  kyokki-migrate:
+    build: ./backend
+    image: kyokki-backend:local
+
+  kyokki-api:
+    build: ./backend
+    image: kyokki-backend:local
+
+  kyokki-worker:
+    build: ./backend
+    image: kyokki-backend:local
+
+  kyokki-telegram:
+    build: ./backend
+    image: kyokki-backend:local
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Where the Next.js server proxies /api/* to (compose service name).
+        - API_INTERNAL_URL=http://kyokki-api:8000
+    image: kyokki-frontend:local

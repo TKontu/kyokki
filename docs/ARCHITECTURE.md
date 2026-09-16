@@ -6,7 +6,9 @@
 > - **Running:** FastAPI API, PostgreSQL 15, Redis (pub/sub for WebSocket broadcasts and
 >   scanner mode state), Next.js 14 frontend. The frontend proxies `/api/*` to the API on the
 >   same origin (MVP-F2). No Traefik, no TLS; the prod compose publishes two plain HTTP ports on
->   the LAN (17301 frontend, 17300 API). Runbook: [DEPLOY.md](./DEPLOY.md).
+>   the LAN (17301 frontend, 17300 API). Images are published to GHCR by CI and the homelab
+>   deploys `docker-compose.prod.yml` straight from GitHub (Portainer), building nothing.
+>   Runbook: [DEPLOY.md](./DEPLOY.md).
 > - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images) → one LLM
 >   extraction call (OpenAI-compatible endpoint, vLLM or Ollama) → RapidFuzz match against
 >   `product_master.canonical_name` → review → confirm. If the model fails or finds nothing on a

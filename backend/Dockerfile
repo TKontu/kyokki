@@ -21,5 +21,6 @@ RUN mkdir -p /app/data /app/logs
 # Expose port
 EXPOSE 8000
 
-# Run uvicorn
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Default command; the compose files override it per service (api, worker, telegram bot).
+# No --reload: this image is what the homelab runs.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
