@@ -52,3 +52,14 @@ start Wave 4 (R5 receipt API module and polling hooks) while R4 waits for the ho
   went through MinerU + `c2.muse-glimmer` in 65 s.
 - The repo is public, so GitHub-hosted Actions minutes are free; a self-hosted runner with a
   mounted Docker socket would be a security risk on a public repo (fork PRs run arbitrary code).
+
+## Receipt review (2026-09-16)
+- `/receipt/[id]` is the review screen and `ReceiptsBanner` on the home page is the way in.
+  That closes the loop the operator asked for: drop a receipt to the bot, review it, stock
+  appears, consume it.
+- Receipt data lives in `lib/api/receipts.ts` + `hooks/useReceipts.ts`; polling is in the pure
+  helpers `detailPollInterval` / `listPollInterval`, so tests never wait on real timers.
+- A line with no category starts skipped; picking one includes it. Matched lines go to their
+  product and need no category.
+- Still open in Wave 4: R6 (iPad upload page) and R8 (receipts list). Attaching an existing
+  product per line is also deferred until the catalog is worth searching.

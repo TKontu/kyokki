@@ -46,6 +46,7 @@ function sectionOf(heading: RegExp) {
 it('moves an item to the freezer, then marks it as gone', async () => {
   let stock: InventoryItem[] = [PEAS]
   server.use(
+    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
     http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
     http.patch(`${API_URL}/inventory/item-peas`, async ({ request }) => {
       const body = (await request.json()) as Partial<InventoryItem>
