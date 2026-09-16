@@ -35,3 +35,14 @@ Base-SHA: 3e00902
 ## Next action
 Merge S4 and run `alembic upgrade head` on the homelab. Then R3b (heuristic line parser when
 extraction fails), or R4 once the homelab stack and MinerU are up.
+
+## Homelab endpoints (2026-09-16)
+- Inference `192.168.0.94:9292/v1`; models exist as `c0.*` (reserved for the operator's Hermes
+  agent) and `c2.*`. Kyokki uses `c2.muse-glimmer` (vision-capable, ~10 s cold load, 56-70 s per
+  receipt). `c2.gemma-26b` is faster warm but cold-loads for five minutes; `c2.qwen3.8-27b` is
+  accurate but slower and names products in the plural.
+- MinerU `192.168.0.94:8008` (container 8000), healthy, `/file_parse`. Image receipts take the
+  text path again; vision is only the fallback.
+- The extraction prompt requires singular generic names and names household products; the
+  household rule must keep the sentence that food still gets its category, or the model returns
+  no categories at all.

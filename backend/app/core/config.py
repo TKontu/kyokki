@@ -45,7 +45,9 @@ class Settings(BaseSettings):
         return v
 
     # MinerU OCR Service
-    MINERU_BASE_URL: str = "http://192.168.0.136:8000"
+    MINERU_BASE_URL: str = (
+        "http://192.168.0.94:8008"  # host port 8008 -> container 8000
+    )
     MINERU_TIMEOUT: float = 120.0  # seconds; the image falls back to vision on timeout
     # PaddleOCR language pack; it has no Finnish code, "latin" covers å/ä/ö
     MINERU_LANG: str = "latin"
@@ -63,7 +65,8 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = (
         "ollama"  # sent as a bearer token; the gateway does not require one
     )
-    LLM_MODEL: str = "muse-glimmer"  # always-loaded; validated in MVP-R0
+    # The c0.* copies share a GPU reserved for the operator's agent; Kyokki uses c2.*
+    LLM_MODEL: str = "c2.muse-glimmer"
     LLM_TEMPERATURE: float = 0.1
     # Reasoning plus a 49-line receipt with generic names took 3758 tokens (MVP-R2 e2e)
     LLM_MAX_TOKENS: int = 8192

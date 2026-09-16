@@ -200,6 +200,17 @@ class TestInstructions:
         assert "English" in text
         assert "Ground beef" in text
 
+    def test_ask_for_singular_names(self):
+        """Plural and singular names would become two products (MVP-R2 reuse is by name)."""
+        text = build_instructions(CATEGORIES)
+        assert "singular" in text
+        assert '"Apples"' in text
+
+    def test_name_household_products_too(self):
+        text = build_instructions(CATEGORIES)
+        assert "Cleaning cloth" in text
+        assert "Laundry vinegar" in text
+
     def test_list_known_products_to_reuse_their_names(self):
         text = build_instructions(CATEGORIES, ["Milk", "Ground beef", "milk"])
         assert "Known products: Ground beef, Milk." in text

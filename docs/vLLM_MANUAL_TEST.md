@@ -513,3 +513,53 @@ got a name and no category.
 Vision misreads carried into generic names: SIENILIINA (cleaning cloth) → Mushroom in
 `produce`, TUMMA RYPÄLE (grapes) → Raisins; the text path named both correctly. KIRSIKKATOMAATTI
 became "Tomato" on the image path. The review screen (R7) is where such lines get corrected.
+
+## Homelab endpoints and model choice (2026-09-16)
+
+The gateway now serves per-GPU copies of each model (`c0.*`, `c2.*`, plus unprefixed names that
+pick a card themselves) and MinerU is back. **`c0` is reserved for the operator's Hermes agent**,
+so Kyokki must name a `c2.*` model. 104 model entries; the c2 family is muse-glimmer, gemma-26b,
+gemma-e4b, qwen3.5-4b, qwen3.5-9b, qwen3.8-27b, qwythos-v2, fablevibes and ternary.
+
+| Endpoint | Address | Check |
+| --- | --- | --- |
+| Inference (OpenAI-compatible) | `192.168.0.94:9292/v1` | `c2.muse-glimmer` loaded on GPU `094f1ca3`, with vision (mmproj) |
+| MinerU OCR | `192.168.0.94:8008` (container 8000) | `/health` 200, `/file_parse` as our client expects, GPU `689f1c3c` |
+
+MinerU read the rendered receipt image in 20.6 s and returned 31 lines with product names intact,
+so image receipts take the text path again instead of falling back to vision.
+
+### Model comparison on the real contract (text path, generic names, same 60-line receipt)
+
+| Model | Warm | Cold load | Lines | Quantities | Weights | Categorised | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `c2.muse-glimmer` | 56-66 s | ~10 s | 49/49 | 49/49 | 49/49 | 40/49 | singular names, best Finnish -> English |
+| `c2.gemma-26b` | 15.9 s | ~299 s | 49/49 | 49/49 | 49/49 | 41/49 | fastest warm, but a five-minute cold load |
+| `c2.qwen3.8-27b` | 205 s (100 s with `enable_thinking: false`) | ~208 s | 49/49 | 49/49 | 49/49 | 43/49 | plural names; several Finnish mistranslations |
+
+All three read every line, quantity and weight, so **generic-name quality decided it**. The two
+models disagreed on 28 of 49 names. Qwen turned PYYKKIETIKKA (laundry vinegar) into "Game sauce",
+OIVARIINI (butter spread) into "Olives", TUMMA RYPÄLE into "Dark chocolate" and KERMAVIILI into
+"Curd"; it also pluralises ("Apples", "Carrots"), which would split one product into two over
+time because MVP-R2 reuses products by name. **`c2.muse-glimmer` stays the default.**
+
+### Prompt tightening (same run set)
+
+Two rules were added because every bad name came from the same two causes:
+- *"Always write g in the singular"* with examples. Result: no plurals left except "Chips".
+- *"Household and cleaning products get an everyday English name too … Their c is usually null;
+  food keeps its category as below."* Result: SIENILIINA -> Cleaning cloth (was "Mushroom
+  cloth"), PYYKKIETIKKA -> Laundry vinegar, NESTESAIPPUA -> Liquid soap, ROSKAPUSSI -> Trash bag.
+
+The household rule **must** reassert that food keeps its category. A first version without that
+sentence made the model return `c = null` for all 49 lines in three runs out of three. With the
+sentence, categorised is back to 40/49.
+
+Known miss: TUMMA RYPÄLE 500G (dark grapes) is still named "Raisin". Categorisation also varies
+run to run: one pipeline run returned 0 categories and the repeat returned 40. The review screen
+(R7) is where such lines get corrected.
+
+### End-to-end through the deployed pipeline
+Receipt photo -> MinerU -> `c2.muse-glimmer` -> matching, on a throwaway DB with the worker
+running: `completed` in 70-73 s, method `text`, 49 items, 49 generic names, store `s-group`,
+date 2026-01-02.
