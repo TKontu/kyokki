@@ -53,6 +53,7 @@ def test_llm_defaults_target_the_llama_swap_gateway(
         "LLM_BASE_URL",
         "LLM_MODEL",
         "LLM_REASONING_STRENGTH",
+        "MINERU_BASE_URL",
         "MINERU_TIMEOUT",
     ):
         monkeypatch.delenv(key, raising=False)
