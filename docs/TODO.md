@@ -396,6 +396,24 @@ increment U1 after R1b, before R2 creates products.
   `ARCHITECTURE.md` appendix is the reference; chain-specific rules stay post-MVP.
 - **Acceptance:** the 60-line S-kaupat text yields ≥ 80 % of product lines with no LLM
   call; a failing LLM call degrades to heuristic rows rather than `failed`.
+- As built (branch `feat/mvp-r3b-heuristic-fallback`), 2026-09-14:
+  - [x] `app/parsers/heuristic.py` `parse_receipt_text`: `NAME PRICE [PRICE] [VAT code]`
+    product lines, `n KPL` / `n x` quantity and `x,xxx kg` weight lines after them, negative
+    prices (leading or trailing minus) skipped as discounts, header store and first valid date.
+    Skip list shared with the LLM prefilter (`app/parsers/receipt_lines.py`) and extended with
+    deposits, Plussa, Lidl Plus savings and card payment lines.
+  - [x] S-kaupat order: 49/49 names, 11/11 quantities, 10/10 weights (fixtures in
+    `backend/tests/fixtures/receipts/`, expected values checked against the R0 ground truth);
+    K-Group and Lidl appendix snippets parse too.
+  - [x] Fallback only when there is text (PDF or OCR): on `LLMExtractionError` or when the
+    model returns no lines. Unreadable text or the vision path still fail as before.
+    `extraction_method = "heuristic"`, `fallback_reason` stored and returned.
+  - [x] `/process` re-queues a completed heuristic receipt (until confirmed) so the model can
+    read it later; other completed receipts stay 409. The Telegram summary says when a receipt
+    was read without the model.
+  - [x] E2E: worker with the gateway unreachable read the S-kaupat PDF in ~4 s as heuristic
+    (49 items, 11 quantities, 10 weights, store and date); `/process` with `muse-glimmer` back
+    re-read it as `text` (49 generic names, 40 categorised); a second `/process` was 409.
 
 #### MVP-T1 — Telegram receipt drop-in bot
 Operator input 2026-09-14: receipts are mostly digital (online grocery order PDFs, S-Group /
@@ -597,6 +615,8 @@ away, with no port forwarding.
   (pre-filled from `suggested_category`), "Change product" search, include/skip toggle.
   Footer: n items to add, Confirm. On success: toast, invalidate inventory, go home.
 - Confirmed receipts open read-only with a summary.
+- A receipt with `extraction_method = "heuristic"` shows a hint ("read without the AI model",
+  `fallback_reason`) and a "Read again with the model" action (`POST /process`).
 - **Acceptance:** tests for editing, re-matching, skipping, payload shape sent to confirm,
   and the read-only state.
 
@@ -789,7 +809,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Wave 1: [x] F1 (PR #24; operator rotation + history purge still open)  [x] F2 (PR #26; homelab verification pending)  [x] R0 (passed 2026-09-14, `muse-glimmer`)
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
 - Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [x] R2 (PR #37)  [x] C1 (PR #28)  [x] C2 (PR #29)
-- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [x] S3 (PR #39)  [ ] S4 (PR open)  [x] R3 (PR #38)  [ ] R3b  [ ] R4
+- Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [x] S3 (PR #39)  [x] S4 (PR #41)  [x] R3 (PR #38)  [ ] R3b (PR open)  [ ] R4
 - Wave 4: [ ] R5  [ ] R6  [ ] R7  [ ] R8
 - Wave 5: [ ] P1  [ ] P2
 - Wave 6: [ ] P3 acceptance

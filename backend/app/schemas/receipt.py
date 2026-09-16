@@ -142,8 +142,12 @@ class ReceiptResponse(ReceiptBase):
     )
     items_extracted: int = Field(0, description="Number of items extracted")
     items_matched: int = Field(0, description="Number of items matched to products")
-    extraction_method: Literal["text", "vision"] | None = Field(
-        None, description="How the receipt was read"
+    extraction_method: Literal["text", "vision", "heuristic"] | None = Field(
+        None,
+        description="text or vision: the model; heuristic: the fallback line parser",
+    )
+    fallback_reason: str | None = Field(
+        None, description="Why the heuristic parser was used instead of the model"
     )
     items: list[ExtractedItem] = Field(default_factory=list)
     created_at: datetime
@@ -154,7 +158,11 @@ class ReceiptResponse(ReceiptBase):
     def derive_items(self) -> "ReceiptResponse":
         self.items = items_from_structured(self.ocr_structured)
         method = (self.ocr_structured or {}).get("method")
-        self.extraction_method = method if method in ("text", "vision") else None
+        self.extraction_method = (
+            method if method in ("text", "vision", "heuristic") else None
+        )
+        reason = (self.ocr_structured or {}).get("fallback_reason")
+        self.fallback_reason = reason if isinstance(reason, str) else None
         return self
 
 
