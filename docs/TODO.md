@@ -471,6 +471,13 @@ away, with no port forwarding.
   says `Qwen3-4B-Instruct` while `config.py` and `stack.env.example` say `qwen3-8B`). Include OCR language as a measured variable.
 - **Acceptance:** 5/5 receipts reach `completed` in under 120 s each with ≥ 80 % of line
   items extracted. If this cannot be met, stop and file a DEC before building R6/R7.
+- Prep done 2026-09-16 (branch `fix/homelab-endpoints-and-generic-naming`): MinerU is back at
+  `192.168.0.94:8008` and the gateway now serves per-GPU copies; `c0` is reserved for the
+  operator's agent, so the default model is `c2.muse-glimmer`. Compared against `c2.gemma-26b`
+  and `c2.qwen3.8-27b` on the real contract: all three extract 49/49 lines, muse-glimmer wins on
+  generic-name quality (singular, correct Finnish). Prompt now demands singular names and names
+  household products. Numbers in `docs/vLLM_MANUAL_TEST.md`. R4 itself still needs the deployed
+  homelab stack.
 
 #### MVP-C1 — BottomSheet and Toast primitives
 - `components/ui/BottomSheet.tsx`: portal, backdrop, slide-up, ESC and backdrop close, focus

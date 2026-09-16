@@ -53,7 +53,12 @@ Rules:
 - g = the simple generic English name a home cook would write on a shopping list. No brand,
   size, fat content or percentage, or flavour-neutral variant, and the same name for equivalent
   cuts. Examples: SNELLMAN NAUDAN JAUHELIHA 10% -> "Ground beef"; ATRIA KANAN FILEESUIKALE ->
-  "Chicken fillet"; VALIO KEVYTMAITOJUOMA 1L -> "Milk".{known_products}
+  "Chicken fillet"; VALIO KEVYTMAITOJUOMA 1L -> "Milk".
+- Always write g in the singular, whatever the amount: "Apple", "Carrot", "Banana", never
+  "Apples" or "Carrots". One product is one name.
+- Household and cleaning products get an everyday English name too: SIENILIINA ->
+  "Cleaning cloth"; PYYKKIETIKKA -> "Laundry vinegar". Their c is usually null; food keeps its
+  category as below.{known_products}
 - A following line like "3 KPL 1,88 €/KPL" means q = 3 for the product above it.
 - A following line like "0,386 KG 3,89 €/KG" means w = 0.386 (kg) for the product above it.
 - Otherwise q = 1 and w = null.

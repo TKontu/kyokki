@@ -53,15 +53,17 @@ def test_llm_defaults_target_the_llama_swap_gateway(
         "LLM_BASE_URL",
         "LLM_MODEL",
         "LLM_REASONING_STRENGTH",
+        "MINERU_BASE_URL",
         "MINERU_TIMEOUT",
     ):
         monkeypatch.delenv(key, raising=False)
     settings = _settings(monkeypatch)
     assert settings.LLM_BASE_URL == "http://192.168.0.94:9292/v1"
-    assert settings.LLM_MODEL == "muse-glimmer"
+    assert settings.LLM_MODEL == "c2.muse-glimmer"
     assert settings.LLM_MAX_TOKENS == 8192
     assert settings.LLM_TIMEOUT == 180.0
     assert settings.LLM_REASONING_STRENGTH == "low"
+    assert settings.MINERU_BASE_URL == "http://192.168.0.94:8008"
     assert settings.MINERU_LANG == "latin"
     assert settings.MINERU_TIMEOUT == 120.0
 

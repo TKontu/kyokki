@@ -24,7 +24,9 @@ Two more services publish no port:
 
 - Docker Engine with the Compose plugin on the homelab host.
 - An OpenAI-compatible LLM endpoint reachable from that host (the llama-swap gateway with a
-  vision-capable model such as `muse-glimmer`). MinerU OCR is optional: when it is unreachable,
+  vision-capable model such as `muse-glimmer`). Name the copy pinned to the GPU Kyokki may use
+  (the gateway lists `c0.*` and `c2.*` copies; Kyokki defaults to `c2.muse-glimmer`).
+  MinerU OCR is optional: when it is unreachable,
   receipt photos are read directly by the vision model.
   Their URLs go into `stack.env`.
 - Git access to the repository.
@@ -38,7 +40,7 @@ cd kyokki
 # 1. Configuration. stack.env is git-ignored; never commit it.
 cp stack.env.example stack.env
 #    Edit stack.env: POSTGRES_PASSWORD, LLM_BASE_URL, LLM_MODEL (and LLM_REASONING_STRENGTH),
-#    MINERU_BASE_URL.
+#    MINERU_BASE_URL (the MinerU compose maps host 8008 -> container 8000).
 
 # 2. Build and start (first build takes a few minutes: Python deps + Next.js build).
 docker compose -f docker-compose.prod.yml up -d --build
