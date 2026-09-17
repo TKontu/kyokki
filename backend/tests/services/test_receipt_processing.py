@@ -6,7 +6,6 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
-import anyio
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,9 +15,21 @@ from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
 from app.parsers.base import ExtractedLine, ReceiptExtraction
 from app.schemas.receipt import ReceiptStatus
+from app.services import receipt_processing
 from app.services.llm_extractor import CategoryOption, LLMExtractionError
 from app.services.ocr_service import OCRUnavailableError
 from app.services.receipt_processing import ProcessingResult, ReceiptProcessingService
+
+
+class _FakeClock:
+    """Stands in for the ``time`` module so a test can advance it by hand."""
+
+    def __init__(self) -> None:
+        self.value = 0.0
+
+    def monotonic(self) -> float:
+        return self.value
+
 
 OCR = "app.services.receipt_processing.extract_text_from_receipt"
 TEXT = "app.services.receipt_processing.extract_from_text"
@@ -636,13 +647,19 @@ class TestTimingLog:
         assert line.total_seconds >= line.ocr_seconds + line.llm_seconds
 
     async def test_the_vision_path_counts_as_model_time(
-        self, service, image_receipt, sample_category, caplog
+        self, service, image_receipt, sample_category, caplog, monkeypatch
     ):
         caplog.set_level(logging.INFO, logger="app.services.receipt_processing")
 
+        # A fake clock instead of a real sleep. receipt_processing reads the elapsed
+        # time from time.monotonic() and nothing else off the time module, so the
+        # call can advance the clock rather than the test waiting for it.
+        clock = _FakeClock()
+        monkeypatch.setattr(receipt_processing, "time", clock)
+
         async def slow_vision(*args, **kwargs):
             # Timings are logged to a tenth of a second; a real vision call takes ~60
-            await anyio.sleep(0.15)
+            clock.value += 0.15
             return _extraction(method="vision")
 
         with (

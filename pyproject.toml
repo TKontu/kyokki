@@ -12,12 +12,12 @@ select = ["E", "F", "I", "UP", "B", "SIM", "ASYNC"]
 ignore = ["E501", "B008", "UP046"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["app"]
+known-first-party = ["app", "tests"]
 
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
-addopts = "-ra -q"
+# pytest is configured in backend/pytest.ini, which is where the suite is run from.
+# A second copy here shadowed it for anyone running pytest from the repo root, and
+# it lacked the marker deselect, so the MinerU and vLLM tests ran against services
+# that are usually not up.
 
 [tool.mypy]
 python_version = "3.12"

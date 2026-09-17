@@ -1,12 +1,17 @@
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import ConfigDict, SecretStr, computed_field, field_validator
-from pydantic_settings import BaseSettings, NoDecode
+from pydantic import SecretStr, computed_field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-# Get project root directory (two levels up from this file: backend/app/core/config.py -> project root)
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-ENV_FILE = PROJECT_ROOT / ".env"
+# backend/app/core/config.py -> backend/ -> the repository root
+BACKEND_ROOT = Path(__file__).parent.parent.parent
+PROJECT_ROOT = BACKEND_ROOT.parent
+
+# Both are read, later wins. backend/.env is where the file belongs (the backend is
+# what reads it); the repo-root .env stays supported so an existing workstation and
+# the dev compose file keep working unchanged.
+ENV_FILES = (PROJECT_ROOT / ".env", BACKEND_ROOT / ".env")
 
 
 class Settings(BaseSettings):
@@ -109,7 +114,14 @@ class Settings(BaseSettings):
     # Fuzzy matching thresholds
     FUZZY_MATCH_THRESHOLD: int = 80  # Minimum score (0-100) for fuzzy match
 
-    model_config = ConfigDict(env_file=str(ENV_FILE), env_file_encoding="utf-8")
+    # extra="ignore": the repo-root .env still carries legacy prototype keys
+    # (DATABASE_URL, OLLAMA_HOST). Forbidding them aborted every local backend
+    # process with an error that printed each rejected key *with its value*.
+    model_config = SettingsConfigDict(
+        env_file=ENV_FILES,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()

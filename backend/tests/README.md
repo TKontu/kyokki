@@ -41,17 +41,14 @@ pytest tests/api/test_health.py::TestHealthEndpoint::test_health_check_returns_2
 
 ### By marker
 ```bash
-# Run only unit tests (fast)
-pytest -m unit
+# Everything that needs nothing but Python (~330 tests, no PostgreSQL)
+pytest -m "not requires_db"
 
-# Run only integration tests
-pytest -m integration
-
-# Run tests that require database
+# Only the tests that reach PostgreSQL
 pytest -m requires_db
 
-# Skip integration tests
-pytest -m "not integration"
+# The external-service tests, deselected by default in pytest.ini
+pytest -m requires_mineru
 ```
 
 ### With coverage
@@ -72,13 +69,16 @@ pytest -s                  # Show print statements
 
 ## Test Markers
 
-- `unit`: Fast, isolated unit tests (no external dependencies)
 - `integration`: Tests that require external services
 - `slow`: Tests that may take >1 second
-- `requires_db`: Requires PostgreSQL connection
-- `requires_redis`: Requires Redis connection
-- `requires_mineru`: Requires MinerU OCR service
-- `requires_ollama`: Requires Ollama LLM service
+- `requires_db`: Reaches PostgreSQL. **Applied automatically** from fixture use
+  (`db_session`, `db_engine`, `session_factory`, `test_db`, `seeded_db`) by
+  `pytest_collection_modifyitems` in `conftest.py` - do not write it by hand.
+- `requires_mineru`, `requires_vllm`, `requires_ollama`: call the real service, and are
+  deselected by default in `pytest.ini`.
+
+`unit` and `requires_redis` used to be declared and carried by nothing, which read as
+coverage that did not exist; they are gone.
 
 ## Writing Tests
 
@@ -109,7 +109,6 @@ class TestDatabase:
 ```python
 import pytest
 
-@pytest.mark.unit
 class TestMyService:
     def test_service_logic(self) -> None:
         # Test service logic without external dependencies

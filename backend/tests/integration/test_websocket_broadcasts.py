@@ -15,7 +15,7 @@ class TestReceiptStatusBroadcasts:
 
     @pytest.mark.asyncio
     async def test_receipt_confirm_broadcasts_status(
-        self, mocker, client: AsyncClient, db_session: AsyncSession
+        self, mocker, client: AsyncClient, test_db: AsyncSession
     ):
         """Test receipt confirmation broadcasts 'confirmed' status."""
         # Mock Redis publish to avoid actual Redis calls
@@ -24,8 +24,8 @@ class TestReceiptStatusBroadcasts:
         mock_redis.return_value = mock_redis_instance
 
         # Seed categories
-        await seed_categories(db_session)
-        await db_session.commit()
+        await seed_categories(test_db)
+        await test_db.commit()
 
         # Create product
         product_data = {
@@ -57,8 +57,8 @@ class TestReceiptStatusBroadcasts:
                 "products": [{"name": "Milk", "quantity": 1.0, "unit": "pcs"}]
             },
         )
-        db_session.add(receipt)
-        await db_session.commit()
+        test_db.add(receipt)
+        await test_db.commit()
 
         # Confirm receipt
         confirm_data = {
@@ -86,7 +86,7 @@ class TestInventoryUpdateBroadcasts:
 
     @pytest.mark.asyncio
     async def test_create_inventory_broadcasts(
-        self, mocker, client: AsyncClient, db_session: AsyncSession
+        self, mocker, client: AsyncClient, test_db: AsyncSession
     ):
         """Test creating inventory item broadcasts 'created' action."""
         # Mock Redis publish to avoid actual Redis calls
@@ -95,8 +95,8 @@ class TestInventoryUpdateBroadcasts:
         mock_redis.return_value = mock_redis_instance
 
         # Seed categories
-        await seed_categories(db_session)
-        await db_session.commit()
+        await seed_categories(test_db)
+        await test_db.commit()
 
         # Create product first
         product_data = {
@@ -129,7 +129,7 @@ class TestInventoryUpdateBroadcasts:
 
     @pytest.mark.asyncio
     async def test_update_inventory_broadcasts(
-        self, mocker, client: AsyncClient, db_session: AsyncSession
+        self, mocker, client: AsyncClient, test_db: AsyncSession
     ):
         """Test updating inventory item broadcasts 'updated' action."""
         # Mock Redis publish to avoid actual Redis calls
@@ -138,8 +138,8 @@ class TestInventoryUpdateBroadcasts:
         mock_redis.return_value = mock_redis_instance
 
         # Seed categories
-        await seed_categories(db_session)
-        await db_session.commit()
+        await seed_categories(test_db)
+        await test_db.commit()
 
         # Create product
         product_data = {
@@ -178,7 +178,7 @@ class TestInventoryUpdateBroadcasts:
 
     @pytest.mark.asyncio
     async def test_consume_inventory_broadcasts(
-        self, mocker, client: AsyncClient, db_session: AsyncSession
+        self, mocker, client: AsyncClient, test_db: AsyncSession
     ):
         """Test consuming inventory item broadcasts 'consumed' action."""
         # Mock Redis publish to avoid actual Redis calls
@@ -187,8 +187,8 @@ class TestInventoryUpdateBroadcasts:
         mock_redis.return_value = mock_redis_instance
 
         # Seed categories
-        await seed_categories(db_session)
-        await db_session.commit()
+        await seed_categories(test_db)
+        await test_db.commit()
 
         # Create product
         product_data = {
@@ -229,7 +229,7 @@ class TestInventoryUpdateBroadcasts:
 
     @pytest.mark.asyncio
     async def test_delete_inventory_broadcasts(
-        self, mocker, client: AsyncClient, db_session: AsyncSession
+        self, mocker, client: AsyncClient, test_db: AsyncSession
     ):
         """Test deleting inventory item broadcasts 'deleted' action."""
         # Mock Redis publish to avoid actual Redis calls
@@ -238,8 +238,8 @@ class TestInventoryUpdateBroadcasts:
         mock_redis.return_value = mock_redis_instance
 
         # Seed categories
-        await seed_categories(db_session)
-        await db_session.commit()
+        await seed_categories(test_db)
+        await test_db.commit()
 
         # Create product
         product_data = {

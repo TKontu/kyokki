@@ -16,31 +16,42 @@ detailed style and pattern guidance. Read them on demand; they are not loaded he
 
 Two packages live in one repo. Unsuffixed keys run both; `-backend` / `-frontend` keys run one.
 For `test-one`, use the suffixed key that matches the argument's top-level directory. Run
-everything from the repo root. Backend tools go through `python -m` so no activated venv is needed.
+everything from the repo root. **Backend tools run out of `backend/.venv`**, which is the only
+interpreter with the dependencies installed; the system `python` on this workstation is a bare
+3.13/3.14. On Linux and in CI the same commands work with `.venv/bin/python` (CI installs into
+the runner's own interpreter and calls `python` directly).
 
 <!-- claude:commands -->
 | Key                | Command |
 | ------------------ | ------- |
-| install            | pip install -r backend/requirements.txt && (cd frontend && npm ci) |
-| test               | (cd backend && python -m pytest) && (cd frontend && npm test) |
-| test-backend       | cd backend && python -m pytest |
+| install            | py -3.12 -m venv backend/.venv && backend/.venv/Scripts/python -m pip install -r backend/requirements.txt && (cd frontend && npm ci) |
+| test               | (cd backend && .venv/Scripts/python -m pytest) && (cd frontend && npm test) |
+| test-backend       | cd backend && .venv/Scripts/python -m pytest |
 | test-frontend      | cd frontend && npm test |
-| test-one-backend   | cd backend && python -m pytest {arg} -v --tb=short |
+| test-one-backend   | cd backend && .venv/Scripts/python -m pytest {arg} -v --tb=short |
 | test-one-frontend  | cd frontend && npx jest {arg} |
-| lint               | python -m ruff check backend/ && (cd frontend && npm run lint) |
-| lint-fix           | python -m ruff check backend/ --fix && (cd frontend && npm run lint -- --fix) |
-| format             | python -m ruff format backend/ |
-| typecheck          | python -m mypy backend/app/ && (cd frontend && npx tsc --noEmit) |
+| lint               | backend/.venv/Scripts/python -m ruff check backend/ && (cd frontend && npm run lint) |
+| lint-fix           | backend/.venv/Scripts/python -m ruff check backend/ --fix && (cd frontend && npm run lint -- --fix) |
+| format             | backend/.venv/Scripts/python -m ruff format backend/ |
+| typecheck          | (cd backend && .venv/Scripts/python -m scripts.check_mypy_baseline) && (cd frontend && npx tsc --noEmit) |
 | run                | docker compose up |
-| run-backend        | cd backend && python -m uvicorn app.main:app --reload --port 8000 |
+| run-backend        | cd backend && .venv/Scripts/python -m uvicorn app.main:app --reload --port 8000 |
 | run-frontend       | cd frontend && npm run dev |
 | build              | cd frontend && npm run build |
 <!-- /claude:commands -->
 
 - Backend DB tests need PostgreSQL and Redis: `docker compose up -d postgres redis` first.
-  Tests marked `requires_mineru` / `requires_vllm` / `requires_ollama` are excluded by default
-  (`backend/pytest.ini`). Set `KYOKKI_TEST_REQUIRE_DB=1` (CI does) to fail instead of skip
-  when PostgreSQL is unreachable.
+  The suite runs against **`<POSTGRES_DB>_test`**, which it creates if missing and never drops;
+  it refuses to start if that name does not end in `_test`, so a local run cannot touch the dev
+  database. Tests marked `requires_mineru` / `requires_vllm` / `requires_ollama` are excluded by
+  default (`backend/pytest.ini`), and `requires_db` is applied automatically from fixture use, so
+  `-m "not requires_db"` runs the ~330 tests that need nothing but Python. Set
+  `KYOKKI_TEST_REQUIRE_DB=1` (CI does) to fail instead of skip when PostgreSQL is unreachable.
+- `typecheck` compares against `backend/mypy-baseline.txt` (known errors keyed on file and error
+  code) and fails only on new ones. Accept a deliberate change with
+  `cd backend && .venv/Scripts/python -m scripts.check_mypy_baseline --update`. H21 empties it.
+- Settings come from the repo-root `.env` and then `backend/.env`, later winning; unknown keys are
+  ignored. Docker Compose reads the repo-root `.env` only.
 - Migrations run through Docker only, because the `postgres` hostname resolves inside the
   compose network: `docker compose run --rm kyokki-api alembic upgrade head` (add
   `-f docker-compose.prod.yml` on the homelab). CI runs `alembic check`, so every model change

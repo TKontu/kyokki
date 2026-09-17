@@ -18,7 +18,12 @@ async def test_without_a_token_the_bot_idles_and_never_calls_telegram(monkeypatc
     settings = Settings(_env_file=None, TELEGRAM_BOT_TOKEN=None)
 
     task = asyncio.create_task(runner.run(settings))
-    await asyncio.sleep(0.05)
+    # Yield to the loop rather than sleeping: the task either settles into its idle
+    # state or finishes, and both are decided within a few scheduler turns.
+    for _ in range(10):
+        if task.done():
+            break
+        await asyncio.sleep(0)
     assert not task.done()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -35,7 +40,8 @@ class ScriptedClient:
     async def get_updates(self, offset, poll_seconds):
         self.offsets.append(offset)
         if not self.batches:
-            await asyncio.sleep(3600)
+            # Block until the test cancels the task; no timer to leave behind.
+            await asyncio.Event().wait()
         batch = self.batches.pop(0)
         if isinstance(batch, Exception):
             raise batch
@@ -66,10 +72,12 @@ async def test_poll_loop_advances_the_offset_and_survives_errors():
     task = asyncio.create_task(
         runner.poll_loop(client, handler, poll_seconds=1, backoff_base=0.001)
     )
-    for _ in range(400):
+    # backoff_base is 0.001, so the error retry is the only real wait; the rest is
+    # scheduler turns. Yield rather than polling on a 5 ms timer.
+    for _ in range(2000):
         if len(client.offsets) >= 4:
             break
-        await asyncio.sleep(0.005)
+        await asyncio.sleep(0)
     task.cancel()
 
     assert handler.seen == [10, 11, 12]
