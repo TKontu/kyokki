@@ -551,9 +551,14 @@ class TestReceiptItems:
             "match_confidence": "exact",
             "match_source": "exact",
             "suggested_category": "dairy",
+            "piece_grams": None,
+            "shelf_life_days": None,
+            "printed_quantity": None,
+            "printed_unit": None,
             "storage_type": "pantry",
             "location": "pantry",
         }
+        # No piece weight was read, so a weighed line stays in grams
         assert (onion["quantity"], onion["unit"]) == (330.0, "g")
         assert onion["product_id"] is None
         assert (onion["storage_type"], onion["location"]) == (
@@ -678,3 +683,75 @@ class TestReceiptsListPayload:
         response = await client.get(f"/api/receipts?{query}")
 
         assert response.status_code == 422
+
+
+class TestWeighedProduceBecomesPieces:
+    """Q2: a shop sells apples by the kilo; the review screen should offer them as apples."""
+
+    async def _receipt(self, client: AsyncClient, session_factory, lines) -> dict:
+        files = {"file": ("apples.pdf", BytesIO(b"%PDF apples"), "application/pdf")}
+        receipt_id = (await client.post("/api/receipts/scan", files=files)).json()["id"]
+        extraction = ReceiptExtraction(
+            method="text", store_chain="S-Market", lines=lines
+        )
+        with (
+            patch(
+                "app.services.receipt_processing.extract_text_from_receipt",
+                new_callable=AsyncMock,
+                return_value="text",
+            ),
+            patch(
+                "app.services.receipt_processing.extract_from_text",
+                new_callable=AsyncMock,
+                return_value=extraction,
+            ),
+        ):
+            await run_once(session_factory)
+        return (await client.get(f"/api/receipts/{receipt_id}")).json()
+
+    async def test_a_weighed_line_with_a_piece_weight_is_offered_as_pieces(
+        self, client: AsyncClient, test_db: AsyncSession, session_factory
+    ) -> None:
+        body = await self._receipt(
+            client,
+            session_factory,
+            [
+                ExtractedLine(
+                    name="KG OMENA GOLDEN",
+                    generic_name="Apple",
+                    quantity=1,
+                    weight_kg=1.072,
+                    category="produce",
+                    piece_grams=125,
+                    shelf_life_days=21,
+                )
+            ],
+        )
+
+        (apple,) = body["items"]
+        assert (apple["quantity"], apple["unit"]) == (9.0, "pcs")
+        # and what the receipt actually said is still there to show and to override
+        assert (apple["printed_quantity"], apple["printed_unit"]) == (1072.0, "g")
+        assert apple["piece_grams"] == 125
+        assert apple["shelf_life_days"] == 21
+
+    async def test_without_a_piece_weight_the_line_stays_in_grams(
+        self, client: AsyncClient, test_db: AsyncSession, session_factory
+    ) -> None:
+        body = await self._receipt(
+            client,
+            session_factory,
+            [
+                ExtractedLine(
+                    name="NAUDAN JAUHELIHA",
+                    generic_name="Ground beef",
+                    quantity=1,
+                    weight_kg=0.4,
+                    category="meat",
+                )
+            ],
+        )
+
+        (mince,) = body["items"]
+        assert (mince["quantity"], mince["unit"]) == (400.0, "g")
+        assert mince["printed_quantity"] is None

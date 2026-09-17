@@ -72,8 +72,18 @@ def _compact(**overrides) -> str:
                 "q": 1,
                 "w": None,
                 "c": "dairy",
+                "pw": None,
+                "sl": 10,
             },
-            {"n": "PUNASIPULI", "g": "Red onion", "q": 1, "w": 0.33, "c": "produce"},
+            {
+                "n": "PUNASIPULI",
+                "g": "Red onion",
+                "q": 1,
+                "w": 0.33,
+                "c": "produce",
+                "pw": 110,
+                "sl": 30,
+            },
         ],
     }
     body.update(overrides)
@@ -142,7 +152,9 @@ class TestResponseSchema:
         item = schema["properties"]["p"]["items"]
         assert item["properties"]["c"]["enum"] == ["dairy", "produce", None]
         assert item["properties"]["g"] == {"type": "string"}
-        assert item["required"] == ["n", "g", "q", "w", "c"]
+        assert item["required"] == ["n", "g", "q", "w", "c", "pw", "sl"]
+        assert item["properties"]["pw"] == {"type": ["number", "null"]}
+        assert item["properties"]["sl"] == {"type": ["integer", "null"]}
         assert schema["required"] == ["s", "d", "p"]
 
 
@@ -160,12 +172,15 @@ class TestParseCompletion:
                 quantity=1,
                 weight_kg=None,
                 category="dairy",
+                shelf_life_days=10,
             ),
             ExtractedLine(
                 name="PUNASIPULI",
                 generic_name="Red onion",
                 quantity=1,
                 weight_kg=0.33,
+                piece_grams=110,
+                shelf_life_days=30,
                 category="produce",
             ),
         ]
@@ -344,3 +359,52 @@ class TestExtractFromImage:
         assert "dairy (Dairy & Eggs)" in parts[0]["text"]
         expected = "data:image/png;base64," + base64.b64encode(image).decode()
         assert parts[1]["image_url"]["url"] == expected
+
+
+class TestProductShapeFields:
+    """Q2/Q6: the model also estimates what one piece weighs and how long it keeps."""
+
+    def test_asks_for_a_piece_weight_with_examples(self):
+        text = build_instructions(CATEGORIES)
+        assert "pw = " in text
+        assert "apple -> 125" in text
+
+    def test_asks_for_a_shelf_life_with_examples(self):
+        text = build_instructions(CATEGORIES)
+        assert "sl = " in text
+        assert "banana -> 7" in text
+
+    def test_maps_both_onto_the_line(self):
+        result = parse_completion(_compact(), {"dairy", "produce"}, "text")
+
+        milk, onion = result.lines
+        assert (milk.piece_grams, milk.shelf_life_days) == (None, 10)
+        assert (onion.piece_grams, onion.shelf_life_days) == (110.0, 30)
+
+    def test_missing_fields_are_none(self):
+        """Older receipts and the heuristic parser have neither."""
+        body = json.dumps({"p": [{"n": "OMENA", "g": "Apple", "q": 1}]})
+
+        (line,) = parse_completion(body, set(), "text").lines
+
+        assert line.piece_grams is None
+        assert line.shelf_life_days is None
+
+    @pytest.mark.parametrize("bad", [0, -5, "many", True, None])
+    def test_a_nonsense_estimate_is_dropped_not_stored(self, bad):
+        """A zero piece weight would divide a real purchase into nothing."""
+        body = json.dumps(
+            {"p": [{"n": "OMENA", "g": "Apple", "q": 1, "pw": bad, "sl": bad}]}
+        )
+
+        (line,) = parse_completion(body, set(), "text").lines
+
+        assert line.piece_grams is None
+        assert line.shelf_life_days is None
+
+    def test_a_fractional_shelf_life_becomes_whole_days(self):
+        body = json.dumps({"p": [{"n": "OMENA", "g": "Apple", "q": 1, "sl": 6.7}]})
+
+        (line,) = parse_completion(body, set(), "text").lines
+
+        assert line.shelf_life_days == 7

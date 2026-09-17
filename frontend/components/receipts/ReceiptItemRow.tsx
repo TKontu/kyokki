@@ -41,10 +41,24 @@ export function canInclude(item: ExtractedItem, row: ReviewRow): boolean {
   return row.name.trim() !== '' && row.category !== ''
 }
 
+/**
+ * The shop weighed it, we are counting it (Q2). Showing both keeps the conversion honest,
+ * and the quantity and unit below are already editable if the guess is wrong.
+ */
+function describeConversion(item: ExtractedItem): string | null {
+  if (item.printed_quantity == null || item.printed_unit == null) return null
+  const printed =
+    item.printed_unit === 'g' && item.printed_quantity >= 1000
+      ? `${(item.printed_quantity / 1000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')} kg`
+      : `${item.printed_quantity} ${item.printed_unit}`
+  return `${printed} → ${item.quantity} ${item.unit}`
+}
+
 export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemRowProps) {
   const matched = Boolean(item.product_id)
   const ready = canInclude(item, row)
   const rowId = `row-${item.index}`
+  const conversion = describeConversion(item)
 
   return (
     <div
@@ -91,6 +105,7 @@ export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemR
           )}
           <p className="mt-1 text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
             {item.name}
+            {conversion && <span>{` · ${conversion}`}</span>}
           </p>
         </div>
       </div>

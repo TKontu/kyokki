@@ -102,3 +102,20 @@ start Wave 4 (R5 receipt API module and polling hooks) while R4 waits for the ho
   and cannot be fixed from our side. Evidence is in `docs/DEPLOY.md` prerequisites.
 - Still open: **MVP-R4** wants five real receipts through the deployed stack, and **MVP-P3** is
   the acceptance week. PR #46 (P1+R6+R8) must merge before this branch.
+
+## Products know their own shape (2026-09-17)
+- `product_master.avg_piece_grams` is new (migration `e7a4c9d2b810`); `default_unit` and
+  `default_shelf_life_days` already existed but were frozen copies of the category's. All three
+  are now set from what the model works out while reading the receipt (`pw` and `sl` in the
+  extraction contract).
+- **`quantity_for_product` in `generic_products.py` is the seam.** Both receipt confirm and quick
+  add pass through it, and it is the only place with the resolved product in hand, so any future
+  "store it the way this product is counted" rule belongs there, not in `units.py` (pure
+  arithmetic) and not in the Pydantic validators (no session, product not yet resolved).
+- A later receipt fills in gaps but never overwrites — `ProductResolver._fill_gaps`. Do not
+  "simplify" that into an unconditional assignment or every shop will undo corrections.
+- The extra fields cost ~27 % model time (76.5 s vs 60.2 s on the same 49-line receipt) for no
+  loss of accuracy. Worth watching if more fields are ever added to the contract.
+- Friction items renamed **F1-F6 -> Q1-Q6** to stop colliding with `MVP-F1`/`MVP-F2`. Q2, Q3 and
+  Q6 are done; **Q1** (non-food), **Q4** (consume buttons that fit the item) and **Q5** (opened
+  tracking) remain, and Q4 should bring the product editor that Q2 deliberately left out.

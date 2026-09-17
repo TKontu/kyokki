@@ -210,6 +210,8 @@ class TestPersistence:
             "quantity": 1.0,
             "weight_kg": None,
             "category": "dairy",
+            "piece_grams": None,
+            "shelf_life_days": None,
             "product_id": str(sample_product.id),
             "product_name": "Valio Whole Milk 1L",
             "product_storage_type": "refrigerator",
@@ -672,3 +674,59 @@ class TestTimingLog:
         assert line.receipt_id == str(pdf_receipt.id)
         assert "MinerU is down" in line.error
         assert line.total_seconds >= 0
+
+
+class TestPieceWeightOnStoredLines:
+    """Q2: the catalog's own piece weight beats a fresh guess from the model."""
+
+    async def test_a_matched_products_piece_weight_wins(
+        self, service, pdf_receipt, sample_category, sample_product, db_session
+    ):
+        # The catalog already knows this product weighs 200 g a piece
+        sample_product.avg_piece_grams = Decimal("200")
+        await db_session.commit()
+
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(
+                    name="Valio Whole Milk 1L",
+                    quantity=1,
+                    category="dairy",
+                    piece_grams=125,
+                )
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["piece_grams"] == 200.0
+
+    async def test_an_unmatched_line_keeps_the_models_guess(
+        self, service, pdf_receipt, sample_category
+    ):
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(
+                    name="OMENA GOLDEN",
+                    generic_name="Apple",
+                    quantity=1,
+                    weight_kg=1.072,
+                    category="dairy",
+                    piece_grams=125,
+                )
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["piece_grams"] == 125

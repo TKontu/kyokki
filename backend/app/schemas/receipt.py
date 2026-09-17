@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from app.services.storage import location_for_storage, storage_type_for_category
-from app.services.units import receipt_line_quantity
+from app.services.units import grams_to_pieces, receipt_line_quantity
 
 
 class ReceiptStatus(StrEnum):
@@ -45,6 +45,19 @@ class ExtractedItem(BaseModel):
     suggested_category: str | None = Field(
         None, description="Category id read from the line"
     )
+    piece_grams: float | None = Field(
+        None,
+        description="Roughly what one piece weighs, when the line was sold by weight (Q2)",
+    )
+    shelf_life_days: int | None = Field(
+        None, description="Typical days this keeps; overrides the category default (Q6)"
+    )
+    printed_quantity: float | None = Field(
+        None, description="What the receipt said, when it was converted to pieces"
+    )
+    printed_unit: str | None = Field(
+        None, description="Unit the receipt used, when it was converted to pieces"
+    )
     storage_type: Literal["refrigerator", "freezer", "pantry"] = Field(
         ..., description="Matched product's storage, else derived from the category"
     )
@@ -72,6 +85,16 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
         quantity, unit = receipt_line_quantity(
             line.get("quantity"), line.get("weight_kg")
         )
+        # A shop sells apples by the kilo; the cook counts them. Show pieces, but keep what
+        # the receipt printed so the conversion is visible and can be overridden (Q2).
+        piece_grams = line.get("piece_grams")
+        printed_quantity: float | None = None
+        printed_unit: str | None = None
+        if unit == "g":
+            pieces = grams_to_pieces(quantity, piece_grams)
+            if pieces is not None:
+                printed_quantity, printed_unit = quantity, unit
+                quantity, unit = float(pieces), "pcs"
         category = line.get("category")
         storage = line.get("product_storage_type") or storage_type_for_category(
             category
@@ -91,6 +114,10 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
                 match_confidence=line.get("match_confidence"),
                 match_source=line.get("match_source"),
                 suggested_category=category,
+                piece_grams=piece_grams,
+                shelf_life_days=line.get("shelf_life_days"),
+                printed_quantity=printed_quantity,
+                printed_unit=printed_unit,
                 storage_type=storage,
                 location=location_for_storage(storage),
             )

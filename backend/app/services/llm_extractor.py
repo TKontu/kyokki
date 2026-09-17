@@ -64,12 +64,19 @@ Rules:
 - Otherwise q = 1 and w = null.
 - c = the best category id for the product, or null if none fits (for example household or
   cleaning products). Categories: {categories}.
+- pw = what one piece of this roughly weighs in grams, when it is something a cook counts one
+  at a time but the shop may sell by weight. Examples: apple -> 125; banana -> 120; onion ->
+  110; tomato -> 100. Use null when counting pieces makes no sense: milk, mince, flour,
+  washing-up liquid.
+- sl = how many days this keeps unopened in its normal place, as a round estimate. Examples:
+  banana -> 7; carrot -> 21; milk -> 10; hard cheese -> 30; dried pasta -> 720. Use null if
+  you truly cannot say.
 - s = the store chain or store name from the header; d = the purchase date as YYYY-MM-DD.
   Use null when absent.
 - Skip store header, totals, discounts (NORM., ALENNUS), fees, deposits, payment and VAT
   lines as products.
 
-Return only compact JSON: {{"s": chain, "d": date, "p": [{{"n": name, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null}}]}}."""
+Return only compact JSON: {{"s": chain, "d": date, "p": [{{"n": name, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null, "pw": grams per piece or null, "sl": shelf life days or null}}]}}."""
 
 
 def prefilter_receipt_text(text: str) -> str:
@@ -108,6 +115,18 @@ def _generic_name(value: Any) -> str | None:
     return tidy[:1].upper() + tidy[1:] if tidy else None
 
 
+def _positive(value: Any) -> float | None:
+    """A rough estimate is welcome; zero, negative and nonsense are not (Q2, Q6)."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value) if value > 0 else None
+
+
+def _positive_int(value: Any) -> int | None:
+    number = _positive(value)
+    return round(number) if number is not None else None
+
+
 def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
     """Strict JSON schema for the compact contract; ``c`` may only be a known id or null."""
     return {
@@ -125,8 +144,10 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
                         "q": {"type": "number"},
                         "w": {"type": ["number", "null"]},
                         "c": {"enum": [*category_ids, None]},
+                        "pw": {"type": ["number", "null"]},
+                        "sl": {"type": ["integer", "null"]},
                     },
-                    "required": ["n", "g", "q", "w", "c"],
+                    "required": ["n", "g", "q", "w", "c", "pw", "sl"],
                 },
             },
         },
@@ -190,6 +211,8 @@ def parse_completion(
                     quantity=1.0 if quantity is None else quantity,
                     weight_kg=entry.get("w"),
                     category=category if category in category_ids else None,
+                    piece_grams=_positive(entry.get("pw")),
+                    shelf_life_days=_positive_int(entry.get("sl")),
                 )
             )
         except ValidationError as exc:

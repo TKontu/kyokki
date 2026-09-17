@@ -216,7 +216,8 @@ increment U1 after R1b, before R2 creates products.
   omit), `MINERU_LANG=latin` (PaddleOCR has no `fi`), `MINERU_TIMEOUT=120` (empty env value
   accepted). Example env files and `docs/DEPLOY.md` updated.
 - [x] `llm_extractor.py` rewritten to the R0 request: compact contract
-  `{"s","d","p":[{"n","q","w","c"}]}`, strict `json_schema` with `c` limited to the DB
+  `{"s","d","p":[{"n","q","w","c"}]}` (since grown `g` in MVP-R2, and `pw`/`sl` in Q2/Q6),
+  strict `json_schema` with `c` limited to the DB
   category ids (listed with display names in the prompt), text pre-filter, trailing-price
   stripping, one `LLMExtractionError`. `extract_from_text` and `extract_from_image`. The
   store-hint duplicate and the deprecated flat extraction fields are gone.
@@ -769,32 +770,62 @@ Ordered by expected value once MVP is live.
     language) names, e.g. a per-product display name or translation at extraction time.
 
 #### Operator friction log — the quantity and consumption model is too crude (2026-09-16)
+Renamed F1-F6 -> **Q1-Q6** on 2026-09-17: `MVP-F1` and `MVP-F2` already exist in Wave 1, and
+`DEC-3`'s Blocks column says a bare `F2` meaning the deployable stack.
 Raised while MVP-P1/R6/R8 was in flight. These six belong together: today a product carries one
 unit and a category-wide shelf life, and consuming offers the same buttons whatever the item is.
 **Not before MVP-P3**, and "cooking staples" (flour, salt, oil as pantry constants) is explicitly
 *not* now.
 
-- **F1 — Keep non-food off the stock list.** Towels, compost bags and cleaning supplies should
+- **Q1 — Keep non-food off the stock list.** Towels, compost bags and cleaning supplies should
   not enter the food inventory by default. Partly covered: MVP-R7 starts a line with no category
   skipped, and the extraction prompt names household products. What is missing is the system
   *knowing* a line is non-food rather than leaning on a missing category, so the cook is not
   asked about the same paper towels every week.
-- **F2 — Count fruit and veg in pieces, not grams.** A receipt says 1000 g of apples; the cook
+- **Q2 — Count fruit and veg in pieces, not grams.** A receipt says 1000 g of apples; the cook
   eats apples one at a time. Store a per-product average piece weight (~125 g for an apple) and
   convert at confirm, so stock reads "8 apples". A rough estimate is enough.
-- **F3 — Remember the right unit per product, not per category.** A small yoghurt is a piece; a
+- **Q3 — Remember the right unit per product, not per category.** A small yoghurt is a piece; a
   1 kg tub is a weight. The unit belongs to the product (and possibly to the pack size), and the
   system should learn it from how the cook actually logs and consumes it.
-- **F4 — Consumption options that fit the item and the stock on hand.** C2 ships ¼ ½ ¾ Done for
+- **Q4 — Consumption options that fit the item and the stock on hand.** C2 ships ¼ ½ ¾ Done for
   measured units and −1 −2 −3 Done for pieces, with no idea what the item is. For 8 apples the
   common case is one apple: a large "eat 1" with smaller 2/3/… beside it. The options should be
   derived from the item, its unit and how much is left.
-- **F5 — Opened versus unopened should drive shelf life.** Already on this list as item 2
+- **Q5 — Opened versus unopened should drive shelf life.** Already on this list as item 2
   (`opened_date` + `opened_shelf_life_days`); F5 is the same ask from the kitchen side and
   raises its priority. Matters most for the big packs.
-- **F6 — Shelf life per produce, not per category.** `default_shelf_life_days` is a category
+- **Q6 — Shelf life per produce, not per category.** `default_shelf_life_days` is a category
   constant today, so bananas and carrots expire together. Needs per-product defaults, seeded
   with sensible values and correctable by hand.
+
+##### Q2 + Q3 + Q6 as built (branch `feat/q2-q3-q6-product-defaults`), rulings of 2026-09-17
+The knowledge comes from the model at extraction time (operator ruling), not a seed list.
+
+- [x] The contract gains two per-line fields: **`pw`** (grams per piece, null when counting
+  pieces makes no sense) and **`sl`** (typical shelf life in days), with examples in the prompt
+  beside the existing R2 naming rules. The heuristic parser leaves both `None`.
+- [x] **One migration** (`e7a4c9d2b810`), one nullable column: `product_master.avg_piece_grams`.
+  `default_unit` and `default_shelf_life_days` already existed — they were copied from the
+  category at creation and then never revisited, which was the actual bug.
+- [x] A new product keeps the model's estimates; **a later receipt fills in what is missing but
+  never overwrites what is known**, so a correction survives the weekly shop. Knowing a piece
+  weight makes the product's unit `pcs` whatever the receipt printed (Q3).
+- [x] `quantity_for_product` in `generic_products.py` converts on write — it is the one seam
+  both confirm and quick add pass through, and the only place holding the resolved product. The
+  arithmetic (`grams_to_pieces`) lives in `units.py`.
+- [x] The review row shows the conversion (`KG OMENA GOLDEN · 1.072 kg → 9 pcs`) with the
+  quantity and unit still editable, so a wrong guess is a two-tap fix.
+- [x] Measured on the 49-line S-kaupat receipt: **still 49 items**, piece weights on 7 lines,
+  shelf lives on 39, 5 produce lines converted (13 apples, 12 tomatoes, 3 bananas, 3 onions).
+  Per-product shelf lives now differ from their category (carrot 21 d vs the category's 5).
+  **Cost: 76.5 s of model time against a 60.2 s baseline, +27 %** — still inside R4's 120 s bar,
+  but it is a real price for the two fields.
+- [ ] **Not done, and it bites:** nothing corrects a product's piece weight afterwards. Editing a
+  review row fixes that purchase, not the product, so a bad estimate keeps being applied. A small
+  product editor belongs with Q4; until then the escape hatch is deleting the product.
+- [ ] Also seen: the model gives no piece weight to mango or pomegranate, so those stay in grams.
+  Arguable either way; the prompt's examples are apple, banana, onion and tomato.
 
 ---
 

@@ -5,7 +5,7 @@ arrives in another unit (receipts, barcode data, API requests) is converted here
 ``tsp`` and ``tbsp`` are canonical in their own right and are not converted to dl (MVP-U1).
 """
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
 CanonicalUnit = Literal["dl", "tsp", "tbsp", "g", "pcs"]
@@ -80,3 +80,20 @@ def receipt_line_quantity(
     if weight_kg is not None:
         return to_canonical(weight_kg, "kg")
     return to_canonical(quantity or 1, "pcs")
+
+
+def grams_to_pieces(
+    grams: Decimal | float | None, piece_grams: Decimal | float | None
+) -> int | None:
+    """How many whole pieces a weighed line is, or ``None`` when that cannot be said.
+
+    A receipt prices apples by the kilo; the cook eats them one at a time (Q2). The estimate
+    is deliberately rough - the point is that stock reads "9 apples" rather than "1072 g" - and
+    it never rounds a real purchase down to nothing.
+    """
+    if grams is None or piece_grams is None:
+        return None
+    weight, per_piece = Decimal(str(grams)), Decimal(str(piece_grams))
+    if per_piece <= 0 or weight <= 0:
+        return None
+    return max(1, int((weight / per_piece).to_integral_value(rounding=ROUND_HALF_UP)))

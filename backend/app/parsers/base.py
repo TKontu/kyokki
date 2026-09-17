@@ -27,6 +27,14 @@ class ExtractedLine(BaseModel):
         default=None, ge=0, description="Weight from an 'x,xxx KG' line"
     )
     category: str | None = Field(default=None, description="Suggested category id")
+    piece_grams: float | None = Field(
+        default=None,
+        description="Roughly what one of them weighs, for produce sold by weight (Q2)",
+    )
+    shelf_life_days: int | None = Field(
+        default=None,
+        description="Typical days this keeps unopened; overrides the category default (Q6)",
+    )
 
 
 class ReceiptExtraction(BaseModel):
