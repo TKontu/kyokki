@@ -138,3 +138,19 @@ start Wave 4 (R5 receipt API module and polling hooks) while R4 waits for the ho
   receipt. Do not draw conclusions from single runs.
 - Remaining friction: **Q1** (non-food) and the **product editor** that Q2 and now Q4 have both
   deferred.
+
+## Non-food lines (2026-09-17)
+- The model answers `household` for `c` and we now keep it: a **sentinel in the enum**, not a
+  category. Adding a `household` category would make it a legal pick on the review screen and
+  put towels into stock - do not be tempted.
+- `non_food_name` remembers printed names (normalised name + chain, like `store_product_alias`,
+  but its own table because an alias needs a product). `receipt_processing` marks a line
+  non-food from the model **or** from that memory.
+- Confirm carries `non_food_indexes`; only those are remembered. An ordinary skip must stay
+  silent, or the system learns that things you simply did not buy are not food.
+- **Outstanding check:** the gateway was down for the whole verification, so every live run used
+  the heuristic fallback and the model never answered `household`. The memory half is proven on
+  the real fixture; the sentinel half is unit-tested only. Watch the category count on the first
+  real receipt after deploying - baseline 40 of 49.
+- mypy baseline is **149** now, not 148: a new model adds one unavoidable
+  `Class cannot subclass "Base"` that every other model already has.

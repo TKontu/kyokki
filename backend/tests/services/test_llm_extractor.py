@@ -152,7 +152,12 @@ class TestResponseSchema:
     def test_constrains_category_to_given_ids_or_null(self):
         schema = build_response_schema(["dairy", "produce"])
         item = schema["properties"]["p"]["items"]
-        assert item["properties"]["c"]["enum"] == ["dairy", "produce", None]
+        assert item["properties"]["c"]["enum"] == [
+            "dairy",
+            "produce",
+            "household",
+            None,
+        ]
         assert item["properties"]["g"] == {"type": "string"}
         assert item["required"] == ["n", "g", "q", "w", "c", "pw", "sl", "os"]
         assert item["properties"]["pw"] == {"type": ["number", "null"]}
@@ -255,7 +260,8 @@ class TestInstructions:
         )
 
     def test_unknown_category_becomes_none(self):
-        content = _compact(p=[{"n": "SIENILIINA", "q": 2, "w": None, "c": "household"}])
+        # "household" used to stand in for "unknown"; it is a non-food sentinel now (Q1)
+        content = _compact(p=[{"n": "KALA", "q": 2, "w": None, "c": "seafood"}])
         assert (
             parse_completion(content, CATEGORY_IDS, method="text").lines[0].category
             is None
@@ -302,6 +308,7 @@ class TestExtractFromText:
         assert schema["properties"]["p"]["items"]["properties"]["c"]["enum"] == [
             "dairy",
             "produce",
+            "household",
             None,
         ]
         assert payload["chat_template_kwargs"] == {
@@ -469,10 +476,63 @@ class TestCategoryMatching:
         assert apple.category == "produce"
 
     def test_a_category_that_is_not_ours_is_still_dropped(self):
+        # Not "household": that is a sentinel now, and TestNonFood covers it
+        body = json.dumps({"p": [{"n": "KALA", "g": "Fish", "q": 1, "c": "seafood"}]})
+
+        (line,) = parse_completion(body, {"dairy"}, "text").lines
+
+        assert line.category is None
+
+
+class TestNonFood:
+    """Q1: the model already says "household"; stop throwing the answer away."""
+
+    def test_the_schema_offers_the_sentinel(self):
+        item = build_response_schema(["dairy"])["properties"]["p"]["items"]
+
+        assert item["properties"]["c"]["enum"] == ["dairy", "household", None]
+
+    def test_the_prompt_asks_for_it(self):
+        assert "Answer household for their c" in build_instructions(CATEGORIES)
+
+    def test_a_household_line_is_marked_not_food(self):
         body = json.dumps(
-            {"p": [{"n": "SIENILIINA", "g": "Cloth", "q": 1, "c": "household"}]}
+            {
+                "p": [
+                    {"n": "SIENILIINA", "g": "Cleaning cloth", "q": 1, "c": "household"}
+                ]
+            }
+        )
+
+        (line,) = parse_completion(body, {"dairy"}, "text").lines
+
+        assert line.non_food is True
+        assert line.category is None
+
+    def test_the_sentinel_is_matched_on_case_like_any_other(self):
+        body = json.dumps(
+            {"p": [{"n": "SIENILIINA", "g": "Cloth", "q": 1, "c": "Household"}]}
+        )
+
+        (line,) = parse_completion(body, {"dairy"}, "text").lines
+
+        assert line.non_food is True
+
+    def test_a_food_line_is_not_marked(self):
+        body = json.dumps({"p": [{"n": "MAITO", "g": "Milk", "q": 1, "c": "dairy"}]})
+
+        (line,) = parse_completion(body, {"dairy"}, "text").lines
+
+        assert line.non_food is False
+        assert line.category == "dairy"
+
+    def test_a_category_we_do_not_know_is_still_only_dropped(self):
+        """Unknown is not the same as not food: the model simply failed to file it."""
+        body = json.dumps(
+            {"p": [{"n": "KUMMA", "g": "Something", "q": 1, "c": "seafood"}]}
         )
 
         (line,) = parse_completion(body, {"dairy"}, "text").lines
 
         assert line.category is None
+        assert line.non_food is False

@@ -554,6 +554,7 @@ class TestReceiptItems:
             "piece_grams": None,
             "shelf_life_days": None,
             "opened_shelf_life_days": None,
+            "non_food": False,
             "printed_quantity": None,
             "printed_unit": None,
             "storage_type": "pantry",

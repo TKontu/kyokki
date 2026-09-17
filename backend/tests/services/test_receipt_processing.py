@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
+from app.models.non_food_name import NonFoodName
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
 from app.parsers.base import ExtractedLine, ReceiptExtraction
@@ -213,6 +214,7 @@ class TestPersistence:
             "piece_grams": None,
             "shelf_life_days": None,
             "opened_shelf_life_days": None,
+            "non_food": False,
             "product_id": str(sample_product.id),
             "product_name": "Valio Whole Milk 1L",
             "product_storage_type": "refrigerator",
@@ -731,3 +733,67 @@ class TestPieceWeightOnStoredLines:
 
         (line,) = pdf_receipt.ocr_structured["lines"]
         assert line["piece_grams"] == 125
+
+
+class TestNonFoodLines:
+    """Q1: household lines should stop being offered as food."""
+
+    async def test_the_model_saying_household_marks_the_line(
+        self, service, pdf_receipt, sample_category
+    ):
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(
+                    name="SIENILIINA", generic_name="Cleaning cloth", non_food=True
+                )
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["non_food"] is True
+
+    async def test_a_remembered_name_marks_it_even_when_the_model_forgets(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        """The whole point of remembering: the model does not have to be right every week."""
+        db_session.add(
+            NonFoodName(
+                store_chain="s-group", receipt_name="KOMPOSTOINTIPUSSI", times_seen=1
+            )
+        )
+        await db_session.commit()
+
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(
+                    name="Kompostointipussi", generic_name="Compost bag", non_food=False
+                )
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["non_food"] is True
+
+    async def test_an_ordinary_food_line_is_untouched(
+        self, service, pdf_receipt, sample_category
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction()),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        assert all(not line["non_food"] for line in pdf_receipt.ocr_structured["lines"])

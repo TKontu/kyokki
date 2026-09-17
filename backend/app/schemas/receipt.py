@@ -55,6 +55,9 @@ class ExtractedItem(BaseModel):
     opened_shelf_life_days: int | None = Field(
         None, description="Typical days this keeps once opened (Q5)"
     )
+    non_food: bool = Field(
+        False, description="Household or cleaning; not offered as food (Q1)"
+    )
     printed_quantity: float | None = Field(
         None, description="What the receipt said, when it was converted to pieces"
     )
@@ -120,6 +123,7 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
                 piece_grams=piece_grams,
                 shelf_life_days=line.get("shelf_life_days"),
                 opened_shelf_life_days=line.get("opened_shelf_life_days"),
+                non_food=bool(line.get("non_food")),
                 printed_quantity=printed_quantity,
                 printed_unit=printed_unit,
                 storage_type=storage,
@@ -295,6 +299,10 @@ class ReceiptConfirmRequest(BaseModel):
 
     items: list[ConfirmedItemCreate] = Field(
         ..., description="Confirmed items to add to inventory"
+    )
+    non_food_indexes: list[int] = Field(
+        default_factory=list,
+        description="Lines the cook says are not food; their names are remembered (Q1)",
     )
 
 

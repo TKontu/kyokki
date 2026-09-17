@@ -799,6 +799,29 @@ unit and a category-wide shelf life, and consuming offers the same buttons whate
   constant today, so bananas and carrots expire together. Needs per-product defaults, seeded
   with sensible values and correctable by hand.
 
+##### Q1 as built (branch `feat/q1-non-food`), rulings of 2026-09-17
+- [x] **The model's "household" answer is captured instead of discarded.** It is a *sentinel* in
+  the `c` enum, not a thirteenth category - a category would be a legal pick on the review
+  screen and would put towels *into* stock. `ExtractedLine.non_food` carries it.
+- [x] **`non_food_name`** (migration `f3b8c1d4e207`) remembers printed names the cook has said
+  are not food, keyed like `store_product_alias` - normalised printed name plus store chain -
+  but in its own table, because an alias points at a product and a towel has none.
+- [x] A line is marked non-food when **either** the model says household **or** the printed name
+  is remembered. That second half is what makes it stick when the model wavers, and it is the
+  half that was actually provable: with the gateway down the heuristic parser produced 49
+  unflagged lines and the memory still flagged `KOMPOSTOINTIPUSSI PAPERI` and `SIENILIINA`.
+- [x] Confirm gains `non_food_indexes`. **Only lines the cook leaves marked are remembered** - an
+  ordinary skip teaches nothing, because not buying something is not the same as saying it is
+  not food.
+- [x] The review screen folds them into the footer: "2 household items · Compost bag, Cleaning
+  cloth · Show". Expanding puts them back as ordinary rows, and giving one a category drops it
+  from `non_food_indexes`, so the cook beats the model.
+- [ ] **Not verified: the model actually answering `household`.** The llama-swap gateway at
+  `192.168.0.94:9292` went down mid-verification and never came back, so every live run fell to
+  the heuristic parser. The sentinel is covered by unit tests only. **Check the category count
+  on the first real receipt after deploying** - the baseline is 40 of 49, and this contract has
+  moved it before.
+
 ##### Q4 + Q5 as built (branch `feat/q4-q5-consume-and-opened`), rulings of 2026-09-17
 - [x] **Q4.** `consumptionOptions` derives the buttons from the item. Pieces lead with a large
   `1` and offer only counts smaller than what is left, then `All n`; there are no disabled

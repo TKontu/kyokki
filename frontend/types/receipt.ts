@@ -40,6 +40,7 @@ export interface ExtractedItem {
   piece_grams: number | null // Roughly what one piece weighs, for produce sold by weight (Q2)
   shelf_life_days: number | null // Typical days it keeps; overrides the category default (Q6)
   opened_shelf_life_days: number | null // Typical days it keeps once opened (Q5)
+  non_food: boolean // Household or cleaning; not offered as food (Q1)
   printed_quantity: number | null // What the receipt said, when it was converted to pieces
   printed_unit: string | null // Unit the receipt used, when it was converted to pieces
   storage_type: StorageType
@@ -114,6 +115,7 @@ export interface ConfirmedItemCreate {
 
 export interface ReceiptConfirmRequest {
   items: ConfirmedItemCreate[] // Lines not sent are skipped
+  non_food_indexes?: number[] // Lines the cook says are not food; remembered (Q1)
 }
 
 export interface ReceiptConfirmResponse {

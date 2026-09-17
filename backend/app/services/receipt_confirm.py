@@ -34,6 +34,7 @@ from app.services.generic_products import (
     build_inventory_item,
 )
 from app.services.matching_service import normalize_receipt_name
+from app.services.non_food import remember_non_food
 from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)
@@ -177,8 +178,24 @@ class _Confirmation:
             await self.learn_alias(line, product)
 
 
+async def _remember_skipped_non_food(
+    db: AsyncSession, confirmation: "_Confirmation", indexes: Sequence[int]
+) -> None:
+    """Record the printed names of lines the cook said are not food (Q1)."""
+    names = [
+        str(confirmation.lines[i]["name"])
+        for i in indexes
+        if 0 <= i < len(confirmation.lines) and confirmation.lines[i].get("name")
+    ]
+    if names:
+        await remember_non_food(db, confirmation.chain, names)
+
+
 async def confirm_receipt(
-    db: AsyncSession, receipt_id: UUID, items: Sequence[ConfirmedItemCreate]
+    db: AsyncSession,
+    receipt_id: UUID,
+    items: Sequence[ConfirmedItemCreate],
+    non_food_indexes: Sequence[int] = (),
 ) -> ConfirmResult:
     """Write products, inventory and aliases for the reviewed items, then mark it confirmed.
 
@@ -206,6 +223,8 @@ async def confirm_receipt(
         confirmation = _Confirmation(db, receipt)
         for position, item in enumerate(items):
             await confirmation.add(position, item)
+        # Only lines the cook marked; an ordinary skip must not teach anything (Q1)
+        await _remember_skipped_non_food(db, confirmation, non_food_indexes)
         receipt_row: Any = receipt
         receipt_row.processing_status = ReceiptStatus.CONFIRMED
         await db.commit()
