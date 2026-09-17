@@ -14,6 +14,7 @@ from app.services.generic_products import (
     InvalidProductRequest,
     ProductResolver,
     build_inventory_item,
+    quantity_for_product,
 )
 
 PURCHASED = date(2026, 9, 14)
@@ -145,3 +146,122 @@ class TestBuildInventoryItem:
         assert (item.expiry_date, item.expiry_source) == (date(2026, 12, 1), "manual")
         assert item.location == "freezer"
         assert item.receipt_id == receipt_id
+
+
+class TestProductLearnsItsOwnShape:
+    """Q2/Q3/Q6: a product should know how it is counted and how long it keeps."""
+
+    async def test_a_new_product_keeps_what_the_model_worked_out(
+        self, db_session: AsyncSession, categories
+    ):
+        product, created = await ProductResolver(db_session).resolve(
+            name="Apple",
+            category="produce",
+            unit="g",
+            quantity=1072,
+            piece_grams=125,
+            shelf_life_days=21,
+        )
+
+        assert created is True
+        assert product.avg_piece_grams == Decimal("125.00")
+        assert product.default_shelf_life_days == 21
+        # knowing a piece weight means the cook counts them, whatever the receipt printed
+        assert (product.default_unit, product.unit_type) == ("pcs", "count")
+
+    async def test_without_an_estimate_the_category_still_decides(
+        self, db_session: AsyncSession, categories
+    ):
+        product, _ = await ProductResolver(db_session).resolve(
+            name="Ground beef", category="produce", unit="g", quantity=400
+        )
+
+        assert product.avg_piece_grams is None
+        assert (
+            product.default_shelf_life_days == 5
+        )  # the produce category's blanket figure
+        assert product.default_unit == "g"
+
+    async def test_a_later_receipt_fills_in_a_missing_piece_weight(
+        self, db_session: AsyncSession, categories
+    ):
+        resolver = ProductResolver(db_session)
+        first, _ = await resolver.resolve(
+            name="Apple", category="produce", unit="pcs", quantity=1
+        )
+        assert first.avg_piece_grams is None
+
+        again, created = await ProductResolver(db_session).resolve(
+            name="Apple", category="produce", unit="g", quantity=1072, piece_grams=125
+        )
+
+        assert created is False
+        assert again.avg_piece_grams == Decimal("125")
+
+    async def test_a_later_receipt_never_overwrites_what_is_known(
+        self, db_session: AsyncSession, categories
+    ):
+        """Otherwise every weekly shop would undo a correction."""
+        first, _ = await ProductResolver(db_session).resolve(
+            name="Apple", category="produce", unit="g", quantity=1072, piece_grams=125
+        )
+
+        again, _ = await ProductResolver(db_session).resolve(
+            name="apple", category="produce", unit="g", quantity=500, piece_grams=300
+        )
+
+        assert again.avg_piece_grams == Decimal("125.00")
+
+
+class TestQuantityForProduct:
+    """Q2: what actually lands in stock."""
+
+    def _product(self, **kwargs) -> ProductMaster:
+        defaults = dict(
+            canonical_name="Apple",
+            category="produce",
+            storage_type="refrigerator",
+            default_shelf_life_days=21,
+            unit_type="count",
+            default_unit="pcs",
+            avg_piece_grams=Decimal("125"),
+        )
+        return ProductMaster(**{**defaults, **kwargs})
+
+    def test_a_weighed_purchase_is_stored_as_pieces(self):
+        assert quantity_for_product(self._product(), 1072, "g") == (9, "pcs")
+
+    def test_a_product_with_no_piece_weight_is_left_alone(self):
+        product = self._product(avg_piece_grams=None)
+
+        assert quantity_for_product(product, 1072, "g") == (1072, "g")
+
+    def test_a_product_counted_by_weight_is_left_alone(self):
+        product = self._product(default_unit="g", unit_type="weight")
+
+        assert quantity_for_product(product, 400, "g") == (400, "g")
+
+    def test_buying_them_by_the_piece_needs_no_conversion(self):
+        assert quantity_for_product(self._product(), 3, "pcs") == (3, "pcs")
+
+    async def test_confirm_puts_apples_in_the_fridge_as_apples(
+        self, db_session: AsyncSession, categories
+    ):
+        product, _ = await ProductResolver(db_session).resolve(
+            name="Apple",
+            category="produce",
+            unit="g",
+            quantity=1072,
+            piece_grams=125,
+            shelf_life_days=21,
+        )
+
+        item = build_inventory_item(
+            product, quantity=1072, unit="g", purchase_date=PURCHASED
+        )
+
+        assert (item.initial_quantity, item.unit) == (9, "pcs")
+        assert item.current_quantity == 9
+        # and Q6: the product's own shelf life, not the category's
+        assert item.expiry_date == PURCHASED + timedelta(days=21)
+        assert item.expiry_source == "calculated"

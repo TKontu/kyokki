@@ -6,6 +6,7 @@ import pytest
 
 from app.services.units import (
     canonical_factor,
+    grams_to_pieces,
     receipt_line_quantity,
     to_canonical,
     to_canonical_decimal,
@@ -92,3 +93,30 @@ class TestUnitType:
     )
     def test_unit_type(self, unit, kind):
         assert unit_type_for(unit) == kind
+
+
+class TestGramsToPieces:
+    """Q2: a receipt prices apples by weight, but the cook eats them one at a time."""
+
+    def test_converts_a_weighed_line_to_whole_pieces(self):
+        # 1.072 kg of apples at ~125 g each
+        assert grams_to_pieces(1072, 125) == 9
+
+    def test_rounds_to_the_nearest_piece(self):
+        assert grams_to_pieces(300, 125) == 2  # 2.4
+        assert grams_to_pieces(320, 125) == 3  # 2.56
+
+    def test_never_returns_nothing_for_something(self):
+        """A single small apple still put something in the basket."""
+        assert grams_to_pieces(40, 125) == 1
+        assert grams_to_pieces(1, 1000) == 1
+
+    @pytest.mark.parametrize("piece_grams", [None, 0, -5])
+    def test_without_a_usable_piece_weight_there_is_no_conversion(self, piece_grams):
+        assert grams_to_pieces(1072, piece_grams) is None
+
+    def test_no_grams_no_conversion(self):
+        assert grams_to_pieces(None, 125) is None
+
+    def test_takes_decimals_as_well_as_floats(self):
+        assert grams_to_pieces(Decimal("1072"), Decimal("125")) == 9

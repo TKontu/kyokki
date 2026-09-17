@@ -7,6 +7,7 @@ product takes its shelf life and storage from its category.
 
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -17,7 +18,7 @@ from app.models.category import Category
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.services.storage import location_for_storage, storage_type_for_category
-from app.services.units import unit_type_for
+from app.services.units import grams_to_pieces, unit_type_for
 
 
 class InvalidProductRequest(ValueError):
@@ -41,6 +42,17 @@ class ProductResolver:
             self._categories[category_id] = await get_category(self.db, category_id)
         return self._categories[category_id]
 
+    @staticmethod
+    def _fill_gaps(product: ProductMaster, piece_grams: float | None) -> ProductMaster:
+        """Learn what is still unknown about a product, never overwrite what is known.
+
+        A later receipt filling in a missing piece weight is useful; the same receipt undoing
+        a correction every week is not (Q2).
+        """
+        if piece_grams and product.avg_piece_grams is None:
+            product.avg_piece_grams = Decimal(str(piece_grams))
+        return product
+
     async def resolve(
         self,
         *,
@@ -49,6 +61,8 @@ class ProductResolver:
         product_id: UUID | None = None,
         name: str | None = None,
         category: str | None = None,
+        piece_grams: float | None = None,
+        shelf_life_days: int | None = None,
     ) -> tuple[ProductMaster, bool]:
         """Return ``(product, created)``.
 
@@ -60,14 +74,14 @@ class ProductResolver:
             product = await self.db.get(ProductMaster, product_id)
             if product is None:
                 raise InvalidProductRequest(f"product '{product_id}' not found")
-            return product, False
+            return self._fill_gaps(product, piece_grams), False
 
         tidy = tidy_name(name)
         if not tidy:
             raise InvalidProductRequest("no product name")
         key = tidy.casefold()
         if key in self._by_name:
-            return self._by_name[key], False
+            return self._fill_gaps(self._by_name[key], piece_grams), False
 
         existing = (
             (
@@ -83,7 +97,7 @@ class ProductResolver:
         )
         if existing is not None:
             self._by_name[key] = existing
-            return existing, False
+            return self._fill_gaps(existing, piece_grams), False
 
         if not category:
             raise InvalidProductRequest(f"Category required for new product '{tidy}'")
@@ -93,20 +107,39 @@ class ProductResolver:
                 f"Unknown category '{category}' for new product '{tidy}'"
             )
 
+        # Knowing what one weighs means the cook counts them, whatever the receipt printed (Q2)
+        natural_unit = "pcs" if piece_grams else unit
         product = ProductMaster(
             # Hand-typed names ("oat drink") read like extracted generic names ("Oat drink")
             canonical_name=tidy[:1].upper() + tidy[1:],
             category=category_row.id,
             storage_type=storage_type_for_category(str(category_row.id)),
-            default_shelf_life_days=category_row.default_shelf_life_days,
-            unit_type=unit_type_for(unit),
-            default_unit=unit,
+            # What this product keeps for, falling back to its category's blanket figure (Q6)
+            default_shelf_life_days=shelf_life_days
+            or category_row.default_shelf_life_days,
+            avg_piece_grams=piece_grams,
+            unit_type=unit_type_for(natural_unit),
+            default_unit=natural_unit,
             default_quantity=quantity,
         )
         self.db.add(product)
         await self.db.flush()
         self._by_name[key] = product
         return product, True
+
+
+def quantity_for_product(
+    product: ProductMaster, quantity: Decimal | float, unit: str
+) -> tuple[Decimal | float, str]:
+    """Store the amount the way this product is counted.
+
+    A receipt weighs the apples and the cook eats them one at a time, so a weighed line for a
+    product with a known piece weight is stored in pieces (Q2/Q3). Anything else is left alone.
+    """
+    if unit != "g" or str(product.default_unit) != "pcs":
+        return quantity, unit
+    pieces = grams_to_pieces(quantity, cast(Decimal | None, product.avg_piece_grams))
+    return (pieces, "pcs") if pieces is not None else (quantity, unit)
 
 
 def build_inventory_item(
@@ -120,6 +153,7 @@ def build_inventory_item(
     receipt_id: UUID | None = None,
 ) -> InventoryItem:
     """A sealed item: expiry and location come from the product unless overridden."""
+    quantity, unit = quantity_for_product(product, quantity, unit)
     if expiry_date is not None:
         expiry, source = expiry_date, "manual"
     else:

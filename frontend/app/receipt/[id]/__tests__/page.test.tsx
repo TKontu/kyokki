@@ -32,6 +32,10 @@ function item(index: number, overrides: Partial<ExtractedItem> = {}): ExtractedI
     match_confidence: null,
     match_source: null,
     suggested_category: 'dairy',
+    piece_grams: null,
+    shelf_life_days: null,
+    printed_quantity: null,
+    printed_unit: null,
     storage_type: 'refrigerator',
     location: 'main_fridge',
     ...overrides,
@@ -258,6 +262,36 @@ describe('ReceiptReviewPage', () => {
     renderPage()
 
     expect(await screen.findByText(/read without the AI model/i)).toBeInTheDocument()
+  })
+
+  it('shows what the receipt weighed when it was counted into pieces', async () => {
+    // Q2: the shop sold 1.072 kg of apples; the cook eats them one at a time
+    mockApi(
+      receipt({}, [
+        item(0, {
+          name: 'KG OMENA GOLDEN',
+          generic_name: 'Apple',
+          quantity: 9,
+          unit: 'pcs',
+          piece_grams: 125,
+          printed_quantity: 1072,
+          printed_unit: 'g',
+        }),
+      ])
+    )
+    renderPage()
+
+    expect(await screen.findByText(/1\.072 kg → 9 pcs/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Quantity')).toHaveValue(9)
+    expect(screen.getByRole('radio', { name: 'pcs' })).toBeChecked()
+  })
+
+  it('says nothing about a conversion that did not happen', async () => {
+    mockApi(receipt({}, [item(0, { quantity: 400, unit: 'g' })]))
+    renderPage()
+
+    await screen.findByLabelText('Quantity')
+    expect(screen.queryByText(/→/)).not.toBeInTheDocument()
   })
 
   it('renders and confirms a long receipt', async () => {

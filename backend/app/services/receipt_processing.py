@@ -216,6 +216,10 @@ class ReceiptProcessingService:
                     generic_name=line.generic_name,
                 )
                 stored = line.model_dump(mode="json")
+                if match and match.product.avg_piece_grams is not None:
+                    # The catalog already knows what one of these weighs; trust it over a
+                    # fresh guess from the model (Q2).
+                    stored["piece_grams"] = float(match.product.avg_piece_grams)
                 stored.update(
                     product_id=str(match.product.id) if match else None,
                     product_name=match.product.canonical_name if match else None,
