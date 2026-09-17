@@ -6,6 +6,7 @@ itself, so a local `pytest` run with the compose stack up wiped the dev database
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
@@ -95,11 +96,26 @@ class TestRollbackIsolation:
 
 
 class TestFixtureTarget:
-    async def test_the_engine_never_points_at_the_configured_database(
-        self, db_engine
-    ) -> None:
-        """The guard above only helps if the fixtures actually use the derived URL."""
+    async def test_the_engine_uses_the_derived_test_database(self, db_engine) -> None:
+        """The guard above only helps if the fixtures actually use the derived URL.
+
+        CI already sets POSTGRES_DB=kyokki_test, so the derivation is a no-op there
+        and the name is *not* always the configured one plus a suffix - only always
+        a name ending in _test.
+        """
         from app.core.config import settings
 
-        assert db_engine.url.database == f"{settings.POSTGRES_DB}{'_test'}"
-        assert db_engine.url.database != settings.POSTGRES_DB
+        name = db_engine.url.database
+        assert name.endswith("_test")
+        assert (
+            name == make_url(derive_test_database_url(settings.DATABASE_URL)).database
+        )
+
+    async def test_a_dev_database_name_is_never_used_as_is(self) -> None:
+        """The case that matters on a workstation, where POSTGRES_DB is `kyokki`."""
+        from app.core.config import settings
+
+        if settings.POSTGRES_DB.endswith("_test"):
+            pytest.skip("POSTGRES_DB is already a test database (CI)")
+        derived = make_url(derive_test_database_url(settings.DATABASE_URL)).database
+        assert derived != settings.POSTGRES_DB
