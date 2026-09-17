@@ -16,6 +16,14 @@ import type {
   QuickAddRequest,
 } from '@/types/inventory'
 
+/**
+ * The stock list is the always-on fridge display: nobody focuses it or reloads it, so it has
+ * to refresh itself (MVP-P2). Receipts have their own cadence in `useReceipts.ts`.
+ */
+export const INVENTORY_POLL_MS = 30_000
+/** Short enough that a mount or a regained focus shows fresh stock rather than the cache. */
+const INVENTORY_STALE_MS = 10_000
+
 // Query keys factory
 export const inventoryKeys = {
   all: ['inventory'] as const,
@@ -32,6 +40,8 @@ export function useInventoryList(params?: InventoryListParams) {
   return useQuery({
     queryKey: inventoryKeys.list(params),
     queryFn: () => inventoryAPI.list(params),
+    refetchInterval: INVENTORY_POLL_MS,
+    staleTime: INVENTORY_STALE_MS,
   })
 }
 

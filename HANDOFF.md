@@ -83,3 +83,22 @@ start Wave 4 (R5 receipt API module and polling hooks) while R4 waits for the ho
   `docs/TODO.md` under the post-MVP frontier as F1-F6; not before MVP-P3.
 - Rotate the legacy root `.env` keys: starting a backend process with it in place makes
   pydantic print the forbidden extras *with their values*. Always move it aside first.
+
+## PWA, dark mode and always-on refresh (2026-09-17)
+- `Add to Home Screen` now gives a real app: `app/manifest.ts`, `metadata.appleWebApp` and
+  `metadata.icons` in `app/layout.tsx`, icons in `public/icons/`. Branding constants live in
+  `lib/brand.ts`; regenerate the PNGs with `python frontend/scripts/make_icons.py`.
+- `next/og` (`ImageResponse`) cannot prerender on Windows, so the icons are committed PNGs
+  rather than generated at build time. Do not "improve" this back into `ImageResponse`.
+- `frontend/Dockerfile` copies `public/` now. Standalone output omits it, so anything added
+  there 404s in production without that line.
+- The stock list polls every 30 s (`INVENTORY_POLL_MS`). Before MVP-P2 nothing but receipts
+  polled, even though ARCHITECTURE.md said otherwise.
+- **Dark mode follows the device** and can be forced with `.dark`/`.light` on `<html>`, which
+  is how to check it in a browser. Watch for two traps this uncovered: Tailwind's `content`
+  must include `lib/`, and `getComputedStyle` returns a live object - snapshot it into a plain
+  object before toggling the class, or every reading looks identical.
+- The app needs **iPadOS/Safari 15+**; the 1st-gen iPad Air (iPadOS 12.5) renders a blank page
+  and cannot be fixed from our side. Evidence is in `docs/DEPLOY.md` prerequisites.
+- Still open: **MVP-R4** wants five real receipts through the deployed stack, and **MVP-P3** is
+  the acceptance week. PR #46 (P1+R6+R8) must merge before this branch.

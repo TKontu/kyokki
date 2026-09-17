@@ -60,7 +60,10 @@ docker compose -f docker-compose.prod.yml run --rm kyokki-api alembic upgrade he
 docker compose -f docker-compose.prod.yml run --rm kyokki-api python -m app.db.seed_categories
 ```
 
-Open `http://<host>:17301` on the iPad and add it to the Home Screen.
+Open `http://<host>:17301` on the iPad and add it to the Home Screen: it launches full
+screen, refreshes itself every 30 s, and follows the iPad's light/dark appearance. Needs
+**iPadOS 15 or newer**. The full runbook, including Auto-Lock and Guided Access, is in
+[DEPLOY.md](./DEPLOY.md#on-the-ipad).
 
 ## Usage
 
@@ -106,9 +109,11 @@ pantry: 365 days
 See [ARCHITECTURE.md](./ARCHITECTURE.md)
 
 ```
-iPad PWA → Traefik → FastAPI + Celery → PostgreSQL
-                           ↓
-              MinerU OCR / Open Food Facts / Ollama
+iPad PWA → Next.js (proxies /api) → FastAPI → PostgreSQL + Redis
+                                          ↓
+                          receipt worker → MinerU OCR / LLM
+                                          ↓
+                                   Open Food Facts
 ```
 
 ## Development

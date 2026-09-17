@@ -137,6 +137,15 @@ describe('Date Utilities', () => {
   })
 
   describe('getExpiryColor', () => {
+    it.each(['expired', 'today', 'tomorrow', 'soon', 'fresh'] as ExpiryUrgency[])(
+      'gives %s a dark variant, so the badge is not bright on a dark kitchen screen',
+      (urgency) => {
+        const color = getExpiryColor(urgency)
+        expect(color).toMatch(/dark:bg-/)
+        expect(color).toMatch(/dark:text-/)
+      }
+    )
+
     it('should return red classes for "expired"', () => {
       const color = getExpiryColor('expired')
       expect(color).toContain('red')
