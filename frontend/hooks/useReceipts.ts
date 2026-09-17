@@ -6,8 +6,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { inventoryKeys } from '@/hooks/useInventory'
 import { productKeys } from '@/hooks/useProducts'
-import receiptsAPI from '@/lib/api/receipts'
-import type { Receipt, ReceiptConfirmRequest, ReceiptListParams } from '@/types/receipt'
+import receiptsAPI, { type ReceiptScanFields } from '@/lib/api/receipts'
+import type {
+  Receipt,
+  ReceiptConfirmRequest,
+  ReceiptListParams,
+  ReceiptSummary,
+} from '@/types/receipt'
 
 /** Poll this often while a receipt is queued or being read; extraction takes ~40-70 s. */
 export const READING_POLL_MS = 3000
@@ -33,7 +38,9 @@ export function detailPollInterval(receipt?: Receipt): number | false {
 }
 
 /** The list keeps a slow heartbeat, and speeds up while any receipt is being read. */
-export function listPollInterval(receipts?: Receipt[]): number {
+export function listPollInterval(
+  receipts?: Pick<Receipt, 'processing_status'>[]
+): number {
   return receipts?.some(isBeingRead) ? READING_POLL_MS : IDLE_POLL_MS
 }
 
@@ -47,9 +54,9 @@ export function useReceipt(id: string) {
   })
 }
 
-/** Receipts for the home banner; polls faster while one is being read. */
+/** Receipts for the home banner and the receipts list; polls faster while one is being read. */
 export function useReceiptList(params?: ReceiptListParams) {
-  return useQuery({
+  return useQuery<ReceiptSummary[]>({
     queryKey: receiptKeys.list(params),
     queryFn: () => receiptsAPI.list(params),
     refetchInterval: (query) => listPollInterval(query.state.data),
@@ -70,6 +77,22 @@ export function useConfirmReceipt() {
       queryClient.invalidateQueries({ queryKey: receiptKeys.all })
       // Confirming may have created products that searches should now find
       queryClient.invalidateQueries({ queryKey: productKeys.all })
+    },
+  })
+}
+
+/** Upload a receipt from the iPad (MVP-R6). The worker picks it up from the queue. */
+export function useUploadReceipt() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ file, fields }: { file: File; fields?: ReceiptScanFields }) =>
+      receiptsAPI.scan(file, fields),
+    // Uploading is not idempotent: a retry would be refused as a duplicate (409)
+    retry: false,
+    onSuccess: (receipt) => {
+      queryClient.setQueryData(receiptKeys.detail(receipt.id), receipt)
+      queryClient.invalidateQueries({ queryKey: receiptKeys.all })
     },
   })
 }

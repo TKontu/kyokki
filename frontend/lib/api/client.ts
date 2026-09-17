@@ -26,7 +26,33 @@ function errorMessage(
       return first.msg
     }
   }
+  // An object detail carries more than a message, e.g. the id of the duplicate receipt
+  // that a second upload of the same file collides with (MVP-R6)
+  if (errorData.detail && typeof errorData.detail === 'object') {
+    const { message } = errorData.detail as { message?: unknown }
+    if (typeof message === 'string' && message) {
+      return message
+    }
+  }
   return response.statusText || `Request failed (${response.status})`
+}
+
+/** Everything the caller may need beyond the message; FastAPI puts it in `detail`. */
+function errorDetails(errorData: {
+  details?: unknown
+  detail?: unknown
+}): Record<string, unknown> | undefined {
+  if (errorData.details && typeof errorData.details === 'object') {
+    return errorData.details as Record<string, unknown>
+  }
+  if (
+    errorData.detail &&
+    typeof errorData.detail === 'object' &&
+    !Array.isArray(errorData.detail)
+  ) {
+    return errorData.detail as Record<string, unknown>
+  }
+  return undefined
 }
 
 export class APIClient {
@@ -74,7 +100,7 @@ export class APIClient {
           response.status,
           errorData.code || 'UNKNOWN_ERROR',
           errorMessage(errorData, response),
-          errorData.details
+          errorDetails(errorData)
         )
         this.onError?.(error)
         throw error
@@ -162,7 +188,7 @@ export class APIClient {
           response.status,
           errorData.code || 'UNKNOWN_ERROR',
           errorMessage(errorData, response),
-          errorData.details
+          errorDetails(errorData)
         )
         this.onError?.(error)
         throw error

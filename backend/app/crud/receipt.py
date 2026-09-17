@@ -19,13 +19,17 @@ async def get_receipts(
     *,
     status: ReceiptStatus | None = None,
     store_chain: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[Receipt]:
-    """Get all receipts with optional filtering.
+    """Get receipts with optional filtering.
 
     Args:
         db: Database session.
         status: Optional filter by processing_status.
         store_chain: Optional filter by store_chain.
+        limit: Page size; ``None`` returns every match.
+        offset: How many of the newest receipts to skip.
 
     Returns:
         List of receipts sorted by created_at descending (most recent first).
@@ -40,6 +44,11 @@ async def get_receipts(
 
     # Sort by most recent first
     query = query.order_by(Receipt.created_at.desc())
+
+    if offset:
+        query = query.offset(offset)
+    if limit is not None:
+        query = query.limit(limit)
 
     result = await db.execute(query)
     return list(result.scalars().all())

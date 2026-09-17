@@ -8,7 +8,10 @@ Pipeline:
 4. Store the structured result on the receipt.
 """
 
-from dataclasses import dataclass
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -44,6 +47,34 @@ MAX_ERROR_CHARS = 500  # stored on the receipt and shown to the user
 
 
 @dataclass
+class ReadTimings:
+    """How long the two slow steps took.
+
+    MVP-R4 records OCR time and model time per receipt, and neither is stored on the row, so
+    they are measured here and published on the completion log line.
+    """
+
+    ocr_seconds: float = field(default=0.0)
+    llm_seconds: float = field(default=0.0)
+
+    @contextmanager
+    def ocr(self) -> Iterator[None]:
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            self.ocr_seconds += time.monotonic() - started
+
+    @contextmanager
+    def llm(self) -> Iterator[None]:
+        started = time.monotonic()
+        try:
+            yield
+        finally:
+            self.llm_seconds += time.monotonic() - started
+
+
+@dataclass
 class ProcessingResult:
     """Result of receipt processing pipeline."""
 
@@ -66,17 +97,22 @@ class ReceiptProcessingService:
         receipt: Receipt,
         categories: list[CategoryOption],
         known_products: list[str],
+        timings: ReadTimings,
     ) -> tuple[str | None, ReceiptExtraction, str | None]:
         """Return (OCR text if any, extraction, fallback reason), choosing text or vision input."""
         path = str(receipt.image_path)
 
         if is_pdf(path):
-            pdf_text = await extract_text_from_receipt(path)
-            return await self._read_text(receipt, pdf_text, categories, known_products)
+            with timings.ocr():
+                pdf_text = await extract_text_from_receipt(path)
+            return await self._read_text(
+                receipt, pdf_text, categories, known_products, timings
+            )
 
         text: str | None
         try:
-            text = await extract_text_from_receipt(path)
+            with timings.ocr():
+                text = await extract_text_from_receipt(path)
         except OCRUnavailableError as exc:
             logger.warning(
                 "OCR unavailable, reading the image with the vision model",
@@ -85,7 +121,9 @@ class ReceiptProcessingService:
             text = None
 
         if text and text.strip():
-            return await self._read_text(receipt, text, categories, known_products)
+            return await self._read_text(
+                receipt, text, categories, known_products, timings
+            )
 
         if text is not None:
             logger.warning(
@@ -94,9 +132,10 @@ class ReceiptProcessingService:
             )
         image = await anyio.Path(path).read_bytes()
         # No text to fall back on: a failing vision call fails the receipt
-        extraction = await extract_from_image(
-            image, content_type_for(path), categories, known_products
-        )
+        with timings.llm():
+            extraction = await extract_from_image(
+                image, content_type_for(path), categories, known_products
+            )
         return None, extraction, None
 
     async def _read_text(
@@ -105,6 +144,7 @@ class ReceiptProcessingService:
         text: str,
         categories: list[CategoryOption],
         known_products: list[str],
+        timings: ReadTimings,
     ) -> tuple[str, ReceiptExtraction, str | None]:
         """Extract with the model; if it fails or finds nothing, use the heuristic parser.
 
@@ -112,7 +152,8 @@ class ReceiptProcessingService:
         stands and the receipt fails as before (MVP-R3b).
         """
         try:
-            extraction = await extract_from_text(text, categories, known_products)
+            with timings.llm():
+                extraction = await extract_from_text(text, categories, known_products)
         except LLMExtractionError as exc:
             fallback = parse_receipt_text(text)
             if not fallback.lines:
@@ -136,6 +177,8 @@ class ReceiptProcessingService:
     async def process_receipt(self, receipt: Receipt) -> ProcessingResult:
         """Process a receipt through the full pipeline and update the record."""
         row: Any = receipt  # Column-typed model: assign plain values
+        timings = ReadTimings()
+        started = time.monotonic()
         try:
             if receipt.processing_status != ReceiptStatus.PROCESSING:
                 # Called directly rather than through the queue worker, which already claimed it
@@ -154,7 +197,7 @@ class ReceiptProcessingService:
             # Load the catalog first: its generic names are offered to the model for reuse
             await self.matching_service.prepare(None)
             ocr_text, extraction, fallback_reason = await self._read_receipt(
-                receipt, categories, self.matching_service.product_names
+                receipt, categories, self.matching_service.product_names, timings
             )
 
             chain = normalize_store_chain(
@@ -215,9 +258,24 @@ class ReceiptProcessingService:
                 items_extracted=receipt.items_extracted,
                 items_matched=receipt.items_matched,
             )
+            ocr_seconds = round(timings.ocr_seconds, 1)
+            llm_seconds = round(timings.llm_seconds, 1)
+            total_seconds = round(time.monotonic() - started, 1)
+            # One line per receipt, with the numbers MVP-R4 records. The message repeats them
+            # because the console formatter only shows extras when logging as JSON.
             logger.info(
-                f"Receipt {receipt.id} processing completed via {extraction.method}: "
-                f"{receipt.items_extracted} extracted, {receipt.items_matched} matched"
+                f"Receipt {receipt.id} read via {extraction.method} in {total_seconds}s "
+                f"(OCR {ocr_seconds}s, model {llm_seconds}s): "
+                f"{receipt.items_extracted} extracted, {receipt.items_matched} matched",
+                extra={
+                    "receipt_id": str(receipt.id),
+                    "method": extraction.method,
+                    "ocr_seconds": ocr_seconds,
+                    "llm_seconds": llm_seconds,
+                    "total_seconds": total_seconds,
+                    "items_extracted": receipt.items_extracted,
+                    "items_matched": receipt.items_matched,
+                },
             )
 
             return ProcessingResult(
@@ -241,7 +299,17 @@ class ReceiptProcessingService:
             await broadcast_receipt_status(
                 receipt_id=receipt.id, status=ReceiptStatus.FAILED, error=error_msg
             )
-            logger.error(error_msg, exc_info=True)
+            logger.error(
+                error_msg,
+                exc_info=True,
+                extra={
+                    "receipt_id": str(receipt.id),
+                    "error": error_msg,
+                    "ocr_seconds": round(timings.ocr_seconds, 1),
+                    "llm_seconds": round(timings.llm_seconds, 1),
+                    "total_seconds": round(time.monotonic() - started, 1),
+                },
+            )
 
             return ProcessingResult(
                 success=False,

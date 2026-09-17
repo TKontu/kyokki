@@ -7,6 +7,14 @@ from pathlib import Path
 
 from .config import settings
 
+# Everything the logging module itself puts on a record. Anything else came from a
+# caller's ``extra=`` and is worth publishing: MVP-R4 reads per-receipt timings this way.
+_RESERVED_FIELDS = frozenset(
+    logging.LogRecord(
+        name="", level=0, pathname="", lineno=0, msg="", args=(), exc_info=None
+    ).__dict__
+) | {"asctime", "message", "taskName"}
+
 
 class JSONFormatter(logging.Formatter):
     """Custom JSON formatter for structured logging"""
@@ -22,18 +30,15 @@ class JSONFormatter(logging.Formatter):
             "line": record.lineno,
         }
 
-        # Add extra fields if they exist
-        if hasattr(record, "user_id"):
-            log_entry["user_id"] = record.user_id
-
-        if hasattr(record, "request_id"):
-            log_entry["request_id"] = record.request_id
-
-        if hasattr(record, "operation"):
-            log_entry["operation"] = record.operation
-
-        if hasattr(record, "duration"):
-            log_entry["duration_ms"] = record.duration
+        # Publish whatever the caller passed in ``extra=``; ``log_performance`` measures in
+        # milliseconds and keeps its published name.
+        for key, value in record.__dict__.items():
+            if key in _RESERVED_FIELDS or key.startswith("_"):
+                continue
+            if key == "duration":
+                log_entry["duration_ms"] = value
+            else:
+                log_entry[key] = value
 
         # Add exception info if present
         if record.exc_info:
@@ -43,7 +48,8 @@ class JSONFormatter(logging.Formatter):
         if record.stack_info:
             log_entry["stack_info"] = self.formatStack(record.stack_info)
 
-        return json.dumps(log_entry, ensure_ascii=False)
+        # default=str: an unserialisable extra must not lose the whole line
+        return json.dumps(log_entry, ensure_ascii=False, default=str)
 
 
 def setup_logging() -> None:

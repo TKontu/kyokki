@@ -608,3 +608,73 @@ class TestDuplicateUploads:
             "message": "Receipt already uploaded",
             "receipt_id": first.json()["id"],
         }
+
+
+class TestReceiptsListPayload:
+    """MVP-R8: the list is polled from the iPad, so it stays small and pageable."""
+
+    async def _upload(self, client: AsyncClient, n: int) -> None:
+        files = {
+            "file": (f"r{n}.jpg", BytesIO(f"fake image {n}".encode()), "image/jpeg")
+        }
+        await client.post("/api/receipts/scan", files=files)
+
+    async def test_list_leaves_out_the_ocr_payload(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        """Full OCR text and items are tens of kilobytes each; the list must not carry them."""
+        await self._upload(client, 0)
+
+        listed = (await client.get("/api/receipts")).json()
+
+        assert len(listed) == 1
+        summary = listed[0]
+        for heavy in ("ocr_raw_text", "ocr_structured", "items"):
+            assert heavy not in summary
+        # What the list page actually renders is still there
+        for field in (
+            "id",
+            "store_chain",
+            "purchase_date",
+            "processing_status",
+            "error",
+            "items_extracted",
+            "items_matched",
+            "extraction_method",
+            "created_at",
+        ):
+            assert field in summary
+
+    async def test_detail_still_carries_the_full_payload(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        """The review page needs the items; only the list was slimmed."""
+        await self._upload(client, 0)
+        receipt_id = (await client.get("/api/receipts")).json()[0]["id"]
+
+        detail = (await client.get(f"/api/receipts/{receipt_id}")).json()
+
+        assert "items" in detail
+        assert "ocr_raw_text" in detail
+
+    async def test_limit_and_offset_page_through_newest_first(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        for n in range(3):
+            await self._upload(client, n)
+
+        everything = (await client.get("/api/receipts")).json()
+        first = (await client.get("/api/receipts?limit=2")).json()
+        rest = (await client.get("/api/receipts?limit=2&offset=2")).json()
+
+        assert [r["id"] for r in first] == [r["id"] for r in everything[:2]]
+        assert [r["id"] for r in rest] == [r["id"] for r in everything[2:]]
+
+    @pytest.mark.parametrize("query", ["limit=0", "limit=201", "offset=-1"])
+    async def test_rejects_an_out_of_range_page(
+        self, client: AsyncClient, test_db: AsyncSession, query: str
+    ) -> None:
+        """An unbounded list would ship every receipt ever read."""
+        response = await client.get(f"/api/receipts?{query}")
+
+        assert response.status_code == 422

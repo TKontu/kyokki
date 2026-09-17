@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import Link from 'next/link'
 import {
   ConsumptionSheet,
   InventoryList,
@@ -28,18 +27,10 @@ export default function Home() {
   const startEditing = (id: string) => setEditing(items?.find((item) => item.id === id) ?? null)
 
   return (
-    <div className="min-h-screen bg-ui-bg dark:bg-ui-dark-bg">
+    <div>
       <header className="px-6 py-4 border-b border-ui-border dark:border-ui-dark-border flex items-center justify-between">
         <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">Kyokki</h1>
-        <div className="flex items-center gap-4">
-          <Link
-            href="/components-demo"
-            className="text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary hover:underline"
-          >
-            Components
-          </Link>
-          <Button onClick={() => setAdding(true)}>+ Add</Button>
-        </div>
+        <Button onClick={() => setAdding(true)}>+ Add</Button>
       </header>
       <main className="px-6 py-4">
         <ReceiptsBanner />

@@ -9,15 +9,16 @@
 import React from 'react'
 import Link from 'next/link'
 import { isBeingRead, useReceiptList } from '@/hooks/useReceipts'
-import type { Receipt } from '@/types/receipt'
+import type { ReceiptSummary } from '@/types/receipt'
 
 const boxClass =
   'mb-4 flex min-h-touch items-center gap-2 rounded-ui border px-4 py-3 text-base ' +
   'border-ui-border dark:border-ui-dark-border bg-ui-bg-secondary dark:bg-ui-dark-bg-secondary ' +
   'text-ui-text dark:text-ui-dark-text'
 
-function newest(receipts: Receipt[]): Receipt {
-  return [...receipts].sort((a, b) => b.created_at.localeCompare(a.created_at))[0]
+/** One receipt opens straight away; several are worth choosing between (MVP-R8). */
+function destination(receipts: ReceiptSummary[]): string {
+  return receipts.length === 1 ? `/receipt/${receipts[0].id}` : '/receipts'
 }
 
 export function ReceiptsBanner() {
@@ -31,7 +32,7 @@ export function ReceiptsBanner() {
   if (waiting.length) {
     const noun = waiting.length === 1 ? 'receipt' : 'receipts'
     return (
-      <Link href={`/receipt/${newest(waiting).id}`} className={`${boxClass} hover:underline`}>
+      <Link href={destination(waiting)} className={`${boxClass} hover:underline`}>
         <span aria-hidden="true">🧾</span>
         {`${waiting.length} ${noun} waiting to review`}
       </Link>
@@ -49,7 +50,7 @@ export function ReceiptsBanner() {
 
   if (failed.length) {
     return (
-      <Link href={`/receipt/${newest(failed).id}`} className={`${boxClass} hover:underline`}>
+      <Link href={destination(failed)} className={`${boxClass} hover:underline`}>
         <span aria-hidden="true">⚠️</span>
         {failed.length === 1
           ? 'A receipt could not be read'

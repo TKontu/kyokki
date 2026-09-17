@@ -73,9 +73,20 @@ export interface ReceiptUpdate {
   processing_status?: ReceiptStatus
 }
 
+/**
+ * One receipt as the list returns it (MVP-R8). The list is polled, so the API leaves out the
+ * OCR text, the stored extraction and the items; open a receipt to get those.
+ */
+export type ReceiptSummary = Omit<
+  Receipt,
+  'image_path' | 'batch_id' | 'ocr_raw_text' | 'ocr_structured' | 'items'
+>
+
 export interface ReceiptListParams {
   status?: ReceiptStatus
   store?: string
+  limit?: number
+  offset?: number
 }
 
 /**

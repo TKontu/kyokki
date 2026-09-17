@@ -4,7 +4,16 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import handle_integrity_errors
@@ -15,6 +24,7 @@ from app.schemas.receipt import (
     ReceiptConfirmResponse,
     ReceiptResponse,
     ReceiptStatus,
+    ReceiptSummary,
 )
 from app.services import receipt_confirm, receipt_queue
 from app.services.receipt_ingest import UnsupportedReceiptType, ingest_receipt_file
@@ -100,29 +110,38 @@ async def get_receipt(
     return receipt
 
 
-@router.get("", response_model=list[ReceiptResponse])
+@router.get("", response_model=list[ReceiptSummary])
 async def list_receipts(
     status: ReceiptStatus | None = None,
     store: str | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-) -> list[ReceiptResponse]:
-    """Get all receipts with optional filtering.
+) -> list[ReceiptSummary]:
+    """Get a page of receipts, newest first.
+
+    The response leaves out the OCR text and the extracted items: the iPad polls this list,
+    and the review page fetches the receipt it opens.
 
     Args:
         status: Optional filter by processing status; unknown values are rejected (422).
         store: Optional filter by store_chain.
+        limit: Page size, 1-200.
+        offset: How many of the newest receipts to skip.
         db: Database session.
 
     Returns:
-        List of receipts sorted by created_at (most recent first).
+        List of receipt summaries sorted by created_at (most recent first).
     """
     await receipt_queue.fail_stale(db)
     receipts = await crud_receipt.get_receipts(
         db,
         status=status,
         store_chain=store,
+        limit=limit,
+        offset=offset,
     )
-    return receipts
+    return [ReceiptSummary.model_validate(r) for r in receipts]
 
 
 @router.post(

@@ -1,10 +1,12 @@
 """Tests for receipt processing service (OCR or vision → LLM extraction → matching)."""
 
+import logging
 from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+import anyio
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -594,3 +596,79 @@ class TestProcessingResult:
             error=None,
         )
         assert result.extraction is extraction
+
+
+class TestTimingLog:
+    """MVP-R4 is measured from the logs, so every read emits its own numbers."""
+
+    @staticmethod
+    def _read_line(caplog) -> object:
+        lines = [r for r in caplog.records if hasattr(r, "total_seconds")]
+        assert len(lines) == 1, [r.getMessage() for r in caplog.records]
+        return lines[0]
+
+    async def test_a_finished_receipt_logs_its_own_numbers(
+        self, service, pdf_receipt, sample_category, caplog
+    ):
+        caplog.set_level(logging.INFO, logger="app.services.receipt_processing")
+
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction()),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            result = await service.process_receipt(pdf_receipt)
+
+        assert result.success is True
+        line = self._read_line(caplog)
+        assert line.receipt_id == str(pdf_receipt.id)
+        assert line.method == "text"
+        assert line.items_extracted == 2
+        assert line.items_matched == 0
+        # Both slow steps are timed separately: R4 records OCR time and LLM time per receipt
+        assert line.ocr_seconds >= 0
+        assert line.llm_seconds >= 0
+        assert line.total_seconds >= line.ocr_seconds + line.llm_seconds
+
+    async def test_the_vision_path_counts_as_model_time(
+        self, service, image_receipt, sample_category, caplog
+    ):
+        caplog.set_level(logging.INFO, logger="app.services.receipt_processing")
+
+        async def slow_vision(*args, **kwargs):
+            # Timings are logged to a tenth of a second; a real vision call takes ~60
+            await anyio.sleep(0.15)
+            return _extraction(method="vision")
+
+        with (
+            patch(OCR, new_callable=AsyncMock, side_effect=OCRUnavailableError("down")),
+            patch(TEXT, new_callable=AsyncMock),
+            patch(VISION, new_callable=AsyncMock, side_effect=slow_vision),
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is True
+        line = self._read_line(caplog)
+        assert line.method == "vision"
+        assert line.llm_seconds >= 0.1
+        assert line.ocr_seconds == 0.0
+
+    async def test_a_failed_receipt_still_reports_where_the_time_went(
+        self, service, pdf_receipt, sample_category, caplog
+    ):
+        caplog.set_level(logging.INFO, logger="app.services.receipt_processing")
+
+        with (
+            patch(
+                OCR, new_callable=AsyncMock, side_effect=RuntimeError("MinerU is down")
+            ),
+            patch(TEXT, new_callable=AsyncMock),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            result = await service.process_receipt(pdf_receipt)
+
+        assert result.success is False
+        line = self._read_line(caplog)
+        assert line.receipt_id == str(pdf_receipt.id)
+        assert "MinerU is down" in line.error
+        assert line.total_seconds >= 0
