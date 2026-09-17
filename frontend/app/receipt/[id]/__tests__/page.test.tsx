@@ -35,6 +35,7 @@ function item(index: number, overrides: Partial<ExtractedItem> = {}): ExtractedI
     piece_grams: null,
     shelf_life_days: null,
     opened_shelf_life_days: null,
+    non_food: false,
     printed_quantity: null,
     printed_unit: null,
     storage_type: 'refrigerator',
@@ -146,6 +147,7 @@ describe('ReceiptReviewPage', () => {
 
     await waitFor(() => expect(confirms).toHaveLength(1))
     expect(confirms[0]).toEqual({
+      non_food_indexes: [],
       items: [
         { index: 0, product_id: 'p-milk', quantity: 1, unit: 'pcs', purchase_date: '2026-09-02' },
         { index: 1, name: 'Generic 1', category: 'dairy', quantity: 1, unit: 'pcs', purchase_date: '2026-09-02' },
@@ -293,6 +295,80 @@ describe('ReceiptReviewPage', () => {
 
     await screen.findByLabelText('Quantity')
     expect(screen.queryByText(/→/)).not.toBeInTheDocument()
+  })
+
+  it('folds household lines away instead of listing them', async () => {
+    // Q1: nine dead rows to scroll past every week is the friction
+    mockApi(
+      receipt({}, [
+        item(0),
+        item(1, {
+          name: 'KOMPOSTOINTIPUSSI PAPERI',
+          generic_name: 'Compost bag',
+          suggested_category: null,
+          non_food: true,
+        }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(rows()).toHaveLength(1)
+    expect(screen.getByText(/1 household item · Compost bag/)).toBeInTheDocument()
+  })
+
+  it('shows household lines again on request', async () => {
+    mockApi(
+      receipt({}, [
+        item(0),
+        item(1, { generic_name: 'Compost bag', suggested_category: null, non_food: true }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }))
+
+    expect(rows()).toHaveLength(2)
+  })
+
+  it('remembers the household lines when confirming', async () => {
+    const confirms = mockApi(
+      receipt({}, [
+        item(0),
+        item(1, { generic_name: 'Compost bag', suggested_category: null, non_food: true }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect(confirms[0].non_food_indexes).toEqual([1])
+    expect((confirms[0] as { items: { index: number }[] }).items.map((i) => i.index)).toEqual([0])
+  })
+
+  it('a household line the cook puts back is not remembered', async () => {
+    const confirms = mockApi(
+      receipt({}, [
+        item(0),
+        item(1, { generic_name: 'Compost bag', suggested_category: null, non_food: true }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }))
+    // Giving it a category is how the cook says "this one really is food"
+    fireEvent.change(within(rows()[1]).getByLabelText('Category'), {
+      target: { value: 'dairy' },
+    })
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect(confirms[0].non_food_indexes).toEqual([])
+    expect((confirms[0] as { items: { index: number }[] }).items).toHaveLength(2)
   })
 
   it('renders and confirms a long receipt', async () => {

@@ -46,6 +46,10 @@ _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 # Catalog names offered to the model so equivalent products keep one name; bounds the prompt
 MAX_KNOWN_PRODUCTS = 300
 
+# What the model answers for c when a line is not food at all. Deliberately not a category:
+# a category would be a legal pick on the review screen and would put towels into stock (Q1).
+NON_FOOD = "household"
+
 _INSTRUCTIONS = """Extract every purchased product from this grocery receipt.
 
 Rules:
@@ -57,8 +61,8 @@ Rules:
 - Always write g in the singular, whatever the amount: "Apple", "Carrot", "Banana", never
   "Apples" or "Carrots". One product is one name.
 - Household and cleaning products get an everyday English name too: SIENILIINA ->
-  "Cleaning cloth"; PYYKKIETIKKA -> "Laundry vinegar". Their c is usually null; food keeps its
-  category as below.{known_products}
+  "Cleaning cloth"; PYYKKIETIKKA -> "Laundry vinegar". Answer household for their c - they are
+  not food and do not go in the fridge. Food keeps its category as below.{known_products}
 - A following line like "3 KPL 1,88 €/KPL" means q = 3 for the product above it.
 - A following line like "0,386 KG 3,89 €/KG" means w = 0.386 (kg) for the product above it.
 - Otherwise q = 1 and w = null.
@@ -147,7 +151,9 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
                         "g": {"type": "string"},
                         "q": {"type": "number"},
                         "w": {"type": ["number", "null"]},
-                        "c": {"enum": [*category_ids, None]},
+                        # "household" is a sentinel, not a category: it marks a line as
+                        # not food rather than filing it anywhere (Q1)
+                        "c": {"enum": [*category_ids, NON_FOOD, None]},
                         "pw": {"type": ["number", "null"]},
                         "sl": {"type": ["integer", "null"]},
                         "os": {"type": ["integer", "null"]},
@@ -213,11 +219,9 @@ def parse_completion(
         if not name:
             continue
         raw_category = entry.get("c")
-        category = (
-            by_fold.get(str(raw_category).casefold())
-            if isinstance(raw_category, str)
-            else None
-        )
+        folded = str(raw_category).casefold() if isinstance(raw_category, str) else ""
+        non_food = folded == NON_FOOD
+        category = None if non_food else by_fold.get(folded)
         quantity = entry.get("q")
         try:
             lines.append(
@@ -230,6 +234,7 @@ def parse_completion(
                     piece_grams=_positive(entry.get("pw")),
                     shelf_life_days=_positive_int(entry.get("sl")),
                     opened_shelf_life_days=_positive_int(entry.get("os")),
+                    non_food=non_food,
                 )
             )
         except ValidationError as exc:

@@ -63,6 +63,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
   // Edits live here, keyed by line index; a row not touched yet uses the read values.
   const [edits, setEdits] = useState<Record<number, Partial<ReviewRow>>>({})
+  const [showHousehold, setShowHousehold] = useState(false)
 
   const sortedCategories = useMemo(
     () => [...(categories ?? [])].sort((a, b) => a.sort_order - b.sort_order),
@@ -149,8 +150,12 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
     )
   }
 
+  // Household lines are folded away rather than scrolled past every week (Q1). Expanding
+  // them puts them back as ordinary rows, so a misjudgement is one tap to fix.
+  const household = rows.filter(({ item, row }) => item.non_food && !row.include)
+  const visible = rows.filter((entry) => !household.includes(entry))
   const included = rows.filter(({ row }) => row.include)
-  const skipped = rows.length - included.length
+  const skipped = visible.length - included.length
   const purchaseDate = receipt.purchase_date ?? toISODate(new Date())
 
   const submit = () => {
@@ -174,7 +179,10 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
     )
 
     confirm.mutate(
-      { id: receipt.id, data: { items } },
+      {
+        id: receipt.id,
+        data: { items, non_food_indexes: household.map(({ item }) => item.index) },
+      },
       {
         onSuccess: (result) => {
           const noun = result.items_created === 1 ? 'item' : 'items'
@@ -225,7 +233,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
       <main className={`${mainClass} pb-32`}>
         <ul className="flex flex-col gap-3">
-          {rows.map(({ item, row }) => (
+          {(showHousehold ? rows : visible).map(({ item, row }) => (
             <li key={item.index}>
               <ReceiptItemRow
                 item={item}
@@ -244,9 +252,25 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
       </main>
 
       <footer className="fixed inset-x-0 bottom-0 flex items-center justify-between gap-4 border-t border-ui-border bg-white px-6 py-3 pb-[env(safe-area-inset-bottom)] dark:border-ui-dark-border dark:bg-ui-dark-bg">
-        <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-          {skipped > 0 ? `${skipped} skipped` : 'Nothing skipped'}
-        </p>
+        <div className="min-w-0 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
+          <p>{skipped > 0 ? `${skipped} skipped` : 'Nothing skipped'}</p>
+          {household.length > 0 && (
+            <p className="truncate">
+              {`${household.length} household ${household.length === 1 ? 'item' : 'items'} · `}
+              {household
+                .map(({ item, row }) => row.name || item.generic_name || item.name)
+                .join(', ')}
+              {' · '}
+              <button
+                type="button"
+                className="underline"
+                onClick={() => setShowHousehold((shown) => !shown)}
+              >
+                {showHousehold ? 'Hide' : 'Show'}
+              </button>
+            </p>
+          )}
+        </div>
         <Button
           size="lg"
           disabled={included.length === 0 || !quantitiesValid || confirm.isPending}

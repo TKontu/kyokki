@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
 from app.models.inventory_item import InventoryItem
+from app.models.non_food_name import NonFoodName
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
 from app.models.store_product_alias import StoreProductAlias
@@ -439,3 +440,35 @@ class TestConfirmedItemSchema:
     def test_location_is_validated(self):
         with pytest.raises(ValidationError):
             _item(index=0, location="garage")
+
+
+class TestNonFoodMemory:
+    """Q1: the cook should not be asked about the same paper towels every week."""
+
+    async def _confirm(self, db_session, receipt, items, non_food_indexes):
+        return await confirm_receipt(db_session, receipt.id, items, non_food_indexes)
+
+    async def test_a_marked_line_is_remembered_by_its_printed_name(
+        self, db_session: AsyncSession, receipt, categories
+    ):
+        await self._confirm(db_session, receipt, [], [2])  # MUOVIKASSI
+
+        rows = (await db_session.execute(select(NonFoodName))).scalars().all()
+        assert [(r.receipt_name, r.store_chain, r.times_seen) for r in rows] == [
+            ("MUOVIKASSI", "s-group", 1)
+        ]
+
+    async def test_a_line_merely_skipped_teaches_nothing(
+        self, db_session: AsyncSession, receipt, categories
+    ):
+        """Not buying something for the fridge is not the same as saying it is not food."""
+        await self._confirm(db_session, receipt, [], [])
+
+        assert (await db_session.execute(select(NonFoodName))).scalars().all() == []
+
+    async def test_an_index_off_the_end_is_ignored(
+        self, db_session: AsyncSession, receipt, categories
+    ):
+        await self._confirm(db_session, receipt, [], [99, -1])
+
+        assert (await db_session.execute(select(NonFoodName))).scalars().all() == []

@@ -3,6 +3,7 @@
 from app.models.category import Category
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
+from app.models.non_food_name import NonFoodName
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
 from app.models.shopping_list_item import ShoppingListItem
@@ -16,4 +17,5 @@ __all__ = [
     "InventoryItem",
     "ConsumptionLog",
     "ShoppingListItem",
+    "NonFoodName",
 ]

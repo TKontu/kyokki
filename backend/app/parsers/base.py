@@ -39,6 +39,10 @@ class ExtractedLine(BaseModel):
         default=None,
         description="Typical days this keeps once opened, for things that are opened (Q5)",
     )
+    non_food: bool = Field(
+        default=False,
+        description="Household or cleaning, not something that belongs in the fridge (Q1)",
+    )
 
 
 class ReceiptExtraction(BaseModel):

@@ -215,7 +215,10 @@ async def confirm_receipt(
     try:
         async with handle_integrity_errors():
             result = await receipt_confirm.confirm_receipt(
-                db, receipt_id, confirm_request.items
+                db,
+                receipt_id,
+                confirm_request.items,
+                confirm_request.non_food_indexes,
             )
     except receipt_confirm.ReceiptNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

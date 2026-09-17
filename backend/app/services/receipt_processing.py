@@ -32,7 +32,12 @@ from app.services.llm_extractor import (
     extract_from_image,
     extract_from_text,
 )
-from app.services.matching_service import MatchingService, MatchResult
+from app.services.matching_service import (
+    MatchingService,
+    MatchResult,
+    normalize_receipt_name,
+)
+from app.services.non_food import known_non_food
 from app.services.ocr_service import (
     OCRUnavailableError,
     content_type_for,
@@ -196,6 +201,8 @@ class ReceiptProcessingService:
             ]
             # Load the catalog first: its generic names are offered to the model for reuse
             await self.matching_service.prepare(None)
+            # Names the cook has already called non-food; they win over a model that wavers
+            remembered = await known_non_food(self.db, None)
             ocr_text, extraction, fallback_reason = await self._read_receipt(
                 receipt, categories, self.matching_service.product_names, timings
             )
@@ -216,6 +223,8 @@ class ReceiptProcessingService:
                     generic_name=line.generic_name,
                 )
                 stored = line.model_dump(mode="json")
+                if normalize_receipt_name(line.name) in remembered:
+                    stored["non_food"] = True
                 if match and match.product.avg_piece_grams is not None:
                     # The catalog already knows what one of these weighs; trust it over a
                     # fresh guess from the model (Q2).
