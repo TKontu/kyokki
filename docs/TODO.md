@@ -3,6 +3,10 @@
 > **Priority rule (2026-09-13):** everything is ordered by distance to *MVP running on the
 > kitchen iPad*. Work the Critical Path top to bottom. Items under "Deferred" are not to be
 > started until the MVP is live on the device, regardless of how far along their specs are.
+>
+> **Amendment (2026-09-17):** the reviews under `docs/reviews/` added a hardening track after
+> MVP-P3 in this file. Its wave H0 is MVP work and runs before the acceptance week; wave H1
+> repairs MVP-R1b/R2 matching behaviour; H2 to H4 follow MVP-P3 and precede the agent track.
 
 ## 🎯 Milestone: MVP live on the iPad
 
@@ -738,6 +742,99 @@ away, with no port forwarding.
 #### MVP-P3 — Acceptance week
 - Use it for a week. Scan every receipt, consume from the iPad, fix stock by hand when wrong.
   Log friction in this file under "Post-MVP frontier". Tick the eight acceptance items above.
+- Wave H0 of the hardening track below runs before or alongside this week: it removes the
+  data-loss and dead-display failures the reviews found, which would otherwise be logged as
+  friction and then have to be fixed under acceptance pressure.
+
+### Hardening track — findings of the 2026-09-17 reviews
+Five reviews traced every surface at `23b83ad`: `docs/reviews/pipeline-receipt-processing.md`,
+`pipeline-receipt-confirm.md`, `pipeline-foundations.md`, `pipeline-foundations-2.md` and
+`pipeline-foundations-3.md`. Each finding there has a `file:line` and a failure scenario; the
+items here are the PR-sized work that closes them, grouped into waves by what they unblock.
+The matching redesign has its own spec, `docs/PRODUCT_RESOLUTION_SPEC.md`; wave H1 is that
+spec's PR-1 to PR-7 under stable ids.
+
+How this fits the priority rule: **H0 is MVP work** (the acceptance week cannot be run safely
+without it), **H1 repairs MVP-R1b/R2 behaviour** (the matcher pre-selects wrong products and
+confirm makes that permanent), and **H2 to H4 come after MVP-P3** unless the acceptance week
+hits one of them, in which case that item moves up. The agent track (`docs/agent_TODO.md`)
+starts after H2, because it needs the status machine, the vocabularies and the access key.
+
+#### Decisions the track needs (operator-gated)
+
+| ID | Question | Blocks | Recommended | Status |
+| --- | --- | --- | --- | --- |
+| DEC-5 | Access control for the LAN API: a shared secret header checked on every mutating route and the WebSocket (one env var, sent by the frontend proxy and the CLI), or Traefik forward-auth later, or stay open | H31, AG1 | shared header now; forward-auth when HTTPS lands | open |
+| DEC-6 | Next.js major upgrade (14 is unsupported; 1 critical, 2 high on paths this app has): before or after the acceptance week | H33 | right after P3; React 19 and the caching changes should not land during acceptance | open |
+| DEC-7 | Scanner and Open Food Facts surface (~700 lines, no frontend caller, three known 500s): quarantine behind a flag, or route through `ProductResolver` now | H41 | quarantine until GS1/barcode work starts | open |
+| DEC-8 | Receipt retention: delete the file N days after confirm and keep the structured lines; keep or drop `ocr_raw_text` after confirm | H35 | 90 days, drop the raw text on file deletion | open |
+| DEC-9 | Categories: seed-only (remove POST and DELETE, storage stays a code map) or user data (storage becomes a column, delete becomes RESTRICT) | H22 | seed-only | open |
+| DEC-10 | Expiry when an item is moved to the freezer: leave the product's shelf life (today: mince frozen on day one reads expired on day six), or a frozen-shelf-life rule per category | none yet | defer; log it in the acceptance week if it bites | open |
+
+#### Wave H0 — before the acceptance week
+
+| ID | Side | Increment | Est. | Closes |
+| --- | --- | --- | --- | --- |
+| H01 | backend | **Test database isolation.** `conftest` derives `<POSTGRES_DB>_test`, creates it if missing, runs each test in a rolled-back transaction, imports settings lazily; `requires_db` applied automatically from fixture use in `pytest_collection_modifyitems`, the four decorative markers either meaningful or gone | 3h | F2 Critical #1, F3 Critical #2, F3 misjudgement 8 |
+| H02 | repo | **Settings and commands that work on the workstation.** `extra="ignore"` in `Settings`; `ENV_FILE` moves to `backend/.env` with `backend/.env.example`; the CLAUDE.md table pins the interpreter (`backend/.venv` via `python -m`); `typecheck` compares against a committed baseline until H21 takes it to zero; the three undocumented settings get example lines | 2h | F1 Important (settings echo values), F3 Critical #2, F3 Minor (env examples) |
+| H03 | infra | **Deploy runbook and liveness.** `--env-file` on the Telegram steps, the volumes claim fixed, `/health` checks Postgres and Redis with a 1 s budget, `kyokki-api` gets a healthcheck and `frontend` waits on it, `TZ=Europe/Helsinki` on every backend service | 2h | F3 Critical #1, F2 Minor (`/health`), F1 Minor (healthcheck, TZ) |
+| H04 | frontend | **The display cannot go blank.** `error.tsx` and `global-error.tsx`; `StatusBadge` and every vocabulary-indexed map render unknown values as their raw string; `normalizeInventoryItem` narrows at the API boundary | 3h | F2 Critical #3, F1 Minor (no error boundary), F2 misjudgement 2 |
+| H05 | backend | **No 500 on a reachable route.** Shopping and categories under `handle_integrity_errors`; product and category DELETE answer 409 naming what references them; OFF category ids mapped to seeded ids | 3h | F1 Critical #1-#3, F2 Critical #2 |
+| H06 | frontend | **Green, not flaky.** Fake timers around the search debounce, `findBy` timeouts above debounce plus msw latency, `--detectOpenHandles` to find the leaked worker, real sleeps removed | 2h | F3 Critical #3, F3 Minor (sleeps) |
+| H07 | backend | **Receipt pipeline seams.** `enqueue` is a conditional `UPDATE … WHERE processing_status IN (…)`; `/process` may re-read a completed receipt with zero lines; an image-only PDF goes through OCR then vision; the stored extension comes from the validated content type (also closes the NUL/long-suffix 500); upload byte cap at the API | 4h | Processing Important #1-#2, Confirm Important #1, F3 Minor (suffix) |
+| H08 | both | **A receipt can always be finished.** Confirm with zero included lines is allowed and dismisses the receipt; a remembered non-food line that the cook includes with an `index` deletes its `non_food_name` row; only lines the cook has seen folded are sent as `non_food_indexes` | 3h | F1 Important (undismissable), Confirm Important #2 |
+
+#### Wave H1 — product resolution (`docs/PRODUCT_RESOLUTION_SPEC.md`)
+
+| ID | Spec | Side | Increment | Est. | Depends on |
+| --- | --- | --- | --- | --- | --- |
+| H11 | PR-1 | backend | `product_name` table (canonical plus synonyms), unique normalised canonical name after a dedupe migration, `ProductResolver` resolves by name, confirm learns synonyms | 4h | — |
+| H12 | PR-2 | backend | `line_id` and `resolution` on stored lines; `ExtractedItem.match_source` becomes alias/name/selected/none plus `verified`; old blobs tolerated and tested | 3h | — |
+| H13 | PR-3 | backend | `product_resolution.py`: deterministic tiers, `pg_trgm` candidate retrieval, one selection call per receipt validated against the offered candidates; fuzzy decision path, `match_all`, `match_product` and `FUZZY_MATCH_THRESHOLD` removed | 8h | H11, H12 |
+| H14 | PR-4 | backend | Alias provenance (`source`), unique (chain, printed name), the learning table from spec 3.4, precedence verified before unverified | 3h | H13 |
+| H15 | PR-5 | frontend | Review row: provenance chip (known / auto), **Change** control on the existing product search with a "New product" entry, detach | 6h | H12, H14 |
+| H16 | PR-6 | backend | `POST /products/{id}/merge`; FKs to `product_master` become RESTRICT with a 409 naming the references (DEC-9 for categories) | 4h | H11 |
+| H17 | PR-7 | pipeline | Catalog list leaves the extraction prompt behind a setting; measured on the 49-line fixture; default once quality holds | 2h | H13 |
+| H18 | — | both | **Product editor**: rename, piece weight, shelf life, opened shelf life, unit; the Q2/Q4 leftover, and the only safe answer to a wrong first guess | 5h | H16 |
+
+#### Wave H2 — foundations: state, schema, types, dates
+
+| ID | Side | Increment | Est. | Closes |
+| --- | --- | --- | --- | --- |
+| H21 | backend | **Typed models.** `Mapped[]` and `DeclarativeBase`, the `row: Any` casts removed, mypy baseline to zero, CI gate fails on lint and type | 6h | F1 Important (CI gate), F1 misjudgement 4 |
+| H22 | backend | **Delete semantics.** Every FK gets an explicit rule (RESTRICT with 409, or cascade where history belongs to the parent); category API per DEC-9 | 3h | F1 Critical #1-#2, F1 misjudgement 5, F2 Minor (spices) |
+| H23 | backend | **One status machine.** `transition(item, event)` with an allowed-transition table: discard freezes quantity and blocks writes, correction above full re-labels, create enforces `current ≤ initial`, consume quantised to 2 dp with a unit and a zero-result refused, expiry ≥ purchase; `SELECT … FOR UPDATE` on consume and update | 6h | F1 Important (lost update), F2 Important #1-#2, F2 Minor (create, consume, expiry), F2 misjudgement 1 |
+| H24 | both | **Closed vocabularies.** One `StrEnum` per vocabulary (inventory status, expiry source, location, shopping priority and source) used by the schemas and the crud rules; the TS types regenerated or checked against the schemas in CI (`avg_piece_grams` added, phantom list params removed) | 3h | F1 Minor (free strings, types drift), F2 misjudgement 2 |
+| H25 | frontend | **One source of truth while a sheet is open.** Edit sheet diffs against the mounted snapshot; quick add derives location and unit from the resolved product, never from the chosen category, and hides "Create new" while the search is pending; the consumption mirror either follows the opened clock or stops predicting expiry | 4h | F2 Important #3, F2 Minor (quick add), F1 misjudgement 6 |
+| H26 | backend | **An honest model boundary.** Every failure at the boundary is an `LLMExtractionError` with a kind (transport, format, truncated); JSON found with `raw_decode`, `finish_reason == "length"` stored as such, `w`/`q` coerced like `pw`/`sl`, receipt text fenced as data | 3h | F2 Important (non-httpx errors), F2 Minor (extractor), F2 misjudgement 5 |
+| H27 | backend | **A structural heuristic parser.** A skipped line resets the current product, weights accept 1-3 decimals, `säästö` anchored to the loyalty forms, tests on the fixtures for each | 2h | F2 Important (deposit count), F2 Minor (parser) |
+| H28 | both | **Dates have an owner.** The client sends `opened_date`, `purchase_date` and the "today" it used; the server validates and stores; `dates.ts` parses `YYYY-MM-DD` as local; the expiry badge and the quick-add default agree with the server | 3h | F1 Minor (two clocks), F1 misjudgement 8 |
+
+#### Wave H3 — exposure, dependencies, retention
+
+| ID | Side | Increment | Est. | Closes |
+| --- | --- | --- | --- | --- |
+| H31 | both | **The LAN is not the boundary** (DEC-5). Shared secret header on every mutating route and the WebSocket handshake, `Origin` checked on the WebSocket, the upload route behind the same header, `API_PORT` no longer published by default (the frontend proxy is the door) | 4h | F3 Important (WebSocket, upload), F3 misjudgement 5, F1 Minor (API_PORT) |
+| H32 | repo | **Reproducible builds.** `uv lock` or `pip-compile` for the backend, exact pins for React and react-query, `pip-audit` and `npm audit --omit=dev` in CI, dev dependencies out of the prod image, `.dockerignore` in both packages, non-root user | 3h | F3 Important (unpinned), F2 Minor (Dockerfiles), F1 Minor (root) |
+| H33 | frontend | **Next.js 15/16** (DEC-6): React 19, async request APIs, caching defaults; the rewrite and the standalone Dockerfile re-verified; audit clean | 8h | F3 Important (Next 14 line) |
+| H34 | backend | **Bounded work per receipt.** Page cap and byte cap before parsing, pdf parsing in a subprocess with a timeout, Redis client with socket and connect timeouts, broadcasts fire-and-forget with a timeout | 4h | F3 Important (large PDF), F1 Minor (Redis), F3 misjudgement 6 |
+| H35 | both | **Things can be forgotten** (DEC-8). `DELETE /receipts/{id}`; a retention job that deletes the file N days after confirm; the Redis-listener log line carries type and id only; log rotation and a `pg_dump` plus `kyokki_data` backup script in the runbook | 4h | F3 Minor (retention, log payload), F1 Minor (backup), F3 misjudgement 7 |
+| H36 | operator | **Rotate and purge.** Postgres password and gateway key rotated on the homelab; `stack.env` purged from the public history (open since MVP-F1) | 1h | F3 Important (history) |
+
+#### Wave H4 — scanner, tests, docs, hygiene
+
+| ID | Side | Increment | Est. | Closes |
+| --- | --- | --- | --- | --- |
+| H41 | backend | **Scanner quarantine or repair** (DEC-7). Quarantine: `SCANNER_ENABLED=false` leaves the router unmounted and its tests behind a marker. Repair: route through `ProductResolver`, validate quantity > 0, fail the scan when the mode cannot be read, mode state in Postgres | 3h / 8h | F1 Important (scanner), F2 Important (scanner), F1 misjudgement 7, F2 misjudgement 4 |
+| H42 | backend | **Concurrency and tolerance tests.** Two sessions under `asyncio.gather` for `claim_next`, confirm and consume; `items_from_structured` on pre-R1b blobs; `requires_mineru` instead of bare skips; the Ollama integration tests deleted and the CI integration job made blocking | 4h | F3 Important (locks untested), F3 Minor (markers) |
+| H43 | docs | **One owner for status.** The sprint block owns what is built; the ARCHITECTURE as-built note rewritten and pointed at it; README features trimmed to what exists; the two style profiles rewritten for this codebase or deleted; SETUP_SUMMARY deleted; FRONTEND_PLAN and SCANNER_ARCHITECTURE get status banners; CLAUDE.md rules either made true (products and categories broadcast, categories use `handle_integrity_errors`, shopping validation moves to the schema) or reworded, with a grep check per rule in CI | 3h | F3 Important (docs), F3 misjudgements 1-2, F3 Minor (rules, layout, stale docs) |
+| H44 | repo | **Line endings.** `.gitattributes` with `* text=auto eol=lf`, one normalising commit | 1h | F3 Minor (CRLF) |
+| H45 | frontend | **A status surface for an unattended display.** A persistent banner for last sync, worker or gateway unreachable, and failed actions with a retry chip; toasts stay for the happy path; icon buttons named with the product; sheet focus lands on the primary action; empty-stock copy names the real ways in | 4h | F2 Minor (toast, a11y, copy), F2 misjudgement 8 |
+| H46 | backend | **A consumption history that can be read back.** Event vocabulary (consume, correct, discard, restore), `consumed_at` written, corrections logged, `meal_contexts` wired or dropped; prerequisite for post-MVP item 8 | 3h | F2 misjudgement 8 (log), F2 Minor (dead fields) |
+| H47 | backend | **Telegram hygiene.** Exit non-zero on the 409 conflict from a second instance, `failure_text` without gateway internals, a separate dev token documented | 1h | F2 Important (two instances), F2 Minor (failure text) |
+
+Report keys: Processing = `pipeline-receipt-processing.md`, Confirm = `pipeline-receipt-confirm.md`,
+F1 = `pipeline-foundations.md`, F2 = `pipeline-foundations-2.md`, F3 = `pipeline-foundations-3.md`.
 
 ### Post-MVP frontier (do not start before MVP-P3)
 **First after MVP-P3: agent interface track** (`docs/agent_TODO.md`, AG0–AG7, planned
@@ -748,9 +845,11 @@ alternative chosen in the AG0 spike against HowToCook granularity. It absorbs pa
 6 and 8 below: name-based consume is shared with Home Assistant, and shopping-list generation.
 
 Ordered by expected value once MVP is live.
-1. WebSocket live updates in the PWA (`services/websockets.py` already broadcasts).
-2. "Opened" tracking: consuming from sealed sets `opened_date` and switches to
-   `opened_shelf_life_days`.
+1. WebSocket live updates in the PWA (`services/websockets.py` already broadcasts). Needs H25
+   first: with push updates, a sheet holding a stale snapshot turns every edit into a lost
+   update. Also needs H31: the WebSocket has no origin check today.
+2. ~~"Opened" tracking~~ — done as Q5 (PR #49): consuming from sealed sets `opened_date` and
+   the opened clock shortens expiry.
 3. GS1 DataMatrix parser (`backend/app/services/gs1_parser.py` — no stub exists yet).
 4. Traefik + HTTPS, service worker, offline queue.
 5. Shopping list UI (API done, PR #14), minimum-stock auto-add.
@@ -882,8 +981,10 @@ The knowledge comes from the model at extraction time (operator ruling), not a s
   **Cost: 76.5 s of model time against a 60.2 s baseline, +27 %** — still inside R4's 120 s bar,
   but it is a real price for the two fields.
 - [ ] **Not done, and it bites:** nothing corrects a product's piece weight afterwards. Editing a
-  review row fixes that purchase, not the product, so a bad estimate keeps being applied. A small
-  product editor belongs with Q4; until then the escape hatch is deleting the product.
+  review row fixes that purchase, not the product, so a bad estimate keeps being applied. The
+  product editor is **H18** in the hardening track. Deleting the product is *not* an escape
+  hatch: any product that has been on a receipt has an alias row and the delete is a 500
+  (`pipeline-foundations.md`, Critical #1); H05 turns that into a 409 and H16 adds merge.
 - [ ] Also seen: the model gives no piece weight to mango or pomegranate, so those stay in grams.
   Arguable either way; the prompt's examples are apple, banana, onion and tomato.
 
@@ -1021,9 +1122,15 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Decisions: [x] DEC-1 (`dl|tsp|tbsp|g|pcs`)  [x] DEC-2 (JSON number)  [x] DEC-3 (same-origin rewrite, shipped in F2)  [x] DEC-4 (not needed, R0 passed)
 - Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [x] R2 (PR #37)  [x] C1 (PR #28)  [x] C2 (PR #29)
 - Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [x] S3 (PR #39)  [x] S4 (PR #41)  [x] R3 (PR #38)  [x] R3b (PR #42)  [ ] R4 (measurable now; needs 5 real receipts)
-- Wave 4: [x] R5 (PR #45)  [x] R6 (PR open)  [x] R7 (PR #45)  [x] R8 (PR open)
+- Wave 4: [x] R5 (PR #45)  [x] R6 (PR #46)  [x] R7 (PR #45)  [x] R8 (PR #46)
 - Wave 5: [x] P1 (PR #46)  [x] P2 (PR #47)
-- Wave 6: [ ] P3 acceptance
+- Friction Q1-Q6: [x] Q2/Q3/Q6 (PR #48)  [x] Q4/Q5 (PR #49)  [x] Q1 (PR #50)  [ ] product editor (now H18)
+- Reviews 2026-09-17: five reports under `docs/reviews/`, hardening track H0-H4 added above, `docs/PRODUCT_RESOLUTION_SPEC.md` written
+- Hardening H0 (before P3): [ ] H01  [ ] H02  [ ] H03  [ ] H04  [ ] H05  [ ] H06  [ ] H07  [ ] H08
+- Decisions: [ ] DEC-5 access  [ ] DEC-6 Next.js  [ ] DEC-7 scanner  [ ] DEC-8 retention  [ ] DEC-9 categories  [ ] DEC-10 freezer expiry
+- Wave 6: [ ] P3 acceptance (with H0)
+- Hardening H1 resolution: [ ] H11  [ ] H12  [ ] H13  [ ] H14  [ ] H15  [ ] H16  [ ] H17  [ ] H18
+- Hardening H2-H4: after P3, before the agent track
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery

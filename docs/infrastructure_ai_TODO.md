@@ -20,9 +20,26 @@
 - Works with any store/language
 
 **⏳ Pending**
-- Traefik SSL setup
-- Product matching implementation (RapidFuzz)
-- Celery task integration
+- Traefik SSL setup (post-MVP item 4; DEC-5 decides the interim access control)
+- ~~Product matching implementation (RapidFuzz)~~ shipped in MVP-R1b and being replaced by
+  `docs/PRODUCT_RESOLUTION_SPEC.md` (hardening H11-H17)
+- ~~Celery task integration~~ Celery was removed in MVP-F2; the receipt queue is Postgres plus
+  `python -m app.worker` (MVP-R3)
+
+> **2026-09-17 — hardening track.** Infrastructure and AI items from the reviews under
+> `docs/reviews/`, dispatched from `docs/TODO.md`:
+>
+> | Item | What |
+> | --- | --- |
+> | H03 | `--env-file` on the Telegram deploy steps, `/health` that checks Postgres and Redis, an API healthcheck the frontend waits on, `TZ=Europe/Helsinki` |
+> | H13, H17 | resolution service with `pg_trgm` retrieval and one selection call per receipt; the 300-name catalog list leaves the extraction prompt (measured on the 49-line fixture) |
+> | H26 | every model-boundary failure typed (transport, format, truncated); `finish_reason` read; receipt text fenced as data |
+> | H31 | shared secret header and WebSocket origin check (DEC-5); `API_PORT` not published by default |
+> | H32 | `uv lock` or `pip-compile`, `pip-audit` and `npm audit` in CI, `.dockerignore`, non-root images, dev dependencies out of the prod image |
+> | H34 | page and byte caps before parsing, pdf parsing in a subprocess with a timeout, Redis client timeouts, broadcasts fire-and-forget |
+> | H35 | retention job for receipt files (DEC-8), log payload trimmed, rotation policy, backup script for `pg_dump` plus `kyokki_data` |
+> | H36 | rotate the Postgres password and gateway key, purge `stack.env` from the public history |
+> | H44 | `.gitattributes` and one line-ending normalisation |
 
 ---
 
@@ -158,6 +175,11 @@ class StoreInfo(BaseModel):
 ---
 
 ## Product Matching
+
+> **Superseded 2026-09-17.** The strategy below shipped as MVP-R1b and is being replaced by
+> `docs/PRODUCT_RESOLUTION_SPEC.md`: exact keys (alias, product name, synonym), then trigram
+> retrieval of a shortlist, then one model selection call validated against the shortlist.
+> Similarity never decides identity again. Kept here as the record of what was built.
 
 ### Matching Strategy
 ```

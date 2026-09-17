@@ -29,6 +29,25 @@
 
 > **📋 See detailed implementation plan:** `/home/linux/.claude/plans/reactive-swinging-stream.md`
 
+> **2026-09-17 — hardening track.** The reviews under `docs/reviews/` (`pipeline-foundations.md`
+> and `pipeline-foundations-2.md` carry the frontend findings) add frontend work that is
+> dispatched from the hardening track in `docs/TODO.md`, not from the phases below:
+>
+> | Item | What | Why |
+> | --- | --- | --- |
+> | H04 | `error.tsx` and `global-error.tsx`; unknown vocabulary values rendered as their raw string; narrowing at the API boundary | one unknown `status` blanks the whole stock page; there is no error boundary on an always-on display |
+> | H06 | fake timers around the search debounce, `findBy` timeouts above debounce plus msw latency, the leaked worker found | two timing races are the only red tests in the repo |
+> | H08 | confirm with zero included lines allowed | a receipt with nothing to add cannot be dismissed and nags forever |
+> | H15 | review row: provenance chip, a Change control on the product search with a "New product" entry, detach | a matched line is read-only, so a wrong match can only be skipped; including it learns a verified alias |
+> | H18 | product editor: name, piece weight, shelf life, opened shelf life, unit | the Q2/Q4 leftover; a wrong first guess is otherwise permanent |
+> | H24 | TS types checked against the backend schemas in CI; `avg_piece_grams` added, phantom list params removed | types drift silently today |
+> | H25 | edit sheet diffs against the mounted snapshot; quick add derives location and unit from the resolved product and hides "Create new" while the search is pending; the consumption mirror follows the opened clock or stops predicting expiry | a stale edit form overwrites a fresher quantity; quick add and the backend disagree on identity |
+> | H28 | `dates.ts` parses `YYYY-MM-DD` as local; the client sends the dates it used | the badge is a day off west of UTC and the server stores UTC "today" |
+> | H33 | Next.js 15/16 (DEC-6) | the 14 line receives no security fixes; 1 critical, 2 high apply |
+> | H45 | a persistent status banner (last sync, worker unreachable, failed action with retry); icon buttons named with the product; sheet focus on the primary action; empty-state copy | errors are five-second toasts on a display nobody watches |
+>
+> Post-MVP item 1 (WebSocket in the PWA) waits for H25 and H31.
+
 ---
 
 ## Directory Structure
