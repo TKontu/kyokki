@@ -112,6 +112,31 @@ async def create_inventory_item(
     return await _reload(db, db_item.id)
 
 
+def _start_opened_clock(item: InventoryItem) -> None:
+    """Shorten the expiry once a pack is opened (Q5).
+
+    An opened tub of cream should stop claiming the fortnight it had sealed. Opening can only
+    ever bring the date forward - a jar opened the day before its printed date does not gain a
+    fortnight - so the earlier of the two wins.
+
+    **Loose produce is not a pack.** Taking one apple out of a bowl of thirteen does not open
+    anything, and shortening the other twelve would be plainly wrong. The tell is the piece
+    weight: we only record one for things sold loose and counted out. A milk carton is stored
+    as a single piece too, so counting in pieces is *not* the test - it would wrongly exempt
+    every carton and jar.
+    """
+    row: Any = item
+    product = item.product_master
+    if product is not None and product.avg_piece_grams is not None:
+        return
+    opened_days = product.opened_shelf_life_days if product is not None else None
+    if opened_days is None:
+        return
+    opened_expiry = row.opened_date + timedelta(days=int(opened_days))
+    if opened_expiry < row.expiry_date:
+        row.expiry_date = opened_expiry
+
+
 def apply_quantity_status(item: InventoryItem, new_quantity: Decimal) -> None:
     """Status after the remaining quantity changes, for consume and for corrections.
 
@@ -124,6 +149,7 @@ def apply_quantity_status(item: InventoryItem, new_quantity: Decimal) -> None:
     elif new_quantity < row.initial_quantity:
         if row.status == "sealed":
             row.opened_date = date.today()
+            _start_opened_clock(item)
         remaining_percentage = (new_quantity / row.initial_quantity) * 100
         row.status = "partial" if remaining_percentage < 75 else "opened"
     elif row.status == "empty":

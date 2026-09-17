@@ -212,6 +212,7 @@ class TestPersistence:
             "category": "dairy",
             "piece_grams": None,
             "shelf_life_days": None,
+            "opened_shelf_life_days": None,
             "product_id": str(sample_product.id),
             "product_name": "Valio Whole Milk 1L",
             "product_storage_type": "refrigerator",

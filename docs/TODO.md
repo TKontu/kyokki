@@ -799,6 +799,43 @@ unit and a category-wide shelf life, and consuming offers the same buttons whate
   constant today, so bananas and carrots expire together. Needs per-product defaults, seeded
   with sensible values and correctable by hand.
 
+##### Q4 + Q5 as built (branch `feat/q4-q5-consume-and-opened`), rulings of 2026-09-17
+- [x] **Q4.** `consumptionOptions` derives the buttons from the item. Pieces lead with a large
+  `1` and offer only counts smaller than what is left, then `All n`; there are no disabled
+  buttons to read past. Measured things keep quarter/half/three-quarters but are labelled with
+  the amount (`½ · 500 dl`), and a fraction that would finish the item is dropped rather than
+  shown three times over. `ConsumptionOptionKey` is open now, and the sheet renders the primary
+  option full width.
+- [x] **Q5.** The contract gains `os` (days it keeps once opened); it rides the same path as
+  `pw`/`sl` onto `product_master.opened_shelf_life_days`, which existed as a column and was
+  read by nothing. Opening an item now brings its expiry in to
+  `opened_date + opened_shelf_life_days`, and **only ever inwards** - a jar opened the day
+  before its printed date does not gain a fortnight.
+- [x] **Loose produce is not a pack.** The guard is the *piece weight*, not the unit: a milk
+  carton is stored as `1 pcs` too, so gating on `pcs` would have exempted every carton and jar.
+  Taking one apple from a bowl of thirteen opens nothing. The model agrees - it returned no
+  `os` for any of apple, banana, carrot, lime, mango, onion, pear or tomato.
+- [x] `avg_piece_grams` is exposed through the product schemas at last; Q2 stored it but the
+  API could neither read nor write it.
+- [ ] Still not done: the product editor. Q2 deferred it, Q4 was meant to bring it, and this
+  increment went to Q5 instead. A wrong piece weight still cannot be corrected except by
+  deleting the product.
+
+##### A production bug found while verifying this (2026-09-17)
+**Every category came back null, 0 of 49**, with code byte-identical to `main`. The cause was
+not this increment: the model answers `"Dairy"` for the id `dairy`, and `parse_completion`
+compared case-sensitively, so every category was discarded and confirm could create nothing.
+The strict `json_schema` enum is meant to prevent this and the gateway no longer enforces it -
+the homelab's llama-swap config has grown a lot of new entries since 2026-09-16. Matching is
+case-insensitive now, and 40 of 49 categories came back. **This would have broken the deployed
+stack silently**, so it is worth deploying even on its own.
+
+##### On the cost of the extraction contract
+The earlier "+27 % for `pw` + `sl`" was one sample against another. Measured again on the same
+49-line receipt with three estimate fields: **67.4 s**, against 76.5 s for two fields and 60.2 s
+for none. Run-to-run variance swamps the difference, so treat the contract's cost as roughly
+60-77 s per receipt and stop reading single runs as trends.
+
 ##### Q2 + Q3 + Q6 as built (branch `feat/q2-q3-q6-product-defaults`), rulings of 2026-09-17
 The knowledge comes from the model at extraction time (operator ruling), not a seed list.
 
@@ -962,7 +999,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Wave 2: [x] S1 (PR #27)  [x] R1a (PR #32)  [x] R1b (PR #34)  [x] U1 (PR #35)  [x] R2 (PR #37)  [x] C1 (PR #28)  [x] C2 (PR #29)
 - Wave 3: [x] S2 (PR #30)  [x] T1 (PR #36)  [x] S3 (PR #39)  [x] S4 (PR #41)  [x] R3 (PR #38)  [x] R3b (PR #42)  [ ] R4 (measurable now; needs 5 real receipts)
 - Wave 4: [x] R5 (PR #45)  [x] R6 (PR open)  [x] R7 (PR #45)  [x] R8 (PR open)
-- Wave 5: [x] P1 (PR #46, open)  [x] P2 (PR open)
+- Wave 5: [x] P1 (PR #46)  [x] P2 (PR #47)
 - Wave 6: [ ] P3 acceptance
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)

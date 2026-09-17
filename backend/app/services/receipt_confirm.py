@@ -106,6 +106,7 @@ class _Confirmation:
                 # What the model worked out about this product while reading the receipt
                 piece_grams=line.get("piece_grams"),
                 shelf_life_days=line.get("shelf_life_days"),
+                opened_shelf_life_days=line.get("opened_shelf_life_days"),
             )
         except InvalidProductRequest as exc:
             raise InvalidConfirmItem(f"Item {position}: {exc}") from exc

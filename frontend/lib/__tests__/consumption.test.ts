@@ -61,8 +61,13 @@ describe('consumption', () => {
   })
 
   describe('proportional options', () => {
-    it('offers quarter, half, three quarters and done', () => {
-      expect(consumptionOptions(makeItem()).map((o) => o.label)).toEqual(['¼', '½', '¾', 'Done'])
+    it('labels each fraction with the amount it actually takes', () => {
+      expect(consumptionOptions(makeItem()).map((o) => o.label)).toEqual([
+        '¼ · 250 dl',
+        '½ · 500 dl',
+        '¾ · 750 dl',
+        'Done',
+      ])
     })
 
     it('computes a quarter of 1000 dl as 250 dl', () => {
@@ -71,11 +76,11 @@ describe('consumption', () => {
       expect(byKey(makeItem()).threeQuarters.amount).toBe(750)
     })
 
-    it('caps fractions at what is left', () => {
-      const options = byKey(makeItem({ current_quantity: 100 }))
-      expect(options.quarter.amount).toBe(100)
-      expect(options.half.amount).toBe(100)
-      expect(options.half.disabled).toBe(false)
+    it('drops fractions that would finish the item', () => {
+      // At 100 dl left of 1000, a quarter, a half and three quarters are all "everything"
+      const options = consumptionOptions(makeItem({ current_quantity: 100 }))
+      expect(options.map((o) => o.label)).toEqual(['Done'])
+      expect(options[0].amount).toBe(100)
     })
 
     it('uses the whole remaining quantity for done', () => {
@@ -87,24 +92,47 @@ describe('consumption', () => {
         83.25
       )
     })
+
+    it('marks nothing primary when there are fractions to choose between', () => {
+      expect(consumptionOptions(makeItem()).some((o) => o.primary)).toBe(false)
+    })
   })
 
   describe('countable options', () => {
-    it('offers -1, -2, -3 and done for pieces', () => {
-      const item = makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 6 })
+    it('leads with eating one, then smaller counts, then all of them', () => {
+      const item = makeItem({ unit: 'pcs', initial_quantity: 13, current_quantity: 13 })
       const options = consumptionOptions(item)
-      expect(options.map((o) => o.label)).toEqual(['−1', '−2', '−3', 'Done'])
-      expect(options.map((o) => o.amount)).toEqual([1, 2, 3, 6])
+
+      expect(options.map((o) => o.label)).toEqual(['1', '2', '3', 'All 13'])
+      expect(options.map((o) => o.amount)).toEqual([1, 2, 3, 13])
       expect(options.every((o) => !o.disabled)).toBe(true)
     })
 
-    it('disables counts that are not less than what is left', () => {
-      const options = byKey(makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 2 }))
-      expect(options.one.disabled).toBe(false)
-      expect(options.two.disabled).toBe(true)
-      expect(options.three.disabled).toBe(true)
-      expect(options.done.disabled).toBe(false)
-      expect(options.done.amount).toBe(2)
+    it('makes eating one the primary act', () => {
+      const options = byKey(makeItem({ unit: 'pcs', initial_quantity: 13, current_quantity: 13 }))
+      expect(options['count-1'].primary).toBe(true)
+      expect(options['count-2'].primary).toBe(false)
+      expect(options.done.primary).toBe(false)
+    })
+
+    it('never offers a count that would finish the item', () => {
+      // 3 of 3 is not "three", it is "all of them"
+      const options = consumptionOptions(
+        makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 3 })
+      )
+
+      expect(options.map((o) => o.label)).toEqual(['1', '2', 'All 3'])
+      expect(options.every((o) => !o.disabled)).toBe(true)
+    })
+
+    it('offers only finishing it when one is left', () => {
+      const options = consumptionOptions(
+        makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 1 })
+      )
+
+      expect(options.map((o) => o.label)).toEqual(['All 1'])
+      expect(options[0].primary).toBe(true)
+      expect(options[0].amount).toBe(1)
     })
   })
 

@@ -103,6 +103,7 @@ describe('TypeScript Types', () => {
             suggested_category: 'produce',
             piece_grams: 110,
             shelf_life_days: 30,
+            opened_shelf_life_days: null,
             printed_quantity: null,
             printed_unit: null,
             storage_type: 'refrigerator',

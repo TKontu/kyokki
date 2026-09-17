@@ -265,3 +265,62 @@ class TestQuantityForProduct:
         # and Q6: the product's own shelf life, not the category's
         assert item.expiry_date == PURCHASED + timedelta(days=21)
         assert item.expiry_source == "calculated"
+
+
+class TestOpenedShelfLifeOnProducts:
+    """Q5: the product remembers how long it keeps once opened."""
+
+    async def test_a_new_product_keeps_the_models_estimate(
+        self, db_session: AsyncSession, categories
+    ):
+        product, created = await ProductResolver(db_session).resolve(
+            name="Cream",
+            category="dairy",
+            unit="dl",
+            quantity=2,
+            shelf_life_days=14,
+            opened_shelf_life_days=5,
+        )
+
+        assert created is True
+        assert product.opened_shelf_life_days == 5
+
+    async def test_a_later_receipt_fills_a_missing_one(
+        self, db_session: AsyncSession, categories
+    ):
+        first, _ = await ProductResolver(db_session).resolve(
+            name="Cream", category="dairy", unit="dl", quantity=2
+        )
+        assert first.opened_shelf_life_days is None
+
+        again, created = await ProductResolver(db_session).resolve(
+            name="cream",
+            category="dairy",
+            unit="dl",
+            quantity=2,
+            opened_shelf_life_days=5,
+        )
+
+        assert created is False
+        assert again.opened_shelf_life_days == 5
+
+    async def test_a_later_receipt_never_overwrites_a_known_one(
+        self, db_session: AsyncSession, categories
+    ):
+        await ProductResolver(db_session).resolve(
+            name="Cream",
+            category="dairy",
+            unit="dl",
+            quantity=2,
+            opened_shelf_life_days=5,
+        )
+
+        again, _ = await ProductResolver(db_session).resolve(
+            name="Cream",
+            category="dairy",
+            unit="dl",
+            quantity=2,
+            opened_shelf_life_days=30,
+        )
+
+        assert again.opened_shelf_life_days == 5

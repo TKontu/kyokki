@@ -6,33 +6,26 @@
 import { isInactive as isGone } from '@/lib/stock'
 import type { InventoryItem, Unit } from '@/types/inventory'
 
-export type ConsumptionOptionKey =
-  | 'quarter'
-  | 'half'
-  | 'threeQuarters'
-  | 'one'
-  | 'two'
-  | 'three'
-  | 'done'
+/** `done` finishes the item; counts are `count-1`, `count-2`, …; fractions keep their names. */
+export type ConsumptionOptionKey = string
 
 export interface ConsumptionOption {
   key: ConsumptionOptionKey
   label: string
   amount: number
   disabled: boolean
+  /** The act the cook almost always means, rendered large. */
+  primary?: boolean
 }
 
-const PROPORTIONAL: { key: ConsumptionOptionKey; label: string; fraction: number }[] = [
+const PROPORTIONAL: { key: string; label: string; fraction: number }[] = [
   { key: 'quarter', label: '¼', fraction: 0.25 },
   { key: 'half', label: '½', fraction: 0.5 },
   { key: 'threeQuarters', label: '¾', fraction: 0.75 },
 ]
 
-const COUNTS: { key: ConsumptionOptionKey; label: string; count: number }[] = [
-  { key: 'one', label: '−1', count: 1 },
-  { key: 'two', label: '−2', count: 2 },
-  { key: 'three', label: '−3', count: 3 },
-]
+/** Eating one is the common case; more than three at a time is what "All" is for. */
+const COUNT_LADDER = [1, 2, 3]
 
 /** Below this share of the initial quantity an item is "partial" (backend rule). */
 const PARTIAL_THRESHOLD = 0.75
@@ -59,27 +52,55 @@ function isInactive(item: InventoryItem): boolean {
   return isGone(item) || item.current_quantity <= 0
 }
 
-/** The buttons offered for an item: ¼ ½ ¾ Done, or −1 −2 −3 Done for countable units. */
+/** Counts below what is left. Taking all of them is the "All n" option, not a count. */
+function countOptions(remaining: number): ConsumptionOption[] {
+  return COUNT_LADDER.filter((count) => count < remaining).map((count) => ({
+    key: `count-${count}`,
+    label: String(count),
+    amount: count,
+    disabled: false,
+    primary: count === 1,
+  }))
+}
+
+/** Fractions of the original amount, capped at what is left and labelled with the amount. */
+function fractionOptions(item: InventoryItem, remaining: number): ConsumptionOption[] {
+  return PROPORTIONAL.map(({ key, label, fraction }) => {
+    const amount = Math.min(roundQuantity(fraction * item.initial_quantity), remaining)
+    return {
+      key,
+      // "½" of a part-used pack is ambiguous; the amount is not
+      label: `${label} · ${formatQuantity(amount)} ${item.unit}`,
+      amount,
+      disabled: false,
+    }
+  }).filter((option) => option.amount < remaining)
+}
+
+/**
+ * The buttons offered for an item, derived from its unit and what is actually left (Q4).
+ *
+ * Pieces lead with a large "1", because eating one apple is what happens; fractions are for
+ * things that are poured or spooned. Nothing is offered that would be the same as finishing
+ * the item, so there are no dead buttons to read past.
+ */
 export function consumptionOptions(item: InventoryItem): ConsumptionOption[] {
-  const inactive = isInactive(item)
   const remaining = roundQuantity(item.current_quantity)
+  if (isInactive(item)) {
+    return [{ key: 'done', label: 'Done', amount: remaining, disabled: true }]
+  }
 
-  const partial: ConsumptionOption[] = isCountable(item.unit)
-    ? COUNTS.map(({ key, label, count }) => ({
-        key,
-        label,
-        amount: count,
-        // A count equal to what is left is the same as Done
-        disabled: inactive || count >= remaining,
-      }))
-    : PROPORTIONAL.map(({ key, label, fraction }) => ({
-        key,
-        label,
-        amount: Math.min(roundQuantity(fraction * item.initial_quantity), remaining),
-        disabled: inactive,
-      }))
-
-  return [...partial, { key: 'done', label: 'Done', amount: remaining, disabled: inactive }]
+  const countable = isCountable(item.unit)
+  const partial = countable ? countOptions(remaining) : fractionOptions(item, remaining)
+  const finish: ConsumptionOption = {
+    key: 'done',
+    label: countable ? `All ${formatQuantity(remaining)}` : 'Done',
+    amount: remaining,
+    disabled: false,
+    // With nothing smaller on offer, finishing it is the only thing to do
+    primary: partial.length === 0,
+  }
+  return [...partial, finish]
 }
 
 function todayIsoDate(): string {

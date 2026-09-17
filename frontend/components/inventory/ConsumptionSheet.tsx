@@ -2,7 +2,9 @@
 
 /**
  * ConsumptionSheet Component
- * Bottom sheet with one-tap consumption: ¼ ½ ¾ Done, or −1 −2 −3 Done for pieces.
+ * Bottom sheet with one-tap consumption. The options come from the item itself (Q4): pieces
+ * lead with a large "1" because eating one apple is what happens, measured things offer
+ * fractions labelled with the amount.
  */
 
 import React from 'react'
@@ -32,7 +34,7 @@ function successMessage(item: InventoryItem, option: ConsumptionOption): string 
   if (isCountable(item.unit)) {
     return `Consumed ${formatQuantity(option.amount)} ${item.unit} · ${item.product_name}`
   }
-  return `Consumed ${option.label} · ${item.product_name}`
+  return `Consumed ${formatQuantity(option.amount)} ${item.unit} · ${item.product_name}`
 }
 
 export function ConsumptionSheet({ item, open, onClose }: ConsumptionSheetProps) {
@@ -69,19 +71,45 @@ export function ConsumptionSheet({ item, open, onClose }: ConsumptionSheetProps)
       <p className="mb-4 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
         {`${formatQuantity(item.current_quantity)} / ${formatQuantity(item.initial_quantity)} ${item.unit} left`}
       </p>
-      <div className="grid grid-cols-4 gap-3">
-        {consumptionOptions(item).map((option) => (
-          <Button
-            key={option.key}
-            size="xl"
-            variant={option.key === 'done' ? 'secondary' : 'primary'}
-            disabled={option.disabled}
-            onClick={() => handleConsume(option)}
-          >
-            {option.label}
-          </Button>
-        ))}
-      </div>
+      {(() => {
+        const options = consumptionOptions(item)
+        const lead = options.find((option) => option.primary)
+        const rest = options.filter((option) => option !== lead)
+        return (
+          <div className="flex flex-col gap-3">
+            {lead && (
+              <Button
+                key={lead.key}
+                size="xl"
+                fullWidth
+                variant={lead.key === 'done' ? 'secondary' : 'primary'}
+                disabled={lead.disabled}
+                onClick={() => handleConsume(lead)}
+              >
+                {lead.label}
+              </Button>
+            )}
+            {rest.length > 0 && (
+              <div
+                className="grid gap-3"
+                style={{ gridTemplateColumns: `repeat(${rest.length}, minmax(0, 1fr))` }}
+              >
+                {rest.map((option) => (
+                  <Button
+                    key={option.key}
+                    size="xl"
+                    variant={option.key === 'done' ? 'secondary' : 'primary'}
+                    disabled={option.disabled}
+                    onClick={() => handleConsume(option)}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
     </BottomSheet>
   )
 }

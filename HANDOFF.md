@@ -119,3 +119,22 @@ start Wave 4 (R5 receipt API module and polling hooks) while R4 waits for the ho
 - Friction items renamed **F1-F6 -> Q1-Q6** to stop colliding with `MVP-F1`/`MVP-F2`. Q2, Q3 and
   Q6 are done; **Q1** (non-food), **Q4** (consume buttons that fit the item) and **Q5** (opened
   tracking) remain, and Q4 should bring the product editor that Q2 deliberately left out.
+
+## Consume options and the opened clock (2026-09-17)
+- `consumptionOptions` (`frontend/lib/consumption.ts`) now derives the buttons from the item;
+  `ConsumptionOptionKey` is an open string and options carry `primary`, which the sheet renders
+  full width. Counts that would finish the item are not offered - `All n` is that button.
+- Opening an item shortens its expiry (`_start_opened_clock` in `crud/inventory_item.py`),
+  only ever inwards. **The guard is `avg_piece_grams`, not the unit**: milk is stored as `1 pcs`,
+  so gating on `pcs` would exempt every carton. Do not "simplify" it back to a unit check.
+- The extraction contract now carries `pw`, `sl` and `os`. The instruction to skip them for
+  known products lives *inside* the conditional known-products block, so an empty catalog is
+  never told to skip anything.
+- **Watch out:** `parse_completion` matches the category case-insensitively because the gateway
+  does not reliably enforce the strict `json_schema` enum - the model answers `"Dairy"` for
+  `dairy`. A case-sensitive compare silently nulls every category and confirm then creates
+  nothing. This was a live bug on `main`, not something this branch introduced.
+- Extraction cost is noisy: 60.2 s (no estimates), 76.5 s (two), 67.4 s (three) on the same
+  receipt. Do not draw conclusions from single runs.
+- Remaining friction: **Q1** (non-food) and the **product editor** that Q2 and now Q4 have both
+  deferred.

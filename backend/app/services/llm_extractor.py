@@ -71,12 +71,15 @@ Rules:
 - sl = how many days this keeps unopened in its normal place, as a round estimate. Examples:
   banana -> 7; carrot -> 21; milk -> 10; hard cheese -> 30; dried pasta -> 720. Use null if
   you truly cannot say.
+- os = how many days it keeps after the pack is opened. Examples: milk -> 5; yoghurt -> 5;
+  juice -> 5; hard cheese -> 14; ketchup -> 180. Use null for loose fruit and vegetables and
+  anything else that is not opened.
 - s = the store chain or store name from the header; d = the purchase date as YYYY-MM-DD.
   Use null when absent.
 - Skip store header, totals, discounts (NORM., ALENNUS), fees, deposits, payment and VAT
   lines as products.
 
-Return only compact JSON: {{"s": chain, "d": date, "p": [{{"n": name, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null, "pw": grams per piece or null, "sl": shelf life days or null}}]}}."""
+Return only compact JSON: {{"s": chain, "d": date, "p": [{{"n": name, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null, "pw": grams per piece or null, "sl": shelf life days or null, "os": opened shelf life days or null}}]}}."""
 
 
 def prefilter_receipt_text(text: str) -> str:
@@ -100,7 +103,8 @@ def build_instructions(
             first_spelling.setdefault(tidy.casefold(), tidy)
     unique = sorted(first_spelling.values(), key=str.casefold)[:MAX_KNOWN_PRODUCTS]
     known = (
-        "\n  When an equivalent product is listed here, use its name exactly. "
+        "\n  When an equivalent product is listed here, use its name exactly, and set "
+        "pw, sl and os to null for it - the system already knows those. "
         f"Known products: {', '.join(unique)}."
         if unique
         else ""
@@ -146,8 +150,9 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
                         "c": {"enum": [*category_ids, None]},
                         "pw": {"type": ["number", "null"]},
                         "sl": {"type": ["integer", "null"]},
+                        "os": {"type": ["integer", "null"]},
                     },
-                    "required": ["n", "g", "q", "w", "c", "pw", "sl"],
+                    "required": ["n", "g", "q", "w", "c", "pw", "sl", "os"],
                 },
             },
         },
@@ -194,6 +199,12 @@ def parse_completion(
     if not isinstance(products, list):
         raise LLMExtractionError("LLM response has no product list")
 
+    # The strict json_schema pins ``c`` to the known ids, but the gateway does not always
+    # enforce it: muse-glimmer answers "Dairy" for the id `dairy`, and a case-sensitive
+    # comparison then silently nulls every category, which leaves confirm unable to create
+    # any product. Match on case, not on luck.
+    by_fold = {str(known).casefold(): known for known in category_ids}
+
     lines: list[ExtractedLine] = []
     for entry in products:
         if not isinstance(entry, dict):
@@ -201,7 +212,12 @@ def parse_completion(
         name = _TRAILING_PRICE.sub("", str(entry.get("n") or "")).strip()
         if not name:
             continue
-        category = entry.get("c")
+        raw_category = entry.get("c")
+        category = (
+            by_fold.get(str(raw_category).casefold())
+            if isinstance(raw_category, str)
+            else None
+        )
         quantity = entry.get("q")
         try:
             lines.append(
@@ -210,9 +226,10 @@ def parse_completion(
                     generic_name=_generic_name(entry.get("g")),
                     quantity=1.0 if quantity is None else quantity,
                     weight_kg=entry.get("w"),
-                    category=category if category in category_ids else None,
+                    category=category,
                     piece_grams=_positive(entry.get("pw")),
                     shelf_life_days=_positive_int(entry.get("sl")),
+                    opened_shelf_life_days=_positive_int(entry.get("os")),
                 )
             )
         except ValidationError as exc:

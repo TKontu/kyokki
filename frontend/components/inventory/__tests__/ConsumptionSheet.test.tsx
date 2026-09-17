@@ -76,24 +76,32 @@ describe('ConsumptionSheet', () => {
       expect(screen.getByText('750 / 1000 dl left')).toBeInTheDocument()
     })
 
-    it('offers fractions for measured items', () => {
+    it('offers fractions labelled with the amount for measured items', () => {
       renderSheet(MILK)
-      for (const label of ['¼', '½', '¾', 'Done']) {
+      // ¾ of 1000 is 750, which is everything left, so it is offered as Done instead
+      for (const label of ['¼ · 250 dl', '½ · 500 dl', 'Done']) {
         expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
       }
     })
 
-    it('offers whole counts for pieces', () => {
+    it('leads with eating one for pieces', () => {
       renderSheet(EGGS)
-      for (const label of ['−1', '−2', '−3', 'Done']) {
+      for (const label of ['1', '2', '3', 'All 6']) {
         expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
       }
-      expect(screen.queryByRole('button', { name: '½' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /·/ })).not.toBeInTheDocument()
+    })
+
+    it('gives the common act its own full-width button', () => {
+      renderSheet(EGGS)
+      expect(screen.getByRole('button', { name: '1' }).className).toContain('w-full')
     })
 
     it('uses 56pt consumption buttons', () => {
       renderSheet(MILK)
-      expect(screen.getByRole('button', { name: '½' }).className).toContain('min-h-touch-lg')
+      expect(
+        screen.getByRole('button', { name: '½ · 500 dl' }).className
+      ).toContain('min-h-touch-lg')
     })
   })
 
@@ -101,7 +109,7 @@ describe('ConsumptionSheet', () => {
     it('consumes half of the initial quantity and closes', () => {
       const onClose = renderSheet(MILK)
 
-      fireEvent.click(screen.getByRole('button', { name: '½' }))
+      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
 
       expect(mutate).toHaveBeenCalledWith(
         { id: 'item-milk', data: { quantity: 500 } },
@@ -118,7 +126,7 @@ describe('ConsumptionSheet', () => {
 
     it('consumes whole pieces', () => {
       renderSheet(EGGS)
-      fireEvent.click(screen.getByRole('button', { name: '−2' }))
+      fireEvent.click(screen.getByRole('button', { name: '2' }))
       expect(mutate.mock.calls[0][0]).toEqual({ id: 'item-eggs', data: { quantity: 2 } })
     })
   })
@@ -126,11 +134,11 @@ describe('ConsumptionSheet', () => {
   describe('Feedback', () => {
     it('confirms a fraction with a success toast', () => {
       renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: '½' }))
+      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
 
       act(() => lastMutateOptions().onSuccess?.())
 
-      expect(screen.getByRole('status')).toHaveTextContent('Consumed ½ · Oat Milk')
+      expect(screen.getByRole('status')).toHaveTextContent('Consumed 500 dl · Oat Milk')
     })
 
     it('confirms Done as used up', () => {
@@ -144,7 +152,7 @@ describe('ConsumptionSheet', () => {
 
     it('confirms pieces with the count', () => {
       renderSheet(EGGS)
-      fireEvent.click(screen.getByRole('button', { name: '−2' }))
+      fireEvent.click(screen.getByRole('button', { name: '2' }))
 
       act(() => lastMutateOptions().onSuccess?.())
 
@@ -153,7 +161,7 @@ describe('ConsumptionSheet', () => {
 
     it('shows the API error message', () => {
       renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: '½' }))
+      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
 
       act(() =>
         lastMutateOptions().onError?.(
@@ -166,7 +174,7 @@ describe('ConsumptionSheet', () => {
 
     it('hides server and network error text behind a readable message', () => {
       renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: '½' }))
+      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
 
       act(() =>
         lastMutateOptions().onError?.(
@@ -180,7 +188,7 @@ describe('ConsumptionSheet', () => {
 
     it('falls back to a generic error message', () => {
       renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: '½' }))
+      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
 
       act(() => lastMutateOptions().onError?.(new Error('')))
 

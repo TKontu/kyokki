@@ -85,7 +85,7 @@ describe('Consume flow', () => {
     renderHome()
     expect(await screen.findByRole('progressbar', { name: '1000 of 1000 dl remaining' })).toBeInTheDocument()
 
-    await openSheetAndTap('½')
+    await openSheetAndTap('½ · 500 dl')
 
     // Optimistic: the list shows the new amount while the request is still pending
     await waitFor(() => expect(remaining('500 of 1000 dl remaining')).toBeInTheDocument())
@@ -97,7 +97,7 @@ describe('Consume flow', () => {
 
     releaseConsume()
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Consumed ½ · Oat Milk')
+    expect(await screen.findByRole('status')).toHaveTextContent('Consumed 500 dl · Oat Milk')
     expect(remaining('500 of 1000 dl remaining')).toBeInTheDocument()
   })
 
@@ -140,7 +140,7 @@ describe('Consume flow', () => {
     renderHome()
     expect(await screen.findByRole('progressbar', { name: '1000 of 1000 dl remaining' })).toBeInTheDocument()
 
-    await openSheetAndTap('½')
+    await openSheetAndTap('½ · 500 dl')
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Cannot consume 500 - only 100 available'
