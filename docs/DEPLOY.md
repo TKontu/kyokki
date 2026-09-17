@@ -36,6 +36,12 @@ Two more services publish no port:
   receipt photos are read directly by the vision model.
   Their URLs go into `stack.env`.
 - Git access to the repository (public, so no credentials needed).
+- **An iPad (or any browser) on iPadOS 15 or newer.** Measured 2026-09-17: the app is a blank
+  page on Safari 12 (iPadOS 12.5, e.g. a 1st-gen iPad Air, which cannot be updated further).
+  The shipped bundle uses `?.`, `??` and `:is()`, and Next 14's App Router compiles to a fixed
+  modern target that ignores `browserslist` - setting `safari >= 12` and rebuilding produced
+  byte-identical chunks. TanStack Query v5 also publishes Safari 15 as its floor. An iPad 7th
+  gen or newer is comfortably inside this.
 
 ## First deployment with Portainer (from GitHub)
 
@@ -78,9 +84,23 @@ docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file
 ## On the iPad
 
 1. Open Safari and go to `http://<host>:17301`. The inventory list should render.
-2. Share → **Add to Home Screen**. Launch Kyokki from the icon.
+2. Share → **Add to Home Screen**. Launch Kyokki from the icon: it opens full screen with no
+   browser chrome, using the web app manifest plus the `apple-mobile-web-app-*` metadata
+   (MVP-P2). The Home Screen icon is the Kyokki fridge mark.
 3. Settings → Display & Brightness → Auto-Lock → **Never** (a web app does not keep the
    screen awake by itself). Guided Access is an alternative for a dedicated kitchen iPad.
+4. The stock list refreshes itself every 30 seconds, so a wall-mounted iPad nobody touches
+   still shows what is actually in the fridge. Receipts being read refresh every 3 seconds.
+5. **Appearance follows the iPad.** Settings → Display & Brightness → Dark (or Automatic, which
+   switches at sunset) turns the app dark, so the kitchen screen is not white at midnight.
+
+Two honest limits:
+
+- The manifest asks for landscape, but **iOS ignores `orientation` for home-screen web apps**.
+  The wall mount decides the orientation.
+- **No offline mode**, and not only by choice: the stack is served over plain HTTP on the LAN,
+  which is not a secure context, so a service worker cannot register at all. Post-MVP, TLS
+  would have to come first.
 
 ## Updating
 

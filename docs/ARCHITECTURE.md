@@ -427,8 +427,10 @@ GET    /api/health                 Health check
 
 ## 9. WebSocket Real-Time Updates
 
-MVP note: the iPad PWA polls (inventory every 30 s, a processing receipt every 3 s) and does
-not open this socket. The broadcasts below are emitted today and will be consumed post-MVP.
+MVP note: the iPad PWA polls and does not open this socket. Both cadences are real as of
+MVP-P2: `INVENTORY_POLL_MS` (30 s) in `hooks/useInventory.ts`, and 3 s for a receipt being read
+(`READING_POLL_MS`) falling back to 30 s for the receipts list, in `hooks/useReceipts.ts`. The
+broadcasts below are emitted today and will be consumed post-MVP.
 
 ### 9.1 Architecture
 The system uses **Redis Pub/Sub** with WebSocket broadcasting for real-time updates.
@@ -603,10 +605,11 @@ Family member adds item via phone
 
 | Component | Technology |
 |-----------|------------|
-| Frontend | Next.js 14, PWA, Tailwind |
+| Frontend | Next.js 14, PWA (manifest + Home Screen, no service worker), Tailwind |
+| Browser floor | **iPadOS / Safari 15+.** Measured broken on Safari 12: Next 14's App Router compiles to a fixed modern target and ignores `browserslist`, and TanStack Query v5 publishes Safari 15 as its floor. See `docs/DEPLOY.md` prerequisites. |
 | Backend | FastAPI, Python 3.12 |
 | Database | PostgreSQL 15, Alembic |
-| Background work | FastAPI `BackgroundTasks` (MVP-R3); Celery removed |
+| Background work | Standalone worker process (`python -m app.worker`) claiming queued receipts (MVP-R3); Celery removed |
 | Real-Time | WebSocket + Redis Pub/Sub (emitted today; PWA polls until post-MVP) |
 | OCR | MinerU (homelab), pdfplumber for digital PDFs |
 | LLM | Any OpenAI-compatible endpoint (vLLM / Ollama); model set by `LLM_MODEL` |

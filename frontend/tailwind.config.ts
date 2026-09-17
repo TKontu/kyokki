@@ -1,11 +1,20 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
-  darkMode: 'class',
+  // Follow the iPad's own appearance, so a wall-mounted screen is not white at midnight
+  // (MVP-P2). `.dark` / `.light` on <html> still force it, which is how the browser check
+  // drives dark mode and how /components-demo toggles it.
+  darkMode: [
+    'variant',
+    ['@media (prefers-color-scheme: dark) { &:not(.light *) }', '&:is(.dark *)'],
+  ],
   content: [
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    // lib/ builds class strings too (getExpiryColor); without this they are only generated
+    // when some component happens to use the same string, which is luck, not a guarantee.
+    "./lib/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
     extend: {

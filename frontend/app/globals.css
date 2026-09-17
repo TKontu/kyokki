@@ -27,8 +27,30 @@
   --transition-normal: 300ms;
 }
 
-/* Dark theme - Class-based for manual control */
+/* color-scheme tells the browser to paint its own controls (file pickers, date inputs,
+   scrollbars) to match, which the meta tag alone does not do when the class forces a theme. */
+:root {
+  color-scheme: light;
+}
+
+/* Dark theme: follows the device appearance, with .dark / .light as manual overrides.
+   Kept in step with the `darkMode` variant in tailwind.config.ts. */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    color-scheme: dark;
+    --background: #1a1b1e;
+    --foreground: #f8f9fa;
+    --bg-secondary: #25262b;
+    --bg-tertiary: #2c2e33;
+    --border: #373a40;
+    --border-strong: #424549;
+    --text-secondary: #c1c2c5;
+    --text-tertiary: #909296;
+  }
+}
+
 .dark {
+  color-scheme: dark;
   --background: #1a1b1e;
   --foreground: #f8f9fa;
   --bg-secondary: #25262b;

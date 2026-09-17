@@ -6,6 +6,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
+  INVENTORY_POLL_MS,
   inventoryKeys,
   useInventoryList,
   useInventoryItem,
@@ -84,6 +85,32 @@ describe('useInventory Hooks', () => {
 
       expect(result.current.data).toHaveLength(1)
       expect(result.current.data?.[0].id).toBe(mockInventoryItem.id)
+    })
+
+    it('polls so a wall-mounted iPad nobody touches still shows current stock', async () => {
+      // The fridge display is never focused and never reloaded; without this it shows
+      // whatever was true when it was last opened.
+      jest.useFakeTimers()
+      ;(global.fetch as jest.Mock).mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => [mockInventoryItem],
+      })
+
+      const { result } = renderHook(() => useInventoryList(), { wrapper: createWrapper() })
+      await waitFor(() => expect(result.current.isSuccess).toBe(true))
+      expect(global.fetch).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        await jest.advanceTimersByTimeAsync(INVENTORY_POLL_MS + 1000)
+      })
+
+      expect((global.fetch as jest.Mock).mock.calls.length).toBeGreaterThan(1)
+      jest.useRealTimers()
+    })
+
+    it('refreshes about twice a minute', () => {
+      expect(INVENTORY_POLL_MS).toBe(30_000)
     })
 
     it('should handle loading state', () => {
