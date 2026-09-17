@@ -1,6 +1,20 @@
 # Backend — Development TODO
 
-**Stack:** FastAPI, SQLAlchemy, Celery, Redis, PostgreSQL
+**Stack:** FastAPI, async SQLAlchemy + asyncpg, PostgreSQL (data and the receipt queue), Redis
+(pub/sub for WebSocket broadcasts), one worker process (`python -m app.worker`). Celery was
+removed in MVP-F2.
+
+> **2026-09-17 — hardening track.** The reviews under `docs/reviews/` found the defects listed
+> below; the work is dispatched from the hardening track in `docs/TODO.md` (ids H01-H47), not
+> from the phase lists in this file. Backend items, in order:
+>
+> | Wave | Items | What |
+> | --- | --- | --- |
+> | H0 | H01, H02, H03, H05, H07, H08 | test DB isolation (the suite drops tables on the dev DB), settings that ignore unknown keys, `/health` that checks its dependencies, no 500 on any reachable route, the enqueue race and the image-only PDF, empty confirm and non-food forgetting |
+> | H1 | H11-H14, H16, H17 | product resolution per `docs/PRODUCT_RESOLUTION_SPEC.md`: names and synonyms, deterministic tiers plus a constrained selection call, alias provenance, merge, catalog list out of the prompt |
+> | H2 | H21-H24, H26-H28 | `Mapped[]` models and a real type gate, delete semantics per FK, one status machine with row locks, closed vocabularies, an honest model boundary, a structural heuristic parser, client-owned dates |
+> | H3 | H31, H32, H34, H35 | shared secret header and WebSocket origin (DEC-5), lock file and audits, bounded work per receipt, retention and backup (DEC-8) |
+> | H4 | H41, H42, H46, H47 | scanner quarantine or repair (DEC-7), concurrency tests, a readable consumption log, Telegram hygiene |
 
 ---
 
@@ -275,8 +289,16 @@ def parse_gs1(data: str) -> dict:
 ## Key Services
 
 ### MatchingService
+> **Superseded 2026-09-17** by `docs/PRODUCT_RESOLUTION_SPEC.md` (hardening H11-H17). The
+> fuzzy step below is what shipped in MVP-R1b and it decides identity by substring similarity:
+> with a catalog of Milk, Apple, Cream, Butter and Tomato, the model's correct answers Oat milk,
+> Pineapple, Sour cream, Peanut butter and Cherry tomato all pre-select the wrong product at 90
+> "high", and confirm then learns a verified alias for it. Resolution replaces the score with
+> exact keys (aliases, product names and synonyms) and a model selection constrained to a
+> retrieved shortlist; similarity survives only for shortlisting and interactive search.
+
 ```python
-class MatchingService:
+class MatchingService:  # MVP-R1b as built; being replaced, see the note above
     def match(self, receipt_text: str, store: str) -> Product | None:
         # 1. Exact match on store_product_alias
         # 2. Fuzzy match (RapidFuzz, threshold 80)

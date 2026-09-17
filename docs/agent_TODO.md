@@ -254,6 +254,21 @@ AG0 recipe decision ─> AG5 recipes ─> AG6 shopping generation ────�
 AG0 can run in parallel with AG1–AG4. AG6's `low_stock` source does not need recipes and can
 ship before AG5.
 
+### Dependencies from the 2026-09-17 reviews
+The hardening track in `docs/TODO.md` (H0-H4) runs before this track, and four of its items
+are hard prerequisites, because an agent is the first client that will hit every write path
+without a person watching the screen:
+
+| Needs | Why |
+| --- | --- |
+| H23 one status machine with row locks | today two overlapping consumes lose one and log both, discard does not freeze the item, and a correction above full keeps a stale label; an agent consuming by name will hit all three |
+| H24 closed vocabularies | the create API stores any `status` string, and one unknown value blanks the iPad's stock page |
+| H31 access control (DEC-5) | AG1's tokens have nothing to attach to while the API is open; the CLI sends the shared header until forward-auth exists |
+| H11-H16 product resolution | name-based add, consume and alias creation need product identity by key and synonym, not by fuzzy score, and a merge for the duplicates an agent will otherwise create |
+
+AG2's open question on consume marking items `opened` is answered: Q5 (PR #49) already does
+that through `apply_quantity_status` and the opened clock.
+
 ## Open questions (decide in the named increment)
 - AG0: recipe service choice, and whether difficulty or calories need custom fields.
 - AG2: whether consume should also mark items `opened` (post-MVP "Opened tracking").
