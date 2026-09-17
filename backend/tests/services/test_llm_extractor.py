@@ -74,6 +74,7 @@ def _compact(**overrides) -> str:
                 "c": "dairy",
                 "pw": None,
                 "sl": 10,
+                "os": 5,
             },
             {
                 "n": "PUNASIPULI",
@@ -83,6 +84,7 @@ def _compact(**overrides) -> str:
                 "c": "produce",
                 "pw": 110,
                 "sl": 30,
+                "os": None,
             },
         ],
     }
@@ -152,9 +154,10 @@ class TestResponseSchema:
         item = schema["properties"]["p"]["items"]
         assert item["properties"]["c"]["enum"] == ["dairy", "produce", None]
         assert item["properties"]["g"] == {"type": "string"}
-        assert item["required"] == ["n", "g", "q", "w", "c", "pw", "sl"]
+        assert item["required"] == ["n", "g", "q", "w", "c", "pw", "sl", "os"]
         assert item["properties"]["pw"] == {"type": ["number", "null"]}
         assert item["properties"]["sl"] == {"type": ["integer", "null"]}
+        assert item["properties"]["os"] == {"type": ["integer", "null"]}
         assert schema["required"] == ["s", "d", "p"]
 
 
@@ -173,6 +176,7 @@ class TestParseCompletion:
                 weight_kg=None,
                 category="dairy",
                 shelf_life_days=10,
+                opened_shelf_life_days=5,
             ),
             ExtractedLine(
                 name="PUNASIPULI",
@@ -408,3 +412,67 @@ class TestProductShapeFields:
         (line,) = parse_completion(body, set(), "text").lines
 
         assert line.shelf_life_days == 7
+
+
+class TestOpenedShelfLife:
+    """Q5: how long a pack keeps once it is opened."""
+
+    def test_asks_for_it_with_examples(self):
+        text = build_instructions(CATEGORIES)
+        assert "os = " in text
+        assert "milk -> 5" in text
+
+    def test_says_to_skip_the_estimates_for_products_already_known(self):
+        """Re-deriving what the catalog already holds is paid-for work with no answer."""
+        text = build_instructions(CATEGORIES, ["Apple", "Milk"])
+
+        assert "pw, sl and os to null for it" in text
+
+    def test_an_empty_catalog_is_never_told_to_skip_them(self):
+        """With nothing known, that rule could only talk the model out of estimating."""
+        text = build_instructions(CATEGORIES)
+
+        assert "already knows those" not in text
+
+    def test_maps_it_onto_the_line(self):
+        milk, onion = parse_completion(_compact(), {"dairy", "produce"}, "text").lines
+
+        assert milk.opened_shelf_life_days == 5
+        assert onion.opened_shelf_life_days is None
+
+    @pytest.mark.parametrize("bad", [0, -3, "soon", None])
+    def test_a_nonsense_estimate_is_dropped(self, bad):
+        body = json.dumps({"p": [{"n": "MAITO", "g": "Milk", "q": 1, "os": bad}]})
+
+        (line,) = parse_completion(body, set(), "text").lines
+
+        assert line.opened_shelf_life_days is None
+
+
+class TestCategoryMatching:
+    """The gateway does not always honour the strict enum, and a miss nulls the category."""
+
+    def test_a_differently_cased_category_still_matches(self):
+        """muse-glimmer answers "Dairy" for the id `dairy`; a case-sensitive test lost all 49."""
+        body = json.dumps(
+            {
+                "p": [
+                    {"n": "MAITO", "g": "Milk", "q": 1, "c": "Dairy"},
+                    {"n": "OMENA", "g": "Apple", "q": 1, "c": "PRODUCE"},
+                ]
+            }
+        )
+
+        milk, apple = parse_completion(body, {"dairy", "produce"}, "text").lines
+
+        assert milk.category == "dairy"
+        assert apple.category == "produce"
+
+    def test_a_category_that_is_not_ours_is_still_dropped(self):
+        body = json.dumps(
+            {"p": [{"n": "SIENILIINA", "g": "Cloth", "q": 1, "c": "household"}]}
+        )
+
+        (line,) = parse_completion(body, {"dairy"}, "text").lines
+
+        assert line.category is None

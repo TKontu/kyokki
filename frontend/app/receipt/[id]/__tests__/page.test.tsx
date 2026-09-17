@@ -34,6 +34,7 @@ function item(index: number, overrides: Partial<ExtractedItem> = {}): ExtractedI
     suggested_category: 'dairy',
     piece_grams: null,
     shelf_life_days: null,
+    opened_shelf_life_days: null,
     printed_quantity: null,
     printed_unit: null,
     storage_type: 'refrigerator',

@@ -39,6 +39,7 @@ export interface ExtractedItem {
   suggested_category: string | null // Category id
   piece_grams: number | null // Roughly what one piece weighs, for produce sold by weight (Q2)
   shelf_life_days: number | null // Typical days it keeps; overrides the category default (Q6)
+  opened_shelf_life_days: number | null // Typical days it keeps once opened (Q5)
   printed_quantity: number | null // What the receipt said, when it was converted to pieces
   printed_unit: string | null // Unit the receipt used, when it was converted to pieces
   storage_type: StorageType

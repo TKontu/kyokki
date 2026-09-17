@@ -35,6 +35,10 @@ class ExtractedLine(BaseModel):
         default=None,
         description="Typical days this keeps unopened; overrides the category default (Q6)",
     )
+    opened_shelf_life_days: int | None = Field(
+        default=None,
+        description="Typical days this keeps once opened, for things that are opened (Q5)",
+    )
 
 
 class ReceiptExtraction(BaseModel):

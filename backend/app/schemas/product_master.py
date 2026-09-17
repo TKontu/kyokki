@@ -18,6 +18,11 @@ class ProductMasterBase(BaseModel):
     default_shelf_life_days: int = Field(
         ..., gt=0, description="Default shelf life (unopened)"
     )
+    avg_piece_grams: JsonDecimal | None = Field(
+        None,
+        gt=0,
+        description="Roughly what one piece weighs, so weighed produce can be counted (Q2)",
+    )
     opened_shelf_life_days: int | None = Field(
         None, gt=0, description="Shelf life after opening"
     )
@@ -62,6 +67,7 @@ class ProductMasterUpdate(BaseModel):
     category: str | None = None
     storage_type: str | None = None
     default_shelf_life_days: int | None = Field(None, gt=0)
+    avg_piece_grams: JsonDecimal | None = Field(None, gt=0)
     opened_shelf_life_days: int | None = Field(None, gt=0)
     unit_type: str | None = None
     default_unit: str | None = None

@@ -52,6 +52,9 @@ class ExtractedItem(BaseModel):
     shelf_life_days: int | None = Field(
         None, description="Typical days this keeps; overrides the category default (Q6)"
     )
+    opened_shelf_life_days: int | None = Field(
+        None, description="Typical days this keeps once opened (Q5)"
+    )
     printed_quantity: float | None = Field(
         None, description="What the receipt said, when it was converted to pieces"
     )
@@ -116,6 +119,7 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
                 suggested_category=category,
                 piece_grams=piece_grams,
                 shelf_life_days=line.get("shelf_life_days"),
+                opened_shelf_life_days=line.get("opened_shelf_life_days"),
                 printed_quantity=printed_quantity,
                 printed_unit=printed_unit,
                 storage_type=storage,

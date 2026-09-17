@@ -571,3 +571,62 @@ class TestProductCanonicalUnits:
             },
         )
         assert response.status_code == 422
+
+
+class TestPieceWeightThroughTheAPI:
+    """Q2 stored a piece weight but never exposed it; a correction needs both directions."""
+
+    PRODUCT = {
+        "canonical_name": "Apple",
+        "category": "fruits",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 21,
+        "unit_type": "count",
+        "default_unit": "pcs",
+    }
+
+    async def test_it_round_trips_through_create_and_read(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        created = await client.post(
+            "/api/products", json={**self.PRODUCT, "avg_piece_grams": 125}
+        )
+
+        assert created.status_code == 201
+        assert created.json()["avg_piece_grams"] == 125
+
+        fetched = await client.get(f"/api/products/{created.json()['id']}")
+        assert fetched.json()["avg_piece_grams"] == 125
+
+    async def test_a_bad_estimate_can_be_corrected(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (
+            await client.post(
+                "/api/products", json={**self.PRODUCT, "avg_piece_grams": 125}
+            )
+        ).json()
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"avg_piece_grams": 180}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["avg_piece_grams"] == 180
+
+    async def test_a_product_without_one_reads_as_null(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        created = await client.post("/api/products", json=self.PRODUCT)
+
+        assert created.json()["avg_piece_grams"] is None
+
+    async def test_a_weightless_piece_is_rejected(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """Zero would divide a real purchase into nothing."""
+        response = await client.post(
+            "/api/products", json={**self.PRODUCT, "avg_piece_grams": 0}
+        )
+
+        assert response.status_code == 422

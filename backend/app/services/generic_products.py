@@ -43,7 +43,11 @@ class ProductResolver:
         return self._categories[category_id]
 
     @staticmethod
-    def _fill_gaps(product: ProductMaster, piece_grams: float | None) -> ProductMaster:
+    def _fill_gaps(
+        product: ProductMaster,
+        piece_grams: float | None,
+        opened_shelf_life_days: int | None = None,
+    ) -> ProductMaster:
         """Learn what is still unknown about a product, never overwrite what is known.
 
         A later receipt filling in a missing piece weight is useful; the same receipt undoing
@@ -51,6 +55,8 @@ class ProductResolver:
         """
         if piece_grams and product.avg_piece_grams is None:
             product.avg_piece_grams = Decimal(str(piece_grams))
+        if opened_shelf_life_days and product.opened_shelf_life_days is None:
+            product.opened_shelf_life_days = opened_shelf_life_days
         return product
 
     async def resolve(
@@ -63,6 +69,7 @@ class ProductResolver:
         category: str | None = None,
         piece_grams: float | None = None,
         shelf_life_days: int | None = None,
+        opened_shelf_life_days: int | None = None,
     ) -> tuple[ProductMaster, bool]:
         """Return ``(product, created)``.
 
@@ -74,14 +81,19 @@ class ProductResolver:
             product = await self.db.get(ProductMaster, product_id)
             if product is None:
                 raise InvalidProductRequest(f"product '{product_id}' not found")
-            return self._fill_gaps(product, piece_grams), False
+            return self._fill_gaps(product, piece_grams, opened_shelf_life_days), False
 
         tidy = tidy_name(name)
         if not tidy:
             raise InvalidProductRequest("no product name")
         key = tidy.casefold()
         if key in self._by_name:
-            return self._fill_gaps(self._by_name[key], piece_grams), False
+            return (
+                self._fill_gaps(
+                    self._by_name[key], piece_grams, opened_shelf_life_days
+                ),
+                False,
+            )
 
         existing = (
             (
@@ -97,7 +109,7 @@ class ProductResolver:
         )
         if existing is not None:
             self._by_name[key] = existing
-            return self._fill_gaps(existing, piece_grams), False
+            return self._fill_gaps(existing, piece_grams, opened_shelf_life_days), False
 
         if not category:
             raise InvalidProductRequest(f"Category required for new product '{tidy}'")
@@ -118,6 +130,8 @@ class ProductResolver:
             default_shelf_life_days=shelf_life_days
             or category_row.default_shelf_life_days,
             avg_piece_grams=piece_grams,
+            # How long it keeps once the pack is open, when the model could say (Q5)
+            opened_shelf_life_days=opened_shelf_life_days,
             unit_type=unit_type_for(natural_unit),
             default_unit=natural_unit,
             default_quantity=quantity,
