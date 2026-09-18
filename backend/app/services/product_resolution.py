@@ -78,15 +78,21 @@ class Resolution:
     verified: bool = False
     candidates: list[Candidate] = field(default_factory=list)
     non_food: bool = False
+    # Where the alias itself came from, when `source` is "alias". Confirm reads it back
+    # so reinforcing a mapping keeps its provenance instead of claiming the cook's word.
+    alias_source: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The blob stored on the receipt line (H12 shape)."""
-        return {
+        blob: dict[str, Any] = {
             "product_id": str(self.product.id) if self.product else None,
             "source": self.source,
             "verified": self.verified,
             "candidates": [c.as_dict() for c in self.candidates],
         }
+        if self.alias_source is not None:
+            blob["alias_source"] = self.alias_source
+        return blob
 
 
 class TrigramRetriever:
@@ -193,6 +199,7 @@ class ProductResolution:
                         product=product,
                         source="alias",
                         verified=bool(alias.manually_verified),
+                        alias_source=str(alias.source or "cook"),
                     )
                     continue
 
