@@ -6,8 +6,9 @@ queue survives restarts. A receipt stuck in ``processing`` (worker killed, hung 
 after ``RECEIPT_STALE_MINUTES`` so it can be retried.
 """
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -33,18 +34,70 @@ def stale_error() -> str:
     )
 
 
+class NotEnqueueable(Exception):
+    """The receipt left the state the caller saw before the queue write landed."""
+
+
+# A freshly ingested receipt is the only thing the upload path may queue.
+ENQUEUEABLE_ON_UPLOAD = (ReceiptStatus.UPLOADED,)
+# Re-reading is allowed from any state the pipeline has finished with, but never
+# from `confirmed`: the cook has already turned that receipt into inventory.
+ENQUEUEABLE_ON_REREAD = (
+    ReceiptStatus.UPLOADED,
+    ReceiptStatus.COMPLETED,
+    ReceiptStatus.FAILED,
+)
+
+
 async def enqueue(
-    db: AsyncSession, receipt: Receipt, *, now: datetime | None = None
+    db: AsyncSession,
+    receipt: Receipt,
+    *,
+    allowed_statuses: Sequence[str] = ENQUEUEABLE_ON_REREAD,
+    now: datetime | None = None,
 ) -> Receipt:
-    """Put a receipt at the back of the queue, clearing any previous failure."""
-    row: Any = receipt  # Column-typed model: assign plain values
-    row.processing_status = ReceiptStatus.QUEUED
-    row.queued_at = _now(now)
-    row.processing_started_at = None
-    row.error = None
+    """Put a receipt at the back of the queue, clearing any previous failure.
+
+    A conditional UPDATE, not an attribute write: the caller read the status in a
+    separate statement, and `confirm_receipt` holds a row lock while it sets
+    `confirmed`. Without the WHERE clause, `/process` could block on that lock and
+    then land `queued` on top of `confirmed`, so the cook's confirmed receipt went
+    back through the reader.
+
+    Raises:
+        NotEnqueueable: the row is no longer in one of ``allowed_statuses``.
+    """
+    receipt_id = cast(UUID, receipt.id)
+    queued_at = _now(now)
+    updated = (
+        await db.execute(
+            update(Receipt)
+            .where(
+                Receipt.id == receipt_id,
+                Receipt.processing_status.in_(list(allowed_statuses)),
+            )
+            .values(
+                processing_status=ReceiptStatus.QUEUED,
+                queued_at=queued_at,
+                processing_started_at=None,
+                error=None,
+            )
+            .returning(Receipt.id)
+        )
+    ).scalar_one_or_none()
+
+    if updated is None:
+        # Nothing was written, so there is nothing to roll back; the caller's
+        # transaction is left exactly as it was.
+        current = await db.get(Receipt, receipt_id, populate_existing=True)
+        found = getattr(current, "processing_status", None) or "gone"
+        raise NotEnqueueable(f"Receipt is {found} and cannot be queued")
+
     await db.commit()
-    await broadcast_receipt_status(receipt_id=cast(UUID, receipt.id), status="queued")
-    logger.info("Receipt queued", extra={"receipt_id": str(receipt.id)})
+    # The caller holds this object; refresh it rather than hand back a stale status.
+    await db.get(Receipt, receipt_id, populate_existing=True)
+    await broadcast_receipt_status(receipt_id=receipt_id, status="queued")
+    logger.info("Receipt queued", extra={"receipt_id": str(receipt_id)})
     return receipt
 
 

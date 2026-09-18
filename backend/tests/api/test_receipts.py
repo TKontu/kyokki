@@ -367,11 +367,15 @@ class TestProcessReceipt:
         self, client: AsyncClient, test_db: AsyncSession, status: str, message: str
     ) -> None:
         receipt_id = await self._upload(client)
-        fields = (
+        fields: dict = (
             {"processing_started_at": datetime.now(UTC)}
             if status == "processing"
             else {}
         )
+        if status in ("completed", "confirmed"):
+            # A read that found something. A completed receipt with zero lines is
+            # deliberately re-readable now (H07); see the test below.
+            fields["items_extracted"] = 3
         await self._set_status(test_db, receipt_id, status, **fields)
 
         response = await client.post(f"/api/receipts/{receipt_id}/process")
@@ -413,13 +417,54 @@ class TestProcessReceipt:
     ) -> None:
         receipt_id = await self._upload(client)
         await self._set_status(
-            test_db, receipt_id, status, ocr_structured={"method": method, "lines": []}
+            test_db,
+            receipt_id,
+            status,
+            ocr_structured={"method": method, "lines": []},
+            items_extracted=3,
         )
 
         response = await client.post(f"/api/receipts/{receipt_id}/process")
 
         assert response.status_code == 409
         assert "already read" in response.json()["detail"]
+
+    async def test_a_completed_receipt_with_no_lines_can_be_reread(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        """An image-only PDF completed with zero lines and `method: text`, and the
+        old rule re-read only `heuristic` - so it could be neither read again nor
+        (before H08) dismissed. It nagged from the banner forever."""
+        receipt_id = await self._upload(client)
+        await self._set_status(
+            test_db,
+            receipt_id,
+            "completed",
+            ocr_structured={"method": "text", "lines": []},
+            items_extracted=0,
+        )
+
+        response = await client.post(f"/api/receipts/{receipt_id}/process")
+
+        assert response.status_code == 202
+        assert response.json()["processing_status"] == "queued"
+
+    async def test_a_confirmed_receipt_with_no_lines_is_still_refused(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        """Confirmed is terminal: the cook has already dealt with it."""
+        receipt_id = await self._upload(client)
+        await self._set_status(
+            test_db,
+            receipt_id,
+            "confirmed",
+            ocr_structured={"method": "text", "lines": []},
+            items_extracted=0,
+        )
+
+        response = await client.post(f"/api/receipts/{receipt_id}/process")
+
+        assert response.status_code == 409
 
     async def test_process_receipt_not_found(
         self, client: AsyncClient, test_db: AsyncSession

@@ -11,6 +11,7 @@ from datetime import date
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.crud import receipt as crud_receipt
 from app.models.receipt import Receipt
@@ -18,13 +19,27 @@ from app.services import receipt_queue
 
 logger = get_logger(__name__)
 
-ALLOWED_CONTENT_TYPES = frozenset(
-    {"application/pdf", "image/jpeg", "image/jpg", "image/png", "image/webp"}
-)
+# The stored file name comes from here, never from the client's file name. The
+# worker routes on the stored suffix, so a Telegram document with no suffix used
+# to be accepted, acknowledged, and then failed by the worker as an unsupported
+# file type - and a name with a NUL byte or a multi-kilobyte suffix reached
+# aiofiles.open and answered 500.
+SUFFIX_FOR_CONTENT_TYPE = {
+    "application/pdf": ".pdf",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
+ALLOWED_CONTENT_TYPES = frozenset(SUFFIX_FOR_CONTENT_TYPE)
 
 
 class UnsupportedReceiptType(ValueError):
     """The file is not a PDF or a supported image."""
+
+
+class ReceiptTooLarge(ValueError):
+    """The upload is larger than ``MAX_RECEIPT_UPLOAD_BYTES``."""
 
 
 @dataclass(frozen=True)
@@ -46,11 +61,19 @@ async def ingest_receipt_file(
 
     Raises:
         UnsupportedReceiptType: ``content_type`` is not a PDF or supported image.
+        ReceiptTooLarge: the file is over the configured cap.
     """
     if content_type not in ALLOWED_CONTENT_TYPES:
         raise UnsupportedReceiptType(
             f"Unsupported file type: {content_type or 'unknown'}. "
             f"Allowed types: {', '.join(sorted(ALLOWED_CONTENT_TYPES))}"
+        )
+
+    cap = settings.MAX_RECEIPT_UPLOAD_BYTES
+    if len(content) > cap:
+        raise ReceiptTooLarge(
+            f"Receipt is {len(content) // 1_000_000} MB; the limit is "
+            f"{cap // 1_000_000} MB"
         )
 
     sha256 = hashlib.sha256(content).hexdigest()
@@ -64,6 +87,7 @@ async def ingest_receipt_file(
             db,
             file_content=content,
             filename=filename,
+            suffix=SUFFIX_FOR_CONTENT_TYPE[content_type],
             store_chain=store_chain,
             purchase_date=purchase_date,
             content_sha256=sha256,
@@ -77,5 +101,7 @@ async def ingest_receipt_file(
         return IngestResult(receipt=existing, duplicate=True)
 
     # Every new upload goes straight to the worker queue (MVP-R3)
-    await receipt_queue.enqueue(db, receipt)
+    await receipt_queue.enqueue(
+        db, receipt, allowed_statuses=receipt_queue.ENQUEUEABLE_ON_UPLOAD
+    )
     return IngestResult(receipt=receipt, duplicate=False)

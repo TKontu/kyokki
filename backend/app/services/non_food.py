@@ -11,7 +11,7 @@ agree on what "the same line" means.
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.non_food_name import NonFoodName
@@ -25,6 +25,29 @@ async def known_non_food(db: AsyncSession, store_chain: str | None) -> set[str]:
     """
     rows = (await db.execute(select(NonFoodName))).scalars().all()
     return {str(row.receipt_name) for row in rows}
+
+
+async def forget_non_food(
+    db: AsyncSession, store_chain: str, receipt_names: list[str]
+) -> int:
+    """Drop printed names the cook has now treated as food. Returns rows deleted.
+
+    Nothing else in the codebase deletes a `non_food_name` row, so before this a
+    misjudgement - the model calling a food line household, the cook not noticing -
+    hid that product from every future receipt with no way back.
+    """
+    names = [n for n in (normalize_receipt_name(raw) for raw in receipt_names) if n]
+    if not names:
+        return 0
+    deleted = await db.execute(
+        delete(NonFoodName)
+        .where(
+            NonFoodName.store_chain == store_chain,
+            NonFoodName.receipt_name.in_(names),
+        )
+        .returning(NonFoodName.id)
+    )
+    return len(deleted.scalars().all())
 
 
 async def remember_non_food(

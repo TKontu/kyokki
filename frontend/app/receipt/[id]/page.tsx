@@ -64,6 +64,10 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   // Edits live here, keyed by line index; a row not touched yet uses the read values.
   const [edits, setEdits] = useState<Record<number, Partial<ReviewRow>>>({})
   const [showHousehold, setShowHousehold] = useState(false)
+  // Whether the cook has ever opened the household fold on this receipt. Folding
+  // is the model's guess; only a cook who has actually seen the lines can teach
+  // anything from them (H08).
+  const [householdSeen, setHouseholdSeen] = useState(false)
 
   const sortedCategories = useMemo(
     () => [...(categories ?? [])].sort((a, b) => a.sort_order - b.sort_order),
@@ -178,15 +182,25 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
           }
     )
 
+    // Only teach from lines the cook has actually looked at. A misjudgement inside
+    // a fold that was never opened would otherwise be remembered forever, hiding a
+    // real food line from every future receipt (H08).
+    const nonFoodIndexes = householdSeen
+      ? household.map(({ item }) => item.index)
+      : []
+
     confirm.mutate(
-      {
-        id: receipt.id,
-        data: { items, non_food_indexes: household.map(({ item }) => item.index) },
-      },
+      { id: receipt.id, data: { items, non_food_indexes: nonFoodIndexes } },
       {
         onSuccess: (result) => {
-          const noun = result.items_created === 1 ? 'item' : 'items'
-          toast.success(`Added ${result.items_created} ${noun} · ${storeName(receipt)}`)
+          if (result.items_created === 0) {
+            toast.success(`Dismissed · ${storeName(receipt)}`)
+          } else {
+            const noun = result.items_created === 1 ? 'item' : 'items'
+            toast.success(
+              `Added ${result.items_created} ${noun} · ${storeName(receipt)}`
+            )
+          }
           router.push('/')
         },
         // Keep the review open so nothing edited is lost; 4xx messages are meant for people.
@@ -264,7 +278,10 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
               <button
                 type="button"
                 className="underline"
-                onClick={() => setShowHousehold((shown) => !shown)}
+                onClick={() => {
+                  setShowHousehold((shown) => !shown)
+                  setHouseholdSeen(true)
+                }}
               >
                 {showHousehold ? 'Hide' : 'Show'}
               </button>
@@ -273,11 +290,16 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
         </div>
         <Button
           size="lg"
-          disabled={included.length === 0 || !quantitiesValid || confirm.isPending}
+          disabled={!quantitiesValid || confirm.isPending}
           loading={confirm.isPending}
           onClick={submit}
         >
-          {`Add ${included.length} ${included.length === 1 ? 'item' : 'items'}`}
+          {/* Confirming nothing is how an all-household receipt, a duplicate, or a
+              read that found no lines gets finished. Without it the receipt stays
+              `completed` and the home banner counts it as waiting forever (H08). */}
+          {included.length === 0
+            ? 'Dismiss receipt'
+            : `Add ${included.length} ${included.length === 1 ? 'item' : 'items'}`}
         </Button>
       </footer>
     </div>

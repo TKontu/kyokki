@@ -182,3 +182,68 @@ class TestQueuePosition:
         await _receipt(db_session, ReceiptStatus.QUEUED, queued_at=NOW)
 
         assert await receipt_queue.queue_position(db_session, mine) == 2
+
+
+class TestEnqueueIsConditional:
+    """`enqueue` used to be an unconditional attribute write on a row the caller
+    had read in an earlier statement. `confirm_receipt` holds a row lock while it
+    sets `confirmed`, so /process could block on that lock and then land `queued`
+    on top of it - putting a confirmed receipt back through the reader (H07)."""
+
+    async def test_a_confirmed_receipt_is_refused(self, db_session: AsyncSession):
+        receipt = await _receipt(db_session, ReceiptStatus.CONFIRMED)
+
+        with pytest.raises(receipt_queue.NotEnqueueable):
+            await receipt_queue.enqueue(db_session, receipt, now=NOW)
+
+    async def test_the_status_is_left_alone_when_it_is_refused(
+        self, db_session: AsyncSession
+    ):
+        receipt = await _receipt(db_session, ReceiptStatus.CONFIRMED)
+
+        with pytest.raises(receipt_queue.NotEnqueueable):
+            await receipt_queue.enqueue(db_session, receipt, now=NOW)
+
+        refreshed = await db_session.get(Receipt, receipt.id, populate_existing=True)
+        assert refreshed.processing_status == ReceiptStatus.CONFIRMED
+
+    @pytest.mark.parametrize(
+        "status",
+        [ReceiptStatus.UPLOADED, ReceiptStatus.COMPLETED, ReceiptStatus.FAILED],
+    )
+    async def test_a_finished_receipt_can_be_queued_again(
+        self, db_session: AsyncSession, status: str
+    ):
+        receipt = await _receipt(db_session, status, error="something went wrong")
+
+        await receipt_queue.enqueue(db_session, receipt, now=NOW)
+
+        refreshed = await db_session.get(Receipt, receipt.id, populate_existing=True)
+        assert refreshed.processing_status == ReceiptStatus.QUEUED
+        assert refreshed.queued_at == NOW
+        assert refreshed.error is None
+
+    async def test_the_upload_path_only_queues_a_fresh_receipt(
+        self, db_session: AsyncSession
+    ):
+        """Ingest passes its own allowed set; a re-upload of something already read
+        must not silently restart it."""
+        receipt = await _receipt(db_session, ReceiptStatus.COMPLETED)
+
+        with pytest.raises(receipt_queue.NotEnqueueable):
+            await receipt_queue.enqueue(
+                db_session,
+                receipt,
+                allowed_statuses=receipt_queue.ENQUEUEABLE_ON_UPLOAD,
+                now=NOW,
+            )
+
+    async def test_the_refusal_names_the_status_it_found(
+        self, db_session: AsyncSession
+    ):
+        receipt = await _receipt(db_session, ReceiptStatus.CONFIRMED)
+
+        with pytest.raises(receipt_queue.NotEnqueueable) as excinfo:
+            await receipt_queue.enqueue(db_session, receipt, now=NOW)
+
+        assert "confirmed" in str(excinfo.value)

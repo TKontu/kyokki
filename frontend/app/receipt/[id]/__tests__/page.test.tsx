@@ -116,6 +116,8 @@ function renderPage() {
 }
 
 const addButton = () => screen.getByRole('button', { name: /^add \d+ items?$/i })
+const dismissButton = () => screen.getByRole('button', { name: /^dismiss receipt$/i })
+const showHousehold = () => fireEvent.click(screen.getByRole('button', { name: 'Show' }))
 const rows = () => screen.getAllByRole('listitem')
 
 describe('ReceiptReviewPage', () => {
@@ -332,7 +334,9 @@ describe('ReceiptReviewPage', () => {
     expect(rows()).toHaveLength(2)
   })
 
-  it('remembers the household lines when confirming', async () => {
+  it('remembers the household lines the cook has looked at', async () => {
+    // Opening the fold is what makes this a judgement rather than the model's
+    // guess; see the test below (H08).
     const confirms = mockApi(
       receipt({}, [
         item(0),
@@ -342,6 +346,7 @@ describe('ReceiptReviewPage', () => {
     renderPage()
 
     await screen.findByText('PRINTED 0')
+    showHousehold()
     fireEvent.click(addButton())
 
     await waitFor(() => expect(confirms).toHaveLength(1))
@@ -359,7 +364,7 @@ describe('ReceiptReviewPage', () => {
     renderPage()
 
     await screen.findByText('PRINTED 0')
-    fireEvent.click(screen.getByRole('button', { name: 'Show' }))
+    showHousehold()
     // Giving it a category is how the cook says "this one really is food"
     fireEvent.change(within(rows()[1]).getByLabelText('Category'), {
       target: { value: 'dairy' },
@@ -369,6 +374,42 @@ describe('ReceiptReviewPage', () => {
     await waitFor(() => expect(confirms).toHaveLength(1))
     expect(confirms[0].non_food_indexes).toEqual([])
     expect((confirms[0] as { items: { index: number }[] }).items).toHaveLength(2)
+  })
+
+  it('a household fold the cook never opened teaches nothing', async () => {
+    // The model's guess alone is not a judgement. Remembering it would hide a real
+    // food line from every future receipt, and nothing could unlearn it (H08).
+    const confirms = mockApi(
+      receipt({}, [
+        item(0),
+        item(1, { generic_name: 'Compost bag', suggested_category: null, non_food: true }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect(confirms[0].non_food_indexes).toEqual([])
+  })
+
+  it('a receipt with nothing to add can be dismissed', async () => {
+    // An all-household receipt, a duplicate, or a read that found no lines. Before
+    // H08 Confirm was disabled at zero items, so the receipt stayed `completed` and
+    // the home banner counted it as waiting forever.
+    const confirms = mockApi(
+      receipt({}, [
+        item(0, { generic_name: 'Compost bag', suggested_category: null, non_food: true }),
+      ])
+    )
+    renderPage()
+
+    await waitFor(() => expect(dismissButton()).toBeEnabled())
+    fireEvent.click(dismissButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items).toEqual([])
   })
 
   it('renders and confirms a long receipt', async () => {

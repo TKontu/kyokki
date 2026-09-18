@@ -28,7 +28,11 @@ def is_pdf(file_path: str | Path) -> bool:
 
 
 def content_type_for(file_path: str | Path) -> str:
-    """MIME type from the file name, e.g. image/png; octet-stream when unknown."""
+    """MIME type from the file name, e.g. image/png; octet-stream when unknown.
+
+    The stored name's suffix comes from the validated upload content type
+    (receipt_ingest.SUFFIX_FOR_CONTENT_TYPE), so this round-trips.
+    """
     guessed, _ = mimetypes.guess_type(str(file_path))
     return guessed or "application/octet-stream"
 
@@ -37,8 +41,13 @@ async def extract_text_from_receipt(file_path: str) -> str:
     """Extract text from receipt image or PDF.
 
     Routes:
-    - PDF files → pdfplumber (for digital receipts like S-Group PDFs)
+    - PDF files → pdfplumber, then MinerU when the PDF has no text layer
     - Image files → MinerU OCR service (for photo receipts)
+
+    A scanned or photographed receipt saved as a PDF has no text layer, so
+    pdfplumber returns "". That used to be handed straight to the model, which
+    read nothing, and the receipt completed with zero lines (H07). MinerU's
+    /file_parse accepts PDFs, so it is the same OCR call the image path makes.
 
     Raises:
         ValueError: If file type unsupported.
@@ -49,7 +58,13 @@ async def extract_text_from_receipt(file_path: str) -> str:
 
     if is_pdf(path):
         logger.info("Extracting text from PDF", extra={"file": path.name})
-        return await asyncio.to_thread(_extract_from_pdf, path)
+        text = await asyncio.to_thread(_extract_from_pdf, path)
+        if text.strip():
+            return text
+        logger.info(
+            "PDF has no text layer, sending it to MinerU", extra={"file": path.name}
+        )
+        return await _extract_from_image(path)
     if path.suffix.lower() in IMAGE_SUFFIXES:
         logger.info("Extracting text from image via MinerU", extra={"file": path.name})
         return await _extract_from_image(path)

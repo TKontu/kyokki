@@ -79,6 +79,7 @@ async def create_receipt(
     *,
     file_content: bytes,
     filename: str,
+    suffix: str | None = None,
     store_chain: str | None = None,
     purchase_date: date | None = None,
     batch_id: UUID | None = None,
@@ -89,7 +90,9 @@ async def create_receipt(
     Args:
         db: Database session.
         file_content: The uploaded file bytes.
-        filename: Original filename (used for extension).
+        filename: Original filename, kept for the log only.
+        suffix: Extension to store the file under, derived from the validated
+            content type. Falls back to the client's filename when absent.
         store_chain: Optional store chain name.
         purchase_date: Optional purchase date.
         batch_id: Optional batch ID for multi-receipt processing.
@@ -97,9 +100,11 @@ async def create_receipt(
     Returns:
         Created receipt.
     """
-    # Generate unique filename
+    # Generate unique filename. The extension decides how the worker reads the
+    # file, so it comes from the validated content type rather than from a name
+    # the client chose (H07).
     receipt_id = uuid.uuid4()
-    file_extension = Path(filename).suffix
+    file_extension = suffix if suffix is not None else Path(filename).suffix
     stored_filename = f"{receipt_id}{file_extension}"
 
     # Ensure receipts directory exists

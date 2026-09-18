@@ -27,7 +27,11 @@ from app.schemas.receipt import (
     ReceiptSummary,
 )
 from app.services import receipt_confirm, receipt_queue
-from app.services.receipt_ingest import UnsupportedReceiptType, ingest_receipt_file
+from app.services.receipt_ingest import (
+    ReceiptTooLarge,
+    UnsupportedReceiptType,
+    ingest_receipt_file,
+)
 
 router = APIRouter()
 
@@ -54,6 +58,7 @@ async def upload_receipt(
 
     Raises:
         HTTPException 400: If file type is not supported.
+        HTTPException 413: If the file is larger than MAX_RECEIPT_UPLOAD_BYTES.
         HTTPException 409: If the same file was already uploaded (detail has receipt_id).
     """
     try:
@@ -68,6 +73,10 @@ async def upload_receipt(
     except UnsupportedReceiptType as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except ReceiptTooLarge as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)
         ) from exc
 
     if result.duplicate:
@@ -180,20 +189,31 @@ async def process_receipt(
     structured: dict[str, Any] = (
         receipt.ocr_structured if isinstance(receipt.ocr_structured, dict) else {}
     )
-    reread_heuristic = (
-        receipt.processing_status == ReceiptStatus.COMPLETED
-        and structured.get("method") == "heuristic"
+    # A completed read is worth repeating when it produced nothing usable: the
+    # heuristic parser gives no categories or generic names, and an extraction
+    # with no lines at all (an image-only PDF that never reached OCR) left the
+    # cook with a receipt that could be neither re-read nor finished.
+    empty_read = (receipt.items_extracted or 0) == 0
+    rereadable = receipt.processing_status == ReceiptStatus.COMPLETED and (
+        structured.get("method") == "heuristic" or empty_read
     )
     if (
         receipt.processing_status in (ReceiptStatus.COMPLETED, ReceiptStatus.CONFIRMED)
-        and not reread_heuristic
+        and not rereadable
     ):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Receipt was already read",
         )
 
-    await receipt_queue.enqueue(db, receipt)
+    try:
+        await receipt_queue.enqueue(db, receipt)
+    except receipt_queue.NotEnqueueable as exc:
+        # Something changed the row between the read above and the queue write -
+        # confirm holds a row lock while it sets `confirmed`.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     return ReceiptResponse.model_validate(receipt)
 
 

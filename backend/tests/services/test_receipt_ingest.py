@@ -2,7 +2,9 @@
 
 import hashlib
 import shutil
+from pathlib import Path
 from unittest.mock import patch
+from uuid import uuid4
 
 import anyio
 import pytest
@@ -10,8 +12,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.receipt import Receipt
 from app.services.receipt_ingest import (
+    ReceiptTooLarge,
     UnsupportedReceiptType,
     ingest_receipt_file,
 )
@@ -122,3 +126,77 @@ async def test_unique_violation_race_returns_the_existing_receipt(
 
     assert second.duplicate is True
     assert second.receipt.id == first_id
+
+
+class TestStoredSuffixComesFromTheContentType:
+    """The worker routes on the stored file's suffix. Taking it from the client's
+    file name meant a Telegram document (which arrives with no suffix) was
+    accepted, acknowledged to the cook, and then failed by the worker as an
+    unsupported file type - and a hostile or odd name reached aiofiles.open (H07)."""
+
+    @pytest.mark.parametrize(
+        ("filename", "content_type", "expected"),
+        [
+            ("telegram-BQACAgQAAx", "application/pdf", ".pdf"),
+            ("receipt", "image/jpeg", ".jpg"),
+            ("receipt.jpeg", "image/jpeg", ".jpg"),
+            ("receipt.PDF", "application/pdf", ".pdf"),
+            ("receipt.pdf.exe", "application/pdf", ".pdf"),
+            ("shot.png", "image/png", ".png"),
+            ("shot.webp", "image/webp", ".webp"),
+        ],
+    )
+    async def test_the_suffix_is_derived_not_copied(
+        self,
+        db_session: AsyncSession,
+        filename: str,
+        content_type: str,
+        expected: str,
+    ):
+        result = await ingest_receipt_file(
+            db_session,
+            content=uuid4().bytes + b"receipt",
+            filename=filename,
+            content_type=content_type,
+        )
+
+        assert Path(str(result.receipt.image_path)).suffix == expected
+
+    async def test_a_name_that_would_break_the_filesystem_is_ignored(
+        self, db_session: AsyncSession
+    ):
+        result = await ingest_receipt_file(
+            db_session,
+            content=uuid4().bytes + b"receipt",
+            filename="receipt\x00." + "x" * 5000,
+            content_type="application/pdf",
+        )
+
+        assert Path(str(result.receipt.image_path)).suffix == ".pdf"
+
+
+class TestUploadSizeCap:
+    async def test_a_file_over_the_cap_is_refused(self, db_session: AsyncSession):
+        oversized = b"x" * (settings.MAX_RECEIPT_UPLOAD_BYTES + 1)
+
+        with pytest.raises(ReceiptTooLarge):
+            await ingest_receipt_file(
+                db_session,
+                content=oversized,
+                filename="huge.pdf",
+                content_type="application/pdf",
+            )
+
+    async def test_a_file_at_the_cap_is_accepted(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setattr(settings, "MAX_RECEIPT_UPLOAD_BYTES", 32)
+
+        result = await ingest_receipt_file(
+            db_session,
+            content=b"x" * 32,
+            filename="small.pdf",
+            content_type="application/pdf",
+        )
+
+        assert result.duplicate is False
