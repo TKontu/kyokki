@@ -23,11 +23,16 @@ export type ReceiptUnit = 'g' | 'dl' | 'pcs'
 
 export type MatchConfidence = 'exact' | 'high' | 'medium' | 'low'
 
-/** alias: learned store name; exact: canonical name; fuzzy*: closest name or alias. */
-export type MatchSource = 'alias' | 'exact' | 'fuzzy' | 'fuzzy_alias'
+/**
+ * How a line came to point at a product.
+ * alias: a learned printed name. name: a known catalog name. Both are exact keys.
+ * selected: proposed rather than keyed - the row shows it as "auto". none: unresolved.
+ */
+export type MatchSource = 'alias' | 'name' | 'selected' | 'none'
 
 export interface ExtractedItem {
-  index: number // Position on the receipt; confirm and review address items by it
+  index: number // Position in the stored line list; kept for one release
+  line_id: string | null // Stable identity, kept across re-reads; null before H12
   name: string // Product name as printed
   generic_name: string | null // Brand-free generic name suggested for a new product
   quantity: number
@@ -37,6 +42,7 @@ export interface ExtractedItem {
   match_score: number | null // 0-100
   match_confidence: MatchConfidence | null
   match_source: MatchSource | null
+  verified: boolean // The mapping came from a key the cook confirmed, not a proposal
   suggested_category: string | null // Category id
   piece_grams: number | null // Roughly what one piece weighs, for produce sold by weight (Q2)
   shelf_life_days: number | null // Typical days it keeps; overrides the category default (Q6)
@@ -105,7 +111,8 @@ export interface ReceiptListParams {
  * At least one of product_id, name or index is required.
  */
 export interface ConfirmedItemCreate {
-  index?: number | null
+  index?: number | null // Receipt line by position
+  line_id?: string | null // Receipt line by identity; wins over index
   product_id?: string | null
   name?: string | null
   category?: string | null

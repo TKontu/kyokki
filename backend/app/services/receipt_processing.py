@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import anyio
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,6 +50,67 @@ from app.services.store_chain import normalize_store_chain
 logger = get_logger(__name__)
 
 MAX_ERROR_CHARS = 500  # stored on the receipt and shown to the user
+
+
+def _line_ids_by_name(structured: object) -> dict[str, list[str]]:
+    """Line ids already stored for this receipt, grouped by normalised printed name.
+
+    A re-read produces a fresh list of lines; matching them back by printed name keeps
+    the identity of every line that was there before, so edits and non-food memory
+    survive (H12). Repeats of one printed name are handed out in order.
+    """
+    if not isinstance(structured, dict):
+        return {}
+    lines = structured.get("lines")
+    if not isinstance(lines, list):
+        return {}
+    by_name: dict[str, list[str]] = {}
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        line_id, name = line.get("line_id"), line.get("name")
+        if line_id and name:
+            by_name.setdefault(normalize_receipt_name(str(name)), []).append(
+                str(line_id)
+            )
+    return by_name
+
+
+def _line_id_for(name: str, previous: dict[str, list[str]]) -> str:
+    """Reuse this printed name's next unused id, or mint one."""
+    waiting = previous.get(normalize_receipt_name(name))
+    if waiting:
+        return waiting.pop(0)
+    return str(uuid4())
+
+
+def _resolution(match: "MatchResult | None") -> dict[str, Any]:
+    """How this line came to point at a product, in the vocabulary H13 will keep.
+
+    The matcher still decides here; only the *description* changes. A similarity guess
+    is recorded as `selected` - proposed, not keyed - which is the truth the review row
+    shows as "auto" rather than the "high" it used to claim.
+    """
+    if match is None:
+        return {
+            "product_id": None,
+            "source": "none",
+            "verified": False,
+            "candidates": [],
+        }
+    source = (
+        "alias"
+        if match.source == "alias"
+        else "name"
+        if match.source == "exact"
+        else "selected"
+    )
+    return {
+        "product_id": str(match.product.id),
+        "source": source,
+        "verified": bool(match.verified),
+        "candidates": [],
+    }
 
 
 @dataclass
@@ -213,6 +275,9 @@ class ReceiptProcessingService:
 
             matched_products: list[MatchResult] = []
             stored_lines = []
+            # Re-reading a receipt must not invalidate what the cook already edited, so
+            # a printed name that was there before keeps its line_id (H12).
+            previous_ids = _line_ids_by_name(receipt.ocr_structured)
             for line in extraction.lines:
                 # Only confident matches pre-select a product; weaker fuzzy guesses (the R1b
                 # end-to-end run paired CHEDDAR PUNAINEN with PUNASIPULI at 50) stay unmatched
@@ -230,12 +295,14 @@ class ReceiptProcessingService:
                     # fresh guess from the model (Q2).
                     stored["piece_grams"] = float(match.product.avg_piece_grams)
                 stored.update(
+                    line_id=_line_id_for(line.name, previous_ids),
                     product_id=str(match.product.id) if match else None,
                     product_name=match.product.canonical_name if match else None,
                     product_storage_type=match.product.storage_type if match else None,
                     match_score=round(match.score, 1) if match else None,
                     match_confidence=match.confidence.value if match else None,
                     match_source=match.source if match else None,
+                    resolution=_resolution(match),
                 )
                 stored_lines.append(stored)
                 if match:

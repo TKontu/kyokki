@@ -22,6 +22,7 @@ const CATEGORIES = [
 function item(index: number, overrides: Partial<ExtractedItem> = {}): ExtractedItem {
   return {
     index,
+    line_id: `line-${index}`,
     name: `PRINTED ${index}`,
     generic_name: `Generic ${index}`,
     quantity: 1,
@@ -31,6 +32,7 @@ function item(index: number, overrides: Partial<ExtractedItem> = {}): ExtractedI
     match_score: null,
     match_confidence: null,
     match_source: null,
+    verified: false,
     suggested_category: 'dairy',
     piece_grams: null,
     shelf_life_days: null,

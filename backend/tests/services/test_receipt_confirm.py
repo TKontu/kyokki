@@ -430,7 +430,7 @@ class TestReceiptState:
 
 class TestConfirmedItemSchema:
     def test_needs_a_product_a_name_or_a_line(self):
-        with pytest.raises(ValidationError, match="product_id, name or index"):
+        with pytest.raises(ValidationError, match="product_id, name, index or line_id"):
             ConfirmedItemCreate(quantity=1, unit="pcs", purchase_date=PURCHASED)
 
     def test_units_still_convert(self):

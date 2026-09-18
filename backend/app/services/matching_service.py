@@ -46,6 +46,9 @@ class MatchResult:
     score: float  # 0-100, higher is better
     confidence: MatchConfidence
     source: MatchSource = "fuzzy"
+    # True only when the cook confirmed the alias this came through. H13 replaces this
+    # class; until then it is what tells the review row "known" from "auto".
+    verified: bool = False
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,7 @@ class MatchingService:
                 score=100.0,
                 confidence=MatchConfidence.EXACT,
                 source="alias",
+                verified=bool(alias.manually_verified),
             )
 
         generic_key = normalize_receipt_name(generic_name) if generic_name else ""
@@ -139,6 +143,7 @@ class MatchingService:
                     score=100.0,
                     confidence=MatchConfidence.EXACT,
                     source="exact",
+                    verified=True,
                 )
 
         exact = self._exact_canonical(key)
@@ -148,6 +153,7 @@ class MatchingService:
                 score=100.0,
                 confidence=MatchConfidence.EXACT,
                 source="exact",
+                verified=True,
             )
 
         candidates = self._candidates(store_chain)
