@@ -10,13 +10,17 @@ from decimal import Decimal
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.category import get_category
 from app.models.category import Category
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
+from app.services.product_names import (
+    learn_product_name,
+    normalize_product_name,
+    product_for_name,
+)
 from app.services.storage import location_for_storage, storage_type_for_category
 from app.services.units import grams_to_pieces, unit_type_for
 
@@ -86,7 +90,7 @@ class ProductResolver:
         tidy = tidy_name(name)
         if not tidy:
             raise InvalidProductRequest("no product name")
-        key = tidy.casefold()
+        key = normalize_product_name(tidy)
         if key in self._by_name:
             return (
                 self._fill_gaps(
@@ -95,18 +99,9 @@ class ProductResolver:
                 False,
             )
 
-        existing = (
-            (
-                await self.db.execute(
-                    select(ProductMaster)
-                    .where(func.lower(ProductMaster.canonical_name) == tidy.lower())
-                    .order_by(ProductMaster.created_at)
-                    .limit(1)
-                )
-            )
-            .scalars()
-            .first()
-        )
+        # Any known name, not just the canonical one: "Minced beef" finds Ground beef
+        # once a confirm has learned the synonym (spec §3.1).
+        existing = await product_for_name(self.db, tidy)
         if existing is not None:
             self._by_name[key] = existing
             return self._fill_gaps(existing, piece_grams, opened_shelf_life_days), False
@@ -138,6 +133,10 @@ class ProductResolver:
         )
         self.db.add(product)
         await self.db.flush()
+        # The canonical name is a row like any other, so the next lookup is one query.
+        await learn_product_name(
+            self.db, product, str(product.canonical_name), "canonical"
+        )
         self._by_name[key] = product
         return product, True
 

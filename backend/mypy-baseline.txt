@@ -33,6 +33,7 @@
 4	app/models/inventory_item.py	no-any-return
 1	app/models/non_food_name.py	misc
 1	app/models/product_master.py	misc
+1	app/models/product_name.py	misc
 1	app/models/receipt.py	misc
 1	app/models/shopping_list_item.py	misc
 1	app/models/store_product_alias.py	misc
