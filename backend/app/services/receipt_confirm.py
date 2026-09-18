@@ -35,6 +35,7 @@ from app.services.generic_products import (
 )
 from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import forget_non_food, remember_non_food
+from app.services.product_names import learn_product_name
 from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)
@@ -113,6 +114,16 @@ class _Confirmation:
             raise InvalidConfirmItem(f"Item {position}: {exc}") from exc
         if created:
             self.result.products_created += 1
+
+        # The generic name becomes a key, so the same thing under another brand resolves
+        # without the model next week (spec §3.4). `cook` when the cook typed the name
+        # here, `model` when it came from the read line. Only the cook's own action
+        # produces verified memory, and the full precedence table lands in H14.
+        learned_name = item.name or line.get("generic_name")
+        if learned_name:
+            await learn_product_name(
+                self.db, product, learned_name, "cook" if item.name else "model"
+            )
         return product
 
     async def learn_alias(self, line: dict[str, Any], product: ProductMaster) -> None:

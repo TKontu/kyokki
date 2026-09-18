@@ -153,12 +153,23 @@ async def _create_database_if_missing(url: str) -> None:
 
 
 async def _create_schema(url: str) -> None:
+    """Rebuild the test database's schema from the models, once per session.
+
+    Dropped first, not just created: ``create_all`` skips tables that already exist,
+    so a test database made before a schema change kept the old shape for ever. That
+    let H11's unique index pass locally and fail in CI, which builds its database with
+    ``alembic upgrade head`` on every run.
+
+    Only ever reached for a database whose name ends in ``_test`` (``guard_test_database``),
+    and tests roll back rather than persist, so there is nothing here to lose.
+    """
     # app.db.base is what alembic/env.py uses; it registers every model.
     from app.db.base import Base
 
     engine = create_async_engine(url, echo=False)
     try:
         async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
     finally:
         await engine.dispose()

@@ -5,10 +5,12 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
@@ -26,6 +28,13 @@ class ProductMaster(Base):
     __tablename__ = "product_master"
     __table_args__ = (
         UniqueConstraint("off_product_id", name="uq_product_master_off_product_id"),
+        # One product per name, case- and space-insensitively (H11). A functional index,
+        # declared here so `alembic check` does not propose dropping it every run.
+        Index(
+            "uq_product_master_canonical_name_lower",
+            text("lower(btrim(canonical_name))"),
+            unique=True,
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
@@ -70,6 +79,9 @@ class ProductMaster(Base):
 
     # Relationships
     category_rel = relationship("Category", foreign_keys=[category])
+    names = relationship(
+        "ProductName", back_populates="product_master", cascade="all, delete-orphan"
+    )
     store_aliases = relationship("StoreProductAlias", back_populates="product_master")
     inventory_items = relationship("InventoryItem", back_populates="product_master")
     shopping_list_items = relationship(

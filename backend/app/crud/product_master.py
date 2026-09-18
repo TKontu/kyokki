@@ -12,6 +12,7 @@ from app.models.product_master import ProductMaster
 from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
 from app.schemas.product_master import ProductMasterCreate, ProductMasterUpdate
+from app.services.product_names import learn_product_name
 from app.services.units import unit_type_for
 
 
@@ -97,6 +98,11 @@ async def create_product(
     """
     db_product = ProductMaster(**product.model_dump())
     db.add(db_product)
+    await db.flush()
+    # A product nobody can look up by name is invisible to resolution (H11).
+    await learn_product_name(
+        db, db_product, str(db_product.canonical_name), "canonical"
+    )
     await db.commit()
     await db.refresh(db_product)
     return db_product
