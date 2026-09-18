@@ -194,6 +194,27 @@ describe('ItemEditSheet', () => {
     expect(await screen.findByText('Deleted · Oat drink')).toBeInTheDocument()
   })
 
+  // A location outside the three known ones left every radio unchecked, so the sheet looked
+  // like it had no answer and the diff against the item never produced a change (H04).
+  it('offers a location it does not know as its own checked option', async () => {
+    mockApi()
+    renderSheet({ ...OAT, location: 'cellar' })
+
+    expect(screen.getByRole('radio', { name: 'cellar' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Fridge' })).not.toBeChecked()
+  })
+
+  it('sends the move when the cook picks a known location instead', async () => {
+    const calls = mockApi()
+    renderSheet({ ...OAT, location: 'cellar' })
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Pantry' }))
+    fireEvent.click(save())
+
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0].body).toEqual({ location: 'pantry' })
+  })
+
   it('keeps the sheet open with an API error message', async () => {
     mockApi({
       patchResponse: () =>

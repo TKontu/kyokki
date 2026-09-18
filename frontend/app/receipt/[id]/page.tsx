@@ -150,6 +150,33 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
     )
   }
 
+  // Only 'completed' means there is something to review. Anything else — 'uploaded' from before
+  // the queue existed (MVP-R3), or a status this build has never heard of — used to fall through
+  // to the review form and render an empty list with an "Add 0 items" button. Say what is
+  // actually going on and offer the one action that can move it along (H04).
+  if (status !== 'completed') {
+    return (
+      <Frame>
+        <p role="alert" className="mb-4 text-ui-text dark:text-ui-dark-text">
+          {status === 'uploaded'
+            ? 'This receipt was never queued to be read.'
+            : `This receipt is in a state this app does not know: ${status}.`}
+        </p>
+        <Button
+          size="lg"
+          loading={reprocess.isPending}
+          onClick={() =>
+            reprocess.mutate(receipt.id, {
+              onError: () => toast.error('Could not queue this receipt'),
+            })
+          }
+        >
+          Read it now
+        </Button>
+      </Frame>
+    )
+  }
+
   // Household lines are folded away rather than scrolled past every week (Q1). Expanding
   // them puts them back as ordinary rows, so a misjudgement is one tap to fix.
   const household = rows.filter(({ item, row }) => item.non_food && !row.include)

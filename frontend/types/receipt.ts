@@ -4,6 +4,7 @@
  */
 
 import type { StorageType } from './product'
+import type { Vocabulary } from './vocabulary'
 
 /** Uploads are queued and read by the worker service; 'uploaded' only on pre-queue receipts. */
 export type ReceiptStatus =
@@ -55,7 +56,9 @@ export interface Receipt {
   batch_id: string | null // UUID for multi-receipt processing
   ocr_raw_text: string | null // Raw OCR or PDF text (null when read by vision)
   ocr_structured: Record<string, unknown> | null // Stored extraction (debugging)
-  processing_status: ReceiptStatus
+  // The worker owns this value and may learn new ones without a frontend release: the chip, the
+  // poll interval and the review page all have to cope with a string they do not know (H04).
+  processing_status: Vocabulary<ReceiptStatus>
   error: string | null // Last processing failure, if any
   queued_at: string | null // ISO datetime it entered the queue
   processing_started_at: string | null // ISO datetime the worker started reading it

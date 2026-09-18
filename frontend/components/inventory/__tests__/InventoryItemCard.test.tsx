@@ -354,6 +354,36 @@ describe('TestInventoryItemCardTouchTargets', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Values the API sent that this build does not recognise (H04)
+// ---------------------------------------------------------------------------
+
+describe('TestInventoryItemCardUnknownValues', () => {
+  it('renders a status it does not know instead of throwing the page away', () => {
+    // StatusBadge did `statusConfig[status].variant`, and this card is on every stock row: one
+    // unfamiliar status took the whole list down with it.
+    render(
+      <InventoryItemCard
+        item={{ ...MOCK_ITEM, status: 'fermenting' }}
+        productName="Oat Milk"
+      />
+    )
+    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
+    expect(screen.getByText('fermenting')).toBeInTheDocument()
+  })
+
+  it('shows a location it does not know by its raw name', () => {
+    render(
+      <InventoryItemCard
+        item={{ ...MOCK_ITEM, location: 'cellar' }}
+        productName="Oat Milk"
+        productCategory="Dairy & Eggs"
+      />
+    )
+    expect(screen.getByText('Dairy & Eggs · cellar')).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Custom className
 // ---------------------------------------------------------------------------
 

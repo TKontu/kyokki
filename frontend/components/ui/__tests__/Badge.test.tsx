@@ -133,4 +133,16 @@ describe('StatusBadge', () => {
     render(<StatusBadge status="discarded" />);
     expect(screen.getByText('Discarded')).toBeInTheDocument();
   });
+
+  // This badge is on every stock card, so the old `statusConfig[status].variant` turned one
+  // unrecognised status into a blank stock page (H04).
+  it('shows an unrecognised status raw, in the neutral variant', () => {
+    const { container } = render(<StatusBadge status="fermenting" />);
+    expect(screen.getByText('fermenting')).toBeInTheDocument();
+    expect((container.firstChild as HTMLElement).className).toContain('bg-ui-bg-secondary');
+  });
+
+  it('does not throw on an empty status', () => {
+    expect(() => render(<StatusBadge status="" />)).not.toThrow();
+  });
 });

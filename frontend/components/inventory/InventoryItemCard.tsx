@@ -9,7 +9,7 @@ import { StatusBadge } from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import { ExpiryBadge } from './ExpiryBadge'
 import { QuantityBar } from './QuantityBar'
-import type { InventoryItem, InventoryLocation } from '@/types/inventory'
+import type { InventoryItem } from '@/types/inventory'
 
 export interface InventoryItemCardProps {
   item: InventoryItem
@@ -22,7 +22,7 @@ export interface InventoryItemCardProps {
   className?: string
 }
 
-const LOCATION_LABELS: Record<InventoryLocation, string> = {
+const LOCATION_LABELS: Partial<Record<string, string>> = {
   main_fridge: 'Main Fridge',
   freezer: 'Freezer',
   pantry: 'Pantry',

@@ -1,4 +1,11 @@
-import { buildStockView, compareStock, EXPIRING_SOON_DAYS, isInactive } from '../stock'
+import {
+  buildStockView,
+  compareStock,
+  EXPIRING_SOON_DAYS,
+  isInactive,
+  LOCATION_OPTIONS,
+  locationOptions,
+} from '../stock'
 import type { InventoryItem, InventoryLocation } from '@/types/inventory'
 
 // Fake "now" is 2024-02-01 local noon; expiry offsets are relative to that date.
@@ -53,6 +60,31 @@ afterEach(() => {
 })
 
 describe('stock', () => {
+  // An unknown location used to leave every radio unchecked, so the form looked like it had no
+  // answer and an edit sheet's diff never saw a change (H04).
+  describe('locationOptions', () => {
+    it('offers the three known locations and nothing else', () => {
+      expect(locationOptions('freezer')).toBe(LOCATION_OPTIONS)
+      expect(locationOptions()).toBe(LOCATION_OPTIONS)
+      expect(locationOptions('')).toBe(LOCATION_OPTIONS)
+    })
+
+    it('adds a location it does not know as its own option, labelled raw', () => {
+      const options = locationOptions('cellar')
+      expect(options).toHaveLength(LOCATION_OPTIONS.length + 1)
+      expect(options[options.length - 1]).toEqual({ value: 'cellar', label: 'cellar' })
+    })
+
+    it('does not mutate the shared option list', () => {
+      locationOptions('cellar')
+      expect(LOCATION_OPTIONS.map((option) => option.value)).toEqual([
+        'main_fridge',
+        'freezer',
+        'pantry',
+      ])
+    })
+  })
+
   describe('compareStock', () => {
     it('sorts by expiry date ascending', () => {
       const late = makeItem({ expiry_date: dateIn(20) })

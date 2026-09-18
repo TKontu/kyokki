@@ -20,8 +20,8 @@ import { useDeleteInventoryItem, useUpdateInventoryItem } from '@/hooks/useInven
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { formatQuantity } from '@/lib/consumption'
-import { LOCATION_OPTIONS, isInactive } from '@/lib/stock'
-import type { InventoryItem, InventoryItemUpdate, InventoryLocation } from '@/types/inventory'
+import { isInactive, locationOptions } from '@/lib/stock'
+import type { InventoryItem, InventoryItemUpdate } from '@/types/inventory'
 
 export interface ItemEditSheetProps {
   item: InventoryItem | null
@@ -41,7 +41,8 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
 
   const [quantity, setQuantity] = useState(String(item.current_quantity))
   const [expiry, setExpiry] = useState(item.expiry_date.split('T')[0])
-  const [location, setLocation] = useState<InventoryLocation>(item.location)
+  // A plain string: the item may already sit in a location this build does not know (H04)
+  const [location, setLocation] = useState<string>(item.location)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   const name = item.product_name
@@ -181,7 +182,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           label="Location"
           name="item-edit-location"
           value={location}
-          options={LOCATION_OPTIONS}
+          options={locationOptions(item.location)}
           onChange={setLocation}
         />
       </div>

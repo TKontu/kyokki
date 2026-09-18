@@ -3,7 +3,7 @@
  * Using fetch mocks instead of MSW for simplicity
  */
 
-import inventoryAPI from '../inventory'
+import inventoryAPI, { normalizeInventoryItem } from '../inventory'
 import type { InventoryItem, InventoryItemCreate } from '@/types/inventory'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
@@ -81,6 +81,56 @@ describe('Inventory API', () => {
       const item = await inventoryAPI.consume(mockInventoryItem.id, { quantity: 250 })
       expect(item.current_quantity).toBe(500)
       expect(typeof item.initial_quantity).toBe('number')
+    })
+  })
+
+  // The four enum fields used to pass through untouched, so the screens each had to guess what
+  // an unfamiliar value meant. This is now the one place that decides, and its decision is to
+  // keep whatever the API said rather than substitute a default that would read as a fact (H04).
+  describe('vocabulary fields', () => {
+    it('keeps the values it recognises', () => {
+      const item = normalizeInventoryItem(mockInventoryItem)
+      expect(item.status).toBe('opened')
+      expect(item.location).toBe('main_fridge')
+      expect(item.unit).toBe('dl')
+      expect(item.expiry_source).toBe('calculated')
+    })
+
+    it('keeps a value it does not recognise, raw', () => {
+      const item = normalizeInventoryItem({
+        ...mockInventoryItem,
+        status: 'fermenting',
+        location: 'cellar',
+        unit: 'bushel',
+        expiry_source: 'guessed',
+      })
+
+      expect(item.status).toBe('fermenting')
+      expect(item.location).toBe('cellar')
+      expect(item.unit).toBe('bushel')
+      expect(item.expiry_source).toBe('guessed')
+    })
+
+    it('never substitutes a default for a missing value', () => {
+      const item = normalizeInventoryItem({
+        ...mockInventoryItem,
+        status: null as unknown as string,
+        location: undefined as unknown as string,
+      })
+
+      expect(item.status).toBe('')
+      expect(item.location).toBe('')
+    })
+
+    it('runs on every response, not just the list', async () => {
+      ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...mockInventoryItem, status: 'fermenting' }),
+      })
+
+      const item = await inventoryAPI.get(mockInventoryItem.id)
+      expect(item.status).toBe('fermenting')
     })
   })
 

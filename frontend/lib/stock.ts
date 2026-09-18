@@ -24,6 +24,20 @@ export const LOCATION_OPTIONS: { value: InventoryLocation; label: string }[] = [
   { value: 'pantry', label: 'Pantry' },
 ]
 
+/**
+ * The three choices, plus `current` as its own option when it is not one of them (H04).
+ *
+ * Without this a location the API invented leaves every radio unchecked: the form looks like it
+ * has no answer, and a diff against "what the item already says" never fires. Offering the raw
+ * value keeps it visible, keeps it checked, and lets the cook move the item somewhere known.
+ */
+export function locationOptions(current?: string): { value: string; label: string }[] {
+  if (!current || LOCATION_OPTIONS.some((option) => option.value === current)) {
+    return LOCATION_OPTIONS
+  }
+  return [...LOCATION_OPTIONS, { value: current, label: current }]
+}
+
 export interface StockGroup {
   key: string
   label: string

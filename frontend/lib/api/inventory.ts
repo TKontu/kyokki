@@ -5,24 +5,66 @@
 
 import apiClient from './client'
 import type {
+  ExpirySource,
   InventoryItem,
   InventoryItemCreate,
+  InventoryItemStatus,
   InventoryItemUpdate,
+  InventoryLocation,
   ConsumeRequest,
   InventoryListParams,
   QuickAddRequest,
+  Unit,
 } from '@/types/inventory'
+import type { Vocabulary } from '@/types/vocabulary'
+
+/** Every value of each enum the API shares with us, in the order the schemas declare them. */
+const UNITS: readonly Unit[] = ['dl', 'tsp', 'tbsp', 'g', 'pcs']
+const STATUSES: readonly InventoryItemStatus[] = [
+  'sealed',
+  'opened',
+  'partial',
+  'empty',
+  'discarded',
+]
+const EXPIRY_SOURCES: readonly ExpirySource[] = ['scanned', 'calculated', 'manual']
+const LOCATIONS: readonly InventoryLocation[] = ['main_fridge', 'freezer', 'pantry']
 
 /**
+ * One vocabulary field. Narrows to the union when the API used a value this build knows and
+ * keeps the raw string when it did not — never substituting a default, because a wrong label
+ * ("Sealed" on a status nobody here recognises) is worse than an unfamiliar one, and every
+ * screen renders the raw value (H04). Anything that is not a string at all becomes '' rather
+ * than the word "null" or "undefined" on a card.
+ */
+export function vocabularyValue<T extends string>(
+  known: readonly T[],
+  raw: unknown
+): Vocabulary<T> {
+  if (raw === null || raw === undefined) return ''
+  const value = typeof raw === 'string' ? raw : String(raw)
+  return (known as readonly string[]).includes(value) ? (value as T) : value
+}
+
+/**
+ * The single place an inventory item from the API is made safe to render.
+ *
  * The backend serialises Decimal columns as JSON strings ("1000.00"). Components do
  * arithmetic and `toFixed` on quantities, so coerce them at the API boundary. Also
  * correct if the backend ever switches to JSON numbers (see docs/TODO.md, MVP-S1).
+ *
+ * The four vocabulary fields are recognised here too, so the screens downstream can assume a
+ * string and nothing more.
  */
 export function normalizeInventoryItem(raw: InventoryItem): InventoryItem {
   return {
     ...raw,
     initial_quantity: Number(raw.initial_quantity),
     current_quantity: Number(raw.current_quantity),
+    unit: vocabularyValue(UNITS, raw.unit),
+    status: vocabularyValue(STATUSES, raw.status),
+    expiry_source: vocabularyValue(EXPIRY_SOURCES, raw.expiry_source),
+    location: vocabularyValue(LOCATIONS, raw.location),
   }
 }
 

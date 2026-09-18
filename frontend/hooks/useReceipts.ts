@@ -32,9 +32,25 @@ export function isBeingRead(receipt: Pick<Receipt, 'processing_status'>): boolea
   return receipt.processing_status === 'queued' || receipt.processing_status === 'processing'
 }
 
-/** Poll one receipt only while it is being read; stop once it is finished. */
+/**
+ * Finished: the worker is done with this receipt, one way or another, and nothing will change
+ * unless a person acts. Only these three are terminal — everything else, including a status this
+ * build has never heard of, may still be on its way somewhere.
+ */
+export function isFinished(receipt: Pick<Receipt, 'processing_status'>): boolean {
+  const status = receipt.processing_status
+  return status === 'completed' || status === 'failed' || status === 'confirmed'
+}
+
+/**
+ * Poll one receipt fast while it is being read, stop once it is finished, and fall back to the
+ * idle heartbeat for anything else. Treating an unknown status as terminal stopped polling
+ * permanently: on an unattended iPad the page would sit on a stale receipt forever (H04).
+ */
 export function detailPollInterval(receipt?: Receipt): number | false {
-  return receipt && isBeingRead(receipt) ? READING_POLL_MS : false
+  if (!receipt) return false
+  if (isBeingRead(receipt)) return READING_POLL_MS
+  return isFinished(receipt) ? false : IDLE_POLL_MS
 }
 
 /** The list keeps a slow heartbeat, and speeds up while any receipt is being read. */

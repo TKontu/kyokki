@@ -260,6 +260,27 @@ describe('ReceiptReviewPage', () => {
     expect(screen.queryByRole('button', { name: /^add/i })).not.toBeInTheDocument()
   })
 
+  // The status chain had no final branch, so anything outside the handled set fell through to
+  // the review form and rendered an empty list with an "Add 0 items" button (H04).
+  it('says so when the receipt is in a status it does not know', async () => {
+    mockApi(receipt({ processing_status: 'archived', items: [] }, []))
+    renderPage()
+
+    expect(await screen.findByText(/state this app does not know: archived/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^add \d+ items?$/i })).not.toBeInTheDocument()
+  })
+
+  it('offers to read a pre-queue receipt that was never read', async () => {
+    // 'uploaded' predates MVP-R3; such a row has no items and nothing to review
+    mockApi(receipt({ processing_status: 'uploaded', items: [] }, []))
+    renderPage()
+
+    expect(await screen.findByText(/never queued to be read/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /read it now/i }))
+
+    expect(await screen.findByText(/still reading this receipt/i)).toBeInTheDocument()
+  })
+
   it('notes a receipt read without the model', async () => {
     mockApi(receipt({ extraction_method: 'heuristic', fallback_reason: 'Model unavailable' }))
     renderPage()
