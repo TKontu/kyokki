@@ -230,11 +230,13 @@ class TestPersistence:
             "product_id": str(sample_product.id),
             "product_name": "Valio Whole Milk 1L",
             "product_storage_type": "refrigerator",
-            "match_score": 100.0,
-            "match_confidence": "exact",
-            "match_source": "exact",
-            # How the line came to point at a product, in the vocabulary that survives
-            # the matcher (H12). A canonical-name hit is a key, so it is verified.
+            # No score decides anything any more (H13); the fields stay only so older
+            # clients keep parsing, and H15 drops them from the review row.
+            "match_score": None,
+            "match_confidence": None,
+            "match_source": "name",
+            # How the line came to point at a product. A known catalog name is a key,
+            # so it is verified - the review row may call it "known".
             "resolution": {
                 "product_id": str(sample_product.id),
                 "source": "name",
@@ -248,21 +250,25 @@ class TestPersistence:
         assert butter["match_score"] is None
         assert butter["match_confidence"] is None
         assert butter["match_source"] is None
-        assert butter["resolution"] == {
-            "product_id": None,
-            "source": "none",
-            "verified": False,
-            "candidates": [],
-        }
+        # Unresolved, but the shortlist it was offered is recorded: that is what the
+        # model would have chosen from, and what H15 shows when the cook opens Change.
+        assert butter["resolution"]["product_id"] is None
+        assert butter["resolution"]["source"] == "none"
+        assert butter["resolution"]["verified"] is False
+        assert [c["name"] for c in butter["resolution"]["candidates"]] == [
+            "Valio Whole Milk 1L"
+        ]
         assert UUID(butter["line_id"]) != UUID(milk["line_id"])
         # The raw header text stays in ocr_structured; the receipt gets the chain key
         assert image_receipt.store_chain == "s-group"
         assert image_receipt.purchase_date == date(2026, 1, 2)
         assert image_receipt.items_extracted == 2
         assert image_receipt.items_matched == 1
-        assert (
-            result.matched_products[0].product.canonical_name == "Valio Whole Milk 1L"
-        )
+        resolved = [r for r in result.resolutions.values() if r.product is not None]
+        assert [str(r.product.canonical_name) for r in resolved] == [
+            "Valio Whole Milk 1L"
+        ]
+        assert [r.source for r in resolved] == ["name"]
 
     async def test_a_re_read_keeps_each_line_its_identity(
         self, service, image_receipt, sample_product, db_session
@@ -394,7 +400,8 @@ class TestPersistence:
         (line,) = pdf_receipt.ocr_structured["lines"]
         assert line["generic_name"] == "Ground beef"
         assert line["product_id"] == str(beef.id)
-        assert line["match_source"] == "exact"
+        # `exact` in the old vocabulary; a known catalog name is now `name` (H12/H13)
+        assert line["match_source"] == "name"
 
     async def test_alias_match_is_stored_per_line(
         self, service, pdf_receipt, sample_product, db_session
@@ -679,7 +686,7 @@ class TestProcessingResult:
             success=True,
             ocr_text=None,
             extraction=extraction,
-            matched_products=[],
+            resolutions={},
             error=None,
         )
         assert result.extraction is extraction

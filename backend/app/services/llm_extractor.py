@@ -166,7 +166,11 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
     }
 
 
-def _outer_json(content: str) -> dict[str, Any]:
+def extract_json_object(content: str) -> dict[str, Any]:
+    """The JSON object in a completion, past any reasoning block or code fence.
+
+    Shared with product_selection: muse-glimmer is a reasoning model and wraps
+    its answer, so both callers need the same unwrapping."""
     content = _THINK.sub("", content).strip()
     fence = _FENCE.search(content)
     if fence:
@@ -200,7 +204,7 @@ def parse_completion(
     Tolerant where a wrong value should not fail a receipt (unknown category, bad date, a
     price left in a name) and strict where the output is unusable (no product list).
     """
-    data = _outer_json(content)
+    data = extract_json_object(content)
     products = data.get("p")
     if not isinstance(products, list):
         raise LLMExtractionError("LLM response has no product list")

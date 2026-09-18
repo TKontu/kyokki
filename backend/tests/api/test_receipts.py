@@ -596,8 +596,9 @@ class TestReceiptItems:
             "unit": "pcs",
             "product_id": str(product.id),
             "product_name": "BARISTA KAURAJUOMA",
-            "match_score": 100.0,
-            "match_confidence": "exact",
+            # Scores no longer decide anything (H13), so they are no longer stored.
+            "match_score": None,
+            "match_confidence": None,
             "match_source": "name",
             "verified": True,
             "suggested_category": "dairy",
