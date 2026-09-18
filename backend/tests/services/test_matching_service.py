@@ -4,6 +4,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
@@ -379,8 +380,7 @@ class TestAliasFirstMatching:
             "milk": product("Valio Lactose-Free Milk Drink 1L"),
             "butter": product("Oivariini Butter Spread"),
             "decoy": product("Oivariini Normaalisuolainen Light"),
-            "twin_a": product("Kaurajuoma"),
-            "twin_b": product("Kaurajuoma"),
+            "oat": product("Kaurajuoma"),
         }
         db_session.add_all(products.values())
         await db_session.flush()
@@ -471,16 +471,29 @@ class TestAliasFirstMatching:
         assert result is not None
         assert result.source == "exact"
 
-    async def test_products_with_the_same_name_stay_distinct(self, db_session, catalog):
-        service = MatchingService(db_session)
-        await service.prepare(None)
+    async def test_a_second_product_of_the_same_name_is_refused(
+        self, db_session, catalog
+    ):
+        """This test used to assert the opposite: two "Kaurajuoma" products stayed
+        distinct, because only a non-unique index existed. H11 makes a name a key, so
+        the duplicate the pipeline could previously create is now impossible - a near
+        duplicate under a different name is resolved by merge (H16), never by a script.
+        """
+        db_session.add(
+            ProductMaster(
+                id=uuid4(),
+                canonical_name="  kaurajuoma ",
+                category="dairy",
+                storage_type="refrigerator",
+                default_shelf_life_days=7,
+                unit_type="count",
+                default_unit="pcs",
+            )
+        )
 
-        matches = await service.match_all("Kaurajuoma", limit=5)
-
-        ids = {
-            m.product.id for m in matches if m.product.canonical_name == "Kaurajuoma"
-        }
-        assert ids == {catalog["twin_a"].id, catalog["twin_b"].id}
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+        await db_session.rollback()
 
     async def test_prepare_loads_the_catalog_once_for_many_lines(
         self, db_session, catalog
