@@ -1,5 +1,7 @@
 """Shared pytest fixtures for all tests."""
 
+import asyncio
+import contextlib
 import os
 from collections.abc import AsyncGenerator
 from decimal import Decimal
@@ -7,28 +9,47 @@ from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-from app.core.config import settings
-from app.db.base_class import Base
-from app.db.session import engine as app_engine
-from app.main import app
 from app.models.category import Category
 from app.models.product_master import ProductMaster
-from app.services.broadcast_helpers import close_redis_client
+from tests.support import (
+    derive_test_database_url,
+    guard_test_database,
+    maintenance_url,
+)
+
+# Anything reaching one of these needs PostgreSQL.
+DB_FIXTURES = frozenset(
+    {"db_engine", "db_session", "session_factory", "test_db", "seeded_db"}
+)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Apply ``requires_db`` from fixture use.
+
+    The marker was declared in pytest.ini but written on a single test, so
+    deselecting it deselected nothing while ~380 tests needed a database.
+    """
+    for item in items:
+        if DB_FIXTURES & set(getattr(item, "fixturenames", ())):
+            item.add_marker("requires_db")
 
 
 @pytest.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
-    """
-    Create async HTTP client for testing FastAPI endpoints.
+    """Async HTTP client for endpoints that do not touch the database.
 
-    Usage:
-        async def test_endpoint(client):
-            response = await client.get("/api/health")
-            assert response.status_code == 200
+    Endpoints that do need one take ``test_db`` or ``seeded_db`` as well, which
+    points ``get_db`` at the test session.
     """
+    from app.main import app
+
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as ac:
@@ -107,44 +128,187 @@ async def sample_product(
     return product
 
 
-@pytest.fixture(scope="function")
-async def db_engine():
-    """Create test database engine using PostgreSQL.
+async def _create_database_if_missing(url: str) -> None:
+    import asyncpg
+    from sqlalchemy.engine import make_url
 
-    Uses the same PostgreSQL instance as dev, but creates/drops tables
-    per test for isolation. Skips automatically when PostgreSQL is unavailable.
-    """
-    engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    target = make_url(url)
+    admin = make_url(maintenance_url(url))
+    connection = await asyncpg.connect(
+        host=admin.host,
+        port=admin.port or 5432,
+        user=admin.username,
+        password=admin.password,
+        database=admin.database,
+    )
+    try:
+        exists = await connection.fetchval(
+            "SELECT 1 FROM pg_database WHERE datname = $1", target.database
+        )
+        if not exists:
+            # The name is derived from POSTGRES_DB by tests.support, never user input.
+            await connection.execute(f'CREATE DATABASE "{target.database}"')
+    finally:
+        await connection.close()
 
+
+async def _create_schema(url: str) -> None:
+    # app.db.base is what alembic/env.py uses; it registers every model.
+    from app.db.base import Base
+
+    engine = create_async_engine(url, echo=False)
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-    except Exception:
+    finally:
         await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def test_database_url() -> str:
+    """``<POSTGRES_DB>_test`` - never the database the application is configured with.
+
+    Pure: it derives and guards a name without connecting, so it is safe for the
+    autouse fixture below to depend on even when PostgreSQL is not running.
+
+    Settings are imported here rather than at module scope so that a malformed env
+    file fails the tests that need one instead of making the suite uncollectable.
+    """
+    from app.core.config import settings
+
+    return guard_test_database(derive_test_database_url(settings.DATABASE_URL))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _point_the_app_at_the_test_database(test_database_url: str) -> None:
+    """Rebind the application's module-level engine, for the whole session.
+
+    Several tests drive endpoints through ``client`` without overriding ``get_db``,
+    so the request opens its own session from ``app.db.session``. Before H01 that
+    session talked to the dev database for real, and only the fixture's ``drop_all``
+    cleaned up afterwards. Rebinding makes the dev database unreachable from the
+    suite even when a test forgets the override.
+
+    ``seed_categories`` captured ``AsyncSessionLocal`` by value at import time, so
+    its copy has to be replaced too.
+    """
+    import app.db.seed_categories as app_seed
+    import app.db.session as app_session
+
+    engine = create_async_engine(test_database_url, pool_pre_ping=True)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    app_session.engine = engine
+    app_session.AsyncSessionLocal = factory
+    app_seed.AsyncSessionLocal = factory
+
+
+@pytest.fixture(scope="session")
+def _database_ready(test_database_url: str) -> str:
+    """Create the test database and its schema once per session.
+
+    Synchronous on purpose. pytest-asyncio gives every test its own event loop, so
+    a session-scoped *async* fixture would hand later tests objects bound to a loop
+    that has already closed; ``asyncio.run`` keeps this one-time setup in its own.
+    """
+    try:
+        # Creating the database needs a connection to the maintenance database,
+        # which a locked-down role may not have. CI does not need it at all: its
+        # POSTGRES_DB is already kyokki_test and the workflow migrates it. Only
+        # _create_schema has to succeed, and it fails loudly if the database is
+        # genuinely missing.
+        with contextlib.suppress(Exception):
+            asyncio.run(_create_database_if_missing(test_database_url))
+        asyncio.run(_create_schema(test_database_url))
+    except Exception:
         if os.environ.get("KYOKKI_TEST_REQUIRE_DB"):
             # CI provides PostgreSQL; a connection failure there is a real failure,
             # not a reason to silently skip the whole DB-backed suite.
             raise
         pytest.skip("PostgreSQL not available")
 
+    return test_database_url
+
+
+@pytest.fixture
+async def db_engine(_database_ready: str):
+    """An engine on the test database. The schema is already there."""
+    engine = create_async_engine(_database_ready, echo=False)
     try:
         yield engine
     finally:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.drop_all)
         await engine.dispose()
 
 
-@pytest.fixture(scope="function")
-async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Create async database session for testing."""
-    async_session = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+@pytest.fixture
+async def committed_db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
+    """A session whose commits are real, cleaned up by truncating afterwards.
 
-    async with async_session() as session:
+    ``db_session`` below is the default and keeps everything inside one
+    rolled-back transaction, which a second connection cannot see. Row locking and
+    ``claim_next`` are exactly the behaviours that need two connections, so those
+    tests take this instead.
+    """
+    from app.db.base import Base
+
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with factory() as session:
+            yield session
+    finally:
+        tables = ", ".join(table.name for table in Base.metadata.sorted_tables)
+        async with db_engine.begin() as conn:
+            await conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+
+
+@pytest.fixture
+async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
+    """A session inside a transaction that is always rolled back.
+
+    ``join_transaction_mode="create_savepoint"`` lets the code under test - and the
+    fixtures above - commit for real while every row still disappears when the outer
+    transaction rolls back. Before H01 isolation came from dropping and recreating
+    every table around each test, against the database ``settings`` pointed at.
+    """
+    async with db_engine.connect() as connection:
+        transaction = await connection.begin()
+        session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
         try:
             yield session
         finally:
-            await session.rollback()
+            await session.close()
+            if transaction.is_active:
+                await transaction.rollback()
+
+
+@pytest.fixture
+async def test_db(db_session: AsyncSession) -> AsyncGenerator[AsyncSession, None]:
+    """``db_session`` with the app's ``get_db`` dependency pointed at it."""
+    from app.db.session import get_db
+    from app.main import app
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        yield db_session
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+async def seeded_db(test_db: AsyncSession) -> AsyncSession:
+    """``test_db`` plus the seeded categories that product and inventory FKs need."""
+    from app.db.seed_categories import seed_categories
+
+    await seed_categories(test_db)
+    await test_db.commit()
+    return test_db
 
 
 @pytest.fixture(autouse=True)
@@ -161,6 +325,10 @@ async def _dispose_app_engine() -> AsyncGenerator[None, None]:
     same lifetime problem, so it is closed here as well.
     """
     yield
+
+    from app.db.session import engine as app_engine
+    from app.services.broadcast_helpers import close_redis_client
+
     await app_engine.dispose()
     await close_redis_client()
 

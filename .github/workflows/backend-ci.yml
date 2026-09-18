@@ -59,9 +59,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run mypy
-        run: mypy backend/app/
-        continue-on-error: true  # Don't fail the build on type errors initially
+      - name: Run mypy against the committed baseline
+        working-directory: backend
+        # Known errors live in backend/mypy-baseline.txt, keyed on file and error
+        # code. Only new ones fail. H21 empties the baseline and drops the script.
+        run: python -m scripts.check_mypy_baseline
 
   test:
     name: Test with pytest
@@ -236,9 +238,10 @@ jobs:
             if [ "${{ needs.lint.result }}" != "success" ]; then            
               echo "⚠️ Linting had issues (non-blocking for now)"           
             fi                                                              
-            if [ "${{ needs.type-check.result }}" != "success" ]; then      
-              echo "⚠️ Type checking had issues (non-blocking)"             
-            fi                                                              
+            if [ "${{ needs.type-check.result }}" != "success" ]; then
+              echo "❌ New type errors (see backend/mypy-baseline.txt)"
+              exit 1
+            fi
             if [ "${{ needs.test.result }}" != "success" ]; then            
               echo "❌ Tests failed"                                        
               exit 1                                                        

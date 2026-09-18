@@ -100,13 +100,19 @@ class TestClaim:
         assert first is not None and first.id == waiting.id
 
     async def test_a_locked_receipt_is_skipped_by_another_claimer(
-        self, db_engine, db_session
+        self, db_engine, committed_db_session
     ):
+        # Two more connections have to see these rows, so they are committed for
+        # real rather than living in the transaction db_session rolls back.
         locked = await _receipt(
-            db_session, ReceiptStatus.QUEUED, queued_at=NOW - timedelta(minutes=2)
+            committed_db_session,
+            ReceiptStatus.QUEUED,
+            queued_at=NOW - timedelta(minutes=2),
         )
         free = await _receipt(
-            db_session, ReceiptStatus.QUEUED, queued_at=NOW - timedelta(minutes=1)
+            committed_db_session,
+            ReceiptStatus.QUEUED,
+            queued_at=NOW - timedelta(minutes=1),
         )
         factory = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
 

@@ -16,7 +16,7 @@ class TestShoppingListAPI:
     """Test shopping list CRUD operations."""
 
     async def test_create_shopping_item_free_text(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test creating a free-text shopping list item."""
         response = await client.post(
@@ -45,7 +45,7 @@ class TestShoppingListAPI:
     async def test_create_shopping_item_with_product(
         self,
         client: AsyncClient,
-        db_session: AsyncSession,
+        test_db: AsyncSession,
         sample_product: ProductMaster,
     ):
         """Test creating a shopping list item linked to a product."""
@@ -99,9 +99,7 @@ class TestShoppingListAPI:
         assert response.status_code == 422
         assert "Invalid source" in response.json()["detail"]
 
-    async def test_get_shopping_list(
-        self, client: AsyncClient, db_session: AsyncSession
-    ):
+    async def test_get_shopping_list(self, client: AsyncClient, test_db: AsyncSession):
         """Test getting all shopping list items."""
         # Create some items
         items = [
@@ -129,8 +127,8 @@ class TestShoppingListAPI:
             ),
         ]
         for item in items:
-            db_session.add(item)
-        await db_session.commit()
+            test_db.add(item)
+        await test_db.commit()
 
         # Get list (should exclude purchased by default)
         response = await client.get("/api/shopping/")
@@ -142,7 +140,7 @@ class TestShoppingListAPI:
         assert data[1]["name"] == "Bread"
 
     async def test_get_shopping_list_include_purchased(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test getting shopping list with purchased items."""
         items = [
@@ -163,8 +161,8 @@ class TestShoppingListAPI:
             ),
         ]
         for item in items:
-            db_session.add(item)
-        await db_session.commit()
+            test_db.add(item)
+        await test_db.commit()
 
         response = await client.get("/api/shopping/?include_purchased=true")
 
@@ -173,7 +171,7 @@ class TestShoppingListAPI:
         assert len(data) == 2
 
     async def test_get_shopping_list_filter_priority(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test filtering shopping list by priority."""
         items = [
@@ -193,8 +191,8 @@ class TestShoppingListAPI:
             ),
         ]
         for item in items:
-            db_session.add(item)
-        await db_session.commit()
+            test_db.add(item)
+        await test_db.commit()
 
         response = await client.get("/api/shopping/?priority=urgent")
 
@@ -203,9 +201,7 @@ class TestShoppingListAPI:
         assert len(data) == 1
         assert data[0]["name"] == "Urgent Item"
 
-    async def test_get_urgent_items(
-        self, client: AsyncClient, db_session: AsyncSession
-    ):
+    async def test_get_urgent_items(self, client: AsyncClient, test_db: AsyncSession):
         """Test getting only urgent items."""
         items = [
             ShoppingListItem(
@@ -231,8 +227,8 @@ class TestShoppingListAPI:
             ),
         ]
         for item in items:
-            db_session.add(item)
-        await db_session.commit()
+            test_db.add(item)
+        await test_db.commit()
 
         response = await client.get("/api/shopping/urgent")
 
@@ -241,9 +237,7 @@ class TestShoppingListAPI:
         assert len(data) == 2
         assert all(item["priority"] == "urgent" for item in data)
 
-    async def test_get_shopping_item(
-        self, client: AsyncClient, db_session: AsyncSession
-    ):
+    async def test_get_shopping_item(self, client: AsyncClient, test_db: AsyncSession):
         """Test getting a specific shopping item."""
         item = ShoppingListItem(
             name="Test Item",
@@ -252,8 +246,8 @@ class TestShoppingListAPI:
             priority="normal",
             source="manual",
         )
-        db_session.add(item)
-        await db_session.commit()
+        test_db.add(item)
+        await test_db.commit()
 
         response = await client.get(f"/api/shopping/{item.id}")
 
@@ -263,7 +257,7 @@ class TestShoppingListAPI:
         assert data["name"] == "Test Item"
 
     async def test_get_shopping_item_not_found(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test getting non-existent item returns 404."""
         fake_id = "00000000-0000-0000-0000-000000000000"
@@ -272,7 +266,7 @@ class TestShoppingListAPI:
         assert response.status_code == 404
 
     async def test_update_shopping_item(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test updating a shopping item."""
         item = ShoppingListItem(
@@ -282,8 +276,8 @@ class TestShoppingListAPI:
             priority="normal",
             source="manual",
         )
-        db_session.add(item)
-        await db_session.commit()
+        test_db.add(item)
+        await test_db.commit()
 
         response = await client.patch(
             f"/api/shopping/{item.id}",
@@ -301,7 +295,7 @@ class TestShoppingListAPI:
         assert data["priority"] == "urgent"
 
     async def test_update_shopping_item_invalid_priority(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test updating with invalid priority fails."""
         item = ShoppingListItem(
@@ -311,8 +305,8 @@ class TestShoppingListAPI:
             priority="normal",
             source="manual",
         )
-        db_session.add(item)
-        await db_session.commit()
+        test_db.add(item)
+        await test_db.commit()
 
         response = await client.patch(
             f"/api/shopping/{item.id}",
@@ -322,7 +316,7 @@ class TestShoppingListAPI:
         assert response.status_code == 422
 
     async def test_mark_item_purchased(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test marking an item as purchased."""
         item = ShoppingListItem(
@@ -332,8 +326,8 @@ class TestShoppingListAPI:
             priority="normal",
             source="manual",
         )
-        db_session.add(item)
-        await db_session.commit()
+        test_db.add(item)
+        await test_db.commit()
 
         response = await client.post(f"/api/shopping/{item.id}/purchase")
 
@@ -343,7 +337,7 @@ class TestShoppingListAPI:
         assert data["purchased_at"] is not None
 
     async def test_mark_item_unpurchased(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test marking a purchased item as unpurchased."""
         from datetime import datetime
@@ -357,8 +351,8 @@ class TestShoppingListAPI:
             is_purchased=True,
             purchased_at=datetime.now(UTC),
         )
-        db_session.add(item)
-        await db_session.commit()
+        test_db.add(item)
+        await test_db.commit()
 
         response = await client.post(
             f"/api/shopping/{item.id}/purchase?purchased=false"
@@ -370,7 +364,7 @@ class TestShoppingListAPI:
         assert data["purchased_at"] is None
 
     async def test_delete_shopping_item(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test deleting a shopping item."""
         item = ShoppingListItem(
@@ -380,8 +374,8 @@ class TestShoppingListAPI:
             priority="normal",
             source="manual",
         )
-        db_session.add(item)
-        await db_session.commit()
+        test_db.add(item)
+        await test_db.commit()
         item_id = item.id
 
         response = await client.delete(f"/api/shopping/{item_id}")
@@ -393,7 +387,7 @@ class TestShoppingListAPI:
         assert get_response.status_code == 404
 
     async def test_delete_all_purchased(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         """Test deleting all purchased items."""
         items = [
@@ -422,8 +416,8 @@ class TestShoppingListAPI:
             ),
         ]
         for item in items:
-            db_session.add(item)
-        await db_session.commit()
+            test_db.add(item)
+        await test_db.commit()
 
         response = await client.delete("/api/shopping/purchased/all")
 
@@ -436,7 +430,7 @@ class TestShoppingListAPI:
         assert len(list_response.json()) == 1
         assert list_response.json()[0]["name"] == "Unpurchased"
 
-    async def test_pagination(self, client: AsyncClient, db_session: AsyncSession):
+    async def test_pagination(self, client: AsyncClient, test_db: AsyncSession):
         """Test pagination of shopping list."""
         # Create 15 items
         for i in range(15):
@@ -447,8 +441,8 @@ class TestShoppingListAPI:
                 priority="normal",
                 source="manual",
             )
-            db_session.add(item)
-        await db_session.commit()
+            test_db.add(item)
+        await test_db.commit()
 
         # Get first page
         response = await client.get("/api/shopping/?skip=0&limit=10")
@@ -466,7 +460,7 @@ class TestShoppingCanonicalUnits:
     """MVP-U1: shopping list quantities convert to canonical units."""
 
     async def test_litres_become_decilitres(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         response = await client.post(
             "/api/shopping/",
@@ -476,7 +470,7 @@ class TestShoppingCanonicalUnits:
         assert (response.json()["quantity"], response.json()["unit"]) == (15, "dl")
 
     async def test_update_with_unit_converts(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         created = await client.post(
             "/api/shopping/", json={"name": "Flour", "quantity": "1", "unit": "pcs"}
@@ -490,7 +484,7 @@ class TestShoppingCanonicalUnits:
         assert (response.json()["quantity"], response.json()["unit"]) == (2000, "g")
 
     async def test_unknown_unit_is_rejected(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, test_db: AsyncSession
     ):
         response = await client.post(
             "/api/shopping/", json={"name": "Syrup", "quantity": "1", "unit": "gallon"}

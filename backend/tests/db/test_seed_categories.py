@@ -109,13 +109,14 @@ class TestSeedCategories:
             )
 
     async def test_main_seeds_and_commits_with_app_session(
-        self, db_session: AsyncSession
+        self, committed_db_session: AsyncSession
     ) -> None:
         """`python -m app.db.seed_categories` must work against the configured DB."""
-        # db_session's fixture created the tables; main() opens its own session
-        # via app.db.session.AsyncSessionLocal and must commit what it seeds.
+        # main() opens its own session via app.db.session.AsyncSessionLocal and
+        # commits, so the assertion needs a session that sees another connection's
+        # commits rather than the rolled-back transaction db_session provides.
         await main()
         await main()  # idempotent
 
-        result = await db_session.execute(select(Category))
+        result = await committed_db_session.execute(select(Category))
         assert len(result.scalars().all()) == len(SEED_CATEGORIES)

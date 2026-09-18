@@ -214,12 +214,12 @@ class TestOCRWithRealSamples:
             marker in text.upper() for marker in ["PRISMA", "S-KAUPAT", "S-MARKET"]
         )
 
-    @pytest.mark.skip(reason="Requires MinerU service running")
+    @pytest.mark.requires_mineru
     async def test_extract_from_kesko_image(self):
         """Integration test with real K-Group image sample.
 
-        Skipped by default as it requires MinerU service to be running.
-        Run with: pytest -m integration --run-mineru
+        Deselected by default (pytest.ini), because it calls MinerU for real. Run
+        it with `pytest -m requires_mineru` when the service is up.
         """
         sample_img = anyio.Path("samples/kesko_receipt.jpg")
 

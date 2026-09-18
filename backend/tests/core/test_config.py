@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.core.config import Settings
+from app.core.config import BACKEND_ROOT, ENV_FILES, PROJECT_ROOT, Settings
 
 REQUIRED = {
     "POSTGRES_SERVER": "db",
@@ -123,3 +123,35 @@ def test_telegram_token_is_never_rendered(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.TELEGRAM_BOT_TOKEN.get_secret_value() == token
     assert token not in repr(settings)
     assert token not in str(settings.model_dump())
+
+
+def test_unknown_env_keys_are_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The root .env carries legacy prototype keys (DATABASE_URL, OLLAMA_HOST).
+
+    With the pydantic-settings default of extra="forbid" they aborted every local
+    backend process - uvicorn, the worker, alembic, the seeds and pytest alike.
+    """
+    settings = _settings(
+        monkeypatch,
+        OLLAMA_HOST="http://192.168.0.94:11434",
+        GEMINI_API_KEY="unused-legacy-key",
+    )
+    assert settings.POSTGRES_DB == "d"
+
+
+def test_a_rejected_key_never_reaches_the_error_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """extra="forbid" printed each rejected key *with its value*, which is how
+    three sessions leaked the dev password into a transcript."""
+    secret = "postgresql+asyncpg://kyokki_user:PLAINTEXT-PASSWORD@localhost/kyokki"
+    settings = _settings(monkeypatch, DATABASE_URL=secret)
+    # The computed field wins; the env value is ignored rather than echoed back.
+    assert settings.DATABASE_URL == "postgresql+asyncpg://u:p@db/d"
+
+
+def test_env_file_search_order_prefers_the_backend_copy() -> None:
+    """backend/.env is the documented home; the repo-root .env stays supported so
+    an existing workstation keeps working."""
+    assert ENV_FILES == (PROJECT_ROOT / ".env", BACKEND_ROOT / ".env")
+    assert Settings.model_config["env_file"] == ENV_FILES
