@@ -1126,7 +1126,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Wave 5: [x] P1 (PR #46)  [x] P2 (PR #47)
 - Friction Q1-Q6: [x] Q2/Q3/Q6 (PR #48)  [x] Q4/Q5 (PR #49)  [x] Q1 (PR #50)  [ ] product editor (now H18)
 - Reviews 2026-09-17: five reports under `docs/reviews/`, hardening track H0-H4 added above, `docs/PRODUCT_RESOLUTION_SPEC.md` written
-- Hardening H0 (before P3): [ ] H01  [ ] H02  [ ] H03  [ ] H04  [ ] H05  [ ] H06  [ ] H07  [ ] H08
+- Hardening H0 (before P3): [x] H01 (PR #52)  [x] H02 (PR #52)  [x] H03  [x] H04  [x] H05  [x] H06  [x] H07  [x] H08 — H01/H02 merged; H03-H08 in PRs #53-#56, all opened 2026-09-18
 - Decisions: [ ] DEC-5 access  [ ] DEC-6 Next.js  [ ] DEC-7 scanner  [ ] DEC-8 retention  [ ] DEC-9 categories  [ ] DEC-10 freezer expiry
 - Wave 6: [ ] P3 acceptance (with H0)
 - Hardening H1 resolution: [ ] H11  [ ] H12  [ ] H13  [ ] H14  [ ] H15  [ ] H16  [ ] H17  [ ] H18

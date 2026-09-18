@@ -26,6 +26,9 @@ services:
       - ./samples:/app/samples  # Mount samples for testing
     env_file:
       - .env
+    environment:
+      # Containers default to UTC; the cook reads Helsinki dates.
+      TZ: ${TZ:-Europe/Helsinki}
     networks:
       - kyokki_net
     depends_on:
@@ -42,6 +45,8 @@ services:
       - ./logs:/app/logs
     env_file:
       - .env
+    environment:
+      TZ: ${TZ:-Europe/Helsinki}
     networks:
       - kyokki_net
     depends_on:
@@ -58,6 +63,8 @@ services:
       - ./logs:/app/logs
     env_file:
       - .env
+    environment:
+      TZ: ${TZ:-Europe/Helsinki}
     networks:
       - kyokki_net
     depends_on:

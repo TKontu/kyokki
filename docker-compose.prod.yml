@@ -38,6 +38,8 @@ x-backend-env: &backend-env
   FUZZY_MATCH_THRESHOLD: ${FUZZY_MATCH_THRESHOLD:-80}
   RECEIPT_WORKER_POLL_SECONDS: ${RECEIPT_WORKER_POLL_SECONDS:-2}
   RECEIPT_STALE_MINUTES: ${RECEIPT_STALE_MINUTES:-10}
+  # Containers default to UTC; the cook reads Helsinki dates.
+  TZ: ${TZ:-Europe/Helsinki}
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
   TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
   TELEGRAM_API_BASE: ${TELEGRAM_API_BASE:-https://api.telegram.org}
@@ -79,9 +81,22 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       kyokki-migrate:
         condition: service_completed_successfully
+    healthcheck:
+      # Liveness only, and the image has no curl. Readiness (/api/health) checks
+      # PostgreSQL and Redis; gating container restarts on that would restart-loop
+      # the API every time the database is slow to come up.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health/live', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
   kyokki-worker:
@@ -98,7 +113,7 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       kyokki-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
@@ -117,7 +132,7 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       kyokki-migrate:
         condition: service_completed_successfully
     restart: unless-stopped
@@ -131,7 +146,9 @@ services:
     networks:
       - kyokki_net
     depends_on:
-      - kyokki-api
+      # Without a condition the iPad could reach a frontend whose API is not up.
+      kyokki-api:
+        condition: service_healthy
     restart: unless-stopped
 
   postgres:
@@ -155,6 +172,11 @@ services:
     image: redis:7-alpine
     networks:
       - kyokki_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     restart: unless-stopped
 
 volumes:
