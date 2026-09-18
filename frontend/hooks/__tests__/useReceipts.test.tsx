@@ -30,7 +30,10 @@ const receipt = (overrides: Partial<Receipt> = {}) =>
   }) as Receipt
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
-afterEach(() => server.resetHandlers())
+afterEach(() => {
+  server.resetHandlers()
+  jest.useRealTimers()
+})
 afterAll(() => server.close())
 
 function wrapper(queryClient: QueryClient) {
@@ -55,6 +58,17 @@ describe('poll intervals', () => {
     expect(listPollInterval([receipt({ processing_status: status })])).toBe(IDLE_POLL_MS)
   })
 
+  // A status this build does not know is not proof the worker is done with the receipt. Calling
+  // it terminal stopped detail polling for good, so an unattended iPad sat on a stale page
+  // forever; it now drops back to the idle heartbeat instead (H04).
+  it.each(['uploaded', 'reprocessing', ''] as const)(
+    'keeps a slow heartbeat on the unfinished status %p',
+    (status) => {
+      expect(detailPollInterval(receipt({ processing_status: status }))).toBe(IDLE_POLL_MS)
+      expect(listPollInterval([receipt({ processing_status: status })])).toBe(IDLE_POLL_MS)
+    }
+  )
+
   it('has nothing to follow before the first load', () => {
     expect(detailPollInterval(undefined)).toBe(false)
     expect(listPollInterval(undefined)).toBe(IDLE_POLL_MS)
@@ -76,7 +90,10 @@ describe('useReceipt', () => {
     expect(calls).toBe(1)
   })
 
-  it('does not query without an id', async () => {
+  it('does not query without an id', () => {
+    // Fake timers, not a 200 ms sleep: the assertion is that nothing happened, so there is no
+    // network to wait for and a real wait only bought flakiness on a loaded machine (H06).
+    jest.useFakeTimers()
     const seen: string[] = []
     server.use(
       http.get(`${API_URL}/receipts/:id`, ({ params }) => {
@@ -86,7 +103,9 @@ describe('useReceipt', () => {
     )
     renderHook(() => useReceipt(''), { wrapper: wrapper(newClient()) })
 
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    act(() => {
+      jest.advanceTimersByTime(READING_POLL_MS)
+    })
     expect(seen).toEqual([])
   })
 })

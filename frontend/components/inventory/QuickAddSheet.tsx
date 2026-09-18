@@ -17,10 +17,10 @@ import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { formatQuantity } from '@/lib/consumption'
 import { addDaysISO } from '@/lib/dates'
-import { LOCATION_OPTIONS } from '@/lib/stock'
+import { locationOptions } from '@/lib/stock'
 import type { Category } from '@/types/category'
 import type { InventoryLocation, QuickAddRequest, Unit } from '@/types/inventory'
-import type { ProductMaster, StorageType } from '@/types/product'
+import type { ProductMaster } from '@/types/product'
 
 export interface QuickAddSheetProps {
   open: boolean
@@ -31,10 +31,19 @@ type Selection = { kind: 'existing'; product: ProductMaster } | { kind: 'new'; n
 
 const UNITS: Unit[] = ['pcs', 'g', 'dl', 'tsp', 'tbsp']
 
-const STORAGE_LOCATION: Record<StorageType, InventoryLocation> = {
+const STORAGE_LOCATION: Partial<Record<string, InventoryLocation>> = {
   refrigerator: 'main_fridge',
   freezer: 'freezer',
   pantry: 'pantry',
+}
+
+/**
+ * Where a product of this storage type lives. A storage type this build does not know keeps its
+ * own name as the location, so the Location group still has something checked and `submit`
+ * still sends a value; without it the group was blank and the payload carried `undefined` (H04).
+ */
+function locationFor(storageType: string): string {
+  return STORAGE_LOCATION[storageType] ?? storageType
 }
 
 function QuickAddForm({ onClose }: { onClose: () => void }) {
@@ -47,7 +56,8 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
   const [categoryId, setCategoryId] = useState<string | null>(null)
   const [quantity, setQuantity] = useState('1')
   const [unit, setUnit] = useState<Unit>('pcs')
-  const [location, setLocation] = useState<InventoryLocation>('main_fridge')
+  // A plain string: a product may name a storage type this build does not know (H04)
+  const [location, setLocation] = useState<string>('main_fridge')
   const [expiry, setExpiry] = useState('')
   const [expiryTouched, setExpiryTouched] = useState(false)
 
@@ -71,7 +81,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
     setSelection({ kind: 'existing', product })
     setQuantity(String(product.default_quantity ?? 1))
     setUnit(product.default_unit)
-    setLocation(STORAGE_LOCATION[product.storage_type])
+    setLocation(locationFor(product.storage_type))
     setExpiry(addDaysISO(product.default_shelf_life_days))
     setExpiryTouched(false)
   }
@@ -88,7 +98,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
 
   const pickCategory = (category: Category) => {
     setCategoryId(category.id)
-    setLocation(STORAGE_LOCATION[category.default_storage])
+    setLocation(locationFor(category.default_storage))
     if (!expiryTouched) {
       setExpiry(addDaysISO(category.default_shelf_life_days))
     }
@@ -253,7 +263,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
           label="Location"
           name="quick-add-location"
           value={location}
-          options={LOCATION_OPTIONS}
+          options={locationOptions(location)}
           onChange={setLocation}
         />
 

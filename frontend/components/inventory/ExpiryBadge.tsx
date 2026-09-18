@@ -22,8 +22,11 @@ export interface ExpiryBadgeProps {
    * - scanned: From GS1 DataMatrix barcode (shows 📅 icon)
    * - calculated: Auto-calculated based on category defaults
    * - manual: User-entered date
+   *
+   * A plain string: only 'scanned' changes anything here, and a source the API invented must not
+   * be a type error on the way in (H04).
    */
-  expirySource?: 'scanned' | 'calculated' | 'manual'
+  expirySource?: string
 
   /**
    * Additional CSS classes

@@ -3,6 +3,8 @@
  * Mirror backend schema: /backend/app/schemas/inventory_item.py
  */
 
+import type { Vocabulary } from './vocabulary'
+
 export type InventoryItemStatus = 'sealed' | 'opened' | 'partial' | 'empty' | 'discarded'
 export type InventoryLocation = 'main_fridge' | 'freezer' | 'pantry'
 export type ExpirySource = 'scanned' | 'calculated' | 'manual'
@@ -19,14 +21,16 @@ export interface InventoryItem {
   receipt_id: string | null // UUID
   initial_quantity: number // Decimal, sent as a JSON number (DEC-2)
   current_quantity: number // Decimal, sent as a JSON number (DEC-2)
-  unit: Unit
-  status: InventoryItemStatus
+  // Vocabulary fields on the way in: the API may grow any of these enums without a frontend
+  // release, and `normalizeInventoryItem` keeps whatever it sent rather than guessing (H04).
+  unit: Vocabulary<Unit>
+  status: Vocabulary<InventoryItemStatus>
   purchase_date: string | null // ISO date
   expiry_date: string // ISO date (required)
-  expiry_source: ExpirySource
+  expiry_source: Vocabulary<ExpirySource>
   opened_date: string | null // ISO date
   batch_number: string | null
-  location: InventoryLocation
+  location: Vocabulary<InventoryLocation>
   notes: string | null
   created_at: string // ISO datetime
   consumed_at: string | null // ISO datetime
@@ -58,7 +62,9 @@ export interface QuickAddRequest {
   category?: string // Category id, required for a new product
   quantity: number // > 0
   unit: string // dl, tsp, tbsp, g, pcs (ml, l, kg, kpl convert on write)
-  location?: InventoryLocation // default from the product's storage type
+  // A form may offer back a location the API itself sent (an unknown storage type, say). Sending
+  // it is better than silently omitting the field; an invalid one comes back as a 400 (H04).
+  location?: Vocabulary<InventoryLocation> // default from the product's storage type
   purchase_date?: string // ISO date, default today
   expiry_date?: string // ISO date; omit to calculate from shelf life
 }
@@ -69,7 +75,8 @@ export interface InventoryItemUpdate {
   expiry_date?: string // ISO date
   expiry_source?: ExpirySource
   opened_date?: string | null // ISO date
-  location?: InventoryLocation
+  // Same as QuickAddRequest: the edit sheet can offer the item's own raw location back (H04)
+  location?: Vocabulary<InventoryLocation>
   notes?: string | null
 }
 

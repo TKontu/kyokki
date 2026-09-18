@@ -17,7 +17,9 @@ export function useProductList(params?: ProductListParams) {
   })
 }
 
-const SEARCH_DEBOUNCE_MS = 250
+/** How long typing has to pause before a search goes out. Exported so tests step over it
+ *  with fake timers instead of waiting on the wall clock (H06). */
+export const SEARCH_DEBOUNCE_MS = 250
 
 /** Products whose name contains the term; waits for typing to pause, skips empty terms. */
 export function useProductSearch(term: string) {

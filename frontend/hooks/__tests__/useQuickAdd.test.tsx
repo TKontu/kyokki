@@ -7,7 +7,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
-import { useProductSearch } from '../useProducts'
+import { SEARCH_DEBOUNCE_MS, useProductSearch } from '../useProducts'
 import { useCategories } from '../useCategories'
 import { useQuickAddInventoryItem, inventoryKeys } from '../useInventory'
 import { useDebouncedValue } from '../useDebouncedValue'
@@ -52,7 +52,10 @@ describe('useDebouncedValue', () => {
 })
 
 describe('useProductSearch', () => {
-  it('does not query for an empty term', async () => {
+  it('does not query for an empty term', () => {
+    // Fake timers, not a 300 ms sleep: the assertion is that nothing happened, so there is no
+    // network to wait for and a real wait only bought flakiness on a loaded machine (H06).
+    jest.useFakeTimers()
     const seen: string[] = []
     server.use(
       http.get(`${API_URL}/products`, ({ request }) => {
@@ -64,7 +67,9 @@ describe('useProductSearch', () => {
       wrapper: wrapperWith(newClient()),
     })
 
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    act(() => {
+      jest.advanceTimersByTime(SEARCH_DEBOUNCE_MS * 2)
+    })
     expect(seen).toHaveLength(0)
     expect(result.current.data).toBeUndefined()
   })

@@ -3,11 +3,12 @@
  */
 
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
+import { SEARCH_DEBOUNCE_MS } from '@/hooks/useProducts'
 import { QuickAddSheet } from '../QuickAddSheet'
 import { addDaysISO } from '@/lib/dates'
 import type { Category } from '@/types/category'
@@ -89,7 +90,10 @@ function created(overrides: Partial<InventoryItem> = {}): InventoryItem {
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
-afterEach(() => server.resetHandlers())
+afterEach(() => {
+  server.resetHandlers()
+  jest.useRealTimers()
+})
 afterAll(() => server.close())
 
 function mockApi({
@@ -134,6 +138,23 @@ function type(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } })
 }
 
+/**
+ * Type a search term and step over the debounce with fake timers, so the request is already in
+ * flight when the assertion below starts waiting.
+ *
+ * Every search here used to spend 250 ms of wall clock inside a 1000 ms findBy budget, which is
+ * a race the moment jest runs several suites next to a build. Real timers come straight back so
+ * msw and findBy* work normally; only the debounce is skipped (H06).
+ */
+function search(term: string) {
+  jest.useFakeTimers()
+  type('Product', term)
+  act(() => {
+    jest.advanceTimersByTime(SEARCH_DEBOUNCE_MS)
+  })
+  jest.useRealTimers()
+}
+
 function addButton() {
   return screen.getByRole('button', { name: /^add$/i })
 }
@@ -143,7 +164,7 @@ describe('QuickAddSheet', () => {
     const bodies = mockApi()
     const onClose = renderSheet()
 
-    type('Product', 'mil')
+    search('mil')
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
 
     expect(screen.getByLabelText('Quantity')).toHaveValue(10)
@@ -171,7 +192,7 @@ describe('QuickAddSheet', () => {
     })
     renderSheet()
 
-    type('Product', 'Peas')
+    search('Peas')
     fireEvent.click(await screen.findByRole('button', { name: 'Create new: Peas' }))
 
     expect(screen.getByText('New product')).toBeInTheDocument()
@@ -200,7 +221,7 @@ describe('QuickAddSheet', () => {
     mockApi({ products: [] })
     renderSheet()
 
-    type('Product', 'Tofu')
+    search('Tofu')
     fireEvent.click(await screen.findByRole('button', { name: 'Create new: Tofu' }))
 
     const group = await screen.findByRole('radiogroup', { name: 'Category' })
@@ -216,7 +237,7 @@ describe('QuickAddSheet', () => {
     mockApi()
     renderSheet()
 
-    type('Product', 'MILK')
+    search('MILK')
 
     expect(await screen.findByRole('button', { name: 'Milk' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /create new/i })).not.toBeInTheDocument()
@@ -226,7 +247,7 @@ describe('QuickAddSheet', () => {
     const bodies = mockApi()
     renderSheet()
 
-    type('Product', 'milk')
+    search('milk')
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
     type('Quantity', value)
 
@@ -240,7 +261,7 @@ describe('QuickAddSheet', () => {
     const bodies = mockApi()
     renderSheet()
 
-    type('Product', 'milk')
+    search('milk')
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
     type('Expiry', '2026-12-24')
     fireEvent.click(addButton())
@@ -256,7 +277,7 @@ describe('QuickAddSheet', () => {
     })
     const onClose = renderSheet()
 
-    type('Product', 'milk')
+    search('milk')
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
     type('Quantity', '3')
     fireEvent.click(addButton())
@@ -272,18 +293,51 @@ describe('QuickAddSheet', () => {
     mockApi({ addResponse: () => HttpResponse.json({ detail: 'boom' }, { status: 500 }) })
     renderSheet()
 
-    type('Product', 'milk')
+    search('milk')
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
     fireEvent.click(addButton())
 
     expect(await screen.findByText('Could not add Milk')).toBeInTheDocument()
   })
 
+  // STORAGE_LOCATION[product.storage_type] used to be `undefined` for a storage type this build
+  // does not know: no radio was checked and submit() posted `location: undefined` (H04).
+  it('keeps a storage type it does not know as the location, checked and sent', async () => {
+    const bodies = mockApi({
+      products: [{ ...MILK, canonical_name: 'Kimchi', storage_type: 'cellar' as never }],
+    })
+    renderSheet()
+
+    search('kim')
+    fireEvent.click(await screen.findByRole('button', { name: 'Kimchi' }))
+
+    expect(screen.getByRole('radio', { name: 'cellar' })).toBeChecked()
+
+    fireEvent.click(addButton())
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ location: 'cellar' })
+  })
+
+  it('still lets the cook move it to a location it does know', async () => {
+    const bodies = mockApi({
+      products: [{ ...MILK, canonical_name: 'Kimchi', storage_type: 'cellar' as never }],
+    })
+    renderSheet()
+
+    search('kim')
+    fireEvent.click(await screen.findByRole('button', { name: 'Kimchi' }))
+    fireEvent.click(screen.getByRole('radio', { name: 'Fridge' }))
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ location: 'main_fridge' })
+  })
+
   it('goes back to the search', async () => {
     mockApi()
     renderSheet()
 
-    type('Product', 'milk')
+    search('milk')
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
     fireEvent.click(screen.getByRole('button', { name: /back/i }))
 

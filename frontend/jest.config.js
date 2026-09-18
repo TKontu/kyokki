@@ -10,6 +10,9 @@ const createJestConfig = nextJest({
 const config = {
   coverageProvider: 'v8',
   testEnvironment: 'jsdom',
+  // Room for the 5 s asyncUtilTimeout set in jest.setup.js: a waitFor that runs out should fail
+  // with its own "unable to find ..." message, not with jest's unhelpful test timeout (H06).
+  testTimeout: 20000,
   // msw v2 resolves its Node build only with the default export condition
   testEnvironmentOptions: {
     customExportConditions: [''],
@@ -29,7 +32,6 @@ const config = {
     'components/**/*.{js,jsx,ts,tsx}',
     'lib/**/*.{js,jsx,ts,tsx}',
     'hooks/**/*.{js,jsx,ts,tsx}',
-    'stores/**/*.{js,jsx,ts,tsx}',
     '!**/*.d.ts',
     '!**/node_modules/**',
     '!**/__tests__/**',

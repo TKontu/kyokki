@@ -8,6 +8,7 @@ import {
   getExpiryUrgency,
   formatExpiryDate,
   getExpiryColor,
+  NEUTRAL_EXPIRY_COLOR,
   type ExpiryUrgency,
 } from '../dates'
 
@@ -145,6 +146,14 @@ describe('Date Utilities', () => {
         expect(color).toMatch(/dark:text-/)
       }
     )
+
+    // The lookup was unguarded, so an urgency arriving from untyped data put the literal string
+    // "undefined" into the badge's class list (H04).
+    it('falls back to neutral classes for an urgency it does not know', () => {
+      const color = getExpiryColor('mouldy' as ExpiryUrgency)
+      expect(color).toBe(NEUTRAL_EXPIRY_COLOR)
+      expect(color).not.toContain('undefined')
+    })
 
     it('should return red classes for "expired"', () => {
       const color = getExpiryColor('expired')

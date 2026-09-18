@@ -86,10 +86,14 @@ export function formatExpiryDate(expiryDate: string): string {
  * @param urgency - ExpiryUrgency level
  * @returns Tailwind CSS classes for background and text
  */
+/** Nothing to say about the urgency, so nothing loud: used when `urgency` is not one of the five. */
+export const NEUTRAL_EXPIRY_COLOR = 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
+
 export function getExpiryColor(urgency: ExpiryUrgency): string {
   // Every pair needs a dark variant: these are raw palette colours rather than the
   // ui/ui-dark tokens, so without them the badges stay bright on a dark kitchen screen.
-  const colorMap: Record<ExpiryUrgency, string> = {
+  // Partial, so an urgency arriving from untyped data cannot put `undefined` in a class list.
+  const colorMap: Partial<Record<string, string>> = {
     expired: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200',
     today: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200',
     tomorrow: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-200',
@@ -97,5 +101,5 @@ export function getExpiryColor(urgency: ExpiryUrgency): string {
     fresh: 'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200',
   }
 
-  return colorMap[urgency]
+  return colorMap[urgency] ?? NEUTRAL_EXPIRY_COLOR
 }

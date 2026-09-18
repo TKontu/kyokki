@@ -4,11 +4,12 @@
  */
 
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
+import { SEARCH_DEBOUNCE_MS } from '@/hooks/useProducts'
 import Home from '../page'
 import type { InventoryItem } from '@/types/inventory'
 
@@ -36,7 +37,10 @@ const PEAS: InventoryItem = {
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
-afterEach(() => server.resetHandlers())
+afterEach(() => {
+  server.resetHandlers()
+  jest.useRealTimers()
+})
 afterAll(() => server.close())
 
 it('adds a new product from the home page and shows it in the list', async () => {
@@ -75,7 +79,14 @@ it('adds a new product from the home page and shows it in the list', async () =>
   )
 
   fireEvent.click(await screen.findByRole('button', { name: /\+ add/i }))
+  // Step over the 250 ms search debounce with fake timers rather than spending it against the
+  // findBy budget below; real timers come straight back so msw still answers normally (H06).
+  jest.useFakeTimers()
   fireEvent.change(screen.getByLabelText('Product'), { target: { value: 'Peas' } })
+  act(() => {
+    jest.advanceTimersByTime(SEARCH_DEBOUNCE_MS)
+  })
+  jest.useRealTimers()
   fireEvent.click(await screen.findByRole('button', { name: 'Create new: Peas' }))
   fireEvent.click(await screen.findByRole('radio', { name: /frozen/i }))
   fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '500' } })

@@ -105,20 +105,22 @@ export const ExpiryBadge: React.FC<{
   return <span className={combinedClassName}>{text}</span>;
 };
 
-// Status badge for inventory items
+// Status badge for inventory items. `status` is deliberately a plain string: this badge is on
+// every stock card, so a status the API invented must not be able to blank the whole page.
 export const StatusBadge: React.FC<{
-  status: 'sealed' | 'opened' | 'partial' | 'empty' | 'discarded';
+  status: string;
   className?: string;
 }> = ({ status, className = '' }) => {
-  const statusConfig = {
-    sealed: { label: 'Sealed', variant: 'success' as const },
-    opened: { label: 'Opened', variant: 'info' as const },
-    partial: { label: 'Partial', variant: 'warning' as const },
-    empty: { label: 'Empty', variant: 'default' as const },
-    discarded: { label: 'Discarded', variant: 'error' as const },
+  const statusConfig: Record<string, { label: string; variant: BadgeProps['variant'] } | undefined> = {
+    sealed: { label: 'Sealed', variant: 'success' },
+    opened: { label: 'Opened', variant: 'info' },
+    partial: { label: 'Partial', variant: 'warning' },
+    empty: { label: 'Empty', variant: 'default' },
+    discarded: { label: 'Discarded', variant: 'error' },
   };
 
-  const config = statusConfig[status];
+  // An unrecognised status shows itself, neutrally, rather than throwing on `config.variant`
+  const config = statusConfig[status] ?? { label: status, variant: 'default' as const };
 
   return (
     <Badge variant={config.variant} className={className}>
