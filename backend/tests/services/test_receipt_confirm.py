@@ -509,3 +509,141 @@ class TestNonFoodMemory:
 
         rows = (await db_session.execute(select(NonFoodName))).scalars().all()
         assert [r.receipt_name for r in rows] == ["MUOVIKASSI"]
+
+
+class TestLearningProvenance:
+    """The six situations of `docs/PRODUCT_RESOLUTION_SPEC.md` §3.4.
+
+    Before H14 confirm wrote `manually_verified=True` for every included line, so a
+    proposal the cook merely did not notice became a key that won outright for every
+    later receipt from that chain. Only the cook's own act produces verified memory now.
+    """
+
+    async def _confirm_with(
+        self, db_session: AsyncSession, receipt, resolution: dict, item
+    ):
+        """Put a resolution on line 0 and confirm that line."""
+        lines = list(receipt.ocr_structured["lines"])
+        lines[0] = {**lines[0], "resolution": resolution}
+        row = await db_session.get(Receipt, receipt.id)
+        row.ocr_structured = {**receipt.ocr_structured, "lines": lines}
+        await db_session.commit()
+        return await confirm_receipt(db_session, receipt.id, [item], [])
+
+    async def _alias(self, db_session: AsyncSession) -> StoreProductAlias:
+        return (
+            (
+                await db_session.execute(
+                    select(StoreProductAlias).where(
+                        StoreProductAlias.receipt_name == "VALIO KEVYTMAITO 1L"
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+
+    async def test_keeping_a_name_result_is_a_verified_key(
+        self, db_session: AsyncSession, receipt, milk
+    ):
+        await self._confirm_with(
+            db_session,
+            receipt,
+            {"product_id": str(milk.id), "source": "name", "verified": True},
+            _item(index=0, product_id=milk.id),
+        )
+
+        alias = await self._alias(db_session)
+        assert (alias.source, alias.manually_verified) == ("name", True)
+
+    async def test_keeping_a_selected_result_is_not_verified(
+        self, db_session: AsyncSession, receipt, milk
+    ):
+        """The model proposed it from a shortlist and the cook did not contradict it.
+        That is worth remembering, but it is not the cook's word."""
+        await self._confirm_with(
+            db_session,
+            receipt,
+            {"product_id": str(milk.id), "source": "selected", "verified": False},
+            _item(index=0, product_id=milk.id),
+        )
+
+        alias = await self._alias(db_session)
+        assert (alias.source, alias.manually_verified) == ("model", False)
+
+    async def test_changing_the_product_is_the_cooks_word(
+        self, db_session: AsyncSession, receipt, milk, categories
+    ):
+        """The case that matters most: a wrong proposal the cook corrects becomes
+        verified memory, so the next receipt resolves it by key with no model call."""
+        other = ProductMaster(
+            id=uuid4(),
+            canonical_name="Oat drink",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=7,
+            unit_type="volume",
+            default_unit="dl",
+        )
+        db_session.add(other)
+        await db_session.commit()
+
+        await self._confirm_with(
+            db_session,
+            receipt,
+            {"product_id": str(milk.id), "source": "selected", "verified": False},
+            _item(index=0, product_id=other.id),
+        )
+
+        alias = await self._alias(db_session)
+        assert (alias.source, alias.manually_verified) == ("cook", True)
+        assert alias.product_master_id == other.id
+
+    async def test_an_unresolved_line_the_cook_names_is_the_cooks_word(
+        self, db_session: AsyncSession, receipt, categories
+    ):
+        await self._confirm_with(
+            db_session,
+            receipt,
+            {"product_id": None, "source": "none", "verified": False},
+            _item(index=0, name="Light milk", category="dairy"),
+        )
+
+        alias = await self._alias(db_session)
+        assert (alias.source, alias.manually_verified) == ("cook", True)
+
+    async def test_a_machine_mapping_never_demotes_the_cooks(
+        self, db_session: AsyncSession, receipt, milk
+    ):
+        """Reinforcing an alias the cook corrected must not hand it back to the model."""
+        await self._confirm_with(
+            db_session,
+            receipt,
+            {"product_id": None, "source": "none", "verified": False},
+            _item(index=0, product_id=milk.id),
+        )
+        before = await self._alias(db_session)
+        assert (before.source, before.manually_verified) == ("cook", True)
+
+        row = await db_session.get(Receipt, receipt.id)
+        row.processing_status = ReceiptStatus.COMPLETED
+        await db_session.commit()
+        await self._confirm_with(
+            db_session,
+            receipt,
+            {"product_id": str(milk.id), "source": "selected", "verified": False},
+            _item(index=0, product_id=milk.id),
+        )
+
+        after = await self._alias(db_session)
+        assert (after.source, after.manually_verified) == ("cook", True)
+        assert after.occurrence_count == 2
+
+    async def test_a_skipped_line_teaches_nothing(
+        self, db_session: AsyncSession, receipt, milk
+    ):
+        await confirm_receipt(db_session, receipt.id, [], [])
+
+        assert (
+            await db_session.execute(select(StoreProductAlias))
+        ).scalars().all() == []

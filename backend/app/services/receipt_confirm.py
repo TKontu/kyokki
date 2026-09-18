@@ -132,17 +132,51 @@ class _Confirmation:
             raise InvalidConfirmItem(f"Item {position}: {exc}") from exc
         if created:
             self.result.products_created += 1
-
-        # The generic name becomes a key, so the same thing under another brand resolves
-        # without the model next week (spec §3.4). `cook` when the cook typed the name
-        # here, `model` when it came from the read line. Only the cook's own action
-        # produces verified memory, and the full precedence table lands in H14.
-        learned_name = item.name or line.get("generic_name")
-        if learned_name:
-            await learn_product_name(
-                self.db, product, learned_name, "cook" if item.name else "model"
-            )
         return product
+
+    @staticmethod
+    def _provenance(line: dict[str, Any], product: ProductMaster) -> tuple[str, bool]:
+        """How the cook's choice relates to what was proposed (spec §3.4).
+
+        Returns the alias `source` and whether it is verified memory. The whole point
+        of H14: before it, confirm wrote `manually_verified=True` for every included
+        line, so a guess the cook merely did not notice became a key that won outright
+        for every later receipt from that chain.
+        """
+        resolution = line.get("resolution")
+        resolution = resolution if isinstance(resolution, dict) else {}
+        proposed = resolution.get("product_id")
+        kept = proposed is not None and str(proposed) == str(product.id)
+
+        if not kept:
+            # Changed, attached or detached: the cook's own word either way.
+            return "cook", True
+
+        source = str(resolution.get("source") or "")
+        if source == "name":
+            # A catalog name matched. A key, not a judgement, but a reliable one.
+            return "name", True
+        if source == "alias":
+            return str(resolution.get("alias_source") or "cook"), bool(
+                resolution.get("verified")
+            )
+        # `selected`: the model chose from candidates and the cook did not contradict it.
+        return "model", False
+
+    async def learn_names(
+        self, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
+    ) -> None:
+        """Record the generic name as a key for this product (spec §3.4, right column).
+
+        It is what makes "Minced beef" hit "Ground beef" next week without the
+        extraction prompt carrying the catalog.
+        """
+        source, _ = self._provenance(line, product)
+        learned = item.name or line.get("generic_name")
+        if learned:
+            await learn_product_name(
+                self.db, product, learned, "cook" if source == "cook" else "model"
+            )
 
     async def learn_alias(self, line: dict[str, Any], product: ProductMaster) -> None:
         receipt_name = normalize_receipt_name(str(line["name"]))
@@ -163,13 +197,16 @@ class _Confirmation:
                 .first()
             )
         now = datetime.now(UTC)
+        source, verified = self._provenance(line, product)
+
         if alias is None:
             alias = StoreProductAlias(
                 product_master_id=product.id,
                 store_chain=self.chain,
                 receipt_name=receipt_name,
-                confidence_score=1.0,
-                manually_verified=True,
+                source=source,
+                confidence_score=1.0 if verified else 0.5,
+                manually_verified=verified,
                 occurrence_count=1,
                 last_seen=now,
             )
@@ -180,9 +217,16 @@ class _Confirmation:
             return
         else:
             row: Any = alias  # Column-typed model: assign plain values
+            repointed = str(row.product_master_id) != str(product.id)
             row.product_master_id = product.id
-            row.confidence_score = 1.0
-            row.manually_verified = True
+            # Never demote memory the cook stands behind: a machine mapping must not
+            # overwrite a correction, and reinforcing an existing alias keeps its source.
+            if verified or not row.manually_verified:
+                row.source = (
+                    source if repointed or not row.manually_verified else row.source
+                )
+                row.manually_verified = bool(row.manually_verified) or verified
+                row.confidence_score = 1.0 if row.manually_verified else 0.5
             row.occurrence_count = (row.occurrence_count or 0) + 1
             row.last_seen = now
         self.aliases[receipt_name] = alias
@@ -205,6 +249,7 @@ class _Confirmation:
         self.result.items_created += 1
         if line:
             await self.learn_alias(line, product)
+            await self.learn_names(line, product, item)
 
 
 def _printed_names(confirmation: "_Confirmation", indexes: Iterable[int]) -> list[str]:

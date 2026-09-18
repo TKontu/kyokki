@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
@@ -205,21 +206,26 @@ class TestDeterministicTiers:
     async def test_the_cooks_own_alias_beats_a_machine_one(
         self, db_session: AsyncSession, catalog
     ) -> None:
+        """Precedence is verified, then occurrence count, then recency. Since H14 one
+        printed name has at most one alias per chain, so this is decided between
+        chains - here the receipt is from a third chain, so neither wins on chain."""
         now = datetime.now(UTC)
         db_session.add_all(
             [
                 StoreProductAlias(
                     product_master_id=catalog["milk"].id,
-                    store_chain="s-group",
+                    store_chain="k-group",
                     receipt_name="X",
+                    source="model",
                     manually_verified=False,
                     occurrence_count=9,
                     last_seen=now,
                 ),
                 StoreProductAlias(
                     product_master_id=catalog["cream"].id,
-                    store_chain="s-group",
+                    store_chain="lidl",
                     receipt_name="X",
+                    source="cook",
                     manually_verified=True,
                     occurrence_count=1,
                     last_seen=now,
@@ -233,6 +239,40 @@ class TestDeterministicTiers:
         )
 
         assert resolved["X"].product.id == catalog["cream"].id
+
+    async def test_one_printed_name_has_one_alias_per_chain(
+        self, db_session: AsyncSession, catalog
+    ) -> None:
+        """Enforced only by a SELECT-then-insert in confirm before H14, so two
+        concurrent confirms could duplicate the row."""
+        now = datetime.now(UTC)
+        db_session.add(
+            StoreProductAlias(
+                product_master_id=catalog["milk"].id,
+                store_chain="s-group",
+                receipt_name="X",
+                source="cook",
+                manually_verified=True,
+                occurrence_count=1,
+                last_seen=now,
+            )
+        )
+        await db_session.flush()
+        db_session.add(
+            StoreProductAlias(
+                product_master_id=catalog["cream"].id,
+                store_chain="s-group",
+                receipt_name="X",
+                source="model",
+                manually_verified=False,
+                occurrence_count=1,
+                last_seen=now,
+            )
+        )
+
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+        await db_session.rollback()
 
     async def test_this_chains_alias_beats_another_chains(
         self, db_session: AsyncSession, catalog
