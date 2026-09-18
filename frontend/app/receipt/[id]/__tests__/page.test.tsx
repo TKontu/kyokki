@@ -3,12 +3,13 @@
  */
 
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
 import ReceiptReviewPage from '../page'
+import { SEARCH_DEBOUNCE_MS } from '@/hooks/useProducts'
 import type { ExtractedItem, Receipt, ReceiptStatus } from '@/types/receipt'
 
 const push = jest.fn()
@@ -76,12 +77,49 @@ afterEach(() => {
 })
 afterAll(() => server.close())
 
+const PRODUCTS = [
+  {
+    id: 'p-milk',
+    canonical_name: 'Milk',
+    category: 'dairy',
+    storage_type: 'refrigerator',
+    default_shelf_life_days: 7,
+    opened_shelf_life_days: null,
+    unit_type: 'volume',
+    default_unit: 'dl',
+    default_quantity: 10,
+    min_stock_quantity: null,
+    reorder_quantity: null,
+    off_product_id: null,
+    created_at: '2026-09-01T00:00:00Z',
+    updated_at: '2026-09-01T00:00:00Z',
+  },
+]
+
+/** Step over the search debounce rather than waiting it out (H06). */
+function search(term: string, inputId: string) {
+  jest.useFakeTimers()
+  fireEvent.change(document.getElementById(inputId) as HTMLInputElement, {
+    target: { value: term },
+  })
+  act(() => {
+    jest.advanceTimersByTime(SEARCH_DEBOUNCE_MS)
+  })
+  jest.useRealTimers()
+}
+
 function mockApi(body: Receipt, confirmResponse?: () => Response) {
   const confirms: Record<string, unknown>[] = []
   // The fake keeps state like the API does: re-queueing changes what a refetch returns
   let current = body
   server.use(
     http.get(`${API_URL}/categories`, () => HttpResponse.json(CATEGORIES)),
+    http.get(`${API_URL}/products`, ({ request }) => {
+      const term = (new URL(request.url).searchParams.get('search') ?? '').toLowerCase()
+      return HttpResponse.json(
+        PRODUCTS.filter((p) => p.canonical_name.toLowerCase().includes(term))
+      )
+    }),
     http.get(`${API_URL}/receipts/r1`, () => HttpResponse.json(current)),
     http.post(`${API_URL}/receipts/r1/confirm`, async ({ request }) => {
       confirms.push((await request.json()) as Record<string, unknown>)
@@ -150,11 +188,12 @@ describe('ReceiptReviewPage', () => {
     fireEvent.click(addButton())
 
     await waitFor(() => expect(confirms).toHaveLength(1))
+    // line_id addresses the line by identity (H12); index stays for one release.
     expect(confirms[0]).toEqual({
       non_food_indexes: [],
       items: [
-        { index: 0, product_id: 'p-milk', quantity: 1, unit: 'pcs', purchase_date: '2026-09-02' },
-        { index: 1, name: 'Generic 1', category: 'dairy', quantity: 1, unit: 'pcs', purchase_date: '2026-09-02' },
+        { index: 0, line_id: 'line-0', product_id: 'p-milk', quantity: 1, unit: 'pcs', purchase_date: '2026-09-02' },
+        { index: 1, line_id: 'line-1', name: 'Generic 1', category: 'dairy', quantity: 1, unit: 'pcs', purchase_date: '2026-09-02' },
       ],
     })
     expect(await screen.findByText(/Added 1 item/)).toBeInTheDocument()
@@ -433,6 +472,110 @@ describe('ReceiptReviewPage', () => {
 
     await waitFor(() => expect(confirms).toHaveLength(1))
     expect((confirms[0] as { items: unknown[] }).items).toEqual([])
+  })
+
+  it('shows a confirmed mapping as known and a proposal as auto', async () => {
+    // The row used to print `match_confidence`, and because the pipeline only kept
+    // matches scoring 80 or better, every guess read "high" - including the ones that
+    // paired Pineapple with Apple (H15).
+    mockApi(
+      receipt({}, [
+        item(0, {
+          product_id: 'p-milk',
+          product_name: 'Milk',
+          match_source: 'alias',
+          verified: true,
+        }),
+        item(1, {
+          product_id: 'p-oat',
+          product_name: 'Oat drink',
+          match_source: 'selected',
+          verified: false,
+        }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('→ Milk')
+    expect(within(rows()[0]).getByText('known')).toBeInTheDocument()
+    expect(within(rows()[1]).getByText('auto')).toBeInTheDocument()
+  })
+
+  it('lets the cook change a proposed product, and sends the one they chose', async () => {
+    const confirms = mockApi(
+      receipt({}, [
+        item(0, {
+          product_id: 'p-oat',
+          product_name: 'Oat drink',
+          match_source: 'selected',
+          verified: false,
+        }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('→ Oat drink')
+    fireEvent.click(screen.getByRole('button', { name: 'Change Oat drink' }))
+    search('Milk', `row-0-search`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
+
+    await screen.findByText('→ Milk')
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    const [sent] = (confirms[0] as { items: { product_id?: string }[] }).items
+    expect(sent.product_id).toBe('p-milk')
+  })
+
+  it('a changed row reads as the cook own word, not a proposal', async () => {
+    mockApi(
+      receipt({}, [
+        item(0, {
+          product_id: 'p-oat',
+          product_name: 'Oat drink',
+          match_source: 'selected',
+          verified: false,
+        }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('→ Oat drink')
+    expect(screen.getByText('auto')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change Oat drink' }))
+    search('Milk', `row-0-search`)
+    fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
+
+    await screen.findByText('→ Milk')
+    expect(screen.getByText('known')).toBeInTheDocument()
+  })
+
+  it('lets the cook detach a proposal and name a new product instead', async () => {
+    const confirms = mockApi(
+      receipt({}, [
+        item(0, {
+          product_id: 'p-oat',
+          product_name: 'Oat drink',
+          match_source: 'selected',
+          verified: false,
+          suggested_category: 'dairy',
+        }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('→ Oat drink')
+    fireEvent.click(screen.getByRole('button', { name: 'Change Oat drink' }))
+    search('Barista oat', `row-0-search`)
+    fireEvent.click(await screen.findByRole('button', { name: 'New product: Barista oat' }))
+
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    const [sent] = (confirms[0] as { items: Record<string, unknown>[] }).items
+    expect(sent.product_id).toBeUndefined()
+    expect(sent.name).toBe('Barista oat')
   })
 
   it('renders and confirms a long receipt', async () => {

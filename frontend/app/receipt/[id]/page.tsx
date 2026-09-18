@@ -11,7 +11,12 @@ import React, { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
-import { ReceiptItemRow, canInclude, type ReviewRow } from '@/components/receipts/ReceiptItemRow'
+import {
+  ReceiptItemRow,
+  canInclude,
+  chosenProductId,
+  type ReviewRow,
+} from '@/components/receipts/ReceiptItemRow'
 import { useCategories } from '@/hooks/useCategories'
 import { useConfirmReceipt, useReceipt, useReprocessReceipt } from '@/hooks/useReceipts'
 import { useToast } from '@/hooks/useToast'
@@ -27,6 +32,7 @@ function initialRow(item: ExtractedItem): ReviewRow {
     index: item.index,
     // A line with nothing to go on starts skipped rather than silently creating a product
     include: Boolean(item.product_id) || (name.trim() !== '' && category !== ''),
+    productName: undefined,
     name,
     category,
     quantity: String(item.quantity),
@@ -190,24 +196,22 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   const purchaseDate = receipt.purchase_date ?? toISODate(new Date())
 
   const submit = () => {
-    const items: ConfirmedItemCreate[] = included.map(({ item, row }) =>
-      item.product_id
-        ? {
-            index: item.index,
-            product_id: item.product_id,
-            quantity: Number(row.quantity),
-            unit: row.unit,
-            purchase_date: purchaseDate,
-          }
-        : {
-            index: item.index,
-            name: row.name.trim(),
-            category: row.category,
-            quantity: Number(row.quantity),
-            unit: row.unit,
-            purchase_date: purchaseDate,
-          }
-    )
+    const items: ConfirmedItemCreate[] = included.map(({ item, row }) => {
+      // The cook's choice on the row wins over whatever the read proposed; detaching
+      // (productId: null) sends a name and category instead, and confirm learns the
+      // printed name against the product that results (H15).
+      const productId = chosenProductId(item, row)
+      const base = {
+        index: item.index,
+        line_id: item.line_id,
+        quantity: Number(row.quantity),
+        unit: row.unit,
+        purchase_date: purchaseDate,
+      }
+      return productId
+        ? { ...base, product_id: productId }
+        : { ...base, name: row.name.trim(), category: row.category }
+    })
 
     // Only teach from lines the cook has actually looked at. A misjudgement inside
     // a fold that was never opened would otherwise be remembered forever, hiding a

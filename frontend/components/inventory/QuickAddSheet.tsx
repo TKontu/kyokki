@@ -12,7 +12,7 @@ import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
 import { fieldErrorClass, fieldInputClass, fieldLabelClass } from '@/components/ui/formStyles'
 import { useCategories } from '@/hooks/useCategories'
 import { useQuickAddInventoryItem } from '@/hooks/useInventory'
-import { useProductSearch } from '@/hooks/useProducts'
+import { ProductSearch } from '@/components/products/ProductSearch'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { formatQuantity } from '@/lib/consumption'
@@ -61,13 +61,6 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
   const [expiry, setExpiry] = useState('')
   const [expiryTouched, setExpiryTouched] = useState(false)
 
-  const search = useProductSearch(term)
-  const trimmed = term.trim()
-  const results = trimmed ? (search.data ?? []) : []
-  const exactMatch = results.some(
-    (product) => product.canonical_name.toLowerCase() === trimmed.toLowerCase()
-  )
-
   const sortedCategories = useMemo(
     () => [...(categories.data ?? [])].sort((a, b) => a.sort_order - b.sort_order),
     [categories.data]
@@ -86,8 +79,8 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
     setExpiryTouched(false)
   }
 
-  const pickNew = () => {
-    setSelection({ kind: 'new', name: trimmed })
+  const pickNew = (name: string) => {
+    setSelection({ kind: 'new', name })
     setCategoryId(null)
     setQuantity('1')
     setUnit('pcs')
@@ -139,44 +132,15 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
   if (!selection) {
     return (
       <BottomSheet open onClose={onClose} title="Add to stock">
-        <label htmlFor="quick-add-search" className={fieldLabelClass}>
-          Product
-        </label>
-        <input
-          id="quick-add-search"
-          type="search"
-          autoComplete="off"
-          value={term}
-          onChange={(event) => setTerm(event.target.value)}
-          placeholder="Milk, ground beef, apples…"
-          className={`${fieldInputClass} mt-1`}
+        {/* The same control the receipt review row uses (H15). */}
+        <ProductSearch
+          categories={categories.data ?? []}
+          inputId="quick-add-search"
+          term={term}
+          onTermChange={setTerm}
+          onPickExisting={pickExisting}
+          onPickNew={pickNew}
         />
-        <ul className="mt-3 flex flex-col gap-2">
-          {results.map((product) => (
-            <li key={product.id}>
-              <button
-                type="button"
-                aria-label={product.canonical_name}
-                onClick={() => pickExisting(product)}
-                className="flex w-full min-h-touch items-center gap-2 rounded-ui border border-ui-border dark:border-ui-dark-border px-3 text-left text-ui-text dark:text-ui-dark-text"
-              >
-                <span aria-hidden="true">{categoryById.get(product.category)?.icon ?? ''}</span>
-                {product.canonical_name}
-              </button>
-            </li>
-          ))}
-          {trimmed && !exactMatch && (
-            <li>
-              <button
-                type="button"
-                onClick={pickNew}
-                className="flex w-full min-h-touch items-center rounded-ui border border-dashed border-ui-border dark:border-ui-dark-border px-3 text-left text-ui-text dark:text-ui-dark-text"
-              >
-                {`Create new: ${trimmed}`}
-              </button>
-            </li>
-          )}
-        </ul>
       </BottomSheet>
     )
   }

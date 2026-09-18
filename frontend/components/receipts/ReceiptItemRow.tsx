@@ -6,7 +6,10 @@
  * category. A line already matched to a product keeps that product and needs no category.
  */
 
-import React from 'react'
+import React, { useState } from 'react'
+import { ProductSearch } from '@/components/products/ProductSearch'
+import { ProvenanceChip } from '@/components/receipts/ProvenanceChip'
+import Button from '@/components/ui/Button'
 import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
 import {
   fieldErrorClass,
@@ -24,6 +27,13 @@ export interface ReviewRow {
   category: string
   quantity: string
   unit: ReceiptUnit
+  /**
+   * The product the cook chose on this row, overriding what was proposed.
+   * `null` means detached: treat the line as a new product named by `name` (H15).
+   * `undefined` means untouched - whatever the read proposed still stands.
+   */
+  productId?: string | null
+  productName?: string | null
 }
 
 export interface ReceiptItemRowProps {
@@ -35,9 +45,14 @@ export interface ReceiptItemRowProps {
 
 const UNITS: ReceiptUnit[] = ['pcs', 'g', 'dl']
 
+/** The product this row will actually use: the cook's choice, else what was read. */
+export function chosenProductId(item: ExtractedItem, row: ReviewRow): string | null {
+  return row.productId === undefined ? item.product_id : row.productId
+}
+
 /** A line can be added once it has a product to go to: a match, or a name and a category. */
 export function canInclude(item: ExtractedItem, row: ReviewRow): boolean {
-  if (item.product_id) return true
+  if (chosenProductId(item, row)) return true
   return row.name.trim() !== '' && row.category !== ''
 }
 
@@ -55,10 +70,17 @@ function describeConversion(item: ExtractedItem): string | null {
 }
 
 export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemRowProps) {
-  const matched = Boolean(item.product_id)
+  const [changing, setChanging] = useState(false)
+  const [searchTerm, setSearchTerm] = useState(row.name)
+  const productId = chosenProductId(item, row)
+  const matched = Boolean(productId)
   const ready = canInclude(item, row)
   const rowId = `row-${item.index}`
   const conversion = describeConversion(item)
+  const productName =
+    row.productName !== undefined ? row.productName : item.product_name
+  // The cook's own choice is their word, whatever the read proposed.
+  const chosenByCook = row.productId !== undefined
 
   return (
     <div
@@ -80,14 +102,23 @@ export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemR
         />
         <div className="flex-1">
           {matched ? (
-            <p className="text-base font-medium text-ui-text dark:text-ui-dark-text">
-              {`→ ${item.product_name}`}
-              {item.match_confidence && (
-                <span className="ml-2 text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
-                  {item.match_confidence}
-                </span>
-              )}
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-base font-medium text-ui-text dark:text-ui-dark-text">
+                {`→ ${productName ?? ''}`}
+              </p>
+              <ProvenanceChip
+                source={chosenByCook ? 'alias' : item.match_source}
+                verified={chosenByCook || item.verified}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setChanging(true)}
+                aria-label={`Change ${productName ?? item.name}`}
+              >
+                Change
+              </Button>
+            </div>
           ) : (
             <>
               <label htmlFor={`${rowId}-name`} className={`${fieldLabelClass} sr-only`}>
@@ -101,7 +132,51 @@ export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemR
                 onChange={(event) => onChange({ name: event.target.value })}
                 className={fieldInputClass}
               />
+              {!changing && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1"
+                  onClick={() => setChanging(true)}
+                  aria-label={`Find a product for ${item.name}`}
+                >
+                  Find existing product
+                </Button>
+              )}
             </>
+          )}
+          {changing && (
+            <div className="mt-2 rounded-ui border border-ui-border dark:border-ui-dark-border p-3">
+              <ProductSearch
+                categories={categories}
+                inputId={`${rowId}-search`}
+                term={searchTerm}
+                onTermChange={setSearchTerm}
+                newLabel={(term) => `New product: ${term}`}
+                onPickExisting={(product) => {
+                  onChange({
+                    productId: product.id,
+                    productName: product.canonical_name,
+                    name: product.canonical_name,
+                  })
+                  setChanging(false)
+                }}
+                onPickNew={(name) => {
+                  // Detach: the line becomes a new product named here, and confirm
+                  // learns the printed name against it (H15).
+                  onChange({ productId: null, productName: null, name })
+                  setChanging(false)
+                }}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-2"
+                onClick={() => setChanging(false)}
+              >
+                Cancel
+              </Button>
+            </div>
           )}
           <p className="mt-1 text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
             {item.name}
