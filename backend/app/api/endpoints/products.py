@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.exceptions import handle_integrity_errors
+from app.api.exceptions import handle_integrity_errors, reference_conflict_detail
 from app.crud import product_master as crud_product
 from app.db.session import get_db
 from app.schemas.product_master import (
@@ -79,7 +79,8 @@ async def update_product(
     db: AsyncSession = Depends(get_db),
 ) -> ProductMasterResponse:
     """Update a product."""
-    product = await crud_product.update_product(db, product_id, product_update)
+    async with handle_integrity_errors():
+        product = await crud_product.update_product(db, product_id, product_update)
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -90,8 +91,21 @@ async def update_product(
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
-    """Delete a product."""
-    deleted = await crud_product.delete_product(db, product_id)
+    """Delete a product, unless something still refers to it.
+
+    Confirming a receipt writes a store_product_alias row per product, so a
+    product that has ever been bought has a reference and answers 409 rather
+    than the 500 it used to. H22 decides which of those should cascade instead.
+    """
+    references = await crud_product.references_to_product(db, product_id)
+    if references:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=reference_conflict_detail(references),
+        )
+
+    async with handle_integrity_errors():
+        deleted = await crud_product.delete_product(db, product_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.exceptions import handle_integrity_errors
 from app.db.session import get_db
 from app.services import scanner_service
 from app.services.off_service import OffApiError, OffProductNotFoundError
@@ -117,14 +118,18 @@ async def scan_barcode(
     else:
         mode, _ = await scanner_service.get_mode(request.station_id)
 
+    # handle_integrity_errors is inside the try so that a constraint violation
+    # from the Open Food Facts enrichment path answers 400/409 instead of
+    # escaping as a 500, as an unseeded category id used to (H05).
     try:
-        result = await scanner_service.process_scan(
-            db=db,
-            barcode=request.barcode.strip(),
-            mode=mode,
-            station_id=request.station_id,
-            quantity=request.quantity,
-        )
+        async with handle_integrity_errors():
+            result = await scanner_service.process_scan(
+                db=db,
+                barcode=request.barcode.strip(),
+                mode=mode,
+                station_id=request.station_id,
+                quantity=request.quantity,
+            )
     except OffProductNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

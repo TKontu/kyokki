@@ -2,11 +2,15 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.consumption_log import ConsumptionLog
+from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
+from app.models.shopping_list_item import ShoppingListItem
+from app.models.store_product_alias import StoreProductAlias
 from app.schemas.product_master import ProductMasterCreate, ProductMasterUpdate
 from app.services.units import unit_type_for
 
@@ -123,6 +127,26 @@ async def update_product(
     await db.commit()
     await db.refresh(db_product)
     return db_product
+
+
+async def references_to_product(db: AsyncSession, product_id: UUID) -> dict[str, int]:
+    """Count the rows that would block deleting this product, by table.
+
+    Every foreign key to product_master is NO ACTION (H22 gives each one an
+    explicit rule), so deleting a referenced product raises instead of cascading.
+    Confirming a receipt writes a store_product_alias row for each product, so in
+    practice nearly every real product has at least one reference.
+    """
+    counts: dict[str, int] = {}
+    for model in (InventoryItem, StoreProductAlias, ShoppingListItem, ConsumptionLog):
+        total = await db.scalar(
+            select(func.count())
+            .select_from(model)
+            .where(model.product_master_id == product_id)
+        )
+        if total:
+            counts[model.__tablename__] = int(total)
+    return counts
 
 
 async def delete_product(db: AsyncSession, product_id: UUID) -> bool:

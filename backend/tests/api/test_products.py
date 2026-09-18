@@ -1,37 +1,14 @@
 """Tests for Product CRUD API endpoints."""
 
-from uuid import UUID
+from datetime import date, timedelta
+from decimal import Decimal
+from uuid import UUID, uuid4
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.seed_categories import seed_categories
-from app.db.session import get_db
-from app.main import app
-
-
-@pytest.fixture
-async def seeded_db(db_session: AsyncSession) -> AsyncSession:
-    """Provide a database session with seeded categories and override app dependency."""
-
-    # Override the dependency to use test database session
-    async def override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    # Seed categories (required for foreign key)
-    await seed_categories(db_session)
-    await db_session.commit()
-
-    yield db_session
-
-    # Clean up override
-    app.dependency_overrides.clear()
+from app.models.inventory_item import InventoryItem
+from app.models.store_product_alias import StoreProductAlias
 
 
 class TestListProducts:
@@ -630,3 +607,154 @@ class TestPieceWeightThroughTheAPI:
         )
 
         assert response.status_code == 422
+
+
+class TestDeleteProductThatIsInUse:
+    """A referenced product must answer 409, never 500 (H05, F1 Critical #1).
+
+    Confirming a receipt writes a store_product_alias row for every product
+    (receipt_confirm.py), so in practice almost every real product has one.
+    """
+
+    async def _product(self, client: AsyncClient) -> dict:
+        response = await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "Referenced Milk",
+                "category": "dairy",
+                "storage_type": "refrigerator",
+                "default_shelf_life_days": 7,
+                "unit_type": "volume",
+                "default_unit": "dl",
+            },
+        )
+        assert response.status_code == 201
+        return response.json()
+
+    async def test_referenced_by_inventory_answers_409(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await self._product(client)
+        seeded_db.add(
+            InventoryItem(
+                id=uuid4(),
+                product_master_id=UUID(product["id"]),
+                initial_quantity=Decimal("1000"),
+                current_quantity=Decimal("1000"),
+                unit="dl",
+                status="sealed",
+                expiry_date=date.today() + timedelta(days=7),
+            )
+        )
+        await seeded_db.commit()
+
+        response = await client.delete(f"/api/products/{product['id']}")
+
+        assert response.status_code == 409
+        assert "inventory item" in response.json()["detail"]
+
+    async def test_referenced_by_a_receipt_alias_answers_409(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await self._product(client)
+        seeded_db.add(
+            StoreProductAlias(
+                id=uuid4(),
+                product_master_id=UUID(product["id"]),
+                store_chain="s-market",
+                receipt_name="VALIO MAITO 1L",
+            )
+        )
+        await seeded_db.commit()
+
+        response = await client.delete(f"/api/products/{product['id']}")
+
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert "alias" in detail
+
+    async def test_the_conflict_counts_every_kind_of_reference(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await self._product(client)
+        for _ in range(2):
+            seeded_db.add(
+                InventoryItem(
+                    id=uuid4(),
+                    product_master_id=UUID(product["id"]),
+                    initial_quantity=Decimal("1000"),
+                    current_quantity=Decimal("1000"),
+                    unit="dl",
+                    status="sealed",
+                    expiry_date=date.today() + timedelta(days=7),
+                )
+            )
+        seeded_db.add(
+            StoreProductAlias(
+                id=uuid4(),
+                product_master_id=UUID(product["id"]),
+                store_chain="s-market",
+                receipt_name="VALIO MAITO 1L",
+            )
+        )
+        await seeded_db.commit()
+
+        response = await client.delete(f"/api/products/{product['id']}")
+
+        detail = response.json()["detail"]
+        assert "2 inventory items" in detail
+        assert "1 receipt name alias" in detail
+
+    async def test_the_product_survives_the_refusal(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await self._product(client)
+        seeded_db.add(
+            StoreProductAlias(
+                id=uuid4(),
+                product_master_id=UUID(product["id"]),
+                store_chain="s-market",
+                receipt_name="VALIO MAITO 1L",
+            )
+        )
+        await seeded_db.commit()
+
+        await client.delete(f"/api/products/{product['id']}")
+
+        still_there = await client.get(f"/api/products/{product['id']}")
+        assert still_there.status_code == 200
+
+    async def test_no_error_body_carries_raw_database_text(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """`detail` is rendered to the cook verbatim by the frontend API client,
+        so it must not carry asyncpg's DETAIL line, which quotes row values."""
+        product = await self._product(client)
+        seeded_db.add(
+            StoreProductAlias(
+                id=uuid4(),
+                product_master_id=UUID(product["id"]),
+                store_chain="s-market",
+                receipt_name="VALIO MAITO 1L",
+            )
+        )
+        await seeded_db.commit()
+
+        refused = await client.delete(f"/api/products/{product['id']}")
+        bad_category = await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "Orphan",
+                "category": "nonexistent_category",
+                "storage_type": "pantry",
+                "default_shelf_life_days": 365,
+                "unit_type": "count",
+                "default_unit": "pcs",
+            },
+        )
+
+        for response in (refused, bad_category):
+            detail = response.json()["detail"]
+            assert "Key (" not in detail
+            assert "is still referenced" not in detail
+            assert "DETAIL" not in detail

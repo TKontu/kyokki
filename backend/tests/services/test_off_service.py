@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
+from app.db.seed_categories import SEED_CATEGORIES
 from app.services.off_service import (
     OffApiError,
     OffProductNotFoundError,
@@ -443,3 +444,39 @@ class TestParseOffQuantity:
         qty, unit = parse_off_quantity("6 x 250 ml")
         assert qty is None
         assert unit == "pcs"
+
+
+class TestMappedCategoriesExist:
+    """The mapper returned category ids that were never seeded - `seafood`,
+    `bakery` and `grains` - so enrichment inserted a product whose category FK
+    pointed at nothing and the scanner answered 500 (H05, F1 Critical #3)."""
+
+    SAMPLES = [
+        "Dairies, Milks",
+        "Meats, Poultry",
+        "Fishes, Seafood, Salmon",
+        "Fruits and vegetables, Fresh produce",
+        "Breads, Bakery, Pastries",
+        "Beverages, Juices",
+        "Snacks, Chocolate",
+        "Sauces, Condiments",
+        "Grains, Rice, Pasta, Cereals",
+        "Frozen foods",
+        "Something nobody has ever heard of",
+        "",
+    ]
+
+    def test_every_mapped_category_is_a_seeded_category(self) -> None:
+        seeded = {category["id"] for category in SEED_CATEGORIES}
+        for sample in self.SAMPLES:
+            mapped = map_off_category_to_system(sample)
+            assert mapped in seeded, f"{sample!r} maps to unseeded category {mapped!r}"
+
+    def test_none_maps_to_a_seeded_category(self) -> None:
+        seeded = {category["id"] for category in SEED_CATEGORIES}
+        assert map_off_category_to_system(None) in seeded
+
+    def test_the_three_renamed_ids_land_on_their_seeded_equivalents(self) -> None:
+        assert map_off_category_to_system("Fishes, Seafood") == "fish"
+        assert map_off_category_to_system("Breads, Bakery") == "bread"
+        assert map_off_category_to_system("Grains, Pasta") == "pantry"

@@ -119,7 +119,8 @@ async def update_inventory_item(
     db: AsyncSession = Depends(get_db),
 ) -> InventoryItemResponse:
     """Update an inventory item."""
-    item = await crud_inventory.update_inventory_item(db, item_id, item_update)
+    async with handle_integrity_errors():
+        item = await crud_inventory.update_inventory_item(db, item_id, item_update)
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -167,9 +168,10 @@ async def consume_inventory_item(
 ) -> InventoryItemResponse:
     """Consume/reduce quantity from an inventory item."""
     try:
-        item = await crud_inventory.consume_inventory_item(
-            db, item_id, consume_request.quantity
-        )
+        async with handle_integrity_errors():
+            item = await crud_inventory.consume_inventory_item(
+                db, item_id, consume_request.quantity
+            )
         if not item:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
