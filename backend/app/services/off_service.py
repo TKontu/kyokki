@@ -110,11 +110,12 @@ def map_off_category_to_system(off_category: str | None) -> str:
     ):
         return "meat"
 
-    # Seafood
+    # Seafood. The seeded category is `fish`; returning `seafood` inserted a
+    # product whose category foreign key pointed at nothing (H05).
     if any(
         keyword in category_lower for keyword in ["fish", "seafood", "salmon", "tuna"]
     ):
-        return "seafood"
+        return "fish"
 
     # Produce (fruits and vegetables)
     if any(
@@ -123,9 +124,9 @@ def map_off_category_to_system(off_category: str | None) -> str:
     ):
         return "produce"
 
-    # Bakery
+    # Bakery; the seeded category is `bread`.
     if any(keyword in category_lower for keyword in ["bread", "bakery", "pastry"]):
-        return "bakery"
+        return "bread"
 
     # Beverages
     if any(
@@ -147,11 +148,12 @@ def map_off_category_to_system(off_category: str | None) -> str:
     ):
         return "condiments"
 
-    # Grains
+    # Grains; there is no seeded grains category, and dry goods keep for months,
+    # which is what `pantry` means here.
     if any(
         keyword in category_lower for keyword in ["grain", "rice", "pasta", "cereal"]
     ):
-        return "grains"
+        return "pantry"
 
     # Default to pantry for unknown categories
     return "pantry"

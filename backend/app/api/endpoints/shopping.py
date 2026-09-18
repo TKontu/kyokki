@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.exceptions import handle_integrity_errors
 from app.core.logging import get_logger
 from app.crud.shopping_list_item import shopping_list_item
 from app.db.session import get_db
@@ -123,7 +124,8 @@ async def create_shopping_item(
             detail=f"Invalid source: {item_in.source}. Must be manual, auto_restock, or recipe.",
         )
 
-    item = await shopping_list_item.create(db, obj_in=item_in)
+    async with handle_integrity_errors():
+        item = await shopping_list_item.create(db, obj_in=item_in)
 
     # Broadcast creation
     await broadcast_shopping_list_update(
@@ -165,7 +167,8 @@ async def update_shopping_item(
             detail=f"Invalid priority: {item_in.priority}. Must be urgent, normal, or low.",
         )
 
-    updated_item = await shopping_list_item.update(db, db_obj=item, obj_in=item_in)
+    async with handle_integrity_errors():
+        updated_item = await shopping_list_item.update(db, db_obj=item, obj_in=item_in)
 
     # Broadcast update
     await broadcast_shopping_list_update(
@@ -199,9 +202,10 @@ async def mark_item_purchased(
         extra={"item_id": str(item_id), "purchased": purchased},
     )
 
-    item = await shopping_list_item.mark_purchased(
-        db, item_id=item_id, purchased=purchased
-    )
+    async with handle_integrity_errors():
+        item = await shopping_list_item.mark_purchased(
+            db, item_id=item_id, purchased=purchased
+        )
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -243,7 +247,8 @@ async def delete_shopping_item(
     item_unit = item.unit
     item_priority = item.priority
 
-    await shopping_list_item.remove(db, id=item_id)
+    async with handle_integrity_errors():
+        await shopping_list_item.remove(db, id=item_id)
 
     # Broadcast deletion
     await broadcast_shopping_list_update(
@@ -269,7 +274,8 @@ async def delete_all_purchased(
     """
     logger.info("delete_all_purchased")
 
-    deleted_count = await shopping_list_item.delete_purchased(db)
+    async with handle_integrity_errors():
+        deleted_count = await shopping_list_item.delete_purchased(db)
 
     logger.info("deleted_purchased_items", extra={"count": deleted_count})
 

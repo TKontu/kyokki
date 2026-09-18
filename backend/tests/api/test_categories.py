@@ -1,35 +1,7 @@
 """Tests for Category CRUD API endpoints."""
 
-import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.db.seed_categories import seed_categories
-from app.db.session import get_db
-from app.main import app
-
-
-@pytest.fixture
-async def seeded_db(db_session: AsyncSession) -> AsyncSession:
-    """Provide a database session with seeded categories and override app dependency."""
-
-    # Override the dependency to use test database session
-    async def override_get_db():
-        try:
-            yield db_session
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    # Seed the database
-    await seed_categories(db_session)
-    await db_session.commit()
-
-    yield db_session
-
-    # Clean up override
-    app.dependency_overrides.clear()
 
 
 class TestListCategories:
@@ -128,7 +100,11 @@ class TestCreateCategory:
     async def test_create_category_duplicate_id(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
-        """POST /api/categories should return 400 for duplicate ID."""
+        """POST /api/categories should return 409 for duplicate ID.
+
+        It answered 400 while the router caught IntegrityError by hand and called
+        every integrity error a duplicate; handle_integrity_errors classifies it.
+        """
         duplicate_category = {
             "id": "meat",  # Already exists in seed data
             "display_name": "Duplicate Meat",
@@ -138,7 +114,7 @@ class TestCreateCategory:
 
         response = await client.post("/api/categories", json=duplicate_category)
 
-        assert response.status_code == 400
+        assert response.status_code == 409
         assert "detail" in response.json()
 
     async def test_create_category_invalid_shelf_life(
@@ -258,3 +234,53 @@ class TestDeleteCategory:
         # Delete again
         response2 = await client.delete("/api/categories/snacks")
         assert response2.status_code == 404  # Already deleted
+
+
+class TestDeleteCategoryThatIsInUse:
+    """A category with products must answer 409, never 500 (H05, F1 Critical #2)."""
+
+    async def test_a_category_with_products_answers_409(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        response = await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "Rye Bread",
+                "category": "bread",
+                "storage_type": "pantry",
+                "default_shelf_life_days": 5,
+                "unit_type": "count",
+                "default_unit": "pcs",
+            },
+        )
+        assert response.status_code == 201
+
+        refused = await client.delete("/api/categories/bread")
+
+        assert refused.status_code == 409
+        assert "1 product" in refused.json()["detail"]
+
+    async def test_the_category_survives_the_refusal(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "Rye Bread",
+                "category": "bread",
+                "storage_type": "pantry",
+                "default_shelf_life_days": 5,
+                "unit_type": "count",
+                "default_unit": "pcs",
+            },
+        )
+
+        await client.delete("/api/categories/bread")
+
+        still_there = await client.get("/api/categories/bread")
+        assert still_there.status_code == 200
+
+    async def test_an_empty_category_still_deletes(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        assert (await client.delete("/api/categories/snacks")).status_code == 204

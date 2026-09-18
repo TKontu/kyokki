@@ -490,3 +490,49 @@ class TestShoppingCanonicalUnits:
             "/api/shopping/", json={"name": "Syrup", "quantity": "1", "unit": "gallon"}
         )
         assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+class TestShoppingIntegrityErrors:
+    """Every shopping write went through CRUDBase, which commits inside the crud
+    call, with no handler above it - so a constraint violation was a 500 (H05)."""
+
+    async def test_unknown_product_answers_400(
+        self, client: AsyncClient, test_db: AsyncSession
+    ):
+        response = await client.post(
+            "/api/shopping/",
+            json={
+                "product_master_id": "00000000-0000-0000-0000-000000000000",
+                "name": "Ghost",
+                "quantity": "1",
+                "unit": "pcs",
+                "priority": "normal",
+                "source": "manual",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "Key (" not in response.json()["detail"]
+
+    async def test_updating_onto_an_unknown_product_answers_400(
+        self, client: AsyncClient, test_db: AsyncSession
+    ):
+        created = await client.post(
+            "/api/shopping/",
+            json={
+                "name": "Bananas",
+                "quantity": "6",
+                "unit": "pcs",
+                "priority": "normal",
+                "source": "manual",
+            },
+        )
+        assert created.status_code == 201
+
+        response = await client.patch(
+            f"/api/shopping/{created.json()['id']}",
+            json={"product_master_id": "00000000-0000-0000-0000-000000000000"},
+        )
+
+        assert response.status_code == 400

@@ -1,9 +1,10 @@
 """CRUD operations for Category model."""
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
+from app.models.product_master import ProductMaster
 from app.schemas.category import CategoryCreate, CategoryUpdate
 
 
@@ -79,6 +80,16 @@ async def update_category(
     await db.commit()
     await db.refresh(db_category)
     return db_category
+
+
+async def references_to_category(db: AsyncSession, category_id: str) -> dict[str, int]:
+    """Count the products that would block deleting this category, by table."""
+    total = await db.scalar(
+        select(func.count())
+        .select_from(ProductMaster)
+        .where(ProductMaster.category == category_id)
+    )
+    return {ProductMaster.__tablename__: int(total)} if total else {}
 
 
 async def delete_category(db: AsyncSession, category_id: str) -> bool:
