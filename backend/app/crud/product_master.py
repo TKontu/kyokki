@@ -203,13 +203,17 @@ def _fold_alias_evidence(kept: StoreProductAlias, gone: StoreProductAlias) -> No
     """Merge two aliases for the same printed name into the one that stays.
 
     Dropping the duplicate outright would throw away whatever the cook confirmed
-    on it, so the evidence moves even though the row does not.
+    on it, so the evidence moves even though the row does not. Provenance follows
+    H14's precedence - the cook's word first, and a machine mapping never demotes
+    one the cook corrected.
     """
     keep: Any = kept
     dropped: Any = gone
     keep.occurrence_count = int(keep.occurrence_count or 0) + int(
         dropped.occurrence_count or 0
     )
+    if bool(dropped.manually_verified) and not bool(keep.manually_verified):
+        keep.source = dropped.source
     keep.manually_verified = bool(keep.manually_verified) or bool(
         dropped.manually_verified
     )
@@ -227,10 +231,11 @@ async def _move_aliases(
 ) -> tuple[int, int]:
     """Re-point the source's receipt-name aliases, keeping one row per printed name.
 
-    `store_product_alias` has no unique key on (store_chain, receipt_name) yet -
-    H14 adds one - so a collision would not raise today, it would simply leave two
-    rows the resolver has to choose between, and break the moment the constraint
-    lands. One row per (chain, printed name) is the invariant either way.
+    One mapping per (chain, printed name) is the invariant H14 put in the schema as
+    `uq_store_product_alias_chain_name`, which is why two products cannot normally
+    hold the same printed name and a plain move would be enough. A merge is a repair
+    though, and must not be the operation that dies on a duplicate the constraint did
+    not catch, so a collision collapses to one row instead of raising.
     """
     kept: dict[tuple[str, str], StoreProductAlias] = {
         (str(alias.store_chain), str(alias.receipt_name)): alias

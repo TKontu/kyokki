@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.product_master import references_to_product
@@ -343,8 +343,21 @@ class TestCollidingRows:
     async def test_an_alias_both_products_know_keeps_exactly_one(
         self, client: AsyncClient, seeded_db: AsyncSession, duplicates
     ) -> None:
-        """H14 adds UNIQUE (store_chain, receipt_name); this must not break then."""
+        """A duplicate printed name collapses instead of failing the merge.
+
+        `uq_store_product_alias_chain_name` (H14) normally makes this state
+        impossible, which is exactly why a merge must not depend on it: the repair
+        for a broken catalog cannot be the operation that dies on broken data. The
+        constraint is dropped inside this test's transaction - rolled back with
+        everything else - so the collapse itself can be exercised.
+        """
         source, target = duplicates
+        await seeded_db.execute(
+            text(
+                "ALTER TABLE store_product_alias "
+                "DROP CONSTRAINT IF EXISTS uq_store_product_alias_chain_name"
+            )
+        )
         seeded_db.add_all(
             [
                 StoreProductAlias(
@@ -352,6 +365,7 @@ class TestCollidingRows:
                     product_master_id=UUID(source["id"]),
                     store_chain="s-market",
                     receipt_name="ATRIA JAUHELIHA",
+                    source="cook",
                     occurrence_count=3,
                     manually_verified=True,
                     confidence_score=0.9,
@@ -362,6 +376,7 @@ class TestCollidingRows:
                     product_master_id=UUID(target["id"]),
                     store_chain="s-market",
                     receipt_name="ATRIA JAUHELIHA",
+                    source="model",
                     occurrence_count=2,
                     manually_verified=False,
                     confidence_score=0.4,
@@ -391,8 +406,9 @@ class TestCollidingRows:
         assert len(aliases) == 1
         surviving = aliases[0]
         assert str(surviving.product_master_id) == target["id"]
-        # The cook's verification and the evidence behind it outlive the duplicate.
+        # The cook's word and the evidence behind it outlive the duplicate row.
         assert surviving.manually_verified is True
+        assert surviving.source == "cook"
         assert surviving.occurrence_count == 5
 
     async def test_an_alias_for_another_chain_still_moves(
