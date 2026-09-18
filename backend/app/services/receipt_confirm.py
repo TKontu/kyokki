@@ -86,6 +86,24 @@ class _Confirmation:
         self.aliases: dict[str, StoreProductAlias] = {}
 
     def line(self, position: int, item: ConfirmedItemCreate) -> dict[str, Any]:
+        """The receipt line this item refers to, by identity where the client gave one.
+
+        `index` is a position among *readable* lines, so an unreadable line anywhere
+        shifts every index after it and the wrong printed name gets learned as an alias.
+        `line_id` does not move (H12); `index` stays for receipts read before it.
+        """
+        if item.line_id is not None:
+            wanted = str(item.line_id)
+            for candidate in self.lines:
+                if (
+                    isinstance(candidate, dict)
+                    and str(candidate.get("line_id") or "") == wanted
+                ):
+                    if not candidate.get("name"):
+                        break
+                    return candidate
+            raise InvalidConfirmItem(f"Item {position}: receipt has no line {wanted}")
+
         if item.index is None:
             return {}
         line = self.lines[item.index] if item.index < len(self.lines) else None

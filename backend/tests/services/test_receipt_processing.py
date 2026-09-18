@@ -4,7 +4,7 @@ import logging
 from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -216,7 +216,8 @@ class TestPersistence:
         assert structured["store_chain"] == "S-MARKET"
         assert structured["purchase_date"] == "2026-01-02"
         milk, butter = structured["lines"]
-        assert milk == {
+        # line_id is a fresh uuid per read, so it is checked separately below.
+        assert {k: v for k, v in milk.items() if k != "line_id"} == {
             "name": "Valio Whole Milk 1L",
             "generic_name": None,
             "quantity": 1.0,
@@ -232,12 +233,28 @@ class TestPersistence:
             "match_score": 100.0,
             "match_confidence": "exact",
             "match_source": "exact",
+            # How the line came to point at a product, in the vocabulary that survives
+            # the matcher (H12). A canonical-name hit is a key, so it is verified.
+            "resolution": {
+                "product_id": str(sample_product.id),
+                "source": "name",
+                "verified": True,
+                "candidates": [],
+            },
         }
+        assert UUID(milk["line_id"])
         assert butter["product_id"] is None
         assert butter["product_name"] is None
         assert butter["match_score"] is None
         assert butter["match_confidence"] is None
         assert butter["match_source"] is None
+        assert butter["resolution"] == {
+            "product_id": None,
+            "source": "none",
+            "verified": False,
+            "candidates": [],
+        }
+        assert UUID(butter["line_id"]) != UUID(milk["line_id"])
         # The raw header text stays in ocr_structured; the receipt gets the chain key
         assert image_receipt.store_chain == "s-group"
         assert image_receipt.purchase_date == date(2026, 1, 2)
@@ -246,6 +263,60 @@ class TestPersistence:
         assert (
             result.matched_products[0].product.canonical_name == "Valio Whole Milk 1L"
         )
+
+    async def test_a_re_read_keeps_each_line_its_identity(
+        self, service, image_receipt, sample_product, db_session
+    ):
+        """The point of line_id: a re-read builds a fresh list of lines, and anything
+        keyed to the old one - the cook's edits, non-food memory - would otherwise be
+        pointing at rows that no longer exist (H12)."""
+        with (
+            patch(OCR, new_callable=AsyncMock, side_effect=OCRUnavailableError("down")),
+            patch(VISION, new_callable=AsyncMock, return_value=_extraction("vision")),
+        ):
+            await service.process_receipt(image_receipt)
+        await db_session.refresh(image_receipt)
+        first = [line["line_id"] for line in image_receipt.ocr_structured["lines"]]
+
+        with (
+            patch(OCR, new_callable=AsyncMock, side_effect=OCRUnavailableError("down")),
+            patch(VISION, new_callable=AsyncMock, return_value=_extraction("vision")),
+        ):
+            await service.process_receipt(image_receipt)
+        await db_session.refresh(image_receipt)
+        second = [line["line_id"] for line in image_receipt.ocr_structured["lines"]]
+
+        assert second == first
+
+    async def test_a_line_the_re_read_did_not_find_gives_up_its_id(
+        self, service, image_receipt, sample_product, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, side_effect=OCRUnavailableError("down")),
+            patch(VISION, new_callable=AsyncMock, return_value=_extraction("vision")),
+        ):
+            await service.process_receipt(image_receipt)
+        await db_session.refresh(image_receipt)
+        milk_id = image_receipt.ocr_structured["lines"][0]["line_id"]
+
+        # The second read finds the milk again but reads the other line differently.
+        rewritten = _extraction(
+            "vision",
+            [
+                ExtractedLine(name="Valio Whole Milk 1L", quantity=1, category="dairy"),
+                ExtractedLine(name="ARLA VOI 500G", quantity=1, category="dairy"),
+            ],
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, side_effect=OCRUnavailableError("down")),
+            patch(VISION, new_callable=AsyncMock, return_value=rewritten),
+        ):
+            await service.process_receipt(image_receipt)
+        await db_session.refresh(image_receipt)
+        milk, butter = image_receipt.ocr_structured["lines"]
+
+        assert milk["line_id"] == milk_id
+        assert butter["line_id"] != milk_id
 
     async def test_weak_fuzzy_guesses_are_not_stored_as_matches(
         self, service, pdf_receipt, sample_category, db_session

@@ -584,6 +584,10 @@ class TestReceiptItems:
         assert body["extraction_method"] == "text"
         oat, onion, peas, cloth = body["items"]
 
+        # line_id is minted per read, so it is asserted separately. `match_source` is
+        # `name` rather than the old `exact`, and a canonical-name hit is a key, so the
+        # row is verified: the review screen may call it "known" (H12).
+        assert UUID(oat.pop("line_id"))
         assert oat == {
             "index": 0,
             "name": "BARISTA KAURAJUOMA",
@@ -594,7 +598,8 @@ class TestReceiptItems:
             "product_name": "BARISTA KAURAJUOMA",
             "match_score": 100.0,
             "match_confidence": "exact",
-            "match_source": "exact",
+            "match_source": "name",
+            "verified": True,
             "suggested_category": "dairy",
             "piece_grams": None,
             "shelf_life_days": None,

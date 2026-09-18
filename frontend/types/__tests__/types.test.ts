@@ -91,6 +91,7 @@ describe('TypeScript Types', () => {
         items: [
           {
             index: 0,
+            line_id: '123e4567-e89b-12d3-a456-426614174099',
             name: 'PUNASIPULI',
             generic_name: 'Red onion',
             quantity: 330,
@@ -100,6 +101,7 @@ describe('TypeScript Types', () => {
             match_score: 100,
             match_confidence: 'exact',
             match_source: 'alias',
+            verified: true,
             suggested_category: 'produce',
             piece_grams: 110,
             shelf_life_days: 30,

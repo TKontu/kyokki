@@ -21,11 +21,47 @@ class ReceiptStatus(StrEnum):
     CONFIRMED = "confirmed"
 
 
+# How a line came to point at a product (docs/PRODUCT_RESOLUTION_SPEC.md §3.1). Every
+# value but `selected` is an exact key; `selected` is a proposal the cook can change.
+MatchSource = Literal["alias", "name", "selected", "none"]
+
+# Values written before H12, mapped forward by `items_from_structured`. `fuzzy` and
+# `fuzzy_alias` were similarity guesses, which is exactly what `selected` now means to
+# the review row: proposed, not keyed.
+LEGACY_MATCH_SOURCES: dict[str, MatchSource] = {
+    "alias": "alias",
+    "exact": "name",
+    "fuzzy": "selected",
+    "fuzzy_alias": "selected",
+}
+
+
+def normalise_match_source(raw: object) -> MatchSource | None:
+    """Accept both vocabularies, so receipts already in the database still render."""
+    if raw is None:
+        return None
+    value = str(raw)
+    if value in ("alias", "name", "selected", "none"):
+        return value  # type: ignore[return-value]
+    return LEGACY_MATCH_SOURCES.get(value)
+
+
 class ExtractedItem(BaseModel):
     """One receipt line as the review screen and confirm step see it."""
 
     index: int = Field(
-        ..., description="Position on the receipt; items are addressed by it"
+        ...,
+        description=(
+            "Position among the readable lines. Kept for one release; address lines by "
+            "`line_id` instead, which does not shift when a line is skipped"
+        ),
+    )
+    line_id: UUID | None = Field(
+        None,
+        description=(
+            "Stable identity for this receipt line, kept across re-reads. Absent on "
+            "receipts read before H12"
+        ),
     )
     name: str = Field(..., description="Product name as printed")
     generic_name: str | None = Field(
@@ -41,7 +77,19 @@ class ExtractedItem(BaseModel):
     )
     match_score: float | None = Field(None, description="0-100")
     match_confidence: Literal["exact", "high", "medium", "low"] | None = None
-    match_source: Literal["alias", "exact", "fuzzy", "fuzzy_alias"] | None = None
+    match_source: MatchSource | None = Field(
+        None,
+        description=(
+            "How this product was arrived at: `alias` (a learned printed name), `name` "
+            "(a known catalog name), `selected` (proposed, not from a key), `none`"
+        ),
+    )
+    verified: bool = Field(
+        False,
+        description=(
+            "The mapping came from a key the cook has confirmed, rather than a proposal"
+        ),
+    )
     suggested_category: str | None = Field(
         None, description="Category id read from the line"
     )
@@ -88,6 +136,8 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
     for index, line in enumerate(lines):
         if not isinstance(line, dict) or not line.get("name"):
             continue
+        resolution = line.get("resolution")
+        resolution = resolution if isinstance(resolution, dict) else {}
         quantity, unit = receipt_line_quantity(
             line.get("quantity"), line.get("weight_kg")
         )
@@ -118,7 +168,11 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
                 product_name=line.get("product_name"),
                 match_score=line.get("match_score"),
                 match_confidence=line.get("match_confidence"),
-                match_source=line.get("match_source"),
+                line_id=line.get("line_id"),
+                match_source=normalise_match_source(
+                    resolution.get("source", line.get("match_source"))
+                ),
+                verified=bool(resolution.get("verified", False)),
                 suggested_category=category,
                 piece_grams=piece_grams,
                 shelf_life_days=line.get("shelf_life_days"),
@@ -256,7 +310,16 @@ class ConfirmedItemCreate(BaseModel):
     """
 
     index: int | None = Field(
-        None, ge=0, description="Receipt line; its printed name is learned as an alias"
+        None,
+        ge=0,
+        description=(
+            "Receipt line by position; its printed name is learned as an alias. "
+            "Prefer `line_id`, which does not shift when a line is unreadable"
+        ),
+    )
+    line_id: UUID | None = Field(
+        None,
+        description="Receipt line by identity; wins over `index` when both are given",
     )
     product_id: UUID | None = Field(None, description="Existing product")
     name: str | None = Field(
@@ -279,8 +342,13 @@ class ConfirmedItemCreate(BaseModel):
     def identifies_a_product(self) -> "ConfirmedItemCreate":
         if self.name is not None and not self.name.strip():
             self.name = None
-        if self.product_id is None and self.name is None and self.index is None:
-            raise ValueError("Each item needs a product_id, name or index")
+        if (
+            self.product_id is None
+            and self.name is None
+            and self.index is None
+            and self.line_id is None
+        ):
+            raise ValueError("Each item needs a product_id, name, index or line_id")
         return self
 
     @model_validator(mode="after")
