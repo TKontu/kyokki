@@ -112,6 +112,15 @@ class Settings(BaseSettings):
     # limit (app/telegram_bot/client.py), which is Telegram's.
     MAX_RECEIPT_UPLOAD_BYTES: int = 20 * 1024 * 1024
 
+    # Whether the extraction prompt lists catalog names for the model to reuse.
+    #
+    # H17 measured dropping it on the 49-line fixture, twice: all 49 lines and all 49
+    # generic names survive either way, but the categories the model fills in fall from
+    # 40 to 30-31, and extraction is no faster. So the block stays on and the setting
+    # exists to turn it off - the spec's "keep it behind a setting for one release if
+    # it regresses". Numbers in docs/vLLM_MANUAL_TEST.md.
+    EXTRACTION_OFFERS_CATALOG: bool = True
+
     # Open Food Facts API
     OPENFOODFACTS_API_URL: str = "https://world.openfoodfacts.org/api/v2"
 

@@ -598,3 +598,33 @@ the shape of the record rather than to count towards the five:
 
 OCR is nothing on a digital PDF (pdfplumber, no MinerU call); the model is the whole cost. OCR
 language only becomes a measured variable once a photographed receipt goes through MinerU.
+
+
+## Does the prompt still need the catalog? (H17, 2026-09-18)
+
+The extraction prompt lists up to 300 catalog names so the model reuses them and generic names
+stay consistent between receipts. Since H11 a name is a key and confirm learns the generic name
+as a synonym, so the spec expected the block to be droppable
+(`docs/PRODUCT_RESOLUTION_SPEC.md` §3.6). Measured on the 49-line S-kaupat fixture against
+`c2.muse-glimmer`, with a 20-name warm catalog, twice:
+
+| run | prompt chars | model s | lines read | with generic name | with category |
+| --- | --- | --- | --- | --- | --- |
+| with catalog | 2983 | 71.9 | 49 | 49 | **40** |
+| without catalog | 2657 | 64.7 | 49 | 49 | **31** |
+| with catalog (2nd) | 2983 | 74.5 | 49 | 49 | **40** |
+| without catalog (2nd) | 2657 | 77.0 | 49 | 49 | **30** |
+
+**The block stays on.** Line and generic-name quality hold either way - 49 of 49 both times -
+but the categories the model fills in drop from 40 to 30-31, and the 40 figure is the baseline
+`HANDOFF.md` tells the next session to check a real receipt against. Extraction is not reliably
+faster either: 64.7 s then 77.0 s without, against 71.9 s and 74.5 s with. `EXTRACTION_OFFERS_CATALOG`
+exists to turn it off, per the spec's "keep it behind a setting for one release if it regresses".
+
+Worth revisiting, and worth knowing: **without the catalog the model chooses more specific
+names.** It produced `Cherry tomato`, `Feta cheese`, `Mozzarella`, `Olive oil` and `Nacho chips`
+where the catalog-anchored run gave `Tomato`-shaped generics like `Cabbage`, `Chips`, `Dip`,
+`Oil` and `Sauce`. For a catalog that is meant to be generic-but-not-wrong that is arguably the
+better answer - `docs/PRODUCT_RESOLUTION_SPEC.md` §1 is explicit that Cherry tomato is *not*
+Tomato - so this is worth measuring again once real synonyms have accumulated, rather than
+treating the category count as the last word.

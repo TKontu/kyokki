@@ -242,6 +242,19 @@ class TestInstructions:
     def test_without_known_products_the_list_is_omitted(self):
         assert "Known products" not in build_instructions(CATEGORIES)
 
+    def test_the_catalog_block_can_be_turned_off(self, monkeypatch):
+        """H17 measured dropping it: 49 of 49 lines and generic names survive, but the
+        categories the model fills in fall from 40 to ~30, so it stays on by default
+        and this setting exists to turn it off (docs/vLLM_MANUAL_TEST.md)."""
+        monkeypatch.setattr(settings, "EXTRACTION_OFFERS_CATALOG", False)
+
+        text = build_instructions(CATEGORIES, ["Milk", "Ground beef"])
+
+        assert "Known products" not in text
+
+    def test_the_catalog_block_is_on_by_default(self):
+        assert settings.EXTRACTION_OFFERS_CATALOG is True
+
     def test_known_products_are_capped(self):
         names = [f"Product {i:04d}" for i in range(MAX_KNOWN_PRODUCTS + 50)]
         text = build_instructions(CATEGORIES, names)
