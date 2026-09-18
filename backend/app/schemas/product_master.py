@@ -97,3 +97,26 @@ class ProductMasterResponse(ProductMasterBase):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ProductMergeRequest(BaseModel):
+    """Which product the one in the path is folded into."""
+
+    target_id: UUID = Field(..., description="The product that survives the merge")
+
+
+class ProductMergeResponse(BaseModel):
+    """What the merge did, so the cook can see the duplicate was not just deleted."""
+
+    source_id: UUID = Field(..., description="The product that was merged away")
+    source_name: str = Field(
+        ..., description="Its canonical name, now a synonym of the target"
+    )
+    target: ProductMasterResponse = Field(..., description="The surviving product")
+    moved: dict[str, int] = Field(
+        ..., description="Rows re-pointed at the target, by table"
+    )
+    dropped: dict[str, int] = Field(
+        ...,
+        description="Duplicate rows dropped because the target already had them, by table",
+    )

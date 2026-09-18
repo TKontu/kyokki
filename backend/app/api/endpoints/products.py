@@ -13,11 +13,19 @@ from app.schemas.product_master import (
     ProductMasterCreate,
     ProductMasterResponse,
     ProductMasterUpdate,
+    ProductMergeRequest,
+    ProductMergeResponse,
 )
+from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.off_service import (
     OffApiError,
     OffProductNotFoundError,
     enrich_product_from_off,
+)
+from app.services.product_merge import (
+    MergeIntoItself,
+    UnknownProduct,
+    merge_products,
 )
 
 router = APIRouter()
@@ -111,6 +119,57 @@ async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with ID '{product_id}' not found",
         )
+
+
+@router.post("/{product_id}/merge", response_model=ProductMergeResponse)
+async def merge_product(
+    product_id: UUID,
+    request: ProductMergeRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ProductMergeResponse:
+    """Fold a duplicate product into the one it duplicates, and delete it.
+
+    This is the safe answer to "I cannot delete this product": `DELETE
+    /products/{id}` refuses with 409 while anything still refers to the row, and
+    a merge moves those references to the target instead of destroying them. The
+    merged-away name stays a synonym of the target, so it keeps resolving.
+
+    Returns:
+        - 200: Merged; the body says what moved and what duplicate rows were dropped.
+        - 400: The two ids are the same product.
+        - 404: Either product does not exist.
+    """
+    try:
+        async with handle_integrity_errors():
+            result = await merge_products(db, product_id, request.target_id)
+    except MergeIntoItself as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except UnknownProduct as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+
+    target_name = str(result.target.canonical_name)
+    for item in result.inventory_items:
+        await broadcast_inventory_update(
+            inventory_item_id=item.id,
+            action="updated",
+            current_quantity=item.current_quantity,
+            status=item.status,
+            product_name=target_name,
+        )
+
+    return ProductMergeResponse(
+        source_id=result.source_id,
+        source_name=result.source_name,
+        target=ProductMasterResponse.model_validate(
+            result.target, from_attributes=True
+        ),
+        moved=result.moved,
+        dropped=result.dropped,
+    )
 
 
 @router.post("/enrich")
