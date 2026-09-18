@@ -11,7 +11,7 @@ lookup plus a fallback.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -25,7 +25,18 @@ class ProductName(Base):
     """A name -> product mapping, unique across the catalog."""
 
     __tablename__ = "product_name"
-    __table_args__ = (UniqueConstraint("name", name="uq_product_name_name"),)
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_product_name_name"),
+        # Trigram index for candidate shortlists (H13). Declared here as well as in the
+        # migration so `create_all` builds it for the test database and `alembic check`
+        # does not propose dropping it.
+        Index(
+            "ix_product_name_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "gin_trgm_ops"},
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     product_master_id = Column(

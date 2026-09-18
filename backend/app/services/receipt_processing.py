@@ -19,7 +19,6 @@ from uuid import uuid4
 import anyio
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.logging import get_logger
 from app.crud.category import get_categories
 from app.models.receipt import Receipt
@@ -33,17 +32,19 @@ from app.services.llm_extractor import (
     extract_from_image,
     extract_from_text,
 )
-from app.services.matching_service import (
-    MatchingService,
-    MatchResult,
-    normalize_receipt_name,
-)
+from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import known_non_food
 from app.services.ocr_service import (
     OCRUnavailableError,
     content_type_for,
     extract_text_from_receipt,
     is_pdf,
+)
+from app.services.product_resolution import (
+    ProductResolution,
+    Resolution,
+    ResolvableLine,
+    canonical_names,
 )
 from app.services.store_chain import normalize_store_chain
 
@@ -84,35 +85,6 @@ def _line_id_for(name: str, previous: dict[str, list[str]]) -> str:
     return str(uuid4())
 
 
-def _resolution(match: "MatchResult | None") -> dict[str, Any]:
-    """How this line came to point at a product, in the vocabulary H13 will keep.
-
-    The matcher still decides here; only the *description* changes. A similarity guess
-    is recorded as `selected` - proposed, not keyed - which is the truth the review row
-    shows as "auto" rather than the "high" it used to claim.
-    """
-    if match is None:
-        return {
-            "product_id": None,
-            "source": "none",
-            "verified": False,
-            "candidates": [],
-        }
-    source = (
-        "alias"
-        if match.source == "alias"
-        else "name"
-        if match.source == "exact"
-        else "selected"
-    )
-    return {
-        "product_id": str(match.product.id),
-        "source": source,
-        "verified": bool(match.verified),
-        "candidates": [],
-    }
-
-
 @dataclass
 class ReadTimings:
     """How long the two slow steps took.
@@ -148,7 +120,8 @@ class ProcessingResult:
     success: bool
     ocr_text: str | None
     extraction: ReceiptExtraction | None
-    matched_products: list[MatchResult]
+    # Line id -> how that line resolved. Empty when the read failed.
+    resolutions: dict[str, Resolution]
     error: str | None = None
 
 
@@ -157,7 +130,6 @@ class ReceiptProcessingService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.matching_service = MatchingService(db)
 
     async def _read_receipt(
         self,
@@ -261,52 +233,63 @@ class ReceiptProcessingService:
                 CategoryOption(id=str(c.id), name=str(c.display_name))
                 for c in await get_categories(self.db)
             ]
-            # Load the catalog first: its generic names are offered to the model for reuse
-            await self.matching_service.prepare(None)
+            # Catalog names are offered to the extraction prompt for reuse (H17 measures
+            # dropping this); resolution no longer needs the catalog in memory.
+            catalog = await canonical_names(self.db)
             # Names the cook has already called non-food; they win over a model that wavers
             remembered = await known_non_food(self.db, None)
             ocr_text, extraction, fallback_reason = await self._read_receipt(
-                receipt, categories, self.matching_service.product_names, timings
+                receipt, categories, catalog, timings
             )
 
             chain = normalize_store_chain(
                 str(receipt.store_chain) if receipt.store_chain else None
             ) or normalize_store_chain(extraction.store_chain)
 
-            matched_products: list[MatchResult] = []
             stored_lines = []
             # Re-reading a receipt must not invalidate what the cook already edited, so
             # a printed name that was there before keeps its line_id (H12).
             previous_ids = _line_ids_by_name(receipt.ocr_structured)
-            for line in extraction.lines:
-                # Only confident matches pre-select a product; weaker fuzzy guesses (the R1b
-                # end-to-end run paired CHEDDAR PUNAINEN with PUNASIPULI at 50) stay unmatched
-                match = self.matching_service.match_line(
-                    line.name,
-                    chain,
-                    min_score=settings.FUZZY_MATCH_THRESHOLD,
-                    generic_name=line.generic_name,
+            resolvable = [
+                ResolvableLine(
+                    line_id=_line_id_for(line.name, previous_ids),
+                    printed=line.name,
+                    generic=line.generic_name,
+                    category=line.category,
                 )
+                for line in extraction.lines
+            ]
+            with timings.llm():
+                resolutions = await ProductResolution(self.db).resolve(
+                    resolvable, chain=chain, non_food=remembered
+                )
+
+            matched = 0
+            for line, resolvable_line in zip(extraction.lines, resolvable, strict=True):
+                resolution = resolutions[resolvable_line.line_id]
+                product = resolution.product
                 stored = line.model_dump(mode="json")
-                if normalize_receipt_name(line.name) in remembered:
+                if resolution.non_food:
                     stored["non_food"] = True
-                if match and match.product.avg_piece_grams is not None:
+                if product is not None and product.avg_piece_grams is not None:
                     # The catalog already knows what one of these weighs; trust it over a
                     # fresh guess from the model (Q2).
-                    stored["piece_grams"] = float(match.product.avg_piece_grams)
+                    stored["piece_grams"] = float(product.avg_piece_grams)
                 stored.update(
-                    line_id=_line_id_for(line.name, previous_ids),
-                    product_id=str(match.product.id) if match else None,
-                    product_name=match.product.canonical_name if match else None,
-                    product_storage_type=match.product.storage_type if match else None,
-                    match_score=round(match.score, 1) if match else None,
-                    match_confidence=match.confidence.value if match else None,
-                    match_source=match.source if match else None,
-                    resolution=_resolution(match),
+                    line_id=resolvable_line.line_id,
+                    product_id=str(product.id) if product else None,
+                    product_name=str(product.canonical_name) if product else None,
+                    product_storage_type=str(product.storage_type) if product else None,
+                    # No score decides anything any more; the field stays only so older
+                    # clients keep parsing. H15 drops it from the review row.
+                    match_score=None,
+                    match_confidence=None,
+                    match_source=resolution.source if product else None,
+                    resolution=resolution.as_dict(),
                 )
                 stored_lines.append(stored)
-                if match:
-                    matched_products.append(match)
+                if product is not None:
+                    matched += 1
 
             row.processing_status = ReceiptStatus.COMPLETED
             row.error = None
@@ -322,7 +305,7 @@ class ReceiptProcessingService:
             if fallback_reason:
                 row.ocr_structured["fallback_reason"] = fallback_reason
             row.items_extracted = len(extraction.lines)
-            row.items_matched = len(matched_products)
+            row.items_matched = matched
             # Values the user entered at upload win over what was read from the receipt
             if chain and not receipt.store_chain:
                 row.store_chain = chain
@@ -362,7 +345,7 @@ class ReceiptProcessingService:
                 success=True,
                 ocr_text=ocr_text,
                 extraction=extraction,
-                matched_products=matched_products,
+                resolutions=resolutions,
                 error=None,
             )
 
@@ -395,6 +378,6 @@ class ReceiptProcessingService:
                 success=False,
                 ocr_text=None,
                 extraction=None,
-                matched_products=[],
+                resolutions={},
                 error=error_msg,
             )

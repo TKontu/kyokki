@@ -169,6 +169,9 @@ async def _create_schema(url: str) -> None:
     engine = create_async_engine(url, echo=False)
     try:
         async with engine.begin() as conn:
+            # The trigram index on product_name needs the extension (H13); alembic
+            # creates it in production, create_all does not.
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
     finally:
@@ -342,6 +345,26 @@ async def _dispose_app_engine() -> AsyncGenerator[None, None]:
 
     await app_engine.dispose()
     await close_redis_client()
+
+
+@pytest.fixture(autouse=True)
+def _no_model_selection():
+    """No test may reach the LLM gateway by accident.
+
+    `ProductResolution` asks the model to choose between candidates for lines that
+    deterministic keys could not resolve (H13). With the gateway reachable that is a
+    real HTTP request, so an ordinary unit test would depend on the homelab being up
+    and take seconds. Selection answers nothing unless a test says otherwise, which is
+    also the "model unavailable" path the resolver is required to survive.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    with patch(
+        "app.services.product_resolution.select_products",
+        new_callable=AsyncMock,
+        return_value={},
+    ) as selection:
+        yield selection
 
 
 @pytest.fixture

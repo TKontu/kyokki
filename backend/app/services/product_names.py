@@ -70,12 +70,20 @@ async def known_names(
 ) -> dict[str, ProductMaster]:
     """Resolve many names at once, keyed by their normalised form.
 
-    One query for a whole receipt instead of one per line.
+    One query for a whole receipt instead of one per line - the matcher this replaces
+    loaded every product and every alias in the database for each receipt.
+
+    Falls back to canonical names for the same reason `product_for_name` does: the
+    backfill migration covers everything that existed, but products written straight
+    to `product_master` - Open Food Facts enrichment, say - have no `product_name` row
+    and would otherwise be unresolvable.
     """
     keys = {normalize_product_name(name) for name in names}
     keys.discard("")
     if not keys:
         return {}
+
+    found: dict[str, ProductMaster] = {}
     rows = (
         await db.execute(
             select(ProductName.name, ProductMaster)
@@ -83,7 +91,25 @@ async def known_names(
             .where(ProductName.name.in_(keys))
         )
     ).all()
-    return {str(key): product for key, product in rows}
+    for key, product in rows:
+        found[str(key)] = product
+
+    missing = keys - set(found)
+    if missing:
+        canonical = (
+            await db.execute(
+                select(
+                    func.lower(func.btrim(ProductMaster.canonical_name)),
+                    ProductMaster,
+                ).where(
+                    func.lower(func.btrim(ProductMaster.canonical_name)).in_(missing)
+                )
+            )
+        ).all()
+        for key, product in canonical:
+            found.setdefault(str(key), product)
+
+    return found
 
 
 async def learn_product_name(
