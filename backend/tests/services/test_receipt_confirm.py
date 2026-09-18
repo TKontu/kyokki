@@ -472,3 +472,40 @@ class TestNonFoodMemory:
         await self._confirm(db_session, receipt, [], [99, -1])
 
         assert (await db_session.execute(select(NonFoodName))).scalars().all() == []
+
+    async def _reopen(self, db_session: AsyncSession, receipt) -> None:
+        """Put the receipt back to `completed` so it can be confirmed again."""
+        row = await db_session.get(Receipt, receipt.id)
+        row.processing_status = ReceiptStatus.COMPLETED
+        await db_session.commit()
+
+    async def test_a_line_the_cook_includes_is_not_also_remembered(
+        self, db_session: AsyncSession, receipt, categories
+    ):
+        """Nothing cross-checked the two lists, so correcting a wrong household
+        guess taught the alias *and* wrote the non-food memory in one request,
+        and the line was hidden again on the next receipt (H08)."""
+        await self._confirm(db_session, receipt, [_item(index=3)], [3])
+
+        assert (await db_session.execute(select(NonFoodName))).scalars().all() == []
+
+    async def test_including_a_line_forgets_what_was_learned_before(
+        self, db_session: AsyncSession, receipt, categories
+    ):
+        """Nothing in the codebase deleted a non_food_name row, so a misjudgement
+        hid that product from every future receipt with no way back."""
+        await self._confirm(db_session, receipt, [], [3])
+        assert (await db_session.execute(select(NonFoodName))).scalars().all() != []
+
+        await self._reopen(db_session, receipt)
+        await self._confirm(db_session, receipt, [_item(index=3)], [3])
+
+        assert (await db_session.execute(select(NonFoodName))).scalars().all() == []
+
+    async def test_the_other_folded_lines_are_still_remembered(
+        self, db_session: AsyncSession, receipt, categories
+    ):
+        await self._confirm(db_session, receipt, [_item(index=3)], [2, 3])
+
+        rows = (await db_session.execute(select(NonFoodName))).scalars().all()
+        assert [r.receipt_name for r in rows] == ["MUOVIKASSI"]

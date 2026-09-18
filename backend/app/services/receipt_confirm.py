@@ -8,7 +8,7 @@ receipt from that store arrives pre-matched.
 Everything is written in one transaction; any invalid item rolls the whole confirm back.
 """
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -34,7 +34,7 @@ from app.services.generic_products import (
     build_inventory_item,
 )
 from app.services.matching_service import normalize_receipt_name
-from app.services.non_food import remember_non_food
+from app.services.non_food import forget_non_food, remember_non_food
 from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)
@@ -178,17 +178,37 @@ class _Confirmation:
             await self.learn_alias(line, product)
 
 
-async def _remember_skipped_non_food(
-    db: AsyncSession, confirmation: "_Confirmation", indexes: Sequence[int]
-) -> None:
-    """Record the printed names of lines the cook said are not food (Q1)."""
-    names = [
+def _printed_names(confirmation: "_Confirmation", indexes: Iterable[int]) -> list[str]:
+    return [
         str(confirmation.lines[i]["name"])
         for i in indexes
         if 0 <= i < len(confirmation.lines) and confirmation.lines[i].get("name")
     ]
-    if names:
-        await remember_non_food(db, confirmation.chain, names)
+
+
+async def _apply_non_food(
+    db: AsyncSession,
+    confirmation: "_Confirmation",
+    indexes: Sequence[int],
+    included_indexes: set[int],
+) -> None:
+    """Remember the lines the cook folded away, and forget the ones they kept (Q1).
+
+    A line could previously be confirmed *and* listed as non-food in the same
+    request - nothing cross-checked the two - so the cook correcting a wrong
+    household guess taught the alias and wrote the non-food memory at once, and
+    the same line was hidden again on the next receipt.
+    """
+    skipped = [i for i in indexes if i not in included_indexes]
+    corrected = [i for i in indexes if i in included_indexes]
+
+    remembered = _printed_names(confirmation, skipped)
+    if remembered:
+        await remember_non_food(db, confirmation.chain, remembered)
+
+    forgotten = _printed_names(confirmation, corrected)
+    if forgotten:
+        await forget_non_food(db, confirmation.chain, forgotten)
 
 
 async def confirm_receipt(
@@ -221,10 +241,13 @@ async def confirm_receipt(
             )
 
         confirmation = _Confirmation(db, receipt)
+        included_indexes: set[int] = set()
         for position, item in enumerate(items):
             await confirmation.add(position, item)
+            if item.index is not None:
+                included_indexes.add(item.index)
         # Only lines the cook marked; an ordinary skip must not teach anything (Q1)
-        await _remember_skipped_non_food(db, confirmation, non_food_indexes)
+        await _apply_non_food(db, confirmation, non_food_indexes, included_indexes)
         receipt_row: Any = receipt
         receipt_row.processing_status = ReceiptStatus.CONFIRMED
         await db.commit()

@@ -108,6 +108,10 @@ class Settings(BaseSettings):
             return [int(part) for part in v.split(",") if part.strip()]
         return v
 
+    # Largest receipt upload accepted, in bytes. Matches the Telegram bot's own
+    # limit (app/telegram_bot/client.py), which is Telegram's.
+    MAX_RECEIPT_UPLOAD_BYTES: int = 20 * 1024 * 1024
+
     # Open Food Facts API
     OPENFOODFACTS_API_URL: str = "https://world.openfoodfacts.org/api/v2"
 
