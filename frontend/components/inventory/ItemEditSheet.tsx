@@ -16,7 +16,9 @@ import {
   fieldInputClass,
   fieldLabelClass,
 } from '@/components/ui/formStyles'
+import { ProductEditSheet } from '@/components/products/ProductEditSheet'
 import { useDeleteInventoryItem, useUpdateInventoryItem } from '@/hooks/useInventory'
+import { useProduct } from '@/hooks/useProducts'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { formatQuantity } from '@/lib/consumption'
@@ -44,6 +46,8 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   // A plain string: the item may already sit in a location this build does not know (H04)
   const [location, setLocation] = useState<string>(item.location)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [editingProduct, setEditingProduct] = useState(false)
+  const product = useProduct(editingProduct ? item.product_master_id : null)
 
   const name = item.product_name
   const amount = Number(quantity)
@@ -107,6 +111,15 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
     )
   }
 
+  if (editingProduct) {
+    return product.data ? (
+      <ProductEditSheet
+        product={product.data}
+        onClose={() => setEditingProduct(false)}
+      />
+    ) : null
+  }
+
   return (
     <BottomSheet
       open
@@ -139,6 +152,14 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
         {subtitle && (
           <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">{subtitle}</p>
         )}
+
+        {/* A wrong expiry is usually the product's shelf life, not this item's date,
+            and until H18 there was no way to correct it. */}
+        <div>
+          <Button variant="ghost" size="sm" onClick={() => setEditingProduct(true)}>
+            {`Edit ${name}…`}
+          </Button>
+        </div>
 
         <div>
           <label htmlFor="item-edit-quantity" className={fieldLabelClass}>

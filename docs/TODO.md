@@ -1129,7 +1129,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H0 (before P3): [x] H01 (PR #52)  [x] H02 (PR #52)  [x] H03  [x] H04  [x] H05  [x] H06  [x] H07  [x] H08 — H01/H02 merged; H03-H08 in PRs #53-#56, all opened 2026-09-18
 - Decisions: [ ] DEC-5 access  [ ] DEC-6 Next.js  [ ] DEC-7 scanner  [ ] DEC-8 retention  [ ] DEC-9 categories  [ ] DEC-10 freezer expiry
 - Wave 6: [ ] P3 acceptance (with H0)
-- Hardening H1 resolution: [x] H11 (PR #57)  [x] H12 (#58)  [x] H13 (#59)  [x] H14 (#60)  [x] H15 (#62)  [x] H16 (#61)  [x] H17 (#63)  [ ] H18 product editor
+- Hardening H1 resolution: [x] H11 (PR #57)  [x] H12 (#58)  [x] H13 (#59)  [x] H14 (#60)  [x] H15 (#62)  [x] H16 (#61)  [x] H17 (#63)  [x] H18 (#64) — wave H1 complete
 - Hardening H2-H4: after P3, before the agent track
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
