@@ -99,7 +99,17 @@ def prefilter_receipt_text(text: str) -> str:
 def build_instructions(
     categories: Sequence[CategoryOption], known_products: Sequence[str] = ()
 ) -> str:
+    """The extraction prompt.
+
+    The catalog block is off by default since H17. It was there to keep generic names
+    consistent between receipts, capped at 300 names and growing with the catalog. A
+    name is a key now (H11), and confirm learns the generic name as a synonym, so
+    "Minced beef" reaches "Ground beef" next week without the prompt carrying the
+    catalog at all. `EXTRACTION_OFFERS_CATALOG` puts the list back.
+    """
     listed = ", ".join(f"{c.id} ({c.name})" for c in categories) or "none"
+    if not settings.EXTRACTION_OFFERS_CATALOG:
+        known_products = ()
     first_spelling: dict[str, str] = {}
     for name in known_products:
         tidy = " ".join(name.split())

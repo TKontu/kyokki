@@ -43,9 +43,11 @@ per-area TODOs point at it. Three things to know before doing anything else:
   name does not end in `_test`. The dev database is out of reach.
 - ~~Do not deploy the Telegram service from the runbook's own commands~~ — **fixed in H03**:
   every `docker compose` command in `docs/DEPLOY.md` now carries `--env-file stack.env`.
-- **Fuzzy matching pre-selects wrong products** (Pineapple -> Apple at 90 "high") and confirm
-  learns them as verified aliases. Until H13-H15 land, skip any pre-matched line that looks
-  wrong rather than including it; a skip teaches nothing, an include is permanent.
+- ~~Fuzzy matching pre-selects wrong products and confirm learns them as verified aliases~~ —
+  **fixed in H13-H15 (PRs #59, #60, #62).** Identity is a key now: a line resolves through a
+  learned alias or a known catalog name, or the model picks from a shortlist it was offered and
+  the row labels that `auto`. Only the cook's own act writes verified memory, and a proposal can
+  be changed on the row. An include is no longer permanent.
 
 ## Next action
 Redeploy the homelab, then read one real receipt and check the category count.
