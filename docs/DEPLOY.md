@@ -13,7 +13,8 @@ Portainer, or with `docker compose` on the host. The "Updating" section covers l
 | 17300 | backend  | FastAPI directly (`/api/health`, diagnostics, future integrations such as Home Assistant). |
 
 PostgreSQL and Redis are reachable only inside the compose network. Receipt uploads land in
-`./data`, logs in `./logs`, and the database in the `postgres_data` volume.
+the named volume `kyokki_data`, logs in `kyokki_logs`, and the database in `postgres_data`.
+(The dev stack in `docker-compose.yml` is the one that bind-mounts `./data` and `./logs`.)
 
 Two more services publish no port:
 - **`kyokki-worker`** reads uploaded receipts (OCR or vision, LLM extraction, matching) one at a
@@ -57,7 +58,12 @@ Two more services publish no port:
    be healthy, runs `kyokki-migrate` (schema + default categories, both idempotent) and only
    then starts the API, worker, Telegram bot and frontend.
 4. **Verify.**
-   - `http://<host>:17300/api/health` and `http://<host>:17301/api/health` both return healthy.
+   - `http://<host>:17300/api/health` answers `{"status":"ok","postgres":"ok","redis":"ok"}`.
+     It is a readiness check: 503 with `"status":"degraded"` names the dependency that is down.
+     `http://<host>:17301/api/health` is the same thing through the frontend proxy, which is
+     what the iPad uses, so check that one too.
+     (`/api/health/live` only says the process is up; it is what the container healthcheck
+     polls, so a slow database never restart-loops the API.)
    - In Portainer the stack shows `kyokki-migrate` **Exited (0)** and the other five services
      **running**. That exit is expected: it is a one-shot job.
 
@@ -71,14 +77,14 @@ database with it) and by the API. Changing it later means changing it in Postgre
 git clone https://github.com/TKontu/kyokki.git
 cd kyokki
 cp stack.env.example stack.env      # fill in POSTGRES_PASSWORD; stack.env is git-ignored
-docker compose -f docker-compose.prod.yml --env-file stack.env up -d
-docker compose -f docker-compose.prod.yml --env-file stack.env ps
+docker compose --env-file stack.env -f docker-compose.prod.yml --env-file stack.env up -d
+docker compose --env-file stack.env -f docker-compose.prod.yml --env-file stack.env ps
 ```
 
 To build the images locally instead of pulling them, add the build override:
 
 ```bash
-docker compose -f docker-compose.prod.yml -f docker-compose.build.yml --env-file stack.env up -d --build
+docker compose --env-file stack.env -f docker-compose.prod.yml -f docker-compose.build.yml --env-file stack.env up -d --build
 ```
 
 ## On the iPad
@@ -135,8 +141,8 @@ schedule.
 ```bash
 cd kyokki
 git pull
-docker compose -f docker-compose.prod.yml --env-file stack.env pull
-docker compose -f docker-compose.prod.yml --env-file stack.env up -d
+docker compose --env-file stack.env -f docker-compose.prod.yml --env-file stack.env pull
+docker compose --env-file stack.env -f docker-compose.prod.yml --env-file stack.env up -d
 ```
 
 Migrations are no longer a separate step: `kyokki-migrate` runs `alembic upgrade head` and the
@@ -157,12 +163,14 @@ one and replies with a summary, for example
 It long-polls Telegram, so the homelab needs no open port.
 
 1. In Telegram, open **@BotFather**, send `/newbot` and pick a name. Copy the token.
-2. Put it in `stack.env` as `TELEGRAM_BOT_TOKEN=...` and start the stack
-   (`docker compose -f docker-compose.prod.yml up -d --build`).
+2. Put it in `stack.env` as `TELEGRAM_BOT_TOKEN=...` and start the stack:
+   `docker compose --env-file stack.env -f docker-compose.prod.yml up -d`.
+   (No `--build`: `docker-compose.prod.yml` pulls published images and has no
+   `build:` section. To build locally, add `-f docker-compose.build.yml`.)
 3. Send `/start` to the bot. It answers "This bot is private. Your chat id is …".
 4. Add that id to `TELEGRAM_ALLOWED_CHAT_IDS` in `stack.env` (comma-separated for several
    people) and restart the bot:
-   `docker compose -f docker-compose.prod.yml up -d kyokki-telegram`.
+   `docker compose --env-file stack.env -f docker-compose.prod.yml up -d kyokki-telegram`.
 5. Share a receipt to the bot. It answers "Received", then edits that message with the summary
    after about a minute. `kyokki-worker` reads receipts one at a time; the rest wait in the
    queue and the reply says how many are ahead.
@@ -184,20 +192,25 @@ Keep the token secret: anyone with it can read what is sent to the bot. If it le
 
 ## Operations
 
+Every `docker compose` command for this stack needs `--env-file stack.env`. The compose file
+declares `POSTGRES_PASSWORD` with the required form `${POSTGRES_PASSWORD:?}`, which compose
+evaluates even for `logs` and `down`, so without it the command either aborts or silently
+picks up the repo-root `.env` instead.
+
 ```bash
-docker compose -f docker-compose.prod.yml logs -f kyokki-api      # backend logs
-docker compose -f docker-compose.prod.yml logs -f frontend        # Next.js logs
-docker compose -f docker-compose.prod.yml logs -f kyokki-worker   # receipt reading logs
-docker compose -f docker-compose.prod.yml logs -f kyokki-telegram # receipt bot logs
-docker compose -f docker-compose.prod.yml logs kyokki-migrate      # schema + seed job
-docker compose -f docker-compose.prod.yml exec postgres \
+docker compose --env-file stack.env -f docker-compose.prod.yml logs -f kyokki-api      # backend logs
+docker compose --env-file stack.env -f docker-compose.prod.yml logs -f frontend        # Next.js logs
+docker compose --env-file stack.env -f docker-compose.prod.yml logs -f kyokki-worker   # receipt reading logs
+docker compose --env-file stack.env -f docker-compose.prod.yml logs -f kyokki-telegram # receipt bot logs
+docker compose --env-file stack.env -f docker-compose.prod.yml logs kyokki-migrate      # schema + seed job
+docker compose --env-file stack.env -f docker-compose.prod.yml exec postgres \
   pg_dump -U kyokki_user kyokki > backup-$(date +%F).sql          # database backup
-docker compose -f docker-compose.prod.yml down                    # stop (data volumes stay)
+docker compose --env-file stack.env -f docker-compose.prod.yml down                    # stop (data volumes stay)
 ```
 
 Receipt files and logs live in the named volumes `kyokki_data` and `kyokki_logs` (the database
 in `postgres_data`), so they survive redeploys and there is no host path to keep in sync. Copy a
-receipt out with `docker compose -f docker-compose.prod.yml cp kyokki-api:/app/data/receipts/<id>.pdf .`
+receipt out with `docker compose --env-file stack.env -f docker-compose.prod.yml cp kyokki-api:/app/data/receipts/<id>.pdf .`
 
 ## Development on a workstation
 
@@ -220,7 +233,7 @@ also requires `ALLOWED_ORIGINS` on the backend.
   `curl http://localhost:17301/api/health`. If that fails but `:17300` works, the frontend
   container cannot reach `kyokki-api`; check `docker compose ... logs frontend`.
 - **`alembic upgrade head` fails with "could not translate host name postgres":** it was run
-  outside Docker. Always use `docker compose -f docker-compose.prod.yml run --rm kyokki-api ...`.
+  outside Docker. Always use `docker compose --env-file stack.env -f docker-compose.prod.yml run --rm kyokki-api ...`.
 - **Migrations and models disagree:** CI runs `alembic check`; if you edit a model, add a
   revision with `alembic revision --autogenerate -m "..."` inside the container. New model
   modules must be imported in `app/models/__init__.py`, which `app/db/base.py` re-exports for

@@ -38,10 +38,11 @@ Five pipeline reviews under `docs/reviews/` covered every surface at `23b83ad`, 
 `docs/PRODUCT_RESOLUTION_SPEC.md` replaces fuzzy matching. `docs/TODO.md` now carries a
 hardening track (H0-H4, DEC-5 to DEC-10) between MVP-P3 and the post-MVP frontier; the
 per-area TODOs point at it. Three things to know before doing anything else:
-- **Do not run `test-backend` with the compose stack up** until H01 lands: the fixture drops
-  every table in the database the settings point at, and locally that is the dev database.
-- **Do not deploy the Telegram service from the runbook's own commands** until H03 lands:
-  lines 161 and 165 of `docs/DEPLOY.md` omit `--env-file stack.env`.
+- ~~Do not run `test-backend` with the compose stack up~~ — **fixed in H01 (PR #52)**. The
+  suite runs against `<POSTGRES_DB>_test`, creates it if missing, and refuses to start if the
+  name does not end in `_test`. The dev database is out of reach.
+- ~~Do not deploy the Telegram service from the runbook's own commands~~ — **fixed in H03**:
+  every `docker compose` command in `docs/DEPLOY.md` now carries `--env-file stack.env`.
 - **Fuzzy matching pre-selects wrong products** (Pineapple -> Apple at 90 "high") and confirm
   learns them as verified aliases. Until H13-H15 land, skip any pre-matched line that looks
   wrong rather than including it; a skip teaches nothing, an include is permanent.
