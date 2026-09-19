@@ -22,7 +22,7 @@ import { useConfirmReceipt, useReceipt, useReprocessReceipt } from '@/hooks/useR
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { toISODate } from '@/lib/dates'
-import { receiptDate, storeName } from '@/lib/receipts'
+import { isStale, readMethod, receiptDate, storeName } from '@/lib/receipts'
 import type { ConfirmedItemCreate, ExtractedItem } from '@/types/receipt'
 
 function initialRow(item: ExtractedItem): ReviewRow {
@@ -151,11 +151,28 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   }
 
   if (status === 'confirmed') {
+    // Confirming used to drop the read method entirely, so the one screen you come back to
+    // when stock looks wrong could not tell you whether the model had ever run (Q9).
+    const method = readMethod(receipt)
     return (
       <Frame>
         <p className="text-ui-text dark:text-ui-dark-text">
           {`${storeName(receipt)}, ${receiptDate(receipt)}: already added to your stock.`}
         </p>
+        {method && (
+          <p
+            className={
+              'mt-2 text-sm ' +
+              (method.ok
+                ? 'text-ui-text-secondary dark:text-ui-dark-text-secondary'
+                : 'text-yellow-700 dark:text-yellow-400')
+            }
+          >
+            {method.ok
+              ? `It was ${method.label}.`
+              : `It was ${method.label}, so names are as printed and nothing was categorised.`}
+          </p>
+        )}
       </Frame>
     )
   }
@@ -262,8 +279,10 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
         <p className="mt-1 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
           {`${receipt.items.length} items read, ${receipt.items_matched} already known`}
         </p>
-        {receipt.extraction_method === 'heuristic' && (
-          <p className="mt-2 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
+        {/* A good read used to say nothing at all, so "no warning" and "nobody looked"
+            were indistinguishable. Both now say which they were (Q9). */}
+        {receipt.extraction_method === 'heuristic' ? (
+          <p className="mt-2 text-sm text-yellow-700 dark:text-yellow-400">
             Read without the AI model, so names are as printed.{' '}
             <button
               type="button"
@@ -273,6 +292,12 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
               Read again with the model
             </button>
           </p>
+        ) : (
+          readMethod(receipt) && (
+            <p className="mt-1 text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
+              {readMethod(receipt)?.label}
+            </p>
+          )
         )}
       </header>
 
@@ -298,6 +323,17 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
       <footer className="fixed inset-x-0 bottom-0 flex items-center justify-between gap-4 border-t border-ui-border bg-white px-6 py-3 pb-[env(safe-area-inset-bottom)] dark:border-ui-dark-border dark:bg-ui-dark-bg">
         <div className="min-w-0 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
+          {/* Expiry is counted from the receipt's own date, not the day of adding - which is
+              right, and which means a receipt from months ago silently adds a shelf of expired
+              food. Keyed on the receipt date rather than per-item expiry: the client does not
+              know a matched product's stored shelf life, only the model's guess for the line,
+              so a per-item prediction would be wrong exactly when it mattered (Q10). */}
+          {isStale(receipt) && (
+            <p role="alert" className="text-yellow-700 dark:text-yellow-400">
+              {`This receipt is from ${receiptDate(receipt)} — expiry dates are counted from ` +
+                'then, so most items will be added already expired.'}
+            </p>
+          )}
           <p>{skipped > 0 ? `${skipped} skipped` : 'Nothing skipped'}</p>
           {household.length > 0 && (
             <p className="truncate">

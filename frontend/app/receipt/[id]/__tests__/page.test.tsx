@@ -47,11 +47,30 @@ function item(index: number, overrides: Partial<ExtractedItem> = {}): ExtractedI
   }
 }
 
+/** A date N days before today, so an age-based test does not rot as the year moves on. */
+function daysAgo(days: number): Date {
+  const date = new Date()
+  date.setDate(date.getDate() - days)
+  return date
+}
+
+function isoDaysAgo(days: number): string {
+  const date = daysAgo(days)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+function finnishDaysAgo(days: number): string {
+  const date = daysAgo(days)
+  return `${date.getDate()}.${date.getMonth() + 1}.${date.getFullYear()}`
+}
+
 function receipt(overrides: Partial<Receipt> = {}, items: ExtractedItem[] = [item(0)]): Receipt {
   return {
     id: 'r1',
     store_chain: 's-group',
-    purchase_date: '2026-09-02',
+    // From this week, so the Q10 stale-receipt warning is opted into, not incidental.
+    purchase_date: isoDaysAgo(3),
     image_path: 'data/receipts/r1.pdf',
     batch_id: null,
     ocr_raw_text: null,
@@ -166,7 +185,7 @@ describe('ReceiptReviewPage', () => {
     renderPage()
 
     expect(await screen.findByText(/S-group/)).toBeInTheDocument()
-    expect(screen.getByText(/2\.9\.2026/)).toBeInTheDocument()
+    expect(screen.getByText(finnishDaysAgo(3), { exact: false })).toBeInTheDocument()
     expect(screen.getByLabelText('Product name')).toHaveValue('Generic 0')
     expect(screen.getByText('PRINTED 0')).toBeInTheDocument()
     expect(screen.getByLabelText('Quantity')).toHaveValue(1)
@@ -192,8 +211,8 @@ describe('ReceiptReviewPage', () => {
     expect(confirms[0]).toEqual({
       non_food_indexes: [],
       items: [
-        { index: 0, line_id: 'line-0', product_id: 'p-milk', quantity: 1, unit: 'pcs', purchase_date: '2026-09-02' },
-        { index: 1, line_id: 'line-1', name: 'Generic 1', category: 'dairy', quantity: 1, unit: 'pcs', purchase_date: '2026-09-02' },
+        { index: 0, line_id: 'line-0', product_id: 'p-milk', quantity: 1, unit: 'pcs', purchase_date: isoDaysAgo(3) },
+        { index: 1, line_id: 'line-1', name: 'Generic 1', category: 'dairy', quantity: 1, unit: 'pcs', purchase_date: isoDaysAgo(3) },
       ],
     })
     expect(await screen.findByText(/Added 1 item/)).toBeInTheDocument()
@@ -301,6 +320,18 @@ describe('ReceiptReviewPage', () => {
 
     expect(await screen.findByText(/already added to your stock/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^add/i })).not.toBeInTheDocument()
+    // Q9: confirming used to drop the read method, and this is the screen you come back
+    // to when the stock looks wrong.
+    expect(screen.getByText(/It was read by the model\./)).toBeInTheDocument()
+  })
+
+  it('keeps saying a confirmed receipt was read without the model (Q9)', async () => {
+    mockApi(receipt({ processing_status: 'confirmed', extraction_method: 'heuristic' }))
+    renderPage()
+
+    expect(
+      await screen.findByText(/read without the model, so names are as printed/i)
+    ).toBeInTheDocument()
   })
 
   // The status chain had no final branch, so anything outside the handled set fell through to
@@ -329,6 +360,42 @@ describe('ReceiptReviewPage', () => {
     renderPage()
 
     expect(await screen.findByText(/read without the AI model/i)).toBeInTheDocument()
+  })
+
+  it('says a good read was a good read, instead of saying nothing (Q9)', async () => {
+    // Silence used to mean both "the model read it" and "the model never ran".
+    mockApi(receipt({ extraction_method: 'text' }))
+    renderPage()
+
+    expect(await screen.findByText('read by the model')).toBeInTheDocument()
+  })
+
+  it('warns that an old receipt adds items already expired (Q10)', async () => {
+    // Expiry is purchase_date + shelf life, counted from the shop. That is right, and it
+    // means a receipt from months ago quietly adds a shelf of expired food. Dates are
+    // relative to today so this test does not rot.
+    mockApi(receipt({ purchase_date: isoDaysAgo(102) }))
+    renderPage()
+
+    const warning = await screen.findByRole('alert')
+    expect(warning).toHaveTextContent(/expiry dates are counted from then/i)
+    expect(warning.textContent).toContain(finnishDaysAgo(102))
+  })
+
+  it('says nothing about a receipt from this week', async () => {
+    mockApi(receipt({ purchase_date: isoDaysAgo(3) }))
+    renderPage()
+
+    await screen.findByLabelText('Quantity')
+    expect(screen.queryByText(/counted from then/i)).not.toBeInTheDocument()
+  })
+
+  it('cannot warn when the date was never read', async () => {
+    mockApi(receipt({ purchase_date: null }))
+    renderPage()
+
+    await screen.findByLabelText('Quantity')
+    expect(screen.queryByText(/counted from then/i)).not.toBeInTheDocument()
   })
 
   it('shows what the receipt weighed when it was counted into pieces', async () => {
