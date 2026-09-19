@@ -45,6 +45,7 @@ describe('TypeScript Types', () => {
         storage_type: 'refrigerator',
         default_shelf_life_days: 7,
         opened_shelf_life_days: 3,
+    avg_piece_grams: null,
         unit_type: 'volume',
         default_unit: 'dl',
         default_quantity: 1000,
