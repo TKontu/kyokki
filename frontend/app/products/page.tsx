@@ -190,7 +190,15 @@ export default function ProductsPage() {
       onSuccess: (result) => {
         setProposal(result.applied ? null : result)
         if (result.applied) {
-          toast.success(`Saved ${result.changes.length} shelf lives`)
+          // Say what happened to the food, not just to the catalog (Q12): a corrected
+          // shelf life re-dates the stock that was dated by the old one.
+          const redated =
+            result.items_redated > 0
+              ? `, ${result.items_redated} ${
+                  result.items_redated === 1 ? 'item' : 'items'
+                } re-dated`
+              : ''
+          toast.success(`Saved ${result.changes.length} shelf lives${redated}`)
         }
       },
       onError: () => toast.error('Could not reach the model'),

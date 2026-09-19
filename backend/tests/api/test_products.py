@@ -913,3 +913,130 @@ class TestEstimateCatalogEndpoint:
         response = await client.post("/api/products/estimate")
 
         assert response.json()["considered"] == 0
+
+
+class TestCorrectionReachesTheFood:
+    """Q12: the sequence HANDOFF.md recommends, end to end.
+
+    Before this, confirming a receipt and then correcting the shelf life - by hand or
+    through the catalog estimate - left the stock dated by the number that had just been
+    replaced, with nothing on screen saying so.
+    """
+
+    PRODUCT = {
+        "canonical_name": "Ground beef",
+        "category": "meat",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 5,
+        "unit_type": "weight",
+        "default_unit": "g",
+    }
+
+    async def _stock(self, client: AsyncClient, product_id: str) -> dict:
+        response = await client.post(
+            "/api/inventory",
+            json={
+                "product_master_id": product_id,
+                "initial_quantity": 400,
+                "current_quantity": 400,
+                "unit": "g",
+                "purchase_date": "2026-09-01",
+                "expiry_date": "2026-09-06",
+                "expiry_source": "calculated",
+                "location": "main_fridge",
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    async def test_correcting_by_hand_moves_the_stock(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+
+        await client.patch(
+            f"/api/products/{product['id']}", json={"default_shelf_life_days": 2}
+        )
+
+        moved = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert moved["expiry_date"] == "2026-09-03"
+
+    async def test_a_date_you_typed_is_left_where_you_put_it(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+        await client.patch(
+            f"/api/inventory/{item['id']}", json={"expiry_date": "2026-12-24"}
+        )
+
+        await client.patch(
+            f"/api/products/{product['id']}", json={"default_shelf_life_days": 2}
+        )
+
+        untouched = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert untouched["expiry_date"] == "2026-12-24"
+        assert untouched["expiry_source"] == "manual"
+
+    async def test_editing_something_else_moves_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+
+        await client.patch(
+            f"/api/products/{product['id']}", json={"canonical_name": "Minced beef"}
+        )
+
+        same = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert same["expiry_date"] == "2026-09-06"
+
+    async def test_the_catalog_estimate_moves_the_stock_too(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """The whole point: this is the button HANDOFF.md tells the cook to press."""
+        from app.services.catalog_estimates import Estimate
+
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+
+        with patch(
+            "app.services.catalog_estimates.estimate_shelf_lives",
+            new_callable=AsyncMock,
+            return_value=[
+                Estimate(
+                    id=product["id"], shelf_life_days=2, opened_shelf_life_days=None
+                )
+            ],
+        ):
+            response = await client.post("/api/products/estimate?apply=true")
+
+        assert response.json()["items_redated"] == 1
+
+        moved = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert moved["expiry_date"] == "2026-09-03"
+
+    async def test_a_dry_run_moves_no_stock(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        from app.services.catalog_estimates import Estimate
+
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+
+        with patch(
+            "app.services.catalog_estimates.estimate_shelf_lives",
+            new_callable=AsyncMock,
+            return_value=[
+                Estimate(
+                    id=product["id"], shelf_life_days=2, opened_shelf_life_days=None
+                )
+            ],
+        ):
+            response = await client.post("/api/products/estimate")
+
+        assert response.json()["items_redated"] == 0
+
+        unchanged = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert unchanged["expiry_date"] == "2026-09-06"

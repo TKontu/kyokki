@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.crud import product_master as crud_product
 from app.crud.product_master import MergeResult
+from app.services.expiry_recompute import recompute_expiry_for_product
 
 logger = get_logger(__name__)
 
@@ -71,6 +72,9 @@ async def merge_products(
 
     try:
         result = await crud_product.merge_product_rows(db, source, target)
+        # The moved stock now belongs to a product with its own shelf life, so its dates
+        # were worked out from a figure that no longer applies to it (Q12).
+        await recompute_expiry_for_product(db, target)
         await db.commit()
     except BaseException:
         await db.rollback()

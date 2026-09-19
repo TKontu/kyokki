@@ -1,6 +1,6 @@
 """Scanner service — Redis mode management, station tracking, and scan processing."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,7 @@ from app.services.broadcast_helpers import (
     broadcast_scanner_action,
     get_redis_client,
 )
+from app.services.expiry_recompute import sealed_expiry
 from app.services.off_service import (
     OffApiError,
     OffProductNotFoundError,
@@ -224,9 +225,10 @@ async def _handle_add(
 
     action = "product_created_and_added" if created_product else "inventory_added"
 
-    # Build inventory item with product defaults
-    shelf_life = product.default_shelf_life_days or 365
-    expiry = datetime.now(UTC).date() + timedelta(days=shelf_life)
+    # Build inventory item with product defaults. The scanner has no receipt, so "bought"
+    # is today; the formula itself is the one confirm uses (Q12).
+    purchased = datetime.now(UTC).date()
+    expiry = sealed_expiry(product, purchased)
 
     location = location_for_storage(product.storage_type)
 
@@ -241,7 +243,7 @@ async def _handle_add(
         unit=product.default_unit,
         expiry_date=expiry,
         location=location,
-        purchase_date=datetime.now(UTC).date(),
+        purchase_date=purchased,
     )
     inv_item = await crud_inventory.create_inventory_item(db, inventory_create)
 
