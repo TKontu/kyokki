@@ -59,18 +59,23 @@ export function ProductEditSheet({
   const [pieceGrams, setPieceGrams] = useState(
     product.avg_piece_grams == null ? '' : String(product.avg_piece_grams)
   )
+  const [packGrams, setPackGrams] = useState(
+    product.pack_grams == null ? '' : String(product.pack_grams)
+  )
   const [unit, setUnit] = useState<Unit>(product.default_unit)
 
   const shelfLifeValue = positiveOrNull(shelfLife)
   const openedValue = positiveOrNull(openedShelfLife)
   const pieceValue = positiveOrNull(pieceGrams)
+  const packValue = positiveOrNull(packGrams)
 
   // Shelf life is the one field that may not be blank: every expiry date comes from it.
   const valid =
     name.trim() !== '' &&
     typeof shelfLifeValue === 'number' &&
     openedValue !== undefined &&
-    pieceValue !== undefined
+    pieceValue !== undefined &&
+    packValue !== undefined
 
   // Send only what changed, so two cooks editing different fields do not fight.
   const changes: ProductMasterUpdate = {}
@@ -83,6 +88,9 @@ export function ProductEditSheet({
   }
   if (pieceValue !== product.avg_piece_grams) {
     changes.avg_piece_grams = pieceValue ?? null
+  }
+  if (packValue !== product.pack_grams) {
+    changes.pack_grams = packValue ?? null
   }
   if (unit !== product.default_unit) changes.default_unit = unit
 
@@ -186,6 +194,24 @@ export function ProductEditSheet({
             aria-label="One piece"
             value={pieceGrams}
             onChange={(event) => setPieceGrams(event.target.value)}
+            className={`${fieldInputClass} mt-1`}
+          />
+          <p className={fieldHintClass}>grams, blank if unknown</p>
+        </div>
+
+        <div className="w-32">
+          <label htmlFor="product-pack-grams" className={fieldLabelClass}>
+            One pack
+          </label>
+          <input
+            id="product-pack-grams"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="any"
+            aria-label="One pack"
+            value={packGrams}
+            onChange={(event) => setPackGrams(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
           <p className={fieldHintClass}>grams, blank if unknown</p>

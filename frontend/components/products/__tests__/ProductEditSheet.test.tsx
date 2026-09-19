@@ -31,6 +31,7 @@ const PRODUCT: ProductMaster = {
   default_shelf_life_days: 5,
   opened_shelf_life_days: null,
   avg_piece_grams: null,
+  pack_grams: null,
   unit_type: 'weight',
   default_unit: 'g',
   default_quantity: 400,
@@ -128,6 +129,31 @@ describe('ProductEditSheet', () => {
     // unit_type is derived server-side from default_unit; sending it would fight that.
     expect(patches[0]).toEqual({ default_unit: 'pcs', avg_piece_grams: 110 })
     expect(patches[0]).not.toHaveProperty('unit_type')
+  })
+
+  it('remembers what one pack weighs', async () => {
+    // Q8: the receipt prints `1 pcs` of mince and never says 400 g, so the cook says it
+    // once here and every later receipt from any shop stores grams.
+    const patches = mockApi()
+    renderSheet()
+
+    fireEvent.change(screen.getByLabelText('One pack'), { target: { value: '400' } })
+    fireEvent.click(save())
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toEqual({ pack_grams: 400 })
+  })
+
+  it('clears a pack weight that was wrong', async () => {
+    const patches = mockApi()
+    renderSheet({ ...PRODUCT, pack_grams: 400 })
+
+    expect(screen.getByLabelText('One pack')).toHaveValue(400)
+    fireEvent.change(screen.getByLabelText('One pack'), { target: { value: '' } })
+    fireEvent.click(save())
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toEqual({ pack_grams: null })
   })
 
   it('closes on success', async () => {

@@ -6,7 +6,9 @@ import pytest
 
 from app.services.units import (
     canonical_factor,
+    grams_from_name,
     grams_to_pieces,
+    pieces_to_grams,
     receipt_line_quantity,
     to_canonical,
     to_canonical_decimal,
@@ -120,3 +122,58 @@ class TestGramsToPieces:
 
     def test_takes_decimals_as_well_as_floats(self):
         assert grams_to_pieces(Decimal("1072"), Decimal("125")) == 9
+
+
+class TestGramsFromName:
+    """The pack weight the shop printed in the product name (Q8).
+
+    The model is not asked for this: offered a `pk` field it answered on 1 line of 49
+    and dragged the other per-line estimates down with it (docs/vLLM_MANUAL_TEST.md).
+    """
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("SIPULI 500G", 500.0),
+            ("NACHO CHIPS 475G", 475.0),
+            ("JAUHELIHA 400 G", 400.0),
+            ("PORKKANA 1KG", 1000.0),
+            ("OMENA 1,5KG", 1500.0),
+            ("omena 1.5kg", 1500.0),
+        ],
+    )
+    def test_reads_a_printed_size(self, name, expected) -> None:
+        assert grams_from_name(name) == expected
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "COOP ROSKAPUSSI 30L 25KPL MUSTA",  # litres are not a weight
+            "GLOGI TUMMA SOKEROIMATON 1L",  # a litre of glogi belongs in dl
+            "KANANMUNA 10KPL",  # KPL must not read as kilos
+            "SIKA-NAUTAJAUHELIHA 23%",  # a percentage is not a size
+            "MAKARONI",
+            "",
+            None,
+        ],
+    )
+    def test_ignores_everything_that_is_not_a_weight(self, name) -> None:
+        assert grams_from_name(name) is None
+
+
+class TestPiecesToGrams:
+    def test_one_pack_is_its_weight(self) -> None:
+        assert pieces_to_grams(1, 400) == 400.0
+
+    def test_several_packs_multiply(self) -> None:
+        assert pieces_to_grams(3, 400) == 1200.0
+
+    def test_a_fractional_pack_is_allowed(self) -> None:
+        """Unlike pieces, grams are already fine-grained and are not rounded."""
+        assert pieces_to_grams(Decimal("0.5"), 400) == 200.0
+
+    @pytest.mark.parametrize(
+        ("pieces", "pack"), [(None, 400), (1, None), (0, 400), (1, 0), (-1, 400)]
+    )
+    def test_nothing_to_say_is_none(self, pieces, pack) -> None:
+        assert pieces_to_grams(pieces, pack) is None

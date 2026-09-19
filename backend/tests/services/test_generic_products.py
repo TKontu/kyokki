@@ -244,6 +244,36 @@ class TestQuantityForProduct:
     def test_buying_them_by_the_piece_needs_no_conversion(self):
         assert quantity_for_product(self._product(), 3, "pcs") == (3, "pcs")
 
+    def test_a_counted_pack_is_stored_as_grams(self):
+        """Q8: one pack of mince is 400 g in the freezer, not `1 pcs`."""
+        mince = self._product(
+            canonical_name="Ground beef",
+            unit_type="weight",
+            default_unit="g",
+            avg_piece_grams=None,
+            pack_grams=Decimal("400"),
+        )
+
+        assert quantity_for_product(mince, 1, "pcs") == (400, "g")
+        assert quantity_for_product(mince, 3, "pcs") == (1200, "g")
+
+    def test_a_weighed_pack_needs_no_conversion(self):
+        mince = self._product(
+            unit_type="weight",
+            default_unit="g",
+            avg_piece_grams=None,
+            pack_grams=Decimal("400"),
+        )
+
+        assert quantity_for_product(mince, 380, "g") == (380, "g")
+
+    def test_a_counted_product_with_no_pack_weight_is_left_alone(self):
+        eggs = self._product(
+            unit_type="weight", default_unit="g", avg_piece_grams=None, pack_grams=None
+        )
+
+        assert quantity_for_product(eggs, 1, "pcs") == (1, "pcs")
+
     async def test_confirm_puts_apples_in_the_fridge_as_apples(
         self, db_session: AsyncSession, categories
     ):
@@ -265,6 +295,95 @@ class TestQuantityForProduct:
         # and Q6: the product's own shelf life, not the category's
         assert item.expiry_date == PURCHASED + timedelta(days=21)
         assert item.expiry_source == "calculated"
+
+
+class TestPackWeightOnProducts:
+    """Q8: the shop counts packs of mince; the cook wants to know there is 400 g of it.
+
+    The mirror of `TestProductLearnsItsOwnShape`. The pack weight never comes from the
+    model - offered a `pk` field it answered on 1 line of 49 and dragged the other
+    per-line estimates down with it (docs/vLLM_MANUAL_TEST.md) - so it arrives from a
+    size printed in the name, from the catalog, or from the cook.
+    """
+
+    async def test_a_known_pack_weight_makes_the_product_weighed(
+        self, db_session: AsyncSession, categories
+    ):
+        product, created = await ProductResolver(db_session).resolve(
+            name="Ground beef",
+            category="produce",
+            unit="pcs",
+            quantity=1,
+            pack_grams=400,
+        )
+
+        assert created is True
+        assert product.pack_grams == Decimal("400.00")
+        assert (product.default_unit, product.unit_type) == ("g", "weight")
+
+    async def test_a_piece_weight_wins_over_a_pack_weight(
+        self, db_session: AsyncSession, categories
+    ):
+        """`SIPULI 500G` is a 500 g bag, but onions are still counted one at a time."""
+        product, _ = await ProductResolver(db_session).resolve(
+            name="Onion",
+            category="produce",
+            unit="g",
+            quantity=500,
+            piece_grams=110,
+            pack_grams=500,
+        )
+
+        assert product.default_unit == "pcs"
+        assert (product.avg_piece_grams, product.pack_grams) == (
+            Decimal("110.00"),
+            Decimal("500.00"),
+        )
+
+    async def test_a_later_receipt_fills_in_a_missing_pack_weight(
+        self, db_session: AsyncSession, categories
+    ):
+        resolver = ProductResolver(db_session)
+        first, _ = await resolver.resolve(
+            name="Macaroni", category="produce", unit="pcs", quantity=1
+        )
+        assert first.pack_grams is None
+
+        again, created = await ProductResolver(db_session).resolve(
+            name="Macaroni", category="produce", unit="pcs", quantity=1, pack_grams=400
+        )
+
+        assert created is False
+        assert again.pack_grams == Decimal("400")
+
+    async def test_a_later_receipt_never_overwrites_a_known_pack_weight(
+        self, db_session: AsyncSession, categories
+    ):
+        first, _ = await ProductResolver(db_session).resolve(
+            name="Macaroni", category="produce", unit="pcs", quantity=1, pack_grams=400
+        )
+
+        again, _ = await ProductResolver(db_session).resolve(
+            name="macaroni", category="produce", unit="pcs", quantity=1, pack_grams=500
+        )
+
+        assert again.pack_grams == Decimal("400.00")
+
+    async def test_learning_a_pack_weight_does_not_re_unit_a_counted_product(
+        self, db_session: AsyncSession, categories
+    ):
+        """`_fill_gaps` fills what is unknown; changing the unit is the editor's job."""
+        first, _ = await ProductResolver(db_session).resolve(
+            name="Egg", category="produce", unit="pcs", quantity=10
+        )
+        assert first.default_unit == "pcs"
+
+        again, _ = await ProductResolver(db_session).resolve(
+            name="egg", category="produce", unit="pcs", quantity=10, pack_grams=600
+        )
+
+        assert again.pack_grams == Decimal("600")
+        assert (again.default_unit, again.unit_type) == ("pcs", "count")
 
 
 class TestOpenedShelfLifeOnProducts:

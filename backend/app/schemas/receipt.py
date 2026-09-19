@@ -7,7 +7,11 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from app.services.storage import location_for_storage, storage_type_for_category
-from app.services.units import grams_to_pieces, receipt_line_quantity
+from app.services.units import (
+    grams_to_pieces,
+    pieces_to_grams,
+    receipt_line_quantity,
+)
 
 
 class ReceiptStatus(StrEnum):
@@ -106,11 +110,15 @@ class ExtractedItem(BaseModel):
     non_food: bool = Field(
         False, description="Household or cleaning; not offered as food (Q1)"
     )
+    pack_grams: float | None = Field(
+        None,
+        description="Roughly what one pack weighs, when the line was sold by the pack (Q8)",
+    )
     printed_quantity: float | None = Field(
-        None, description="What the receipt said, when it was converted to pieces"
+        None, description="What the receipt said, when the unit was converted"
     )
     printed_unit: str | None = Field(
-        None, description="Unit the receipt used, when it was converted to pieces"
+        None, description="Unit the receipt used, when the unit was converted"
     )
     storage_type: Literal["refrigerator", "freezer", "pantry"] = Field(
         ..., description="Matched product's storage, else derived from the category"
@@ -144,6 +152,7 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
         # A shop sells apples by the kilo; the cook counts them. Show pieces, but keep what
         # the receipt printed so the conversion is visible and can be overridden (Q2).
         piece_grams = line.get("piece_grams")
+        pack_grams = line.get("pack_grams")
         printed_quantity: float | None = None
         printed_unit: str | None = None
         if unit == "g":
@@ -151,6 +160,13 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
             if pieces is not None:
                 printed_quantity, printed_unit = quantity, unit
                 quantity, unit = float(pieces), "pcs"
+        elif unit == "pcs" and not piece_grams:
+            # The mirror (Q8): the shop counted packs, the cook measures. A piece
+            # weight wins, so this only runs when the line has none.
+            grams = pieces_to_grams(quantity, pack_grams)
+            if grams is not None:
+                printed_quantity, printed_unit = quantity, unit
+                quantity, unit = grams, "g"
         category = line.get("category")
         storage = line.get("product_storage_type") or storage_type_for_category(
             category
@@ -175,6 +191,7 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
                 verified=bool(resolution.get("verified", False)),
                 suggested_category=category,
                 piece_grams=piece_grams,
+                pack_grams=pack_grams,
                 shelf_life_days=line.get("shelf_life_days"),
                 opened_shelf_life_days=line.get("opened_shelf_life_days"),
                 non_food=bool(line.get("non_food")),

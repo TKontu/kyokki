@@ -57,8 +57,9 @@ export function canInclude(item: ExtractedItem, row: ReviewRow): boolean {
 }
 
 /**
- * The shop weighed it, we are counting it (Q2). Showing both keeps the conversion honest,
- * and the quantity and unit below are already editable if the guess is wrong.
+ * The shop weighed it and we are counting it (Q2), or the shop counted packs and we are
+ * weighing them (Q8). Showing both keeps the conversion honest, and the quantity and unit
+ * below are already editable if the guess is wrong.
  */
 function describeConversion(item: ExtractedItem): string | null {
   if (item.printed_quantity == null || item.printed_unit == null) return null

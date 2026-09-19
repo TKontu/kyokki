@@ -50,6 +50,10 @@ class ProductMaster(Base):
     # What one of them weighs, roughly, when the shop sells it by weight but the cook counts
     # it in pieces (Q2). NULL means the idea does not apply - milk, washing-up liquid.
     avg_piece_grams = Column(Numeric(10, 2), nullable=True)
+    # What one pack weighs, for a product measured by weight rather than counted
+    # (Q8). The mirror of avg_piece_grams, and mutually exclusive with it in
+    # practice: a thing is either counted or weighed.
+    pack_grams = Column(Numeric(10, 2), nullable=True)
     unit_type = Column(String, nullable=False)  # volume, weight, count
     default_unit = Column(String, nullable=False)  # dl, tsp, tbsp, g, pcs (MVP-U1)
     default_quantity = Column(Numeric(10, 2), nullable=True)  # 1000, 500, 6
