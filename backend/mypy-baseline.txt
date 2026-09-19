@@ -2,12 +2,14 @@
 # Regenerate with: python -m scripts.check_mypy_baseline --update
 # Adding to this file needs a reason; H21 empties it.
 #
-# Q11 (2026-09-19) added three `assignment` errors, in `_fill_gaps` and `update_product`:
-# writing a plain str/int to an untyped legacy `Column[...]` attribute on a variable that
-# is explicitly annotated `ProductMaster`. The same write elsewhere in the codebase is
-# invisible to mypy only because the row came back from `db.get()` as `Any` -
+# Q11 (2026-09-19) added six `assignment` errors across `_fill_gaps`, `update_product` and
+# the catalog refresh: writing a plain str/int to an untyped legacy `Column[...]` on a
+# variable explicitly annotated `ProductMaster`. The identical write elsewhere in the
+# codebase is invisible to mypy only because the row came back from `db.get()` as `Any` -
 # `crud/inventory_item.py`'s `row.status = "empty"` is the one that did not get away with
 # it either. H21's `Mapped[]` models remove the whole class.
+#
+# NOTE: `--update` rewrites this file from scratch and drops comments. Paste them back.
 1	app/api/endpoints/categories.py	return-value
 1	app/api/endpoints/health.py	no-untyped-def
 6	app/api/endpoints/inventory.py	arg-type
@@ -46,6 +48,7 @@
 1	app/models/shopping_list_item.py	misc
 1	app/models/store_product_alias.py	misc
 1	app/schemas/product_master.py	type-arg
+3	app/services/catalog_estimates.py	assignment
 2	app/services/generic_products.py	assignment
 1	app/services/off_service.py	no-any-return
 8	app/services/receipt_processing.py	arg-type

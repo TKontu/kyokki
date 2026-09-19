@@ -114,6 +114,33 @@ class ProductMasterResponse(ProductMasterBase):
     model_config = {"from_attributes": True}
 
 
+class CatalogEstimateChange(BaseModel):
+    """One product a catalog refresh would change, and what to (Q11)."""
+
+    id: UUID
+    canonical_name: str
+    category: str
+    current_days: int = Field(..., description="The shelf life stored today")
+    proposed_days: int = Field(..., description="What the model says it should be")
+    current_opened: int | None = None
+    proposed_opened: int | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CatalogEstimateResponse(BaseModel):
+    """What a refresh found. `applied` says whether any of it was written."""
+
+    considered: int = Field(
+        ..., description="Products whose shelf life is still a category placeholder"
+    )
+    answered: int = Field(
+        ..., description="Of those, how many the model gave a usable number for"
+    )
+    applied: bool = Field(..., description="False for a dry run, which is the default")
+    changes: list[CatalogEstimateChange]
+
+
 class ProductMergeRequest(BaseModel):
     """Which product the one in the path is folded into."""
 

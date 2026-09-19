@@ -356,14 +356,24 @@ def _no_model_selection():
     real HTTP request, so an ordinary unit test would depend on the homelab being up
     and take seconds. Selection answers nothing unless a test says otherwise, which is
     also the "model unavailable" path the resolver is required to survive.
+
+    The catalog refresh (Q11) is the second such call and gets the same treatment: it
+    answers with nothing, so a test that does not say otherwise proposes no changes.
     """
     from unittest.mock import AsyncMock, patch
 
-    with patch(
-        "app.services.product_resolution.select_products",
-        new_callable=AsyncMock,
-        return_value={},
-    ) as selection:
+    with (
+        patch(
+            "app.services.product_resolution.select_products",
+            new_callable=AsyncMock,
+            return_value={},
+        ) as selection,
+        patch(
+            "app.services.catalog_estimates.estimate_shelf_lives",
+            new_callable=AsyncMock,
+            return_value=[],
+        ),
+    ):
         yield selection
 
 
