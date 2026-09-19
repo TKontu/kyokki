@@ -280,7 +280,16 @@ class MatchingService:
         return candidates
 
     async def _get_all_products(self) -> list[ProductMaster]:
-        result = await self.db.execute(select(ProductMaster))
+        # Ordered, because `process.extract` keeps the first of equally scoring names and
+        # an unordered SELECT returns rows in physical order. "Valio Milk" scores 85.50
+        # against "Valio Whole Milk 1L", "Pirkka Oat Milk 1L" and "Valio Butter 500g"
+        # alike, so without this the winner changed when rows moved - a vacuum, or any
+        # rewrite - and nothing in the output said which of the three it had been.
+        result = await self.db.execute(
+            select(ProductMaster).order_by(
+                ProductMaster.canonical_name, ProductMaster.id
+            )
+        )
         return list(result.scalars().all())
 
     def _calculate_confidence(self, score: float) -> MatchConfidence:

@@ -758,3 +758,68 @@ class TestDeleteProductThatIsInUse:
             assert "Key (" not in detail
             assert "is still referenced" not in detail
             assert "DETAIL" not in detail
+
+
+class TestShelfLifeProvenanceThroughTheAPI:
+    """Q11: the editor is how a cook overrules the catalog, and it has to be recorded.
+
+    `update_product` sets fields with a blind `setattr` loop, so before this the PATCH
+    that fixes mince had no idea it was the cook speaking - and the next receipt would
+    have been free to overwrite the correction.
+    """
+
+    PRODUCT = {
+        "canonical_name": "Ground beef",
+        "category": "meat",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 5,
+        "unit_type": "weight",
+        "default_unit": "g",
+    }
+
+    async def test_a_shelf_life_the_cook_typed_is_marked_as_theirs(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"default_shelf_life_days": 2}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["default_shelf_life_days"] == 2
+        assert response.json()["shelf_life_source"] == "cook"
+
+    async def test_editing_something_else_leaves_the_provenance_alone(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"avg_piece_grams": 125}
+        )
+
+        assert response.json()["shelf_life_source"] == "category"
+
+    async def test_the_caller_cannot_claim_to_be_the_cook(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """Provenance is derived from what the writer did, never asserted in the payload."""
+        product = (
+            await client.post(
+                "/api/products", json={**self.PRODUCT, "shelf_life_source": "cook"}
+            )
+        ).json()
+
+        assert product["shelf_life_source"] == "category"
+
+    async def test_it_is_readable_on_every_product(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """The products screen needs it to say which figures are guesses."""
+        await client.post("/api/products", json=self.PRODUCT)
+
+        listed = (await client.get("/api/products")).json()
+
+        assert listed
+        assert all("shelf_life_source" in product for product in listed)
