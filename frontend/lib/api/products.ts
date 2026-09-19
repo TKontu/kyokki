@@ -1,5 +1,6 @@
 import apiClient from './client'
 import type {
+  CatalogEstimateResponse,
   ProductListParams,
   ProductMaster,
   ProductMasterUpdate,
@@ -26,5 +27,19 @@ export async function update(
   return apiClient.patch<ProductMaster>(`/products/${id}`, data)
 }
 
-const productsAPI = { list, get, update }
+/**
+ * Ask the model what the catalog's guessed shelf lives should be (Q11).
+ *
+ * Only products whose shelf life is still a category placeholder are candidates; a
+ * number the cook set is never sent. `apply` defaults to false, so the first call
+ * proposes and a second one writes.
+ */
+export async function estimate(apply = false): Promise<CatalogEstimateResponse> {
+  return apiClient.post<CatalogEstimateResponse>(
+    `/products/estimate?apply=${apply}`,
+    {}
+  )
+}
+
+const productsAPI = { list, get, update, estimate }
 export default productsAPI

@@ -28,6 +28,9 @@ export const DESTINATIONS: Destination[] = [
     // /receipt/<id> is a receipt opened from this list
     owns: (pathname) => pathname.startsWith('/receipt'),
   },
+  // The catalog (Q11). Until it existed the product editor could only be reached from an
+  // item that happened to be in stock, so most products could not be corrected at all.
+  { href: '/products', label: 'Products', icon: '🏷️' },
 ]
 
 export function isActive(destination: Destination, pathname: string): boolean {

@@ -47,6 +47,7 @@ describe('TypeScript Types', () => {
         opened_shelf_life_days: 3,
     avg_piece_grams: null,
   pack_grams: null,
+  shelf_life_source: 'category',
         unit_type: 'volume',
         default_unit: 'dl',
         default_quantity: 1000,

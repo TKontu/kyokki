@@ -69,3 +69,24 @@ export function useUpdateProduct() {
     },
   })
 }
+
+/**
+ * Ask the model about the catalog's guessed shelf lives (Q11).
+ *
+ * A dry run proposes and changes nothing, so only an applied run invalidates. The
+ * model call takes the better part of a minute for a whole catalog, and retrying it
+ * would double that for no benefit.
+ */
+export function useEstimateCatalog() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (apply: boolean) => productsAPI.estimate(apply),
+    retry: false,
+    onSuccess: (result) => {
+      if (!result.applied) return
+      queryClient.invalidateQueries({ queryKey: productKeys.all })
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+    },
+  })
+}
