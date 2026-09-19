@@ -23,7 +23,7 @@ class InventoryItemBase(BaseModel):
     purchase_date: date | None = Field(None, description="Purchase date")
     expiry_date: date = Field(..., description="Expiry date")
     expiry_source: str = Field(
-        "calculated", description="Expiry source: scanned, calculated, manual"
+        "calculated", description="Expiry source: scanned, calculated, manual, frozen"
     )
     opened_date: date | None = Field(None, description="Date when opened")
     batch_number: str | None = Field(
@@ -92,7 +92,7 @@ class InventoryItemUpdate(BaseModel):
     expiry_date: date | None = Field(
         None, description="Sets expiry_source to manual unless expiry_source is given"
     )
-    expiry_source: Literal["scanned", "calculated", "manual"] | None = None
+    expiry_source: Literal["scanned", "calculated", "manual", "frozen"] | None = None
     opened_date: date | None = None
     location: Literal["main_fridge", "freezer", "pantry"] | None = None
     notes: str | None = None

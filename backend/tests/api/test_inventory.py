@@ -1030,3 +1030,152 @@ class TestItemCorrections:
         response = await client.patch(f"/api/inventory/{item['id']}", json=fields)
 
         assert response.status_code == 422
+
+
+class TestFrozenClock:
+    """Q12/DEC-10: putting something in the freezer restarts its clock on a longer one.
+
+    Mince frozen on the day it was bought used to read expired six days later, because the
+    expiry came from the product's fridge shelf life and moving the item changed nothing.
+    The edit sheet has always allowed the move, so the wrong answer was already reachable.
+    """
+
+    PRODUCT = {
+        "canonical_name": "Ground beef",
+        "category": "meat",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 5,
+        "unit_type": "weight",
+        "default_unit": "g",
+    }
+
+    async def _stock(self, client: AsyncClient, product_id: str, **overrides) -> dict:
+        body = {
+            "product_master_id": product_id,
+            "initial_quantity": 400,
+            "current_quantity": 400,
+            "unit": "g",
+            "purchase_date": "2026-09-01",
+            "expiry_date": "2026-09-06",
+            "expiry_source": "calculated",
+            "location": "main_fridge",
+            **overrides,
+        }
+        response = await client.post("/api/inventory", json=body)
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    async def test_moving_it_to_the_freezer_re_dates_it(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+
+        moved = (
+            await client.patch(
+                f"/api/inventory/{item['id']}", json={"location": "freezer"}
+            )
+        ).json()
+
+        # meat freezes for 180 days, counted from the day it goes in - not from purchase
+        assert moved["expiry_date"] == (date.today() + timedelta(days=180)).isoformat()
+        assert moved["expiry_source"] == "frozen"
+
+    async def test_a_frozen_date_survives_a_shelf_life_correction(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """The half that makes Q12's two PRs compose.
+
+        Without `frozen` as its own source the recompute would treat the item as
+        `calculated` and thaw the clock the next time the catalog learned anything.
+        """
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+        frozen = (
+            await client.patch(
+                f"/api/inventory/{item['id']}", json={"location": "freezer"}
+            )
+        ).json()
+
+        await client.patch(
+            f"/api/products/{product['id']}", json={"default_shelf_life_days": 2}
+        )
+
+        after = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert after["expiry_date"] == frozen["expiry_date"]
+        assert after["expiry_source"] == "frozen"
+
+    async def test_a_date_the_cook_names_in_the_same_edit_wins(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+
+        moved = (
+            await client.patch(
+                f"/api/inventory/{item['id']}",
+                json={"location": "freezer", "expiry_date": "2026-11-01"},
+            )
+        ).json()
+
+        assert moved["expiry_date"] == "2026-11-01"
+        assert moved["expiry_source"] == "manual"
+
+    async def test_a_category_that_does_not_freeze_is_left_alone(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """Nothing useful happens to a frozen bottle of squash."""
+        product = (
+            await client.post(
+                "/api/products",
+                json={
+                    **self.PRODUCT,
+                    "canonical_name": "Orange juice",
+                    "category": "beverages",
+                    "storage_type": "refrigerator",
+                    "unit_type": "volume",
+                    "default_unit": "dl",
+                },
+            )
+        ).json()
+        item = await self._stock(client, product["id"], unit="dl")
+
+        moved = (
+            await client.patch(
+                f"/api/inventory/{item['id']}", json={"location": "freezer"}
+            )
+        ).json()
+
+        assert moved["expiry_date"] == "2026-09-06"
+        assert moved["expiry_source"] == "calculated"
+
+    async def test_moving_it_anywhere_else_changes_no_date(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+
+        moved = (
+            await client.patch(
+                f"/api/inventory/{item['id']}", json={"location": "pantry"}
+            )
+        ).json()
+
+        assert moved["expiry_date"] == "2026-09-06"
+        assert moved["expiry_source"] == "calculated"
+
+    async def test_an_item_already_in_the_freezer_is_not_re_dated_again(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """Otherwise every unrelated edit would quietly extend it."""
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"], location="freezer")
+
+        moved = (
+            await client.patch(
+                f"/api/inventory/{item['id']}",
+                json={"location": "freezer", "current_quantity": 200},
+            )
+        ).json()
+
+        assert moved["expiry_date"] == "2026-09-06"

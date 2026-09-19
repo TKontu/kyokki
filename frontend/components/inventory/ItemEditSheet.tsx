@@ -206,6 +206,17 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           options={locationOptions(item.location)}
           onChange={setLocation}
         />
+        {/* Q12/DEC-10: freezing restarts the clock, and taking it back out deliberately
+            does not - nothing records when it went in, and thawed food keeps for a day
+            or two whatever it was. Say both, because a date that moves on its own is
+            alarming and one that does not move is worse. */}
+        {location === 'freezer' && item.location !== 'freezer' && (
+          <p className="mt-2 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
+            {expiry === item.expiry_date.split('T')[0]
+              ? 'Saving will give this a freezer date. Taking it back out later will not change it back — set the date yourself then.'
+              : 'Your date will be kept, not the freezer one.'}
+          </p>
+        )}
       </div>
     </BottomSheet>
   )

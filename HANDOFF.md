@@ -1,10 +1,10 @@
 # Handoff
-Generated-UTC: 2026-09-19T15:30:00Z
-Base-SHA: fce9023b474649d0f77e7489c45656f265b6190f
+Generated-UTC: 2026-09-19T18:50:54Z
+Base-SHA: 34d4f95c35feff8e3939fe7f7c344289a9761d15
 
 ## Round delta
 
-Six increments merged (#65-#71), from the **acceptance-week friction log**: the first real
+Nine increments merged (#65-#74), from the **acceptance-week friction log**: the first real
 receipt through the rebuilt pipeline, read on the iPad on 2026-09-19. Recorded as **Q7-Q10** in
 `docs/TODO.md`, continuing Q1-Q6.
 
@@ -27,6 +27,16 @@ receipt through the rebuilt pipeline, read on the iPad on 2026-09-19. Recorded a
   placeholder from an answer. `shelf_life_source` separates them; `POST /products/estimate` asks
   the model about the catalog's own names (46 of 46, 52-57 s, mince 5 -> 2 days); and `/products`
   is the first screen from which a product not in stock can be corrected at all.
+- **#73 + #74 Q12 - expiry keeps up.** Q11 changed the catalog's mind but not the food:
+  `build_inventory_item` dates an item once, at confirm, so correcting mince to two days left the
+  mince in the fridge still claiming five. A correction now re-dates the stock it dated - skipping
+  anything you typed yourself, anything already gone, and capping opened items so a longer shelf
+  life cannot undo Q5's shortening. **DEC-10 settled with it:** moving something to the freezer
+  re-dates it from a per-category frozen figure and marks it `frozen`, which is what stops the
+  recompute thawing that clock again.
+- **#72** existed only to fix my own mistake: #71 was opened with `--base` on #70's branch, GitHub
+  did not retarget it in time, and it merged into a dead branch instead of `main`. **Do not stack
+  PRs that way here** - target `main` and say "merge after #N" in the body.
 - **#65** was the previous round's handoff, merged after it had gone stale; this file replaces it.
 
 ## The one finding worth carrying forward
@@ -64,8 +74,12 @@ checks, 12 categories, 42 products, 3 confirmed receipts. That build predates **
 everything in this round**, so a Portainer pull is needed to pick up the product editor (H18),
 Q7's prompt fix, Q8's pack weights and Q9/Q10's read visibility.
 
-**Two migrations have not run on the homelab**, `d1a7f4b62e93` (pack weight) and `f2c91b45d8a7`
-(shelf-life provenance). Both were rehearsed up, down and up again on a scratch database.
+**Three migrations have not run on the homelab**: `d1a7f4b62e93` (pack weight), `f2c91b45d8a7`
+(shelf-life provenance) and `b7e3d5c19f02` (frozen shelf lives). The first two were rehearsed up,
+down and up again on a scratch database; **`b7e3d5c19f02` was not** - local Docker is no longer
+available on this workstation, so its only exercise is CI, which runs `alembic check` and the
+whole suite against a real Postgres. It adds one nullable column and fills eight of the twelve
+seeded categories.
 `f2c91b45d8a7` backfills by comparing each product against its category, which is a heuristic in
 one direction only: a model estimate that happens to equal its category's figure reads as a
 placeholder and becomes overwritable. No correction is ever mislabelled.
@@ -85,10 +99,15 @@ placeholder and becomes overwritable. No correction is ever mislabelled.
   the placeholders (46 of 46 answered, 52-57 s), and `/products` can reach every product rather
   than only the ones in stock. **Still open, and narrower:** whether a model estimate should
   replace an earlier model estimate. No named product needs it.
-- **Correcting a product does not move stock already added**, and should not: `build_inventory_item`
-  freezes `expiry_date` at confirm. The 13 expired items from the June receipt are genuinely three
-  months old - discard them rather than expecting them to heal. Recomputing matters only when a
-  correction lands within days of a confirm; its own increment.
+- **Correcting a product now moves the stock it dated (Q12, #73)** - but only stock whose date
+  the system worked out. Anything you typed is `manual`, anything frozen is `frozen`, and neither
+  is touched. The 13 expired items from the June receipt still do not heal and should not: they
+  were dated from a June purchase, so the recompute gives the same answer. That food really is
+  three months old.
+- **`with_for_update` exists in exactly three places**, and none of them is consume. Q12's
+  recompute locks its own rows, `receipt_confirm` and `receipt_queue` lock a receipt - but
+  `consume_inventory_item` still reads, computes and writes with no lock, so two taps can lose an
+  update. That is **H23**, still open, and Q12 made it easier to reach rather than harder.
 - **CI does not re-check a PR title that was edited**... it does now (#67). The workflow listened
   only for `opened/synchronize/reopened`, and re-running the job replays the stale payload, so a
   retitle could not fix a failing title check without an unrelated commit. `edited` was added.
@@ -96,15 +115,26 @@ placeholder and becomes overwritable. No correction is ever mislabelled.
 - **CI tests the PR merged into main, not your branch.** #68 branched before #67 and the two
   touched the same test fixture; the merge happened to be clean, verified on `ae9275b` after the
   fact (854 backend, 556 frontend, tsc clean). It could as easily not have been.
-- The mypy baseline is **148**, unchanged this round.
+- The mypy baseline is **153**. It grew twice in Q11 (untyped legacy `Column[...]` assignments,
+  reason written into the file) and came **down** by one in Q12, when folding the scanner's
+  duplicate expiry formula into `sealed_expiry` deleted an error with it. Note `--update`
+  regenerates the file and drops its comments; there is a line in it saying so.
+- **No Docker on this workstation.** DB-backed tests, migration rehearsals and `alembic check`
+  run in CI, not locally. What runs locally is `pytest -m "not requires_db and not
+  requires_mineru and not requires_vllm and not requires_ollama"` (406 tests, and it still needs
+  `POSTGRES_*`/`REDIS_HOST` set to *something* because `Settings` requires them), plus ruff,
+  the mypy baseline, and the whole frontend suite.
 
 ## Next action
 
 **Redeploy, then read a second real receipt.** The first one produced this whole round, and every
 fix in it is unproven on real data:
 
-1. Portainer pull (the running build predates #64), then
-   `docker compose -f docker-compose.prod.yml run --rm kyokki-api alembic upgrade head`.
+1. Portainer pull (the running build predates #64): the stack → **Pull and redeploy**, with
+   *re-pull image* ticked. **That is the whole of it.** `kyokki-migrate` runs `alembic upgrade
+   head` and seeds the categories before the other services start
+   (`docker-compose.prod.yml:55-61`), so the separate `alembic upgrade head` this file used to
+   tell you to run was never needed - that instruction was wrong and is now gone.
 2. **Open `/products` and run "Estimate the guesses".** It proposes and writes nothing until a
    second tap. Expect the six meat products to stop reading 5 days apiece, and `Rye crispbread`
    to become 720. This is the one step that repairs the catalog the first four receipts built.
@@ -113,6 +143,8 @@ fix in it is unproven on real data:
    arriving as **grams** if the catalog has learned its pack weight, or as `1 pcs` with one
    correction available in the product editor if it has not.
 4. The stale-receipt warning should **not** appear on a receipt from this week.
+5. Put something in the freezer from an item's edit sheet. Its date should jump to the frozen
+   figure for its category and **stay there** through the next estimate (Q12, DEC-10).
 
 Then **MVP-P3, the acceptance week** (`docs/TODO.md`): five real Finnish receipts end to end from
 the iPad, each under two minutes, with a friction log. Two of the five are now done and they
