@@ -5,7 +5,7 @@ per brand, size or cut. A requested name reuses an existing product case-insensi
 product takes its shelf life and storage from its category.
 """
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from typing import cast
 from uuid import UUID
@@ -16,6 +16,7 @@ from app.crud.category import get_category
 from app.models.category import Category
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
+from app.services.expiry_recompute import sealed_expiry
 from app.services.product_names import (
     learn_product_name,
     normalize_product_name,
@@ -233,7 +234,7 @@ def build_inventory_item(
     if expiry_date is not None:
         expiry, source = expiry_date, "manual"
     else:
-        expiry = purchase_date + timedelta(days=int(product.default_shelf_life_days))
+        expiry = sealed_expiry(product, purchase_date)
         source = "calculated"
     return InventoryItem(
         product_master_id=product.id,

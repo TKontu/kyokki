@@ -138,6 +138,9 @@ class CatalogEstimateResponse(BaseModel):
         ..., description="Of those, how many the model gave a usable number for"
     )
     applied: bool = Field(..., description="False for a dry run, which is the default")
+    items_redated: int = Field(
+        0, description="Stock whose expiry moved with the new shelf lives (Q12)"
+    )
     changes: list[CatalogEstimateChange]
 
 

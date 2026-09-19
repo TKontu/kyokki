@@ -20,7 +20,7 @@ re-running the 49-line fixture unchanged.
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
@@ -29,7 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.crud.product_master import get_products
+from app.crud.product_master import MovedInventoryItem, get_products
+from app.services.expiry_recompute import recompute_expiry_for_product
 from app.services.llm_extractor import LLMExtractionError, extract_json_object
 
 logger = get_logger(__name__)
@@ -251,6 +252,8 @@ class CatalogRefresh:
     answered: int
     changes: list[ProposedChange]
     applied: bool
+    # The stock whose expiry moved with the shelf lives, for the caller to broadcast (Q12).
+    moved: list[MovedInventoryItem] = field(default_factory=list)
 
 
 async def refresh_catalog_shelf_lives(
@@ -321,12 +324,16 @@ async def refresh_catalog_shelf_lives(
             )
         )
 
+    moved: list[MovedInventoryItem] = []
     if apply:
         for change in changes:
             product = by_id[str(change.id)]
             product.default_shelf_life_days = change.proposed_days
             product.shelf_life_source = "model"
             product.opened_shelf_life_days = change.proposed_opened
+            # The stock dated by the old figure moves with it, in the same transaction so a
+            # refresh is still all-or-nothing (Q12).
+            moved.extend(await recompute_expiry_for_product(db, product))
         await db.commit()
 
     logger.info(
@@ -336,6 +343,7 @@ async def refresh_catalog_shelf_lives(
             "answered": len(estimates),
             "changes": len(changes),
             "applied": apply,
+            "items_redated": len(moved),
         },
     )
     return CatalogRefresh(
@@ -343,4 +351,5 @@ async def refresh_catalog_shelf_lives(
         answered=len(estimates),
         changes=changes,
         applied=apply,
+        moved=moved,
     )

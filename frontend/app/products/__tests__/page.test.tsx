@@ -73,7 +73,13 @@ function renderPage(products: ProductMaster[], estimate?: CatalogEstimateRespons
     http.post(`${API_URL}/products/estimate`, ({ request }) => {
       calls.push(new URL(request.url).searchParams.get('apply') ?? 'false')
       return HttpResponse.json(
-        estimate ?? { considered: 0, answered: 0, applied: false, changes: [] }
+        estimate ?? {
+          considered: 0,
+          answered: 0,
+          applied: false,
+          items_redated: 0,
+          changes: [],
+        }
       )
     })
   )
@@ -144,6 +150,7 @@ describe('ProductsPage', () => {
       considered: 1,
       answered: 1,
       applied: false,
+      items_redated: 0,
       changes: [
         {
           id: 'p-mince',
@@ -168,11 +175,38 @@ describe('ProductsPage', () => {
     await waitFor(() => expect(calls).toEqual(['false', 'true']))
   })
 
+  it('says what happened to the food, not just to the catalog (Q12)', async () => {
+    // A corrected shelf life re-dates the stock that was dated by the old one. Saying
+    // only "saved 1 shelf life" would hide the half the cook actually cares about.
+    renderPage([product()], {
+      considered: 1,
+      answered: 1,
+      applied: true,
+      items_redated: 3,
+      changes: [
+        {
+          id: 'p-mince',
+          canonical_name: 'Ground beef',
+          category: 'meat',
+          current_days: 5,
+          proposed_days: 2,
+          current_opened: null,
+          proposed_opened: null,
+        },
+      ],
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: /Estimate the guesses/ }))
+
+    expect(await screen.findByText(/Saved 1 shelf lives, 3 items re-dated/)).toBeInTheDocument()
+  })
+
   it('a proposal can be discarded without writing anything', async () => {
     const calls = renderPage([product()], {
       considered: 1,
       answered: 1,
       applied: false,
+      items_redated: 0,
       changes: [
         {
           id: 'p-mince',
@@ -196,7 +230,7 @@ describe('ProductsPage', () => {
   })
 
   it('says so when the model agreed with everything already stored', async () => {
-    renderPage([product()], { considered: 1, answered: 1, applied: false, changes: [] })
+    renderPage([product()], { considered: 1, answered: 1, applied: false, items_redated: 0, changes: [] })
 
     fireEvent.click(await screen.findByRole('button', { name: /Estimate the guesses/ }))
 

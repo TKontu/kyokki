@@ -86,5 +86,7 @@ export interface CatalogEstimateResponse {
   considered: number
   answered: number
   applied: boolean
+  // Stock whose expiry moved with the new shelf lives (Q12). Zero on a dry run.
+  items_redated: number
   changes: CatalogEstimateChange[]
 }

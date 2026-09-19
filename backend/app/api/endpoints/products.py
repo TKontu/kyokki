@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import handle_integrity_errors, reference_conflict_detail
 from app.crud import product_master as crud_product
+from app.crud.product_master import MovedInventoryItem
 from app.db.session import get_db
 from app.schemas.product_master import (
     CatalogEstimateChange,
@@ -20,6 +21,7 @@ from app.schemas.product_master import (
 )
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.catalog_estimates import refresh_catalog_shelf_lives
+from app.services.expiry_recompute import recompute_expiry_for_product
 from app.services.llm_extractor import LLMExtractionError
 from app.services.off_service import (
     OffApiError,
@@ -90,7 +92,11 @@ async def update_product(
     product_update: ProductMasterUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> ProductMasterResponse:
-    """Update a product."""
+    """Update a product.
+
+    Correcting a shelf life moves the stock that was dated by the old one (Q12): a date
+    the cook typed is left alone, and so is anything already gone from the kitchen.
+    """
     async with handle_integrity_errors():
         product = await crud_product.update_product(db, product_id, product_update)
     if not product:
@@ -98,6 +104,12 @@ async def update_product(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with ID '{product_id}' not found",
         )
+
+    if "default_shelf_life_days" in product_update.model_dump(exclude_unset=True):
+        moved = await recompute_expiry_for_product(db, product)
+        await db.commit()
+        await _announce(moved, str(product.canonical_name))
+
     return product
 
 
@@ -122,6 +134,18 @@ async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with ID '{product_id}' not found",
+        )
+
+
+async def _announce(items: list[MovedInventoryItem], product_name: str) -> None:
+    """Tell every open iPad that these items now expire on a different day (Q12)."""
+    for item in items:
+        await broadcast_inventory_update(
+            inventory_item_id=item.id,
+            action="updated",
+            current_quantity=item.current_quantity,
+            status=item.status,
+            product_name=product_name,
         )
 
 
@@ -156,10 +180,20 @@ async def estimate_catalog_shelf_lives(
             detail=f"Could not estimate shelf lives: {exc}",
         ) from exc
 
+    # Applying changes what every iPad shows, so say so (CLAUDE.md's broadcast rule).
+    for item in result.moved:
+        await broadcast_inventory_update(
+            inventory_item_id=item.id,
+            action="updated",
+            current_quantity=item.current_quantity,
+            status=item.status,
+        )
+
     return CatalogEstimateResponse(
         considered=result.considered,
         answered=result.answered,
         applied=result.applied,
+        items_redated=len(result.moved),
         changes=[
             CatalogEstimateChange.model_validate(change, from_attributes=True)
             for change in result.changes
