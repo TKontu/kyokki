@@ -1180,6 +1180,14 @@ resets its clock rather than leaving the cook to type a date.
   describes. Locking its own query bounds the new writer, but `consume_inventory_item` still reads,
   computes and writes with no lock, so two taps on Consume can still lose an update.
 
+##### One test asserted the behaviour DEC-10 reverses
+`test_location_change_keeps_expiry_source` moved an item to the **freezer** and asserted the
+expiry source stayed `calculated`. The Q12 plan had named it as a guard that *"must keep passing
+untouched"*; it was the one test whose scenario the decision was about, and CI caught it - 1
+failed of 916. Its intent survives (moving something does not rewrite how its date was arrived
+at), so it moves to the pantry, and the freezer keeps its own tests, including that every other
+location still changes nothing.
+
 ##### The frozen figures are seeded, not estimated
 Unlike Q11's shelf lives, no model was asked. They are conservative household numbers about
 *quality* rather than food-safety limits, because quality is what a cook actually notices. Twelve

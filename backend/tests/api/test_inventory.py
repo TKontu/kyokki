@@ -1008,11 +1008,19 @@ class TestItemCorrections:
     async def test_location_change_keeps_expiry_source(
         self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
     ) -> None:
+        """Moving something does not rewrite how its date was arrived at.
+
+        This used to move the item to the **freezer**, which is now the one exception:
+        DEC-10 was settled on 2026-09-19 and freezing re-dates the item and marks it
+        `frozen` (Q12). The assertion was pinning the behaviour that decision reversed,
+        so the move is to the pantry now and the freezer has its own tests in
+        `TestFrozenClock` - including that every *other* location still changes nothing.
+        """
         item = await _create_item(client, test_product["id"])
 
-        body = await self._patch(client, item["id"], location="freezer")
+        body = await self._patch(client, item["id"], location="pantry")
 
-        assert (body["location"], body["expiry_source"]) == ("freezer", "calculated")
+        assert (body["location"], body["expiry_source"]) == ("pantry", "calculated")
 
     @pytest.mark.parametrize(
         "fields",
