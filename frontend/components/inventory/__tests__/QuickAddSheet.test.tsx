@@ -54,6 +54,7 @@ const MILK: ProductMaster = {
   opened_shelf_life_days: null,
     avg_piece_grams: null,
   pack_grams: null,
+  shelf_life_source: 'category',
   unit_type: 'volume',
   default_unit: 'dl',
   default_quantity: 10,

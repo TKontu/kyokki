@@ -1063,6 +1063,72 @@ categories, because per-product shelf life is the real lever; all four ship.
   which loses a day across a spring clock change (23 days measure as 22.958 and floor to 22). In
   CI's UTC neither direction shows, which is why the test asserts both.
 
+#### Operator friction log — Q7's fix was inert on the catalog it was written for (2026-09-19)
+
+Recorded as **Q11**, continuing Q1-Q10. Not a new report from the iPad: it came out of measuring
+the live catalog after Q7 shipped, and it is Q7's unfinished half the way Q7 was Q6's and Q8 was
+Q3's other direction.
+
+```
+products                      50        meat, all six           5 d
+carrying the category blanket 46        Rye crispbread          5 d
+with a value of their own      4          (the model said 720, on a receipt
+                                           still in the database)
+```
+
+- **Q11 — a product keeps whatever was known the first time it was ever seen.** `_fill_gaps`
+  fills piece weight, opened shelf life and pack weight, and has **no shelf-life branch at all**;
+  `shelf_life_days` is used once, in the constructor. So the model's 720 for `Rye crispbread` was
+  handed over on a later receipt and thrown away without so much as a gap to fill. Three of the
+  four stored receipts carry zero estimates - they were read before `pw`/`sl` existed - which is
+  how 46 products were born with a category constant and stayed there.
+- **The column could not do better.** `default_shelf_life_days` is NOT NULL, so creation has to
+  invent a number and `5` cannot be told from `5 because the meat category says so`. Every other
+  learned field says "I do not know" with NULL, which is exactly why every other learned field
+  already improves over time.
+
+**Operator decisions, 2026-09-19:** fix the catalog before running more of the acceptance week,
+because a catalog that is 92 % blanket figures produces the same wrong expiry dates on every
+remaining receipt; and repair the existing 46 by **asking the model about the catalog itself**
+rather than seeding a table - still the model, which is what the 2026-09-17 ruling was protecting.
+
+##### Q11 as built (PRs #70, #71)
+- [x] **`product_master.shelf_life_source`** (migration `f2c91b45d8a7`, `category | model | cook`),
+  following `inventory_item.expiry_source`. A `category` placeholder may be replaced by an
+  estimate; the cook's own number never is. Four write paths set it, including
+  `crud.update_product`'s blind `setattr` loop, which had no idea the editor's PATCH was the cook.
+- [x] **One estimate does not replace another**, deliberately. That is the genuine version of Q2's
+  *"do not undo a correction every week"*, and every named product is a `category` row.
+- [x] **`POST /products/estimate`** asks about names rather than receipt lines, through a separate
+  prompt in `services/catalog_estimates.py`. **46 of 46 answered on all four runs, 52-57 s for the
+  whole catalog** - cheaper than one receipt read. Mince 2 days, chicken fillet 3, ham 10, sausage
+  14, bacon 21, and `Rye crispbread` **720**, which is the number the model already gave it in June.
+- [x] **A dry run is the default** and a plausibility band per category drops a confidently absurd
+  answer. The answers do move between runs (31 of 46 identical, 15 different but all inside a
+  sensible band), so the choice is shown before it is written - and applying freezes it as `model`,
+  which a later refresh never reconsiders. One-time, not weekly churn.
+- [x] **A products screen.** Until #71 `ProductEditSheet` was rendered from exactly one place, an
+  inventory item's edit sheet, so a product not currently in stock could not be opened at all -
+  **35 of the 50**. *"Fixed by hand in the product editor"*, written in `HANDOFF.md` and in Q7's
+  section above, had not been true since H18 shipped. Each row says whether its shelf life is a
+  guess, which is the one number on that screen a cook can act on.
+- [ ] **Not fixed, and correct not to be:** the 13 already-expired items in stock do not heal.
+  `build_inventory_item` freezes `expiry_date` at confirm, and the June mince is genuinely three
+  months old - recomputing it would make the display lie about real food. Discard it. Recomputing
+  **does** matter the day a cook corrects a shelf life an hour after confirming; bounded and safe
+  when it comes (only `expiry_source='calculated'` rows still `sealed`), and it is its own
+  increment.
+- [ ] Still open from Q7, and now narrower: whether a **model** estimate should replace an earlier
+  model estimate. No named product needs it.
+
+##### The measurement rule, third time of asking
+Re-running the **unchanged** 49-line fixture as a control, with `llm_extractor.py` byte-identical
+to `main`, gave **18**, then **39**, then **39** shelf lives. Runs 2 and 3 match Q7's baseline; run
+1 is the model having an off day. A one-run measurement showing 18 would have looked exactly like
+a prompt regression. **A single run cannot tell a regression from noise in either direction** -
+and this is the third time this month that has mattered.
+
+
 ---
 
 ## Phase 1: MVP
@@ -1205,6 +1271,8 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Decisions: [ ] DEC-5 access  [ ] DEC-6 Next.js  [ ] DEC-7 scanner  [ ] DEC-8 retention  [ ] DEC-9 categories  [ ] DEC-10 freezer expiry
 - Wave 6: [ ] P3 acceptance (with H0)
 - Hardening H1 resolution: [x] H11 (PR #57)  [x] H12 (#58)  [x] H13 (#59)  [x] H14 (#60)  [x] H15 (#62)  [x] H16 (#61)  [x] H17 (#63)  [x] H18 (#64) — wave H1 complete
+- Friction Q7-Q10: [x] Q7 (PR #66)  [x] Q8 (#67)  [x] Q9+Q10 (#68) - the first real receipt
+- Friction Q11: [x] shelf-life provenance + catalog estimates (#70)  [x] products screen (#71)
 - Hardening H2-H4: after P3, before the agent track
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
