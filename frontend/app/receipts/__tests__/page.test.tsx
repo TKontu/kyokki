@@ -54,6 +54,39 @@ describe('ReceiptsPage', () => {
     expect(link).toHaveAttribute('href', '/receipt/r1')
     expect(within(link).getByText(/2\.9\.2026/)).toBeInTheDocument()
     expect(within(link).getByText('41 items, 3 already known')).toBeInTheDocument()
+    expect(within(link).getByText('read by the model')).toBeInTheDocument()
+  })
+
+  it('says which receipt the model never read (Q9)', async () => {
+    // A heuristic read reports `completed` with no categories and no estimates. Before
+    // this you had to open all five receipts to find the one that was read badly.
+    renderPage([
+      summary({ id: 'r-good', extraction_method: 'text' }),
+      summary({ id: 'r-bad', extraction_method: 'heuristic' }),
+    ])
+
+    expect(await screen.findByText('read without the model')).toBeInTheDocument()
+    expect(screen.getByText('read by the model')).toBeInTheDocument()
+  })
+
+  it('claims nothing about a receipt that has not been read yet', async () => {
+    renderPage([
+      summary({ processing_status: 'queued', extraction_method: null, items_extracted: 0 }),
+    ])
+
+    await screen.findByRole('link', { name: /S-group/ })
+    expect(screen.queryByText(/read (by|without) the model/)).not.toBeInTheDocument()
+  })
+
+  it('does not claim a failed receipt was read', async () => {
+    // `extraction_method` can be stale on a receipt whose latest read failed; the error
+    // is the honest line there.
+    renderPage([
+      summary({ processing_status: 'failed', error: 'OCR timed out', extraction_method: 'text' }),
+    ])
+
+    expect(await screen.findByText('OCR timed out')).toBeInTheDocument()
+    expect(screen.queryByText('read by the model')).not.toBeInTheDocument()
   })
 
   it.each([

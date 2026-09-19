@@ -988,6 +988,81 @@ The knowledge comes from the model at extraction time (operator ruling), not a s
 - [ ] Also seen: the model gives no piece weight to mango or pomegranate, so those stay in grams.
   Arguable either way; the prompt's examples are apple, banana, onion and tomato.
 
+#### Operator friction log — the first real receipt through the rebuilt pipeline (2026-09-19)
+
+Fifteen lines, S-market, read on the iPad. Four things came back, recorded as **Q7-Q10** in the
+convention of Q1-Q6 above. Two were real defects, one turned out not to be a bug, and one is the
+warning that was missing around it.
+
+- **Q7 — The model declined to estimate shelf life for meat.** Salami, ham, chicken fillet and
+  mince all fell back to the `meat` category's blanket 5 days: far too long for mince and far too
+  short for salami. **This is Q6's unfinished half** - per-product shelf life shipped in #48 and
+  overrides the category, so the mechanism was there and simply never fired for meat.
+- **Q8 — Everything is counted in packs.** `SIKA-NAUTAJAUHELIHA 23%` entered stock as `1 pcs`
+  rather than 400 g. **This is Q3's other direction** - #48 taught the system that a known piece
+  weight makes a product counted; nothing made a known pack weight make it measured. Operator's
+  framing, which is the requirement: *"the receipt does not explicitly state the weight, so that
+  needs to be a property which the system learns by name and remembers."*
+- **Q9 — A bad read is invisible.** `extraction_method` appeared in exactly one place, the review
+  screen, and only when the value was `heuristic`. Not on the receipts list, gone after
+  confirming, and silent on success - so "the model read it" and "nobody looked" were the same
+  blank space.
+- **Q10 — Not a bug: expiry is counted from the receipt.** Every item arrived expired because the
+  receipt was from 9 June and `build_inventory_item` computes `purchase_date + shelf life` with
+  `expiry_source: "calculated"`. That is correct and worth keeping. What was missing is any
+  warning that a stale receipt will land a shelf of expired food.
+
+**Operator decisions, 2026-09-19:** pack weights apply to weight-y products only (mince and pasta
+become grams; apples and eggs stay countable); the meat fix is prompt work rather than new
+categories, because per-product shelf life is the real lever; all four ship.
+
+##### Q7 as built (PR #66) — the catalog block was silencing the estimates
+- [x] **The plan's diagnosis was wrong and the measurement said so.** The prompt did not lack meat
+  examples: with an empty catalog the model estimates meat perfectly well. The cause was the
+  known-products clause - *"set pw, sl and os to null for it, the system already knows those"* -
+  which the model applied to the **whole receipt** rather than to the listed products.
+- [x] Removing the clause is better on both axes: shelf lives go from 4-12 of 49 back to 37-39,
+  and extraction is ~20 % faster (≈88 s to ≈70 s). Numbers in `docs/vLLM_MANUAL_TEST.md`.
+- [x] **No meat examples were added.** The fixture shows they are not needed, and an unmeasured
+  change to a measured artefact is how this started.
+- [ ] **Only helps new products.** `_fill_gaps` never overwrites a stored shelf life (Q2's "do not
+  undo a correction every week"), so `Ground beef`, `Ham`, `Sausage` and `Chicken fillet` already
+  at 5 days on the homelab are fixed by hand in the product editor (H18). **Whether a later,
+  better estimate should correct a stored one is a real open question** - `Rye crispbread` sits at
+  5 days while the model said 720 - and belongs in its own increment.
+
+##### Q8 as built (PR #67) — a pack has a weight
+- [x] **`product_master.pack_grams`** (migration `d1a7f4b62e93`, nullable) is the remembered
+  property. `pieces_to_grams` mirrors `grams_to_pieces`; `quantity_for_product` now converts both
+  ways, so one pack of mince is stored as 400 g and the review row shows `1 pcs → 400 g`.
+- [x] **A piece weight wins.** `SIPULI 500G` is a 500 g bag and onions are still counted.
+- [x] **The model was measured out of the design.** The plan's first source was a `pk` contract
+  field with a ~90 s cost gate. It passed on time (70.9, 76.3 s) and failed on quality: answered
+  on **1 line of 49**, and the fourth estimate per line dropped shelf lives from 39 to 26 and then
+  4 - the same collapse Q7 had just repaired. Reverted; measurement in `docs/vLLM_MANUAL_TEST.md`.
+- [x] Three sources instead: a `G`/`KG` size printed in the name (8 of the 49 fixture lines, free),
+  the catalog once confirm has written one, and the cook in the product editor's *One pack* field.
+  Mince prints no weight at all, so it costs one correction and is then right for every later
+  receipt from any shop.
+- [x] **Learning a pack weight does not re-unit a product that is already counted.** `_fill_gaps`
+  fills what is unknown; changing the unit is the editor's job. Pinned by a test.
+- [ ] **Standing rule this round confirms twice over:** measure a contract change on the 49-line
+  fixture before keeping it, and count the *other* estimates too, not just the new field's. Both
+  times a field was added on reasoning alone, the damage showed up elsewhere in the response.
+
+##### Q9 + Q10 as built (PR #68) — a bad read is visible, and a stale receipt says so
+- [x] `readMethod` in `lib/receipts.ts` turns `extraction_method` into one phrase, and **every**
+  receipt now says which it was: on the receipts list row, on the review header, and on the
+  confirmed screen, which is where you come back when the stock looks wrong. A read without the
+  model is coloured as the warning it is.
+- [x] Nothing on the backend changed: `ReceiptSummary` already carried `extraction_method`.
+- [x] **Q10's warning is keyed on the receipt date, not on per-item expiry.** The client does not
+  know a matched product's stored shelf life, only the model's guess for the line, so a per-item
+  prediction would be wrong exactly when it mattered. Older than a fortnight says so.
+- [x] `receiptAgeDays` compares calendar dates in UTC rather than subtracting wall-clock times,
+  which loses a day across a spring clock change (23 days measure as 22.958 and floor to 22). In
+  CI's UTC neither direction shows, which is why the test asserts both.
+
 ---
 
 ## Phase 1: MVP

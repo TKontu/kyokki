@@ -11,7 +11,7 @@ import Link from 'next/link'
 import { ReceiptStatusChip } from '@/components/receipts'
 import { SkeletonCard } from '@/components/ui/Skeleton'
 import { useReceiptList } from '@/hooks/useReceipts'
-import { receiptDate, storeName } from '@/lib/receipts'
+import { readMethod, receiptDate, storeName } from '@/lib/receipts'
 import type { ReceiptSummary } from '@/types/receipt'
 
 /** Enough history to find anything; the pantry does not need last year's receipts. */
@@ -22,6 +22,29 @@ function itemSummary(receipt: ReceiptSummary): string {
   if (!receipt.items_extracted) return 'No items read yet'
   const items = `${receipt.items_extracted} ${receipt.items_extracted === 1 ? 'item' : 'items'}`
   return `${items}, ${receipt.items_matched} already known`
+}
+
+/**
+ * How the receipt was read belongs here, not only on the review screen (Q9): you cannot tell
+ * which of five receipts was read badly without opening each one. A read without the model
+ * is worth noticing, so it is coloured like the warning it is; a good read is a quiet aside.
+ */
+function ReadMethodNote({ receipt }: { receipt: ReceiptSummary }) {
+  const method = receipt.processing_status === 'failed' ? null : readMethod(receipt)
+  if (!method) return null
+
+  return (
+    <span
+      className={
+        'block truncate text-sm ' +
+        (method.ok
+          ? 'text-ui-text-tertiary dark:text-ui-dark-text-tertiary'
+          : 'text-yellow-700 dark:text-yellow-400')
+      }
+    >
+      {method.label}
+    </span>
+  )
 }
 
 function ReceiptRow({ receipt }: { receipt: ReceiptSummary }) {
@@ -42,6 +65,7 @@ function ReceiptRow({ receipt }: { receipt: ReceiptSummary }) {
           <span className="block truncate text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
             {itemSummary(receipt)}
           </span>
+          <ReadMethodNote receipt={receipt} />
         </span>
         <ReceiptStatusChip status={receipt.processing_status} />
       </Link>
