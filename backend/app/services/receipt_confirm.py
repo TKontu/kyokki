@@ -125,6 +125,7 @@ class _Confirmation:
                 quantity=item.quantity,
                 # What the model worked out about this product while reading the receipt
                 piece_grams=line.get("piece_grams"),
+                pack_grams=line.get("pack_grams"),
                 shelf_life_days=line.get("shelf_life_days"),
                 opened_shelf_life_days=line.get("opened_shelf_life_days"),
             )

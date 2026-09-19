@@ -2,7 +2,10 @@ name: PR Quality Checks
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # `edited` matters: without it a PR retitled to fix this very check never runs it
+    # again, and re-running the job replays the old payload, so the only way through
+    # was a dummy commit.
+    types: [opened, synchronize, reopened, edited]
 
 jobs:
   pr-title-check:

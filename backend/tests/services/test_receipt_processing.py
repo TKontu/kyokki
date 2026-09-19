@@ -830,6 +830,84 @@ class TestPieceWeightOnStoredLines:
         assert line["piece_grams"] == 125
 
 
+class TestPackWeightOnStoredLines:
+    """Q8: what one pack weighs, from the catalog or from the printed name.
+
+    Never from the model. Offered a `pk` contract field it answered on 1 line of 49 and
+    dragged `sl` and `os` down with it (docs/vLLM_MANUAL_TEST.md), so the two sources
+    here are the only ones - plus the cook, in the product editor.
+    """
+
+    async def test_a_matched_products_pack_weight_wins(
+        self, service, pdf_receipt, sample_category, sample_product, db_session
+    ):
+        # The catalog already knows a pack of this is 500 g
+        sample_product.pack_grams = Decimal("500")
+        await db_session.commit()
+
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(name="Valio Whole Milk 1L", quantity=1, category="dairy")
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["pack_grams"] == 500.0
+
+    async def test_an_unmatched_line_takes_the_size_the_shop_printed(
+        self, service, pdf_receipt, sample_category
+    ):
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(
+                    name="SIKA-NAUTAJAUHELIHA 400G",
+                    generic_name="Ground beef",
+                    quantity=1,
+                    category="dairy",
+                )
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["pack_grams"] == 400.0
+
+    async def test_a_line_with_no_printed_size_stores_none(
+        self, service, pdf_receipt, sample_category
+    ):
+        """Mince usually prints no weight at all - that is the whole of Q8's problem."""
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(
+                    name="SIKA-NAUTAJAUHELIHA 23%",
+                    generic_name="Ground beef",
+                    quantity=1,
+                    category="dairy",
+                )
+            ]
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+            patch(VISION, new_callable=AsyncMock),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert "pack_grams" not in line
+
+
 class TestNonFoodLines:
     """Q1: household lines should stop being offered as food."""
 

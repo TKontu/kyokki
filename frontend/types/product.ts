@@ -16,6 +16,7 @@ export interface ProductMaster {
   default_shelf_life_days: number // > 0
   opened_shelf_life_days: number | null // > 0 or null
   avg_piece_grams: number | null // Roughly what one piece weighs, when counted (Q2)
+  pack_grams: number | null // Roughly what one pack weighs, when measured (Q8)
   unit_type: UnitType
   default_unit: Unit
   default_quantity: number | null // > 0 or null
@@ -34,6 +35,7 @@ export interface ProductMasterCreate {
   default_shelf_life_days: number // > 0
   opened_shelf_life_days?: number | null // > 0
   avg_piece_grams?: number | null // > 0
+  pack_grams?: number | null // > 0
   unit_type: UnitType
   default_unit: Unit
   default_quantity?: number | null // > 0
@@ -49,6 +51,7 @@ export interface ProductMasterUpdate {
   default_shelf_life_days?: number // > 0
   opened_shelf_life_days?: number | null // > 0
   avg_piece_grams?: number | null // > 0
+  pack_grams?: number | null // > 0
   // unit_type is derived server-side from default_unit; never send it.
   unit_type?: UnitType
   default_unit?: Unit

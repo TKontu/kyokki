@@ -603,6 +603,7 @@ class TestReceiptItems:
             "verified": True,
             "suggested_category": "dairy",
             "piece_grams": None,
+            "pack_grams": None,
             "shelf_life_days": None,
             "opened_shelf_life_days": None,
             "non_food": False,
@@ -808,3 +809,69 @@ class TestWeighedProduceBecomesPieces:
         (mince,) = body["items"]
         assert (mince["quantity"], mince["unit"]) == (400.0, "g")
         assert mince["printed_quantity"] is None
+
+    async def test_a_counted_pack_with_a_pack_weight_is_offered_in_grams(
+        self, client: AsyncClient, test_db: AsyncSession, session_factory
+    ) -> None:
+        """Q8, the mirror of the apples: the shop counted, the cook measures."""
+        body = await self._receipt(
+            client,
+            session_factory,
+            [
+                ExtractedLine(
+                    name="SIKA-NAUTAJAUHELIHA 400G",
+                    generic_name="Ground beef",
+                    quantity=1,
+                    category="meat",
+                )
+            ],
+        )
+
+        (mince,) = body["items"]
+        assert (mince["quantity"], mince["unit"]) == (400.0, "g")
+        # the review row can still show what the receipt said: 1 pcs -> 400 g
+        assert (mince["printed_quantity"], mince["printed_unit"]) == (1.0, "pcs")
+        assert mince["pack_grams"] == 400.0
+
+    async def test_a_piece_weight_beats_a_pack_weight(
+        self, client: AsyncClient, test_db: AsyncSession, session_factory
+    ) -> None:
+        """`SIPULI 500G` is a 500 g bag, and onions are still counted."""
+        body = await self._receipt(
+            client,
+            session_factory,
+            [
+                ExtractedLine(
+                    name="SIPULI 500G",
+                    generic_name="Onion",
+                    quantity=2,
+                    category="produce",
+                    piece_grams=110,
+                )
+            ],
+        )
+
+        (onion,) = body["items"]
+        assert (onion["quantity"], onion["unit"]) == (2.0, "pcs")
+        assert onion["printed_quantity"] is None
+        assert onion["pack_grams"] == 500.0
+
+    async def test_without_a_pack_weight_a_counted_line_stays_counted(
+        self, client: AsyncClient, test_db: AsyncSession, session_factory
+    ) -> None:
+        body = await self._receipt(
+            client,
+            session_factory,
+            [
+                ExtractedLine(
+                    name="SIKA-NAUTAJAUHELIHA 23%",
+                    generic_name="Ground beef",
+                    quantity=1,
+                    category="meat",
+                )
+            ],
+        )
+
+        (mince,) = body["items"]
+        assert (mince["quantity"], mince["unit"]) == (1.0, "pcs")
+        assert mince["pack_grams"] is None

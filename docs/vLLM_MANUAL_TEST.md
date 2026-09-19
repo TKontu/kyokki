@@ -664,3 +664,35 @@ and Q6 exist to produce.
 
 **No meat examples were added to the prompt.** The fixture shows they are not needed, and an
 unmeasured change to a measured artefact is how this problem started.
+
+## The model cannot be asked for a pack weight (Q8, 2026-09-19)
+
+Q8 wants the 400 g in a pack of mince, which no Finnish receipt prints. The plan's first source
+was a `pk` field in the extraction contract - *what one pack of this weighs in grams* - measured
+against a ~90 s cost gate before committing. It was measured, and **it failed on quality, not on
+time.** Two runs each, 49-line fixture, `c2.muse-glimmer`, 14-name catalog, Q7's prompt:
+
+| contract | shelf lives | opened shelf lives | pack weights | model s |
+| --- | --- | --- | --- | --- |
+| `n g q w c pw sl os` | 39, 40 of 49 | 19, 20 | — | 69.4, 70.7 |
+| `+ pk` | **26**, then **4** of 49 | 13, then 2 | **1**, 1 | 70.9, 76.3 |
+
+`pk` was answered on **one line of forty-nine**, and the fourth estimate per line collapsed the
+three that already worked - the same 4-of-49 instability Q7 had just fixed, and the same failure
+mode twice: **muse-glimmer's per-line estimates are fragile to prompt complexity.** Time stayed
+inside the gate; the answers did not survive.
+
+So `pk` was reverted, and pack weight has three sources, none of them the model:
+
+1. **A size printed in the product name** - `SIPULI 500G`, `KIRSIKKATOMAATTI 250G`. A
+   deterministic parse (`grams_from_name`) of `G`/`KG` only: `COOP ROSKAPUSSI 30L 25KPL` and
+   `GLOGI ... 1L` are not weights. 8 of the 49 fixture lines carry one, for no model cost at all.
+2. **The catalog**, once a product knows its pack weight.
+3. **The cook**, in the product editor's *One pack* field - one correction per product, ever.
+
+That is the fallback the plan wrote down in advance, and it is the whole feature with a cheaper
+source: mince costs one correction and is then right for every later receipt from any shop.
+
+**The standing rule this round confirms:** measure a contract change against this fixture before
+keeping it, and count the *other* estimates too, not just the new field's. Both times a field was
+added on reasoning alone, the damage showed up somewhere else in the response.

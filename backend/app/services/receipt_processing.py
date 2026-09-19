@@ -47,6 +47,7 @@ from app.services.product_resolution import (
     canonical_names,
 )
 from app.services.store_chain import normalize_store_chain
+from app.services.units import grams_from_name
 
 logger = get_logger(__name__)
 
@@ -275,6 +276,17 @@ class ReceiptProcessingService:
                     # The catalog already knows what one of these weighs; trust it over a
                     # fresh guess from the model (Q2).
                     stored["piece_grams"] = float(product.avg_piece_grams)
+                # What one pack weighs (Q8): the catalog first, then whatever the shop
+                # printed in the name. The model is not asked - it answered a `pk` field
+                # on 1 line of 49 and dragged the other estimates down with it
+                # (docs/vLLM_MANUAL_TEST.md).
+                pack_grams = (
+                    float(product.pack_grams)
+                    if product is not None and product.pack_grams is not None
+                    else grams_from_name(line.name)
+                )
+                if pack_grams is not None:
+                    stored["pack_grams"] = pack_grams
                 stored.update(
                     line_id=resolvable_line.line_id,
                     product_id=str(product.id) if product else None,

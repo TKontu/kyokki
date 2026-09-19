@@ -23,6 +23,11 @@ class ProductMasterBase(BaseModel):
         gt=0,
         description="Roughly what one piece weighs, so weighed produce can be counted (Q2)",
     )
+    pack_grams: JsonDecimal | None = Field(
+        None,
+        gt=0,
+        description="Roughly what one pack weighs, so a counted line can be weighed (Q8)",
+    )
     opened_shelf_life_days: int | None = Field(
         None, gt=0, description="Shelf life after opening"
     )
@@ -67,6 +72,9 @@ class ProductMasterUpdate(BaseModel):
     category: str | None = None
     storage_type: str | None = None
     default_shelf_life_days: int | None = Field(None, gt=0)
+    pack_grams: JsonDecimal | None = Field(
+        None, gt=0, description="Grams in one pack, when the product is weighed (Q8)"
+    )
     avg_piece_grams: JsonDecimal | None = Field(None, gt=0)
     opened_shelf_life_days: int | None = Field(None, gt=0)
     unit_type: str | None = None

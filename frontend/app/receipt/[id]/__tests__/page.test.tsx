@@ -36,6 +36,7 @@ function item(index: number, overrides: Partial<ExtractedItem> = {}): ExtractedI
     verified: false,
     suggested_category: 'dairy',
     piece_grams: null,
+    pack_grams: null,
     shelf_life_days: null,
     opened_shelf_life_days: null,
     non_food: false,
@@ -351,6 +352,28 @@ describe('ReceiptReviewPage', () => {
     expect(await screen.findByText(/1\.072 kg → 9 pcs/)).toBeInTheDocument()
     expect(screen.getByLabelText('Quantity')).toHaveValue(9)
     expect(screen.getByRole('radio', { name: 'pcs' })).toBeChecked()
+  })
+
+  it('shows what the receipt counted when it was weighed into grams', async () => {
+    // Q8, the mirror: the shop sold 1 pack of mince; the cook wants the 400 g
+    mockApi(
+      receipt({}, [
+        item(0, {
+          name: 'SIKA-NAUTAJAUHELIHA 23%',
+          generic_name: 'Ground beef',
+          quantity: 400,
+          unit: 'g',
+          pack_grams: 400,
+          printed_quantity: 1,
+          printed_unit: 'pcs',
+        }),
+      ])
+    )
+    renderPage()
+
+    expect(await screen.findByText(/1 pcs → 400 g/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Quantity')).toHaveValue(400)
+    expect(screen.getByRole('radio', { name: 'g' })).toBeChecked()
   })
 
   it('says nothing about a conversion that did not happen', async () => {
