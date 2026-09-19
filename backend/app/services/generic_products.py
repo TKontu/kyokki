@@ -49,15 +49,26 @@ class ProductResolver:
     @staticmethod
     def _fill_gaps(
         product: ProductMaster,
-        piece_grams: float | None,
+        *,
+        piece_grams: float | None = None,
         opened_shelf_life_days: int | None = None,
         pack_grams: float | None = None,
+        shelf_life_days: int | None = None,
     ) -> ProductMaster:
         """Learn what is still unknown about a product, never overwrite what is known.
 
         A later receipt filling in a missing piece weight is useful; the same receipt undoing
         a correction every week is not (Q2).
+
+        Shelf life is the one field that cannot say "unknown" - the column is NOT NULL, so
+        creation had to put the category's blanket figure there. `shelf_life_source` says
+        which it was, so a placeholder can be improved while a correction stays put (Q11).
+        An estimate never replaces another estimate: that would be the weekly churn Q2
+        ruled out, and no product needs it.
         """
+        if shelf_life_days and str(product.shelf_life_source) == "category":
+            product.default_shelf_life_days = shelf_life_days
+            product.shelf_life_source = "model"
         if piece_grams and product.avg_piece_grams is None:
             product.avg_piece_grams = Decimal(str(piece_grams))
         if opened_shelf_life_days and product.opened_shelf_life_days is None:
@@ -91,7 +102,11 @@ class ProductResolver:
                 raise InvalidProductRequest(f"product '{product_id}' not found")
             return (
                 self._fill_gaps(
-                    product, piece_grams, opened_shelf_life_days, pack_grams
+                    product,
+                    piece_grams=piece_grams,
+                    opened_shelf_life_days=opened_shelf_life_days,
+                    pack_grams=pack_grams,
+                    shelf_life_days=shelf_life_days,
                 ),
                 False,
             )
@@ -104,9 +119,10 @@ class ProductResolver:
             return (
                 self._fill_gaps(
                     self._by_name[key],
-                    piece_grams,
-                    opened_shelf_life_days,
-                    pack_grams,
+                    piece_grams=piece_grams,
+                    opened_shelf_life_days=opened_shelf_life_days,
+                    pack_grams=pack_grams,
+                    shelf_life_days=shelf_life_days,
                 ),
                 False,
             )
@@ -118,7 +134,11 @@ class ProductResolver:
             self._by_name[key] = existing
             return (
                 self._fill_gaps(
-                    existing, piece_grams, opened_shelf_life_days, pack_grams
+                    existing,
+                    piece_grams=piece_grams,
+                    opened_shelf_life_days=opened_shelf_life_days,
+                    pack_grams=pack_grams,
+                    shelf_life_days=shelf_life_days,
                 ),
                 False,
             )
@@ -149,6 +169,9 @@ class ProductResolver:
             # What this product keeps for, falling back to its category's blanket figure (Q6)
             default_shelf_life_days=shelf_life_days
             or category_row.default_shelf_life_days,
+            # ...and which of those two it was, so a fallback can be improved later and a
+            # real answer cannot be trampled (Q11)
+            shelf_life_source="model" if shelf_life_days else "category",
             avg_piece_grams=piece_grams,
             pack_grams=pack_grams,
             # How long it keeps once the pack is open, when the model could say (Q5)

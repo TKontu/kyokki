@@ -4,6 +4,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from rapidfuzz import fuzz
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -137,12 +138,39 @@ class TestMatchingService:
         matching_service: MatchingService,
         sample_products: list[ProductMaster],
     ):
-        """Test fuzzy matching with moderate variations."""
-        result = await matching_service.match_product("Valio Milk")
+        """A tie is a tie, and the winner is now at least stable.
 
-        assert result is not None
-        assert result.product.canonical_name == "Valio Whole Milk 1L"
-        # WRatio may score this higher than expected, so accept HIGH or MEDIUM
+        This test used to assert "Valio Milk" matches `Valio Whole Milk 1L`. It does not:
+        WRatio scores it **85.50 against all four** of this fixture's products except the
+        one that is not a product at all, so the assertion was a coin flip that had been
+        landing the same way. It landed differently the moment unrelated rows moved,
+        because the catalog was fetched with no ORDER BY and `process.extract` keeps the
+        first of equal scores.
+
+        The query is ordered now, so the outcome is repeatable - but "repeatable" is all
+        it is, and a scorer that cannot tell Valio milk from Pirkka oat milk is the whole
+        reason H13 took similarity out of the decision path
+        (`docs/PRODUCT_RESOLUTION_SPEC.md`). So assert what is actually true: the winner
+        is one of the tied candidates, and it is the same one every time.
+        """
+        scores = {
+            str(p.canonical_name): fuzz.WRatio(
+                "VALIO MILK", str(p.canonical_name).upper()
+            )
+            for p in sample_products
+        }
+        best = max(scores.values())
+        tied = {name for name, score in scores.items() if score == best}
+        assert len(tied) > 1, (
+            "this test is only meaningful while the top score is a tie"
+        )
+
+        result = await matching_service.match_product("Valio Milk")
+        again = await matching_service.match_product("Valio Milk")
+
+        assert result is not None and again is not None
+        assert result.product.canonical_name in tied
+        assert again.product.canonical_name == result.product.canonical_name
         assert result.confidence in [MatchConfidence.HIGH, MatchConfidence.MEDIUM]
         assert result.score >= 60.0
 

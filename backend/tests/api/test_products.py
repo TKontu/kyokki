@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 from httpx import AsyncClient
@@ -758,3 +759,157 @@ class TestDeleteProductThatIsInUse:
             assert "Key (" not in detail
             assert "is still referenced" not in detail
             assert "DETAIL" not in detail
+
+
+class TestShelfLifeProvenanceThroughTheAPI:
+    """Q11: the editor is how a cook overrules the catalog, and it has to be recorded.
+
+    `update_product` sets fields with a blind `setattr` loop, so before this the PATCH
+    that fixes mince had no idea it was the cook speaking - and the next receipt would
+    have been free to overwrite the correction.
+    """
+
+    PRODUCT = {
+        "canonical_name": "Ground beef",
+        "category": "meat",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 5,
+        "unit_type": "weight",
+        "default_unit": "g",
+    }
+
+    async def test_a_shelf_life_the_cook_typed_is_marked_as_theirs(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"default_shelf_life_days": 2}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["default_shelf_life_days"] == 2
+        assert response.json()["shelf_life_source"] == "cook"
+
+    async def test_editing_something_else_leaves_the_provenance_alone(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"avg_piece_grams": 125}
+        )
+
+        assert response.json()["shelf_life_source"] == "category"
+
+    async def test_the_caller_cannot_claim_to_be_the_cook(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """Provenance is derived from what the writer did, never asserted in the payload."""
+        product = (
+            await client.post(
+                "/api/products", json={**self.PRODUCT, "shelf_life_source": "cook"}
+            )
+        ).json()
+
+        assert product["shelf_life_source"] == "category"
+
+    async def test_it_is_readable_on_every_product(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """The products screen needs it to say which figures are guesses."""
+        await client.post("/api/products", json=self.PRODUCT)
+
+        listed = (await client.get("/api/products")).json()
+
+        assert listed
+        assert all("shelf_life_source" in product for product in listed)
+
+
+class TestEstimateCatalogEndpoint:
+    """Q11: POST /api/products/estimate, and why it does not write by default."""
+
+    PRODUCT = {
+        "canonical_name": "Ground beef",
+        "category": "meat",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 5,
+        "unit_type": "weight",
+        "default_unit": "g",
+    }
+
+    def _says(self, product_id: str, days: int):
+        from app.services.catalog_estimates import Estimate
+
+        return patch(
+            "app.services.catalog_estimates.estimate_shelf_lives",
+            new_callable=AsyncMock,
+            return_value=[
+                Estimate(
+                    id=product_id, shelf_life_days=days, opened_shelf_life_days=None
+                )
+            ],
+        )
+
+    async def test_a_dry_run_is_the_default_and_writes_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        with self._says(product["id"], 2):
+            response = await client.post("/api/products/estimate")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["applied"] is False
+        assert body["considered"] == 1
+        assert body["changes"][0]["current_days"] == 5
+        assert body["changes"][0]["proposed_days"] == 2
+
+        unchanged = (await client.get(f"/api/products/{product['id']}")).json()
+        assert unchanged["default_shelf_life_days"] == 5
+
+    async def test_applying_writes_and_says_so(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        with self._says(product["id"], 2):
+            response = await client.post("/api/products/estimate?apply=true")
+
+        assert response.json()["applied"] is True
+
+        updated = (await client.get(f"/api/products/{product['id']}")).json()
+        assert updated["default_shelf_life_days"] == 2
+        assert updated["shelf_life_source"] == "model"
+
+    async def test_a_gateway_that_cannot_answer_is_a_503_not_a_500(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """H05's rule: no 500 on a reachable route. Nothing is written either."""
+        from app.services.llm_extractor import LLMExtractionError
+
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        with patch(
+            "app.services.catalog_estimates.estimate_shelf_lives",
+            new_callable=AsyncMock,
+            side_effect=LLMExtractionError("gateway is down"),
+        ):
+            response = await client.post("/api/products/estimate?apply=true")
+
+        assert response.status_code == 503
+        untouched = (await client.get(f"/api/products/{product['id']}")).json()
+        assert untouched["default_shelf_life_days"] == 5
+
+    async def test_a_catalog_with_nothing_to_fix_asks_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        await client.patch(
+            f"/api/products/{product['id']}", json={"default_shelf_life_days": 2}
+        )
+
+        response = await client.post("/api/products/estimate")
+
+        assert response.json()["considered"] == 0

@@ -17,6 +17,11 @@ from sqlalchemy.orm import relationship
 
 from app.db.base_class import Base
 
+# Where a stored shelf life came from (Q11). `category` is the blanket figure creation
+# falls back to when no estimate arrived - a placeholder, not an answer. Only the cook's
+# own edit produces `cook`, and only `cook` is safe from a later estimate.
+SHELF_LIFE_SOURCES = ("category", "model", "cook")
+
 
 class ProductMaster(Base):
     """Canonical product definition - the single source of truth for products.
@@ -44,6 +49,13 @@ class ProductMaster(Base):
 
     # Shelf life
     default_shelf_life_days = Column(Integer, nullable=False)  # unopened
+    # Where that number came from (Q11). The column is NOT NULL, so creation has to
+    # invent a value and `5` cannot otherwise be told apart from `5 because the meat
+    # category says so`. Only `cook` is a correction and is never overwritten; a
+    # `category` fallback is a placeholder a later estimate may replace.
+    shelf_life_source = Column(
+        String, nullable=False, default="category", server_default="category"
+    )  # category, model, cook
     opened_shelf_life_days = Column(Integer, nullable=True)  # after opening
 
     # Quantity tracking

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -100,11 +101,44 @@ class ProductMasterResponse(ProductMasterBase):
     """Schema for product API responses."""
 
     id: UUID
+    # Read-only on purpose: provenance is derived from what the writer did, never
+    # claimed by the caller. PATCHing a shelf life is what makes it `cook` (Q11).
+    shelf_life_source: Literal["category", "model", "cook"] = Field(
+        "category",
+        description="Where the shelf life came from: the category, the model, or the cook",
+    )
     off_data: dict | None = Field(None, description="Cached Open Food Facts data")
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CatalogEstimateChange(BaseModel):
+    """One product a catalog refresh would change, and what to (Q11)."""
+
+    id: UUID
+    canonical_name: str
+    category: str
+    current_days: int = Field(..., description="The shelf life stored today")
+    proposed_days: int = Field(..., description="What the model says it should be")
+    current_opened: int | None = None
+    proposed_opened: int | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CatalogEstimateResponse(BaseModel):
+    """What a refresh found. `applied` says whether any of it was written."""
+
+    considered: int = Field(
+        ..., description="Products whose shelf life is still a category placeholder"
+    )
+    answered: int = Field(
+        ..., description="Of those, how many the model gave a usable number for"
+    )
+    applied: bool = Field(..., description="False for a dry run, which is the default")
+    changes: list[CatalogEstimateChange]
 
 
 class ProductMergeRequest(BaseModel):

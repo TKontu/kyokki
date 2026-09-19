@@ -134,6 +134,12 @@ async def update_product(
     for field, value in update_data.items():
         setattr(db_product, field, value)
 
+    # This is the cook talking, and the loop above cannot tell. A shelf life they typed
+    # is a correction: no later estimate may replace it (Q11). Set after the loop so an
+    # explicit `shelf_life_source` in the payload cannot claim to be one.
+    if "default_shelf_life_days" in update_data:
+        db_product.shelf_life_source = "cook"
+
     await db.commit()
     await db.refresh(db_product)
     return db_product
@@ -455,6 +461,9 @@ async def enrich_product_from_off_data(
             default_shelf_life_days=category_defaults.default_shelf_life_days
             if category_defaults
             else 365,
+            # Never an estimate on this path - it is the category's figure or a bare
+            # guess of a year, and both are placeholders a real one may replace (Q11).
+            shelf_life_source="category",
             unit_type=_unit_type(default_unit),
             default_unit=default_unit,
             default_quantity=enriched_data.get("default_quantity"),

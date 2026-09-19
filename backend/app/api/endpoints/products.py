@@ -10,6 +10,8 @@ from app.api.exceptions import handle_integrity_errors, reference_conflict_detai
 from app.crud import product_master as crud_product
 from app.db.session import get_db
 from app.schemas.product_master import (
+    CatalogEstimateChange,
+    CatalogEstimateResponse,
     ProductMasterCreate,
     ProductMasterResponse,
     ProductMasterUpdate,
@@ -17,6 +19,8 @@ from app.schemas.product_master import (
     ProductMergeResponse,
 )
 from app.services.broadcast_helpers import broadcast_inventory_update
+from app.services.catalog_estimates import refresh_catalog_shelf_lives
+from app.services.llm_extractor import LLMExtractionError
 from app.services.off_service import (
     OffApiError,
     OffProductNotFoundError,
@@ -119,6 +123,48 @@ async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with ID '{product_id}' not found",
         )
+
+
+@router.post("/estimate", response_model=CatalogEstimateResponse)
+async def estimate_catalog_shelf_lives(
+    apply: bool = Query(
+        False,
+        description="Write the changes. Omit for a dry run, which is the default.",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> CatalogEstimateResponse:
+    """Re-estimate the shelf lives nobody ever chose (Q11).
+
+    `default_shelf_life_days` is NOT NULL, so creating a product had to invent a
+    number and took its category's blanket figure. Those placeholders are the only
+    candidates here: a shelf life the cook set is never sent to the model, and one
+    the model already estimated is left alone.
+
+    A dry run by default, because this walks the whole catalog in one go. Call it
+    again with `apply=true` once the proposed numbers have been looked at.
+
+    Returns:
+        - 200: What would change, or what did.
+        - 503: The model gateway could not be reached, or answered unusably.
+          Nothing is written in that case, including by a partly-finished batch.
+    """
+    try:
+        result = await refresh_catalog_shelf_lives(db, apply=apply)
+    except LLMExtractionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Could not estimate shelf lives: {exc}",
+        ) from exc
+
+    return CatalogEstimateResponse(
+        considered=result.considered,
+        answered=result.answered,
+        applied=result.applied,
+        changes=[
+            CatalogEstimateChange.model_validate(change, from_attributes=True)
+            for change in result.changes
+        ],
+    )
 
 
 @router.post("/{product_id}/merge", response_model=ProductMergeResponse)

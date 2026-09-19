@@ -696,3 +696,86 @@ source: mince costs one correction and is then right for every later receipt fro
 **The standing rule this round confirms:** measure a contract change against this fixture before
 keeping it, and count the *other* estimates too, not just the new field's. Both times a field was
 added on reasoning alone, the damage showed up somewhere else in the response.
+
+## Asking the model about the catalog instead of the receipt (Q11, 2026-09-19)
+
+Q7 fixed why the model had stopped estimating shelf lives. It repaired nothing already
+stored: on the homelab **46 of 50 products carried their category's blanket figure**, all six
+meat products read 5 days, and `Rye crispbread` sat at 5 while the model's own 720 lay unused in
+a receipt still in the database. The receipts that created those products are `confirmed`, which
+is terminal, and for 45 of the 46 no estimate was ever made at all.
+
+So Q11 asks directly, about **names** rather than receipt lines, through a separate prompt in
+`services/catalog_estimates.py`. Measured on the real 46 candidate names pulled from the homelab:
+
+| run | answered | seconds |
+| --- | --- | --- |
+| 1 | **46 of 46** | 51.8 |
+| 2 | **46 of 46** | 55.2 |
+| 3 | **46 of 46** | 54.5 |
+| 4 | **46 of 46** | 56.6 |
+
+Full coverage every time, in under a minute for the whole catalog — cheaper than one receipt
+read, because there is no OCR and no per-line work. And the answers are the ones the complaint
+was about:
+
+```
+Ground beef      5 -> 2     Rye crispbread   5 -> 720   (the June receipt's own number)
+Chicken fillet   5 -> 3     Milk             7 -> 7
+Chicken          5 -> 3     Yogurt           7 -> 21
+Ham              5 -> 10    Sour cream       7 -> 30
+Sausage          5 -> 14    Olive oil      365 -> 540
+Bacon            5 -> 21    Rice           365 -> 720
+```
+
+Six meat products that were one number are now six different numbers, and mince — the only
+safety issue in the whole friction log — is 2 days.
+
+### The honest part: the answers move between runs
+
+Comparing two runs product by product, **31 of 46 are identical and 15 differ**:
+
+```
+Bacon      14 / 21      Cheese     30 / 45      Dip       180 / 30
+Feta       30 / 60      Egg        35 / 28      Kiwi        7 / 14
+Mozzarella 21 / 30      Ginger     60 / 30      Cucumber   14 / 10
+Olive oil 365 / 720     Orange juice 180 / 21   Chips     365 / 180
+```
+
+All inside a sensible band — none is absurd — but "ask again and get a different number" is
+real, and the design answers it in two places rather than pretending otherwise:
+
+1. **A dry run is the default.** The proposed numbers are shown before anything is written, so
+   the coin toss happens in front of the cook rather than behind them.
+2. **Applying sets `shelf_life_source = 'model'`**, and a refresh only ever considers `category`
+   rows. So the variation is a one-time choice, not weekly churn — a second refresh straight
+   after the first considers **zero** products.
+
+The safety-critical answers are also the stable ones: Ground beef 2/2, Chicken fillet 3/3,
+Ham 10/10, Milk 7/7, Rye crispbread 720/720.
+
+A band per category (`PLAUSIBLE_DAYS`) rejects anything outside what its category could possibly
+mean — 400 days of mince is a confident wrong answer, and this writes to 46 rows at once. A
+rejected answer is not a failure: the product keeps the placeholder it already had.
+
+### The control, which is the point of a separate prompt
+
+Twice this month a change to `_INSTRUCTIONS` destroyed estimates it was not aimed at (Q7, Q8),
+both silently. This prompt lives in its own module and cannot reach the receipt path. Re-running
+the **unchanged 49-line fixture** on the Q11 branch, where `llm_extractor.py` and `parsers/` are
+byte-identical to `main`:
+
+| run | lines | shelf lives | meat/fish with one | seconds |
+| --- | --- | --- | --- | --- |
+| 1 | 49 | **18** of 49 | 0 of 2 | 67.5 |
+| 2 | 49 | **39** of 49 | 2 of 2 | 68.9 |
+| 3 | 49 | **39** of 49 | 2 of 2 | 67.1 |
+
+Runs 2 and 3 match Q7's recorded baseline exactly. **Run 1 is an outlier and it is worth
+recording rather than discarding:** with the prompt, the contract and the fixture all identical,
+the same call produced 18 shelf lives instead of 39. Nothing in the branch can explain it — the
+extraction files are untouched — so this is the model, not the code.
+
+That is the third time this month the two-run rule has earned itself, and it sharpens the rule:
+**a single run cannot distinguish a regression from muse-glimmer having an off day, in either
+direction.** A one-run measurement showing 18 would have looked exactly like a prompt regression.
