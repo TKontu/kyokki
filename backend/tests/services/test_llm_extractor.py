@@ -442,17 +442,28 @@ class TestOpenedShelfLife:
         assert "os = " in text
         assert "milk -> 5" in text
 
-    def test_says_to_skip_the_estimates_for_products_already_known(self):
-        """Re-deriving what the catalog already holds is paid-for work with no answer."""
+    def test_a_known_catalog_never_talks_the_model_out_of_estimating(self):
+        """This assertion is the exact reverse of the one it replaces.
+
+        The block used to end "and set pw, sl and os to null for it - the system
+        already knows those", to save re-deriving what the catalog holds. Measured on
+        the 49-line fixture, offering any catalog at all then dropped shelf lives from
+        39 of 49 to between 1 and 12, and opened shelf lives from 17 to between 1 and 7
+        - the model applied the instruction to the whole receipt, not to the listed
+        products. Every product created from a receipt read with a warm catalog fell
+        back to its category's blanket shelf life, which is the thing Q6 exists to
+        avoid (Q7, docs/vLLM_MANUAL_TEST.md).
+        """
         text = build_instructions(CATEGORIES, ["Apple", "Milk"])
 
-        assert "pw, sl and os to null for it" in text
+        assert "Known products: Apple, Milk." in text
+        assert "null for it" not in text
+        assert "already knows those" not in text
 
-    def test_an_empty_catalog_is_never_told_to_skip_them(self):
-        """With nothing known, that rule could only talk the model out of estimating."""
+    def test_an_empty_catalog_offers_no_block_at_all(self):
         text = build_instructions(CATEGORIES)
 
-        assert "already knows those" not in text
+        assert "Known products" not in text
 
     def test_maps_it_onto_the_line(self):
         milk, onion = parse_completion(_compact(), {"dairy", "produce"}, "text").lines
