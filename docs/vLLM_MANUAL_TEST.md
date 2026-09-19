@@ -628,3 +628,39 @@ where the catalog-anchored run gave `Tomato`-shaped generics like `Cabbage`, `Ch
 better answer - `docs/PRODUCT_RESOLUTION_SPEC.md` §1 is explicit that Cherry tomato is *not*
 Tomato - so this is worth measuring again once real synonyms have accumulated, rather than
 treating the category count as the last word.
+
+
+## The catalog block was silencing the estimates (Q7, 2026-09-19)
+
+The first real receipt came back with `sl: null` for every meat line, so mince, ham, sausage and
+chicken fillet all fell back to the `meat` category's blanket 5 days - too long for mince and far
+too short for salami. The plan assumed the prompt lacked meat examples. **It did not.** Measured
+on the 49-line fixture with an empty catalog, the model estimates meat perfectly well:
+`AMERIKAN PEKONI -> 21`, `KANAN FILEESUIKALE -> 2`, and 39 of 49 lines get a shelf life at all
+(the 10 without are household and cleaning products, which correctly have none).
+
+The cause was the known-products block, which ended *"and set pw, sl and os to null for it - the
+system already knows those"*. It was meant to save re-deriving what the catalog holds. The model
+applied it to the **whole receipt** rather than to the listed products. Two runs each, same
+fixture, with a 14-name catalog offered:
+
+| prompt | shelf lives | opened shelf lives | piece weights | model s |
+| --- | --- | --- | --- | --- |
+| with the clause | **4**, then **12** of 49 | 1, then 7 | 6, 6 | 88.8, 87.0 |
+| clause removed | **37**, then **39** of 49 | 17, 17 | 6, 7 | **69.8, 70.6** |
+| *(no catalog at all, for reference)* | 39 | — | 7 | 64.5 |
+
+Note the instability in the old rows - 4 then 12 - which is the model guessing differently each
+time about how widely the instruction applied. That alone is a reason to remove it.
+
+**Removing the clause is better on both axes and needs no trade:** estimates come back, and
+extraction is about **20 % faster** (≈88 s to ≈70 s), because the model no longer reasons about
+which products to skip. Estimating for a product the catalog already knows costs a few tokens and
+is discarded by `_fill_gaps` anyway; *not* estimating cost the catalog its accuracy.
+
+This also revises the H17 entry above: the catalog block costs roughly 6 s (64.5 s cold against
+≈70 s warm) rather than being free, but it no longer destroys the per-product estimates that Q2
+and Q6 exist to produce.
+
+**No meat examples were added to the prompt.** The fixture shows they are not needed, and an
+unmeasured change to a measured artefact is how this problem started.

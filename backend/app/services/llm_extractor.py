@@ -116,9 +116,16 @@ def build_instructions(
         if tidy:
             first_spelling.setdefault(tidy.casefold(), tidy)
     unique = sorted(first_spelling.values(), key=str.casefold)[:MAX_KNOWN_PRODUCTS]
+    # The block used to end "and set pw, sl and os to null for it - the system already
+    # knows those". It was meant to save the model work on products the catalog knows,
+    # and instead it silenced the estimates for the whole receipt: measured on the
+    # 49-line fixture, shelf lives fell from 39 of 49 to 1 of 49 as soon as any catalog
+    # was offered (Q7). Every product created from a receipt read with a warm catalog
+    # therefore fell back to its category's blanket shelf life, which is what Q6 exists
+    # to avoid. Estimating for a known product costs a few tokens and is discarded by
+    # `_fill_gaps` anyway; not estimating costs the catalog its accuracy.
     known = (
-        "\n  When an equivalent product is listed here, use its name exactly, and set "
-        "pw, sl and os to null for it - the system already knows those. "
+        "\n  When an equivalent product is listed here, use its name exactly. "
         f"Known products: {', '.join(unique)}."
         if unique
         else ""
