@@ -15,6 +15,9 @@ export type { InventoryItemCardProps } from './InventoryItemCard'
 export { InventoryList } from './InventoryList'
 export type { InventoryListProps } from './InventoryList'
 
+export { ClearExpiredSheet } from './ClearExpiredSheet'
+export type { ClearExpiredSheetProps } from './ClearExpiredSheet'
+
 export { ConsumptionSheet } from './ConsumptionSheet'
 export type { ConsumptionSheetProps } from './ConsumptionSheet'
 

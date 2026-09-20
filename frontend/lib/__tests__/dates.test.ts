@@ -93,9 +93,12 @@ describe('Date Utilities', () => {
   })
 
   describe('formatExpiryDate', () => {
-    it('should return "Expired" for past dates', () => {
-      expect(formatExpiryDate('2024-01-14')).toBe('Expired')
-      expect(formatExpiryDate('2024-01-10')).toBe('Expired')
+    it('says how long ago a past date was', () => {
+      // Every past date used to read the one word "Expired", so yesterday's yoghurt and last
+      // June's mince were indistinguishable on a display where they pile up.
+      expect(formatExpiryDate('2024-01-14')).toBe('Yesterday')
+      expect(formatExpiryDate('2024-01-10')).toBe('5 days ago')
+      expect(formatExpiryDate('2023-12-25')).toBe('3 weeks ago')
     })
 
     it('should return "Today" for current date', () => {
@@ -212,7 +215,7 @@ describe('Date Utilities', () => {
 
       expect(days).toBeLessThan(0)
       expect(urgency).toBe('expired')
-      expect(formatted).toBe('Expired')
+      expect(formatted).toBe('5 days ago')
       expect(color).toContain('red')
     })
 

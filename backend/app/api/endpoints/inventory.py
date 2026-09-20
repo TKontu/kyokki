@@ -12,6 +12,8 @@ from app.crud import inventory_item as crud_inventory
 from app.db.session import get_db
 from app.schemas.consume import ConsumeRequest
 from app.schemas.inventory_item import (
+    BulkItemsRequest,
+    BulkItemsResponse,
     InventoryItemCreate,
     InventoryItemResponse,
     InventoryItemUpdate,
@@ -21,7 +23,7 @@ from app.schemas.inventory_item import (
 )
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest
-from app.services.item_status import ItemFrozen
+from app.services.item_status import ItemEvent, ItemFrozen
 from app.services.quick_add import quick_add
 
 router = APIRouter()
@@ -151,6 +153,67 @@ async def update_inventory_item(
     )
 
     return item
+
+
+async def _move_many(
+    db: AsyncSession, ids: list[UUID], event: ItemEvent
+) -> BulkItemsResponse:
+    """Run a bulk move and tell every open iPad about each row that changed."""
+    result = await crud_inventory.move_many(db, ids, event)
+
+    # One message per item, as every other multi-item operation here does. `DELETE
+    # /shopping/purchased/all` is the one bulk route that broadcasts nothing, and the other
+    # screens never learn of it; that is a bug, not a convention.
+    for item in result.changed:
+        await broadcast_inventory_update(
+            inventory_item_id=item.id,
+            action="updated",
+            current_quantity=item.current_quantity,
+            status=item.status,
+        )
+
+    return BulkItemsResponse(
+        changed=len(result.changed), refused=result.refused, missing=result.missing
+    )
+
+
+@router.post("/discard", response_model=BulkItemsResponse)
+async def discard_inventory_items(
+    request: BulkItemsRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BulkItemsResponse:
+    """Throw several items away at once - the shelf of expired food, in one tap.
+
+    One transaction, so the shelf is cleared or it is not; a `PATCH` each would be one
+    transaction per item and a failure half way would leave no way to tell what happened.
+
+    Each item goes through the same transition a single discard does, so the waste log gets
+    exactly one row per item at its remaining quantity. An item already in the bin is counted
+    as `refused` rather than failing the request.
+
+    Returns:
+        - 200: Counters. `changed + refused + missing` is the number of ids sent.
+    """
+    async with handle_integrity_errors():
+        return await _move_many(db, request.ids, ItemEvent.DISCARD)
+
+
+@router.post("/restore", response_model=BulkItemsResponse)
+async def restore_inventory_items(
+    request: BulkItemsRequest,
+    db: AsyncSession = Depends(get_db),
+) -> BulkItemsResponse:
+    """Take several items back out of the bin - the undo for a clear.
+
+    The mirror of discard, and the reason clearing a shelf is safe to offer at all. Items come
+    back `opened`, or `empty` when nothing was left: never `sealed`, because they were in the
+    bin (H23).
+
+    Returns:
+        - 200: Counters, shaped as discard's.
+    """
+    async with handle_integrity_errors():
+        return await _move_many(db, request.ids, ItemEvent.RESTORE)
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -61,23 +61,31 @@ export function getExpiryUrgency(expiryDate: string): ExpiryUrgency {
   return 'fresh'
 }
 
+/** Days or weeks, in the bare voice the badge uses: no "in", no "ago", no flourish. */
+function howLong(days: number): string {
+  if (days <= 6) return `${days} day${days === 1 ? '' : 's'}`
+  const weeks = Math.floor(days / 7)
+  return `${weeks} week${weeks > 1 ? 's' : ''}`
+}
+
 /**
  * Format expiry date as human-readable string
  *
+ * Every past date used to collapse to the single word "Expired", so yesterday's yoghurt and
+ * last June's mince read identically - on a wall display where the expired ones pile up, that
+ * is the difference between "use this first" and "this is compost".
+ *
  * @param expiryDate - ISO date string
- * @returns Formatted string (e.g., "Expired", "Today", "2 days", "1 week")
+ * @returns Formatted string (e.g., "3 weeks ago", "Yesterday", "Today", "2 days", "1 week")
  */
 export function formatExpiryDate(expiryDate: string): string {
   const days = calculateDaysUntilExpiry(expiryDate)
 
-  if (days < 0) return 'Expired'
+  if (days === -1) return 'Yesterday'
+  if (days < 0) return `${howLong(-days)} ago`
   if (days === 0) return 'Today'
   if (days === 1) return 'Tomorrow'
-  if (days <= 6) return `${days} days`
-
-  // For 7+ days, show weeks
-  const weeks = Math.floor(days / 7)
-  return `${weeks} week${weeks > 1 ? 's' : ''}`
+  return howLong(days)
 }
 
 /**

@@ -113,6 +113,30 @@ export function useUpdateInventoryItem() {
 }
 
 /**
+ * Throw several items away at once, and take them back.
+ *
+ * The clear and its undo are the same shape, which is why they share a hook: the undo passes
+ * the ids the clear reported back, so what comes out of the bin is exactly what went in.
+ *
+ * `retry: false` for the same reason as consume - a retried bulk discard would count `refused`
+ * for everything the first attempt got through, and read as a failure.
+ */
+export function useBulkInventoryMove() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ ids, event }: { ids: string[]; event: 'discard' | 'restore' }) =>
+      event === 'discard'
+        ? inventoryAPI.discardMany(ids)
+        : inventoryAPI.restoreMany(ids),
+    retry: false,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+    },
+  })
+}
+
+/**
  * Put a thrown-away item back in the kitchen (H23's `restore`).
  *
  * A plain async function rather than a mutation, and that is the point: the Undo lives on a

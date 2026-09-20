@@ -1,7 +1,7 @@
 """Tests for Inventory CRUD API endpoints."""
 
 from datetime import date, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -1461,3 +1461,115 @@ class TestListFiltersAreAVocabulary:
 
         by_location = (await client.get("/api/inventory?location=freezer")).json()
         assert by_location == []
+
+
+class TestBulkDiscardAndRestore:
+    """Clearing a shelf of expired food, and taking it back.
+
+    One transaction rather than a PATCH each: thirteen items were thirteen round trips,
+    thirteen transactions and thirteen broadcasts, and a failure half way left the shelf half
+    cleared with no way to tell.
+    """
+
+    async def _items(
+        self, client: AsyncClient, product_id: str, count: int
+    ) -> list[dict]:
+        return [
+            await _create_item(
+                client, product_id, initial_quantity=10, current_quantity=10
+            )
+            for _ in range(count)
+        ]
+
+    async def test_it_throws_them_all_away_at_once(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        items = await self._items(client, test_product["id"], 3)
+
+        response = await client.post(
+            "/api/inventory/discard", json={"ids": [i["id"] for i in items]}
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"changed": 3, "refused": 0, "missing": 0}
+
+        listed = (await client.get("/api/inventory")).json()
+        assert listed == []
+
+    async def test_the_waste_log_gets_one_row_each(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """The whole reason the operator chose `discarded` over `empty` for a clear."""
+        items = await self._items(client, test_product["id"], 2)
+
+        await client.post(
+            "/api/inventory/discard", json={"ids": [i["id"] for i in items]}
+        )
+
+        for item in items:
+            logs = await _logs_for(seeded_db, item["id"])
+            assert [(log.action, float(log.quantity_consumed)) for log in logs] == [
+                ("discard", 10.0)
+            ]
+
+    async def test_something_already_gone_is_refused_not_logged_twice(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """A cook clearing a shelf should not have it all fail because one had gone already."""
+        items = await self._items(client, test_product["id"], 2)
+        await client.patch(
+            f"/api/inventory/{items[0]['id']}", json={"status": "discarded"}
+        )
+
+        response = await client.post(
+            "/api/inventory/discard", json={"ids": [i["id"] for i in items]}
+        )
+
+        assert response.json() == {"changed": 1, "refused": 1, "missing": 0}
+        logs = await _logs_for(seeded_db, items[0]["id"])
+        assert len(logs) == 1
+
+    async def test_an_id_that_matches_nothing_is_counted(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        (item,) = await self._items(client, test_product["id"], 1)
+
+        response = await client.post(
+            "/api/inventory/discard", json={"ids": [item["id"], str(uuid4())]}
+        )
+
+        assert response.json() == {"changed": 1, "refused": 0, "missing": 1}
+
+    async def test_restore_brings_back_exactly_what_went_in(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        items = await self._items(client, test_product["id"], 3)
+        ids = [i["id"] for i in items]
+        await client.post("/api/inventory/discard", json={"ids": ids})
+
+        response = await client.post("/api/inventory/restore", json={"ids": ids})
+
+        assert response.json() == {"changed": 3, "refused": 0, "missing": 0}
+        listed = (await client.get("/api/inventory")).json()
+        # Back as `opened`, never `sealed`: they were in the bin (H23).
+        assert sorted(i["id"] for i in listed) == sorted(ids)
+        assert {i["status"] for i in listed} == {"opened"}
+
+    async def test_restoring_something_finished_keeps_it_empty(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        (item,) = await self._items(client, test_product["id"], 1)
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 10})
+        await client.patch(f"/api/inventory/{item['id']}", json={"status": "discarded"})
+
+        await client.post("/api/inventory/restore", json={"ids": [item["id"]]})
+
+        back = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert back["status"] == "empty"
+
+    async def test_an_empty_list_is_refused_at_the_door(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        response = await client.post("/api/inventory/discard", json={"ids": []})
+
+        assert response.status_code == 422

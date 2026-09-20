@@ -6,7 +6,9 @@
 import { calculateDaysUntilExpiry } from '@/lib/dates'
 import type { InventoryItem, InventoryLocation } from '@/types/inventory'
 
-/** Items expiring within this many days (expired included) are pinned on top. */
+/** Items expiring within this many days are pinned on top. Already-expired ones have their
+ *  own section: they used to share this one with no lower bound, so a thing that went off in
+ *  June sat above the milk that goes off tomorrow, for as long as it stayed in the list. */
 export const EXPIRING_SOON_DAYS = 3
 
 const LOCATION_GROUPS: { key: string; label: string }[] = [
@@ -45,6 +47,8 @@ export interface StockGroup {
 }
 
 export interface StockView {
+  /** Already past its date. Oldest first, like everything else here. */
+  expired: InventoryItem[]
   expiringSoon: InventoryItem[]
   groups: StockGroup[]
 }
@@ -73,11 +77,17 @@ export function buildStockView(
     .filter((item) => includeInactive || !isInactive(item))
     .sort(compareStock)
 
+  const expired: InventoryItem[] = []
   const expiringSoon: InventoryItem[] = []
   const byLocation = new Map<string, InventoryItem[]>()
 
   for (const item of visible) {
-    if (calculateDaysUntilExpiry(item.expiry_date) <= EXPIRING_SOON_DAYS) {
+    const days = calculateDaysUntilExpiry(item.expiry_date)
+    if (days < 0) {
+      expired.push(item)
+      continue
+    }
+    if (days <= EXPIRING_SOON_DAYS) {
       expiringSoon.push(item)
       continue
     }
@@ -90,5 +100,5 @@ export function buildStockView(
     .map(({ key, label }) => ({ key, label, items: byLocation.get(key) ?? [] }))
     .filter((group) => group.items.length > 0)
 
-  return { expiringSoon, groups }
+  return { expired, expiringSoon, groups }
 }

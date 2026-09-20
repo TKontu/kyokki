@@ -5,6 +5,7 @@
 
 import apiClient from './client'
 import type {
+  BulkItemsResponse,
   ExpirySource,
   InventoryItem,
   InventoryItemCreate,
@@ -127,6 +128,21 @@ export async function consume(id: string, data: ConsumeRequest): Promise<Invento
   )
 }
 
+/**
+ * Throw several items away at once, or take them back (H23's events, in bulk).
+ *
+ * One request rather than one PATCH each: clearing a shelf of expired food would otherwise be
+ * a transaction and a broadcast per item, and a failure half way would leave no way to tell
+ * what happened. `refused` counts items already in that state - not an error.
+ */
+export async function discardMany(ids: string[]): Promise<BulkItemsResponse> {
+  return apiClient.post<BulkItemsResponse>('/inventory/discard', { ids })
+}
+
+export async function restoreMany(ids: string[]): Promise<BulkItemsResponse> {
+  return apiClient.post<BulkItemsResponse>('/inventory/restore', { ids })
+}
+
 // Export as a namespace object for easier imports
 const inventoryAPI = {
   list,
@@ -136,6 +152,8 @@ const inventoryAPI = {
   update,
   delete: deleteItem,
   consume,
+  discardMany,
+  restoreMany,
 }
 
 export default inventoryAPI

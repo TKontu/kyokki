@@ -1,11 +1,19 @@
 # Handoff
-Generated-UTC: 2026-09-20T07:10:38Z
-Base-SHA: 0d61089878f90bd504d45fcf6653437d2dd7515f
+Generated-UTC: 2026-09-20T10:09:21Z
+Base-SHA: a7aee4807a6d0ccefe3099e824351ee6d6548da0
 
 ## Round delta
 
-Eleven increments merged (#65-#76): the **acceptance-week friction log** finished, then the
+Thirteen increments merged (#65-#78): the **acceptance-week friction log** finished, then the
 first two items of hardening wave **H2** taken early.
+
+**The stock screen (#77, #78).** Two findings from the daily-loop audit, one of them H23's own
+debt: freezing `discarded` removed the only way back from a mis-tapped *Mark as gone*, so the
+toast carries **Undo** now - and the 2026-09-13 "No Undo" ruling is revisited rather than ignored,
+because H23 built the clean reversal it said did not exist. Consume still has none. Separately,
+expired items had pinned themselves to the top of the list forever with no lower bound on
+"expiring soon"; they have their own red section, a real age instead of the bare word `Expired`,
+and a clear that records them as **thrown away** in one transaction.
 
 **H2, started out of order (#75, #76).** The operator's call, for two reasons: H23 is silent
 data loss in the most-used action, and H23 and H24 are two of the three agent-track hard
@@ -56,10 +64,14 @@ receipt through the rebuilt pipeline, read on the iPad on 2026-09-19. Recorded a
   PRs that way here** - target `main` and say "merge after #N" in the body.
 - **#65** was the previous round's handoff, merged after it had gone stale; this file replaces it.
 
-**Still open and worth knowing:** `restore` exists as a transition but **no screen calls it**.
-*"Mark as gone"* filters the item out of every list and nothing passes `include_inactive`, so a
-mis-tap is unrecoverable from the iPad. Before H23 it was recoverable only by accident - through
-the bug H23 fixes - so this is not a regression, but it is now the sharpest edge in the app.
+**Still open and worth knowing:** nothing lists inactive items, so *"Put it back"* in the edit
+sheet is reachable only through the Undo window on the toast. A screen for them forces a question
+the app has no answer to - how long should something stay visible after you bin it - and the
+operator set it aside deliberately.
+
+**And nothing reads the waste log back.** Every discard writes a `consumption_log` row and always
+has; there is no router for it. The clear is being scrupulous about recording waste that no-one
+can yet see. That is **H46**.
 
 ## The one finding worth carrying forward
 
