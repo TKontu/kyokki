@@ -65,6 +65,13 @@ jobs:
         # code. Only new ones fail. H21 empties the baseline and drops the script.
         run: python -m scripts.check_mypy_baseline
 
+      - name: Check the vocabularies against the iPad's types
+        working-directory: backend
+        # frontend/types/ mirrors backend/app/schemas/ by hand, and nothing checked it:
+        # four fields in one month reached the other side only because an unrelated test
+        # fixture stopped compiling (H24).
+        run: python -m scripts.check_vocabularies
+
   test:
     name: Test with pytest
     runs-on: ubuntu-latest

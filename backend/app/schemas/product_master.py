@@ -1,9 +1,9 @@
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.models.product_master import ShelfLifeSource
 from app.schemas.types import JsonDecimal, canonicalize_units
 from app.services.units import unit_type_for
 
@@ -103,8 +103,8 @@ class ProductMasterResponse(ProductMasterBase):
     id: UUID
     # Read-only on purpose: provenance is derived from what the writer did, never
     # claimed by the caller. PATCHing a shelf life is what makes it `cook` (Q11).
-    shelf_life_source: Literal["category", "model", "cook"] = Field(
-        "category",
+    shelf_life_source: ShelfLifeSource = Field(
+        ShelfLifeSource.CATEGORY,
         description="Where the shelf life came from: the category, the model, or the cook",
     )
     off_data: dict | None = Field(None, description="Cached Open Food Facts data")

@@ -1,14 +1,14 @@
 """CRUD operations for ConsumptionLog model."""
 
 from decimal import Decimal
-from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
+from app.schemas.consumption_log import ConsumptionAction
 
-ConsumptionAction = Literal["use_partial", "use_full", "discard", "adjust"]
+__all__ = ["ConsumptionAction", "add_consumption_log"]
 
 
 def add_consumption_log(

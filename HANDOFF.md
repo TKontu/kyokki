@@ -1,10 +1,27 @@
 # Handoff
-Generated-UTC: 2026-09-19T18:50:54Z
-Base-SHA: 34d4f95c35feff8e3939fe7f7c344289a9761d15
+Generated-UTC: 2026-09-20T07:10:38Z
+Base-SHA: 0d61089878f90bd504d45fcf6653437d2dd7515f
 
 ## Round delta
 
-Nine increments merged (#65-#74), from the **acceptance-week friction log**: the first real
+Eleven increments merged (#65-#76): the **acceptance-week friction log** finished, then the
+first two items of hardening wave **H2** taken early.
+
+**H2, started out of order (#75, #76).** The operator's call, for two reasons: H23 is silent
+data loss in the most-used action, and H23 and H24 are two of the three agent-track hard
+prerequisites that need no decision first.
+- **#75 H23 - one status machine.** `consume_inventory_item` was read-modify-write with no lock,
+  so two taps both read 4, both passed the check and both wrote 3 - one helping gone, both log
+  rows written. Both writers lock now, and the rules became a table, which turned up three more:
+  discard did not freeze the item, a correction above full kept a stale label, and create
+  enforced nothing. `contracts/status-transitions.json` is the single copy of the rule, read by
+  both test suites, because the iPad predicts the status too.
+- **#76 H24 - closed vocabularies.** The create path took any string where PATCH answered 422 for
+  the same value. Eight `StrEnum`s now, following `ReceiptStatus`; four spellings of "location"
+  became one; and `scripts.check_vocabularies` runs in CI, because `frontend/types/` mirrors the
+  schemas by hand and four fields crossed in one month only by accident.
+
+The friction log itself (#65-#74): the first real
 receipt through the rebuilt pipeline, read on the iPad on 2026-09-19. Recorded as **Q7-Q10** in
 `docs/TODO.md`, continuing Q1-Q6.
 
@@ -38,6 +55,11 @@ receipt through the rebuilt pipeline, read on the iPad on 2026-09-19. Recorded a
   did not retarget it in time, and it merged into a dead branch instead of `main`. **Do not stack
   PRs that way here** - target `main` and say "merge after #N" in the body.
 - **#65** was the previous round's handoff, merged after it had gone stale; this file replaces it.
+
+**Still open and worth knowing:** `restore` exists as a transition but **no screen calls it**.
+*"Mark as gone"* filters the item out of every list and nothing passes `include_inactive`, so a
+mis-tap is unrecoverable from the iPad. Before H23 it was recoverable only by accident - through
+the bug H23 fixes - so this is not a regression, but it is now the sharpest edge in the app.
 
 ## The one finding worth carrying forward
 
@@ -104,10 +126,12 @@ placeholder and becomes overwritable. No correction is ever mislabelled.
   is touched. The 13 expired items from the June receipt still do not heal and should not: they
   were dated from a June purchase, so the recompute gives the same answer. That food really is
   three months old.
-- **`with_for_update` exists in exactly three places**, and none of them is consume. Q12's
-  recompute locks its own rows, `receipt_confirm` and `receipt_queue` lock a receipt - but
-  `consume_inventory_item` still reads, computes and writes with no lock, so two taps can lose an
-  update. That is **H23**, still open, and Q12 made it easier to reach rather than harder.
+- **Consume and correction are locked now (#75).** The lock lives inside the CRUD functions,
+  not the endpoints, because consume has two callers - the API and the scanner. Picking the item
+  in `scanner_service` is still unlocked and its cap is advisory; that surface is DEC-7's.
+- **The status rules are a table** (`services/item_status.py`) and the iPad's copy answers to the
+  same `contracts/status-transitions.json`. Changing one implementation without the other fails a
+  test rather than flickering a wrong label on the wall display.
 - **CI does not re-check a PR title that was edited**... it does now (#67). The workflow listened
   only for `opened/synchronize/reopened`, and re-running the job replays the stale payload, so a
   retitle could not fix a failing title check without an unrelated commit. `edited` was added.
@@ -115,7 +139,7 @@ placeholder and becomes overwritable. No correction is ever mislabelled.
 - **CI tests the PR merged into main, not your branch.** #68 branched before #67 and the two
   touched the same test fixture; the merge happened to be clean, verified on `ae9275b` after the
   fact (854 backend, 556 frontend, tsc clean). It could as easily not have been.
-- The mypy baseline is **153**. It grew twice in Q11 (untyped legacy `Column[...]` assignments,
+- The mypy baseline is **150**, and has come down three times in three rounds rather than up. It grew twice in Q11 (untyped legacy `Column[...]` assignments,
   reason written into the file) and came **down** by one in Q12, when folding the scanner's
   duplicate expiry formula into `sealed_expiry` deleted an error with it. Note `--update`
   regenerates the file and drops its comments; there is a line in it saying so.

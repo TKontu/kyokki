@@ -9,7 +9,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.crud.consumption_log import add_consumption_log
+from app.crud.consumption_log import ConsumptionAction, add_consumption_log
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.schemas.inventory_item import InventoryItemCreate, InventoryItemUpdate
@@ -244,7 +244,9 @@ async def update_inventory_item(
     update_data.pop("status", None)
 
     if event is ItemEvent.DISCARD:
-        add_consumption_log(db, item=db_item, action="discard", quantity=remaining)
+        add_consumption_log(
+            db, item=db_item, action=ConsumptionAction.DISCARD, quantity=remaining
+        )
     if opens_the_pack(was, new_status):
         row.opened_date = date.today()
         _start_opened_clock(db_item)
@@ -390,7 +392,9 @@ async def consume_inventory_item(
     add_consumption_log(
         db,
         item=db_item,
-        action="use_full" if new_quantity == 0 else "use_partial",
+        action=ConsumptionAction.USE_FULL
+        if new_quantity == 0
+        else ConsumptionAction.USE_PARTIAL,
         quantity=amount,
     )
 

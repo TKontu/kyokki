@@ -10,6 +10,7 @@ lookup plus a fallback.
 
 import uuid
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -17,8 +18,17 @@ from sqlalchemy.orm import relationship
 
 from app.db.base_class import Base
 
-# Where a name came from. Only the cook's own actions produce `cook`.
-NAME_SOURCES = ("canonical", "cook", "model")
+
+class NameSource(StrEnum):
+    """Where a name came from. Only the cook's own actions produce `cook`.
+
+    Was a bare tuple that nothing imported, while `services/product_names.learn_product_name`
+    took a free `str` (H24).
+    """
+
+    CANONICAL = "canonical"
+    COOK = "cook"
+    MODEL = "model"
 
 
 class ProductName(Base):

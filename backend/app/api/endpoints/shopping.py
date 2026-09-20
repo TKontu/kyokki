@@ -117,12 +117,9 @@ async def create_shopping_item(
             detail=f"Invalid priority: {item_in.priority}. Must be urgent, normal, or low.",
         )
 
-    # Validate source
-    if item_in.source not in ["manual", "auto_restock", "recipe"]:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid source: {item_in.source}. Must be manual, auto_restock, or recipe.",
-        )
+    # `source` and `priority` used to be checked here by hand, which was a third way of
+    # spelling a vocabulary alongside Literal and StrEnum. `ShoppingSource` does it at the
+    # schema now, so an unknown value never reaches this function (H24).
 
     async with handle_integrity_errors():
         item = await shopping_list_item.create(db, obj_in=item_in)
@@ -158,13 +155,6 @@ async def update_shopping_item(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Shopping list item {item_id} not found",
-        )
-
-    # Validate priority if being updated
-    if item_in.priority and item_in.priority not in ["urgent", "normal", "low"]:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Invalid priority: {item_in.priority}. Must be urgent, normal, or low.",
         )
 
     async with handle_integrity_errors():

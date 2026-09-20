@@ -6,6 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.schemas.inventory_item import StorageLocation
 from app.services.storage import location_for_storage, storage_type_for_category
 from app.services.units import (
     grams_to_pieces,
@@ -123,7 +124,7 @@ class ExtractedItem(BaseModel):
     storage_type: Literal["refrigerator", "freezer", "pantry"] = Field(
         ..., description="Matched product's storage, else derived from the category"
     )
-    location: Literal["main_fridge", "freezer", "pantry"] = Field(
+    location: StorageLocation = Field(
         ..., description="Default inventory location for this item"
     )
 
@@ -351,7 +352,7 @@ class ConfirmedItemCreate(BaseModel):
     expiry_date: date | None = Field(
         None, description="Override; default is purchase date + shelf life"
     )
-    location: Literal["main_fridge", "freezer", "pantry"] | None = Field(
+    location: StorageLocation | None = Field(
         None, description="Override; default follows the product's storage type"
     )
 

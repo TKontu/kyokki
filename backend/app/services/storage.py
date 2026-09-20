@@ -2,8 +2,14 @@
 
 from typing import Literal
 
+from app.schemas.inventory_item import StorageLocation
+
 StorageType = Literal["refrigerator", "freezer", "pantry"]
-Location = Literal["main_fridge", "freezer", "pantry"]
+
+#: Kept as an alias so callers need not import from `schemas`; it is the same vocabulary.
+#: It used to be a third spelling of it, alongside a `Literal` on the schema and a free
+#: `str` on create (H24).
+Location = StorageLocation
 
 # Every seeded category id (app/db/seed_categories.py) is listed explicitly.
 CATEGORY_STORAGE: dict[str, StorageType] = {
@@ -21,10 +27,10 @@ CATEGORY_STORAGE: dict[str, StorageType] = {
     "snacks": "pantry",
 }
 
-_STORAGE_LOCATION: dict[str, Location] = {
-    "refrigerator": "main_fridge",
-    "freezer": "freezer",
-    "pantry": "pantry",
+_STORAGE_LOCATION: dict[str, StorageLocation] = {
+    "refrigerator": StorageLocation.MAIN_FRIDGE,
+    "freezer": StorageLocation.FREEZER,
+    "pantry": StorageLocation.PANTRY,
 }
 
 
@@ -36,5 +42,5 @@ def storage_type_for_category(category_id: str | None) -> StorageType:
     return CATEGORY_STORAGE.get(category_id or "", "refrigerator")
 
 
-def location_for_storage(storage_type: str | None) -> Location:
-    return _STORAGE_LOCATION.get(storage_type or "", "main_fridge")
+def location_for_storage(storage_type: str | None) -> StorageLocation:
+    return _STORAGE_LOCATION.get(storage_type or "", StorageLocation.MAIN_FRIDGE)

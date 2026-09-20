@@ -81,7 +81,12 @@ class TestShoppingListAPI:
         )
 
         assert response.status_code == 422
-        assert "Invalid priority" in response.json()["detail"]
+        # The refusal moved from a hand-rolled check in the endpoint to the schema (H24), so
+        # the body is Pydantic's structured detail rather than one string. Same status, and
+        # it still names the field and what is allowed.
+        (problem,) = response.json()["detail"]
+        assert problem["loc"][-1] == "priority"
+        assert "urgent" in problem["msg"]
 
     async def test_create_shopping_item_invalid_source(self, client: AsyncClient):
         """Test creating item with invalid source fails."""
@@ -97,7 +102,9 @@ class TestShoppingListAPI:
         )
 
         assert response.status_code == 422
-        assert "Invalid source" in response.json()["detail"]
+        (problem,) = response.json()["detail"]
+        assert problem["loc"][-1] == "source"
+        assert "manual" in problem["msg"]
 
     async def test_get_shopping_list(self, client: AsyncClient, test_db: AsyncSession):
         """Test getting all shopping list items."""
