@@ -154,14 +154,31 @@ describe('ItemEditSheet', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(calls).toEqual([{ method: 'PATCH', body: { status: 'discarded' } }])
     expect(await screen.findByText('Marked as gone · Oat drink')).toBeInTheDocument()
+    // H23 froze discarded items, so this is the only way back from a mis-tap until a screen
+    // lists them. The sheet has closed by now; the Undo does not depend on it.
+    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
   })
 
-  it('does not offer Mark as gone for an item already gone', () => {
+  it('offers Put it back instead, for an item already gone', () => {
     mockApi()
     renderSheet({ ...OAT, status: 'discarded' })
 
     expect(screen.queryByRole('button', { name: 'Mark as gone' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Put it back' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
+  })
+
+  it('puts a gone item back', async () => {
+    const calls = mockApi()
+    const onClose = renderSheet({ ...OAT, status: 'discarded' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Put it back' }))
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    // The status sent is only a signal: the server classifies the event from it, drops it, and
+    // derives the result. It never comes back `sealed`.
+    expect(calls).toEqual([{ method: 'PATCH', body: { status: 'opened' } }])
+    expect(await screen.findByText('Back in the kitchen · Oat drink')).toBeInTheDocument()
   })
 
   it('asks before deleting and can go back', () => {

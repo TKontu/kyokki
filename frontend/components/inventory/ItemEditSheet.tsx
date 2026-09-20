@@ -17,9 +17,13 @@ import {
   fieldLabelClass,
 } from '@/components/ui/formStyles'
 import { ProductEditSheet } from '@/components/products/ProductEditSheet'
-import { useDeleteInventoryItem, useUpdateInventoryItem } from '@/hooks/useInventory'
+import {
+  useDeleteInventoryItem,
+  useRestoreInventoryItem,
+  useUpdateInventoryItem,
+} from '@/hooks/useInventory'
 import { useProduct } from '@/hooks/useProducts'
-import { useToast } from '@/hooks/useToast'
+import { useToast, type ToastOptions } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { formatQuantity } from '@/lib/consumption'
 import { isInactive, locationOptions } from '@/lib/stock'
@@ -40,6 +44,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const toast = useToast()
   const update = useUpdateInventoryItem()
   const remove = useDeleteInventoryItem()
+  const restore = useRestoreInventoryItem()
 
   const [quantity, setQuantity] = useState(String(item.current_quantity))
   const [expiry, setExpiry] = useState(item.expiry_date.split('T')[0])
@@ -60,17 +65,35 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const busy = update.isPending || remove.isPending
   const canSave = quantityValid && Object.keys(changes).length > 0 && !busy
 
-  const patch = (data: InventoryItemUpdate, success: string) => {
+  const patch = (
+    data: InventoryItemUpdate,
+    success: string,
+    options?: ToastOptions
+  ) => {
     update.mutate(
       { id: item.id, data },
       {
         onSuccess: () => {
-          toast.success(success)
+          toast.success(success, options)
           onClose()
         },
         onError: (error) => toast.error(errorText(error, `Could not save ${name}`)),
       }
     )
+  }
+
+  /**
+   * Put it back, from the toast that said it was gone.
+   *
+   * This runs **after the sheet has closed**, so it may not touch `update` or any other
+   * component-scoped mutation: `restore` and `toast` both come from providers that outlive it.
+   * Marking something gone used to be the one action with no way back (H23 froze discarded
+   * items, and the old way back was the bug it fixed).
+   */
+  const undoMarkAsGone = () => {
+    restore(item.id)
+      .then(() => toast.success(`Back in the kitchen · ${name}`))
+      .catch((error) => toast.error(errorText(error, `Could not restore ${name}`)))
   }
 
   const confirmDelete = () => {
@@ -130,15 +153,36 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           <Button size="lg" fullWidth disabled={!canSave} loading={update.isPending} onClick={() => patch(changes, `Saved · ${name}`)}>
             Save
           </Button>
-          <div className={`grid gap-3 ${isInactive(item) ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          <div className="grid grid-cols-2 gap-3">
             {!isInactive(item) && (
               <Button
                 variant="secondary"
                 size="lg"
                 disabled={busy}
-                onClick={() => patch({ status: 'discarded' }, `Marked as gone · ${name}`)}
+                onClick={() =>
+                  patch({ status: 'discarded' }, `Marked as gone · ${name}`, {
+                    // Long enough to read a name and change your mind; the default 3 s is not.
+                    duration: 8000,
+                    action: { label: 'Undo', onClick: undoMarkAsGone },
+                  })
+                }
               >
                 Mark as gone
+              </Button>
+            )}
+            {isInactive(item) && (
+              // The sheet has always rendered a one-column footer for a gone item; this is
+              // what belongs in it. Reachable once a list shows inactive items - until then
+              // the Undo on the toast is the way back (H23's `restore`).
+              <Button
+                variant="secondary"
+                size="lg"
+                disabled={busy}
+                onClick={() =>
+                  patch({ status: 'opened' }, `Back in the kitchen · ${name}`)
+                }
+              >
+                Put it back
               </Button>
             )}
             <Button variant="danger" size="lg" disabled={busy} onClick={() => setConfirmingDelete(true)}>

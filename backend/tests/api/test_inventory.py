@@ -1425,3 +1425,39 @@ class TestCreateRefusesIncoherentRows:
         )
 
         assert item["current_quantity"] == 3
+
+
+class TestListFiltersAreAVocabulary:
+    """H24 closed the request bodies and left the query string open.
+
+    `?status=banana` used to answer `200 []`, which reads as "there are no such items" rather
+    than "there is no such status" - a distinction that matters to a client which cannot see
+    the schema. The screen that lists thrown-away items filters on exactly this.
+    """
+
+    @pytest.mark.parametrize(
+        ("param", "value"),
+        [("status", "banana"), ("location", "under_the_sink")],
+    )
+    async def test_a_value_outside_the_vocabulary_is_refused(
+        self, client: AsyncClient, seeded_db: AsyncSession, param, value
+    ) -> None:
+        response = await client.get(f"/api/inventory?{param}={value}")
+
+        assert response.status_code == 422
+        (problem,) = response.json()["detail"]
+        assert problem["loc"][-1] == param
+
+    async def test_the_real_values_still_work(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(client, test_product["id"], location="freezer")
+        await client.patch(f"/api/inventory/{item['id']}", json={"status": "discarded"})
+
+        # `status` overrides the default hiding of inactive items, so this is how a screen
+        # would list what has been thrown away.
+        gone = (await client.get("/api/inventory?status=discarded")).json()
+        assert [i["id"] for i in gone] == [item["id"]]
+
+        by_location = (await client.get("/api/inventory?location=freezer")).json()
+        assert by_location == []

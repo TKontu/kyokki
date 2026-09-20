@@ -3,6 +3,7 @@
  * TanStack Query hooks for inventory management
  */
 
+import { useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import inventoryAPI from '@/lib/api/inventory'
 import { productKeys } from '@/hooks/useProducts'
@@ -98,6 +99,10 @@ export function useUpdateInventoryItem() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: InventoryItemUpdate }) =>
       inventoryAPI.update(id, data),
+    // The only mutation here that used to retry. A correction is not idempotent - a quantity
+    // sent twice against a row that moved in between is a different answer - and every other
+    // mutation in this file already opts out.
+    retry: false,
     onSuccess: (updatedItem) => {
       // Update specific item in cache
       queryClient.setQueryData(inventoryKeys.detail(updatedItem.id), updatedItem)
@@ -105,6 +110,32 @@ export function useUpdateInventoryItem() {
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
     },
   })
+}
+
+/**
+ * Put a thrown-away item back in the kitchen (H23's `restore`).
+ *
+ * A plain async function rather than a mutation, and that is the point: the Undo lives on a
+ * toast raised by `ItemEditSheet`, which closes itself on success - so by the time anyone taps
+ * it the sheet has unmounted and its mutation observer is gone. The query client and the API
+ * module both outlive it.
+ *
+ * The status sent is only a signal. The server reads it to classify the event, drops it, and
+ * derives the result: `opened`, or `empty` when nothing is left. It never comes back `sealed`,
+ * because it was in the bin. So take the status from the response rather than predicting it.
+ */
+export function useRestoreInventoryItem() {
+  const queryClient = useQueryClient()
+
+  return useCallback(
+    async (id: string) => {
+      const restored = await inventoryAPI.update(id, { status: 'opened' })
+      queryClient.setQueryData(inventoryKeys.detail(restored.id), restored)
+      queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+      return restored
+    },
+    [queryClient]
+  )
 }
 
 /**
