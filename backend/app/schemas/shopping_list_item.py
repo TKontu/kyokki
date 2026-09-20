@@ -1,9 +1,26 @@
 from datetime import datetime
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.types import JsonDecimal, canonicalize_units
+
+
+class ShoppingPriority(StrEnum):
+    """How badly it is needed."""
+
+    URGENT = "urgent"
+    NORMAL = "normal"
+    LOW = "low"
+
+
+class ShoppingSource(StrEnum):
+    """Why the line is on the list - who or what put it there."""
+
+    MANUAL = "manual"
+    AUTO_RESTOCK = "auto_restock"
+    RECIPE = "recipe"
 
 
 class ShoppingListItemBase(BaseModel):
@@ -17,8 +34,12 @@ class ShoppingListItemBase(BaseModel):
     unit: str = Field(
         ..., description="Unit: dl, tsp, tbsp, g, pcs (others convert on write)"
     )
-    priority: str = Field("normal", description="Priority: urgent, normal, low")
-    source: str = Field("manual", description="Source: manual, auto_restock, recipe")
+    priority: ShoppingPriority = Field(
+        ShoppingPriority.NORMAL, description="How badly it is needed"
+    )
+    source: ShoppingSource = Field(
+        ShoppingSource.MANUAL, description="Why the line is on the list"
+    )
 
 
 class ShoppingListItemCreate(ShoppingListItemBase):
@@ -37,7 +58,7 @@ class ShoppingListItemUpdate(BaseModel):
     name: str | None = None
     quantity: JsonDecimal | None = Field(None, gt=0)
     unit: str | None = None
-    priority: str | None = None
+    priority: ShoppingPriority | None = None
     is_purchased: bool | None = None
 
     @model_validator(mode="after")

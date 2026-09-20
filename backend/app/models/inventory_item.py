@@ -38,7 +38,7 @@ class InventoryItem(Base):
     expiry_date = Column(Date, nullable=False, index=True)
     expiry_source = Column(
         String, nullable=False, default="calculated"
-    )  # scanned, calculated, manual
+    )  # scanned, calculated, manual, frozen - schemas.inventory_item.ExpirySource
     opened_date = Column(Date, nullable=True)
 
     # Tracking

@@ -1,4 +1,5 @@
 from datetime import datetime
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -6,14 +7,29 @@ from pydantic import BaseModel, Field
 from app.schemas.types import JsonDecimal
 
 
+class ConsumptionAction(StrEnum):
+    """What happened to the food, as recorded rather than as decided.
+
+    The distinction this whole column exists for is `discard` against the two `use_` values:
+    thrown away is waste, eaten is not, and reducing waste is the point of the app. Nothing
+    reads the log back yet - that is H46.
+
+    `ADJUST` is declared and never written: a correction is deliberately not consumption
+    (`crud/inventory_item.update_inventory_item`). H46 decides whether it should be.
+    """
+
+    USE_PARTIAL = "use_partial"
+    USE_FULL = "use_full"
+    DISCARD = "discard"
+    ADJUST = "adjust"
+
+
 class ConsumptionLogBase(BaseModel):
     """Base consumption log schema with common fields."""
 
     inventory_item_id: UUID = Field(..., description="Inventory item ID")
     product_master_id: UUID = Field(..., description="Product master ID")
-    action: str = Field(
-        ..., description="Action: use_partial, use_full, discard, adjust"
-    )
+    action: ConsumptionAction = Field(..., description="What happened to the food")
     quantity_consumed: JsonDecimal = Field(..., gt=0, description="Quantity consumed")
     consumption_context: str | None = Field(
         None, description="Context: breakfast, lunch, dinner, snack, cooking"

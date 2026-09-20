@@ -1196,6 +1196,64 @@ editing the date by hand marks it `manual` and no recompute touches it again.
 
 
 
+
+##### Wave H2 begun: H23 and H24 as built (PRs #75, #76), 2026-09-20
+Taken out of order on the operator's call, and before the rest of H2, for two reasons: H23 is a
+silent data-loss bug in the most-used action, and both are hard prerequisites for the agent track
+(`docs/agent_TODO.md`) that need no operator decision. The third, H31, still waits on DEC-5.
+
+- [x] **H23 — one status machine, and nobody loses a consume.** `consume_inventory_item` was
+  read-modify-write with no lock: two taps both read 4, both passed the budget check, both wrote
+  3, and one helping vanished while both `consumption_log` rows landed. Both writers take a row
+  lock now, **inside the CRUD functions** rather than the endpoints, because consume has two
+  callers - the API and the scanner.
+- [x] The rules became a table in `services/item_status.py`. They had been spread through
+  `apply_quantity_status`, reachable two ways, and an explicit `status` in a PATCH suppressed them
+  entirely - which is how `discarded` could become `sealed`. Three defects fell out of writing the
+  edges down: discard now freezes the item (409), a correction above full stops reading `partial`,
+  and create refuses `current > initial` or an expiry before the purchase date.
+- [x] **`restore` had to ship with the freezing.** *"Mark as gone"* is already irreversible from
+  the iPad - inactive items are filtered and no screen passes `include_inactive` - so today a
+  mis-tap is recoverable only *through the bug being fixed*. The edge exists; **no screen calls
+  it**, and that is the next frontend increment rather than something smuggled in.
+- [x] Consume gained the bounds its schema never had: quantised to the two decimals the column
+  stores and refused when it rounds to nothing, plus an optional `unit` that converts within a
+  kind of measure and is refused across one. Subtracting 200 g from a count of twelve apples is
+  the mistake an agent makes first.
+- [x] **`contracts/status-transitions.json`** is the single copy of the rule. The iPad predicts
+  the status optimistically in `lib/consumption.ts`, so it was written twice; both test suites
+  read the file now, and changing either implementation without changing it fails one of them.
+- [x] **The concurrency tests H42 asks for exist** (`tests/integration/test_concurrent_writes.py`)
+  and the repo had none - the two older "race" tests simulate an ordering in one session. These
+  bypass the shared rolled-back session deliberately, because contention needs two connections.
+- [x] **H24 — closed vocabularies.** `InventoryStatus`, `ExpirySource`, `StorageLocation`,
+  `ShoppingPriority`, `ShoppingSource`, `ConsumptionAction`, `ShelfLifeSource` and `NameSource`
+  are `StrEnum`s now, following `ReceiptStatus`, which was the only one already done that way.
+  The create path used to take any string where PATCH answered 422 for the same value.
+- [x] **Four spellings of "location" became one.** A `Literal` in `schemas/inventory_item`, a
+  second in `schemas/receipt` (twice), a third as `Location` in `services/storage`, and a free
+  `str` on create. Two dead constants - `NAME_SOURCES` and `SHELF_LIFE_SOURCES`, the latter added
+  in Q11 - declared a vocabulary and were imported by nothing; both are real enums now.
+- [x] The hand-rolled `if x not in [...]` checks in `endpoints/shopping.py` are gone: that was a
+  third way of spelling a vocabulary beside `Literal` and `StrEnum`.
+- [x] **`scripts.check_vocabularies` in CI.** `frontend/types/` mirrors `backend/app/schemas/` by
+  hand and nothing checked it - four fields in one month (`pack_grams`, `shelf_life_source`,
+  `items_redated`, `frozen`) crossed only because an unrelated fixture stopped compiling. It
+  compares members only: `Vocabulary<T>` exists so the iPad can render a value it has never heard
+  of (H04), and shapes are allowed to drift where vocabularies are not.
+- [ ] **No database `CHECK` constraints**, deliberately. A CHECK fails against rows that already
+  violate it, and these columns took free strings for the project's whole life - so it would have
+  to land after the wipe, not before. The Python layer is what H24's row actually asks for.
+- [ ] **Still open:** H31 (DEC-5) is the last agent-track prerequisite. H46 would give the
+  consumption log a read path - `consumed_at` is written by nothing, `ADJUST` is declared and
+  never used, and nothing reads the log back at all.
+
+##### The mypy baseline moved the right way twice more
+153 → 150 with H23 (the transition table replaced hand-rolled `Any` juggling), and H24 held it
+there while turning four `Literal`s into shared enums - which surfaced two real mismatches rather
+than hiding them: `schemas/receipt` was passing a `StorageLocation` into a `Literal`, and
+`crud/inventory_item` was passing bare strings where `ConsumptionAction` is now expected.
+
 ---
 
 ## Phase 1: MVP
@@ -1341,7 +1399,8 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Friction Q7-Q10: [x] Q7 (PR #66)  [x] Q8 (#67)  [x] Q9+Q10 (#68) - the first real receipt
 - Friction Q11: [x] shelf-life provenance + catalog estimates (#70)  [x] products screen (#71, landed on main by #72)
 - Friction Q12: [x] a correction reaches the food (#73)  [x] the freezer clock, DEC-10 (#74)
-- Hardening H2-H4: after P3, before the agent track
+- Hardening H2 (started early, operator call 2026-09-20): [x] H23 (PR #75)  [x] H24 (#76)  [ ] H21  [ ] H22 (DEC-9)  [ ] H25  [ ] H26  [ ] H27  [ ] H28
+- Hardening H3-H4: after P3, before the agent track
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery

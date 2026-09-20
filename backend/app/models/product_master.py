@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from enum import StrEnum
 
 from sqlalchemy import (
     Column,
@@ -17,10 +18,21 @@ from sqlalchemy.orm import relationship
 
 from app.db.base_class import Base
 
-# Where a stored shelf life came from (Q11). `category` is the blanket figure creation
-# falls back to when no estimate arrived - a placeholder, not an answer. Only the cook's
-# own edit produces `cook`, and only `cook` is safe from a later estimate.
-SHELF_LIFE_SOURCES = ("category", "model", "cook")
+
+class ShelfLifeSource(StrEnum):
+    """Where a stored shelf life came from (Q11).
+
+    `category` is the blanket figure creation falls back to when no estimate arrived - a
+    placeholder, not an answer. Only the cook's own edit produces `cook`, and only `cook` is
+    safe from a later estimate.
+
+    This was a bare tuple that nothing imported: the field was enforced by a `Literal` on the
+    *response* schema, so it validated on the way out and never on the way in (H24).
+    """
+
+    CATEGORY = "category"
+    MODEL = "model"
+    COOK = "cook"
 
 
 class ProductMaster(Base):

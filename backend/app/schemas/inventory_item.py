@@ -1,10 +1,46 @@
 from datetime import date, datetime
-from typing import Literal
+from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.schemas.types import JsonDecimal, canonicalize_units
+
+
+class InventoryStatus(StrEnum):
+    """Where an item is in its life. The column is a plain string; this is the vocabulary.
+
+    Until H24 this was a `Literal` on the PATCH schema and a free `str` on create, so
+    `POST /inventory` stored any string at all while `PATCH` answered 422 for the same value.
+    The legal *moves* between these live in `services/item_status.py`; this is only the set.
+    """
+
+    SEALED = "sealed"
+    OPENED = "opened"
+    PARTIAL = "partial"
+    EMPTY = "empty"
+    DISCARDED = "discarded"
+
+
+class ExpirySource(StrEnum):
+    """How the expiry date was arrived at, which is what decides who may overwrite it.
+
+    `calculated` is the only one any automatic recompute touches: `manual` is the cook's own
+    date (Q12), `frozen` is the freezer clock (DEC-10), and `scanned` came off a barcode.
+    """
+
+    SCANNED = "scanned"
+    CALCULATED = "calculated"
+    MANUAL = "manual"
+    FROZEN = "frozen"
+
+
+class StorageLocation(StrEnum):
+    """Where in the kitchen it physically is."""
+
+    MAIN_FRIDGE = "main_fridge"
+    FREEZER = "freezer"
+    PANTRY = "pantry"
 
 
 class InventoryItemBase(BaseModel):
@@ -17,20 +53,20 @@ class InventoryItemBase(BaseModel):
     unit: str = Field(
         ..., description="Unit: dl, tsp, tbsp, g, pcs (others convert on write)"
     )
-    status: str = Field(
-        "sealed", description="Status: sealed, opened, partial, empty, discarded"
+    status: InventoryStatus = Field(
+        InventoryStatus.SEALED, description="Where the item is in its life"
     )
     purchase_date: date | None = Field(None, description="Purchase date")
     expiry_date: date = Field(..., description="Expiry date")
-    expiry_source: str = Field(
-        "calculated", description="Expiry source: scanned, calculated, manual, frozen"
+    expiry_source: ExpirySource = Field(
+        ExpirySource.CALCULATED, description="How the expiry date was arrived at"
     )
     opened_date: date | None = Field(None, description="Date when opened")
     batch_number: str | None = Field(
         None, description="Batch number from GS1 DataMatrix"
     )
-    location: str = Field(
-        "main_fridge", description="Location: main_fridge, freezer, pantry"
+    location: StorageLocation = Field(
+        StorageLocation.MAIN_FRIDGE, description="Where in the kitchen it is"
     )
     notes: str | None = Field(None, description="User notes")
 
@@ -80,7 +116,7 @@ class QuickAddRequest(BaseModel):
     unit: str = Field(
         ..., description="Unit: dl, tsp, tbsp, g, pcs (others convert on write)"
     )
-    location: Literal["main_fridge", "freezer", "pantry"] | None = Field(
+    location: StorageLocation | None = Field(
         None, description="Default follows the product's storage type"
     )
     purchase_date: date | None = Field(None, description="Default today")
@@ -108,13 +144,13 @@ class InventoryItemUpdate(BaseModel):
     current_quantity: JsonDecimal | None = Field(
         None, ge=0, description="Correction: 0 empties; above the full amount raises it"
     )
-    status: Literal["sealed", "opened", "partial", "empty", "discarded"] | None = None
+    status: InventoryStatus | None = None
     expiry_date: date | None = Field(
         None, description="Sets expiry_source to manual unless expiry_source is given"
     )
-    expiry_source: Literal["scanned", "calculated", "manual", "frozen"] | None = None
+    expiry_source: ExpirySource | None = None
     opened_date: date | None = None
-    location: Literal["main_fridge", "freezer", "pantry"] | None = None
+    location: StorageLocation | None = None
     notes: str | None = None
 
 

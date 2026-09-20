@@ -18,13 +18,14 @@ cases and `frontend/lib/consumption.ts` answers to the same ones.
 from decimal import Decimal
 from enum import StrEnum
 
-# Statuses. The column is a plain string; this is the single vocabulary (H24 will move this
-# beside the others and give it a database constraint).
-SEALED = "sealed"
-OPENED = "opened"
-PARTIAL = "partial"
-EMPTY = "empty"
-DISCARDED = "discarded"
+from app.schemas.inventory_item import InventoryStatus
+
+# The set of statuses lives with the schemas (H24); this module owns the moves between them.
+SEALED = InventoryStatus.SEALED
+OPENED = InventoryStatus.OPENED
+PARTIAL = InventoryStatus.PARTIAL
+EMPTY = InventoryStatus.EMPTY
+DISCARDED = InventoryStatus.DISCARDED
 
 #: Thrown away. Frozen: the only move out is an explicit restore.
 FROZEN_STATUSES = (DISCARDED,)
