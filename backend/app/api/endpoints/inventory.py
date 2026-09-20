@@ -15,7 +15,9 @@ from app.schemas.inventory_item import (
     InventoryItemCreate,
     InventoryItemResponse,
     InventoryItemUpdate,
+    InventoryStatus,
     QuickAddRequest,
+    StorageLocation,
 )
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest
@@ -27,8 +29,11 @@ router = APIRouter()
 
 @router.get("", response_model=list[InventoryItemResponse])
 async def list_inventory(
-    location: str | None = Query(None, description="Filter by location"),
-    status: str | None = Query(None, description="Filter by status"),
+    # H24 closed the request bodies and left the query string open: `?status=banana` used to
+    # answer an empty list rather than a 422, which reads as "no such items" instead of "no
+    # such status". The screen that lists thrown-away items filters on this.
+    location: StorageLocation | None = Query(None, description="Filter by location"),
+    status: InventoryStatus | None = Query(None, description="Filter by status"),
     expiring_days: int | None = Query(
         None, description="Filter items expiring within N days"
     ),

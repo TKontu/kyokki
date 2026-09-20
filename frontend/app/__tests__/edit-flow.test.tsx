@@ -84,3 +84,87 @@ it('moves an item to the freezer, then marks it as gone', async () => {
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument()
   )
 })
+
+
+it('puts an item back when Undo is tapped after the sheet has closed', async () => {
+  // The bug this guards: `ItemEditSheet` closes itself on success, so by the time anyone taps
+  // Undo the component - and its mutation observer - is gone. The restore therefore runs
+  // through the query client and the API module, both of which outlive the sheet.
+  let current: InventoryItem = PEAS
+  let stock: InventoryItem[] = [PEAS]
+  const patches: Partial<InventoryItem>[] = []
+  server.use(
+    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
+    http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
+    http.patch(`${API_URL}/inventory/item-peas`, async ({ request }) => {
+      const body = (await request.json()) as Partial<InventoryItem>
+      patches.push(body)
+      // What the server actually does with a restore: the status sent is only a signal, and
+      // the result is derived. It never comes back `sealed` - it was in the bin (H23).
+      const status = body.status === 'discarded' ? 'discarded' : 'opened'
+      // The row outlives the list: a discarded item is hidden, not deleted, which is exactly
+      // what makes restoring it possible.
+      current = { ...current, ...body, status } as InventoryItem
+      stock = status === 'discarded' ? [] : [current]
+      return HttpResponse.json(current)
+    })
+  )
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <Home />
+      </ToastProvider>
+    </QueryClientProvider>
+  )
+
+  await waitFor(() => expect(screen.getByText('Peas')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Mark as gone' }))
+
+  // The sheet is gone by now, which is the whole point
+  expect(await screen.findByText('Marked as gone · Peas')).toBeInTheDocument()
+  await waitFor(() =>
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+  )
+
+  fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+
+  expect(await screen.findByText('Back in the kitchen · Peas')).toBeInTheDocument()
+  await waitFor(() => expect(screen.getByText('Peas')).toBeInTheDocument())
+  expect(patches.map((body) => body.status)).toEqual(['discarded', 'opened'])
+})
+
+it('leaves the item gone when the Undo is not taken', async () => {
+  let stock: InventoryItem[] = [PEAS]
+  server.use(
+    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
+    http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
+    http.patch(`${API_URL}/inventory/item-peas`, async ({ request }) => {
+      const body = (await request.json()) as Partial<InventoryItem>
+      stock = []
+      return HttpResponse.json({ ...PEAS, ...body })
+    })
+  )
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <Home />
+      </ToastProvider>
+    </QueryClientProvider>
+  )
+
+  await waitFor(() => expect(screen.getByText('Peas')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Mark as gone' }))
+
+  expect(await screen.findByText('Marked as gone · Peas')).toBeInTheDocument()
+  await waitFor(() => expect(screen.queryByText('Peas')).not.toBeInTheDocument())
+  // Offered, not taken: the item stays gone.
+  expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+})
