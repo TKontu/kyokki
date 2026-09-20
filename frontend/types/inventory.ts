@@ -7,7 +7,8 @@ import type { Vocabulary } from './vocabulary'
 
 export type InventoryItemStatus = 'sealed' | 'opened' | 'partial' | 'empty' | 'discarded'
 export type InventoryLocation = 'main_fridge' | 'freezer' | 'pantry'
-export type ExpirySource = 'scanned' | 'calculated' | 'manual'
+// `frozen` is set when an item is moved to the freezer and re-dated from there (Q12).
+export type ExpirySource = 'scanned' | 'calculated' | 'manual' | 'frozen'
 /** Canonical units (DEC-1, MVP-U1). The API converts other units on write. */
 export type Unit = 'dl' | 'tsp' | 'tbsp' | 'g' | 'pcs'
 

@@ -156,6 +156,29 @@ def apply_quantity_status(item: InventoryItem, new_quantity: Decimal) -> None:
         row.status = "opened"
 
 
+def _start_frozen_clock(item: InventoryItem, update_data: dict[str, Any]) -> None:
+    """Re-date an item that is going into the freezer (Q12, DEC-10).
+
+    Counted from today rather than from `purchase_date`, because what matters is when it
+    went in: mince frozen on the day it was bought and mince frozen on its last good day
+    both keep about as long from that moment.
+
+    `frozen` rather than `calculated` so the date survives what comes next: a later
+    shelf-life correction re-dates `calculated` stock (Q12's other half), and thawing the
+    clock again every time the catalog learned something would undo this immediately.
+
+    A category with no frozen figure does nothing at all - there is no useful answer for a
+    frozen bottle of squash, and inventing one is worse than leaving the date alone.
+    """
+    product = item.product_master
+    category = product.category_rel if product is not None else None
+    frozen_days = category.frozen_shelf_life_days if category is not None else None
+    if frozen_days is None:
+        return
+    update_data["expiry_date"] = date.today() + timedelta(days=int(frozen_days))
+    update_data["expiry_source"] = "frozen"
+
+
 async def update_inventory_item(
     db: AsyncSession, item_id: UUID, item_update: InventoryItemUpdate
 ) -> InventoryItem | None:
@@ -199,6 +222,14 @@ async def update_inventory_item(
     ):
         # A date set by hand, so the badge no longer claims it was calculated
         update_data["expiry_source"] = "manual"
+    elif (
+        update_data.get("location") == "freezer"
+        and row.location != "freezer"
+        and "expiry_date" not in update_data
+    ):
+        # Putting it in the freezer restarts the clock on a longer one (Q12, DEC-10). Only
+        # when the cook did not also name a date: theirs wins, as it does everywhere else.
+        _start_frozen_clock(db_item, update_data)
 
     for field, value in update_data.items():
         setattr(db_item, field, value)

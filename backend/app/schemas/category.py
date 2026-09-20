@@ -12,6 +12,11 @@ class CategoryBase(BaseModel):
     default_shelf_life_days: int = Field(
         ..., gt=0, description="Default shelf life in days"
     )
+    frozen_shelf_life_days: int | None = Field(
+        None,
+        gt=0,
+        description="How long this keeps frozen, from the day it goes in; null if freezing does not apply (Q12)",
+    )
     meal_contexts: list[str] | None = Field(
         None, description="Meal contexts where this category is used"
     )

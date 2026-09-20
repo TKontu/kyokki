@@ -769,7 +769,7 @@ starts after H2, because it needs the status machine, the vocabularies and the a
 | DEC-7 | Scanner and Open Food Facts surface (~700 lines, no frontend caller, three known 500s): quarantine behind a flag, or route through `ProductResolver` now | H41 | quarantine until GS1/barcode work starts | open |
 | DEC-8 | Receipt retention: delete the file N days after confirm and keep the structured lines; keep or drop `ocr_raw_text` after confirm | H35 | 90 days, drop the raw text on file deletion | open |
 | DEC-9 | Categories: seed-only (remove POST and DELETE, storage stays a code map) or user data (storage becomes a column, delete becomes RESTRICT) | H22 | seed-only | open |
-| DEC-10 | Expiry when an item is moved to the freezer: leave the product's shelf life (today: mince frozen on day one reads expired on day six), or a frozen-shelf-life rule per category | none yet | defer; log it in the acceptance week if it bites | open |
+| DEC-10 | Expiry when an item is moved to the freezer: leave the product's shelf life (today: mince frozen on day one reads expired on day six), or a frozen-shelf-life rule per category | none yet | **settled 2026-09-19: a frozen-shelf-life rule per category** (Q12, PR #74). Taking it back out stays manual | closed |
 
 #### Wave H0 — before the acceptance week
 
@@ -1128,6 +1128,73 @@ to `main`, gave **18**, then **39**, then **39** shelf lives. Runs 2 and 3 match
 a prompt regression. **A single run cannot tell a regression from noise in either direction** -
 and this is the third time this month that has mattered.
 
+#### Operator friction log — Q11 changed the catalog but not the food (2026-09-19)
+
+Recorded as **Q12**, and like Q11 it came out of reading the code rather than from the iPad: Q11
+shipped two ways to change a shelf life after the fact and **neither reached the stock**.
+`build_inventory_item` works out `expiry_date` once, at confirm, and keeps no back-reference, so
+the sequence `HANDOFF.md` itself recommends produced a contradiction:
+
+```
+confirm a receipt      mince expiry = purchase_date + 5 d   (the category placeholder)
+run the estimate       product shelf life 5 -> 2 d
+open the fridge        mince still says 5 d
+```
+
+- **Q12 — a correction has to reach the food.** Unpinned in both directions when it was found: no
+  test would have caught the fix and none blocked it. The same gap existed a second time in
+  `product_merge`, which re-points stock at a product with a different shelf life without
+  re-dating it, and nobody had noticed that one either.
+
+**Operator decisions, 2026-09-19:** make expiry keep up; and settle **DEC-10** — freezing an item
+resets its clock rather than leaving the cook to type a date.
+
+##### Q12 as built (PRs #73, #74)
+- [x] **`services/expiry_recompute.py`** holds the decision and the write. The guards already
+  existed and needed no invention: `manual` is the cook's date, `scanned` is a barcode's, `empty`
+  and `discarded` are gone from the kitchen, and a NULL `purchase_date` has nothing to count from.
+  Only `calculated` moves — the same shape as Q11's `shelf_life_source == 'cook'`.
+- [x] **The case that would have been a bug:** an *opened* item. Q5's invariant is that opening may
+  only ever shorten, so the recompute caps at the opened clock and copies that function's
+  exemption for loose produce, where taking one apple from a bowl never opened anything. Without
+  the cap, lengthening a product's shelf life would have handed an opened tub back the fortnight
+  that opening it took away.
+- [x] Three call sites — the product PATCH, the catalog refresh (inside its transaction, so a
+  refresh stays all-or-nothing), and `product_merge`. **Both product endpoints now broadcast**,
+  which `CLAUDE.md` required and neither did.
+- [x] `purchase_date + default_shelf_life_days` had been written out twice, in `generic_products`
+  and again in `scanner_service` with its own `or 365`. It is `sealed_expiry()` now, and folding
+  the second copy in took the **mypy baseline down** rather than up — the first time it has moved
+  in that direction.
+- [x] **DEC-10 settled: freezing resets the clock.** `category.frozen_shelf_life_days` (migration
+  `b7e3d5c19f02`), seeded per category, and a fourth `expiry_source` — `frozen` — which is what
+  makes the two halves compose: a frozen date is no longer `calculated`, so the recompute skips it
+  instead of thawing the clock the next time the catalog learns anything.
+- [x] A category with no frozen figure does nothing at all. Pantry goods, drinks, condiments and
+  snacks get NULL: nothing useful happens to a frozen bottle of squash, and inventing a number for
+  it would be worse than saying nothing.
+- [ ] **Taking it back out is deliberately not automatic.** Nothing records when it went in, and
+  thawed food keeps for a day or two whatever it was. The edit sheet says so, and typing a date
+  marks it `manual`, which protects it from everything. Revisit if it annoys during the week.
+- [ ] **Not fixed and named:** the recompute is itself the multi-row read-modify-write **H23**
+  describes. Locking its own query bounds the new writer, but `consume_inventory_item` still reads,
+  computes and writes with no lock, so two taps on Consume can still lose an update.
+
+##### One test asserted the behaviour DEC-10 reverses
+`test_location_change_keeps_expiry_source` moved an item to the **freezer** and asserted the
+expiry source stayed `calculated`. The Q12 plan had named it as a guard that *"must keep passing
+untouched"*; it was the one test whose scenario the decision was about, and CI caught it - 1
+failed of 916. Its intent survives (moving something does not rewrite how its date was arrived
+at), so it moves to the pantry, and the freezer keeps its own tests, including that every other
+location still changes nothing.
+
+##### The frozen figures are seeded, not estimated
+Unlike Q11's shelf lives, no model was asked. They are conservative household numbers about
+*quality* rather than food-safety limits, because quality is what a cook actually notices. Twelve
+numbers are twelve chances to be wrong, and the escape hatch is the same as everywhere else:
+editing the date by hand marks it `manual` and no recompute touches it again.
+
+
 
 ---
 
@@ -1268,11 +1335,12 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Friction Q1-Q6: [x] Q2/Q3/Q6 (PR #48)  [x] Q4/Q5 (PR #49)  [x] Q1 (PR #50)  [ ] product editor (now H18)
 - Reviews 2026-09-17: five reports under `docs/reviews/`, hardening track H0-H4 added above, `docs/PRODUCT_RESOLUTION_SPEC.md` written
 - Hardening H0 (before P3): [x] H01 (PR #52)  [x] H02 (PR #52)  [x] H03  [x] H04  [x] H05  [x] H06  [x] H07  [x] H08 — H01/H02 merged; H03-H08 in PRs #53-#56, all opened 2026-09-18
-- Decisions: [ ] DEC-5 access  [ ] DEC-6 Next.js  [ ] DEC-7 scanner  [ ] DEC-8 retention  [ ] DEC-9 categories  [ ] DEC-10 freezer expiry
+- Decisions: [ ] DEC-5 access  [ ] DEC-6 Next.js  [ ] DEC-7 scanner  [ ] DEC-8 retention  [ ] DEC-9 categories  [x] DEC-10 freezer expiry (Q12, #74)
 - Wave 6: [ ] P3 acceptance (with H0)
 - Hardening H1 resolution: [x] H11 (PR #57)  [x] H12 (#58)  [x] H13 (#59)  [x] H14 (#60)  [x] H15 (#62)  [x] H16 (#61)  [x] H17 (#63)  [x] H18 (#64) — wave H1 complete
 - Friction Q7-Q10: [x] Q7 (PR #66)  [x] Q8 (#67)  [x] Q9+Q10 (#68) - the first real receipt
-- Friction Q11: [x] shelf-life provenance + catalog estimates (#70)  [x] products screen (#71)
+- Friction Q11: [x] shelf-life provenance + catalog estimates (#70)  [x] products screen (#71, landed on main by #72)
+- Friction Q12: [x] a correction reaches the food (#73)  [x] the freezer clock, DEC-10 (#74)
 - Hardening H2-H4: after P3, before the agent track
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
