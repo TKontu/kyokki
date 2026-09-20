@@ -787,7 +787,10 @@ class TestConsumptionLogWrites:
         )
 
         assert first.status_code == 200
-        assert second.status_code == 200
+        # The second used to be a silent 200 that deduped after the fact. A discarded item is
+        # frozen now (H23), so it is refused outright - which also means the dedupe cannot be
+        # raced, as two concurrent PATCHes both passing the old check could both log.
+        assert second.status_code == 409
         logs = await _logs_for(seeded_db, item["id"])
         assert [(log.action, float(log.quantity_consumed)) for log in logs] == [
             ("discard", 600.0)
