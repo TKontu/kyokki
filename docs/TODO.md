@@ -1254,6 +1254,55 @@ there while turning four `Literal`s into shared enums - which surfaced two real 
 than hiding them: `schemas/receipt` was passing a `StorageLocation` into a `Literal`, and
 `crud/inventory_item` was passing bare strings where `ConsumptionAction` is now expected.
 
+##### The stock screen, and the undo H23 owed (PRs #77, #78), 2026-09-20
+Two things from the daily-loop audit done while planning H23/H24, one of which **H23 caused**.
+
+- [x] **A mis-tap on *Mark as gone* is no longer final (#77).** Freezing `discarded` was right and
+  removed the only way back: inactive items are filtered from every list, no screen passes
+  `include_inactive`, and the previous escape - consuming a discarded item until it resurrected -
+  was the bug H23 fixed. The toast now carries **Undo** for eight seconds.
+- [x] **The 2026-09-13 ruling is revisited rather than ignored.** MVP-C2 said *"No Undo (ruling):
+  the backend has no clean reversal."* That was true; H23's `restore` is the clean reversal, for
+  discard only. **Consume still has none** and stays out - it needs the endpoint post-MVP item 12
+  describes.
+- [x] The toast's `action` option has existed unused since C1, with `e.g. "Undo"` in its own
+  comment. Nothing in the app had ever passed one.
+- [x] **The undo cannot use the sheet's mutation.** `ItemEditSheet` closes itself on success, so
+  by the time the toast is tapped the component and its observer are gone;
+  `useRestoreInventoryItem` is a plain async function over the query client and the API module,
+  which outlive it. The integration test marks gone, waits for the sheet to close, *then* taps
+  Undo - the sequence that would catch the alternative.
+- [x] **"Put it back" in the sheet.** `ItemEditSheet` already rendered a one-column footer for a
+  gone item; that slot is where Restore belongs. Reachable once something lists inactive items.
+- [x] **Expired items stopped pinning themselves to the top forever (#78).** `buildStockView`
+  pinned everything at `daysUntilExpiry <= 3` with **no lower bound**, so June's mince sat above
+  tomorrow's milk indefinitely - 13 of 15 items on the homelab. `expired` is its own section now,
+  in red, above *Expiring soon*.
+- [x] **Expiry dates gained a past tense.** Every past date used to read the single word
+  `Expired`, so yesterday's yoghurt and last June's mince were indistinguishable. *"Yesterday"*,
+  *"5 days ago"*, *"3 weeks ago"* - mirroring the future ladder the function already had.
+- [x] **`POST /api/inventory/discard` and `/restore`** take a list of ids and answer counters, the
+  shape `receipts/{id}/confirm` and `products/estimate` use. One transaction: clearing thirteen
+  items through `PATCH` was thirteen round trips, thirteen transactions and thirteen broadcasts,
+  and a failure half way left no way to tell. **Both broadcast per item** - unlike
+  `DELETE /shopping/purchased/all`, the only other bulk route, which broadcasts nothing at all.
+- [x] **Clearing records the food as thrown away** (operator ruling, 2026-09-20) and the confirm
+  says so: the eaten-versus-wasted distinction is the number the app exists to reduce, and
+  clearing as `empty` would hide exactly the waste the cook is trying to see. An item already in
+  the bin is `refused`, not logged twice.
+- [x] **The clear's undo is the restore endpoint**, passing back the ids it reported - which is
+  why #77 shipped first: the destructive action arrived with the undo already in the app.
+- [x] `GET /api/inventory`'s `status` and `location` query params are closed vocabularies now.
+  H24 closed the request bodies and left the query string open, so `?status=banana` answered
+  `200 []` - "no such items" rather than "no such status". The screen listing thrown-away things
+  filters on exactly that.
+- [ ] **Still nothing lists inactive items**, so "Put it back" is reachable only through the
+  Undo window. A screen for them forces a question the app has no answer to - how long should
+  something stay visible after you bin it - and the operator set it aside.
+- [ ] **Nothing reads the waste log back.** This round writes the right rows; H46 is what would
+  let anyone see them. The number the clear is being honest about is still invisible.
+
+
 ---
 
 ## Phase 1: MVP
@@ -1400,6 +1449,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Friction Q11: [x] shelf-life provenance + catalog estimates (#70)  [x] products screen (#71, landed on main by #72)
 - Friction Q12: [x] a correction reaches the food (#73)  [x] the freezer clock, DEC-10 (#74)
 - Hardening H2 (started early, operator call 2026-09-20): [x] H23 (PR #75)  [x] H24 (#76)  [ ] H21  [ ] H22 (DEC-9)  [ ] H25  [ ] H26  [ ] H27  [ ] H28
+- Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)
 - Hardening H3-H4: after P3, before the agent track
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)

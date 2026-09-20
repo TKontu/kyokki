@@ -1,5 +1,7 @@
 """CRUD operations for InventoryItem model."""
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -10,12 +12,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.crud.consumption_log import ConsumptionAction, add_consumption_log
+from app.crud.product_master import MovedInventoryItem
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.schemas.inventory_item import InventoryItemCreate, InventoryItemUpdate
 from app.services.item_status import (
     DISCARDED,
     ItemEvent,
+    ItemFrozen,
     is_frozen,
     next_status,
     opens_the_pack,
@@ -273,6 +277,80 @@ async def update_inventory_item(
 
     await db.commit()
     return await _reload(db, db_item.id)
+
+
+@dataclass(frozen=True)
+class BulkResult:
+    """What a bulk move did, and to which rows, for the caller to broadcast."""
+
+    changed: list[MovedInventoryItem]
+    refused: int
+    missing: int
+
+
+async def move_many(
+    db: AsyncSession, item_ids: Sequence[UUID], event: ItemEvent
+) -> BulkResult:
+    """Discard or restore several items in one transaction.
+
+    Clearing a shelf of expired food through `PATCH` is one round trip, one transaction and
+    one broadcast *per item* - thirteen of each for one tap - and a failure half way leaves
+    the shelf half cleared with no way to tell. This is one transaction: all of it lands or
+    none of it does.
+
+    Every row still goes through H23's transition, so an item already in the bin is **refused**
+    rather than discarded twice, and the waste log gets exactly one row per item that actually
+    moved. `refused` and `missing` are counted rather than raised: a cook clearing thirteen
+    things does not want the whole action to fail because one of them was already gone.
+    """
+    if not item_ids:
+        return BulkResult(changed=[], refused=0, missing=0)
+
+    query = (
+        select(InventoryItem)
+        .where(InventoryItem.id.in_(list(item_ids)))
+        .with_for_update(of=InventoryItem)
+    )
+    found = list((await db.execute(query)).scalars().all())
+
+    changed: list[MovedInventoryItem] = []
+    refused = 0
+    for item in found:
+        row: Any = item
+        was = str(row.status)
+        try:
+            new_status = next_status(
+                current=was,
+                event=event,
+                initial=Decimal(str(row.initial_quantity)),
+                remaining=Decimal(str(row.current_quantity)),
+                opened=row.opened_date is not None,
+            )
+        except ItemFrozen:
+            refused += 1
+            continue
+        if new_status == was:
+            refused += 1
+            continue
+
+        if event is ItemEvent.DISCARD:
+            add_consumption_log(
+                db,
+                item=item,
+                action=ConsumptionAction.DISCARD,
+                quantity=Decimal(str(row.current_quantity)),
+            )
+        row.status = new_status
+        changed.append(
+            MovedInventoryItem(
+                id=row.id, current_quantity=row.current_quantity, status=new_status
+            )
+        )
+
+    await db.commit()
+    return BulkResult(
+        changed=changed, refused=refused, missing=len(item_ids) - len(found)
+    )
 
 
 async def delete_inventory_item(db: AsyncSession, item_id: UUID) -> bool:

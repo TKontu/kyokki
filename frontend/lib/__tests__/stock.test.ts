@@ -115,19 +115,32 @@ describe('stock', () => {
   })
 
   describe('buildStockView', () => {
-    it('pins expired, today, tomorrow and up to three days out', () => {
+    it('pins today, tomorrow and up to three days out - and separates what is already past', () => {
+      // Expired items used to share "expiring soon", which had no lower bound: a thing that
+      // went off in June sat above tomorrow's milk for as long as it stayed in the list.
       expect(EXPIRING_SOON_DAYS).toBe(3)
+      const longGone = makeItem({ expiry_date: dateIn(-40) })
       const expired = makeItem({ expiry_date: dateIn(-2) })
       const today = makeItem({ expiry_date: dateIn(0) })
       const tomorrow = makeItem({ expiry_date: dateIn(1) })
       const threeDays = makeItem({ expiry_date: dateIn(3) })
       const fourDays = makeItem({ expiry_date: dateIn(4) })
 
-      const view = buildStockView([fourDays, threeDays, tomorrow, today, expired])
+      const view = buildStockView([fourDays, threeDays, tomorrow, today, expired, longGone])
 
-      expect(ids(view.expiringSoon)).toEqual([expired.id, today.id, tomorrow.id, threeDays.id])
+      expect(ids(view.expired)).toEqual([longGone.id, expired.id])
+      expect(ids(view.expiringSoon)).toEqual([today.id, tomorrow.id, threeDays.id])
       expect(view.groups).toHaveLength(1)
       expect(ids(view.groups[0].items)).toEqual([fourDays.id])
+    })
+
+    it('an expired item is not also in its location group', () => {
+      const gone = makeItem({ expiry_date: dateIn(-5), location: 'pantry' })
+
+      const view = buildStockView([gone])
+
+      expect(ids(view.expired)).toEqual([gone.id])
+      expect(view.groups).toHaveLength(0)
     })
 
     it('never lists a pinned item in its location group', () => {

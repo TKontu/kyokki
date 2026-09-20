@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import {
+  ClearExpiredSheet,
   ConsumptionSheet,
   InventoryList,
   ItemEditSheet,
@@ -20,6 +21,9 @@ export default function Home() {
   // Keep the item being edited even after a delete or "gone" drops it from the list, so the
   // sheet can finish (toast, close) before it unmounts.
   const [editing, setEditing] = useState<InventoryItem | null>(null)
+  // Held rather than re-derived: the confirm lists exactly what was on offer when it opened,
+  // so a background refetch cannot change what the cook is agreeing to throw away.
+  const [clearing, setClearing] = useState<InventoryItem[] | null>(null)
 
   // Read the live cached item so the sheet reflects optimistic and refetched values.
   const consumingItem = items?.find((item) => item.id === consumingId) ?? null
@@ -34,7 +38,11 @@ export default function Home() {
       </header>
       <main className="px-6 py-4">
         <ReceiptsBanner />
-        <InventoryList onConsume={setConsumingId} onEdit={startEditing} />
+        <InventoryList
+          onConsume={setConsumingId}
+          onEdit={startEditing}
+          onClearExpired={setClearing}
+        />
       </main>
       <ConsumptionSheet
         item={consumingItem}
@@ -42,6 +50,11 @@ export default function Home() {
         onClose={() => setConsumingId(null)}
       />
       <QuickAddSheet open={adding} onClose={() => setAdding(false)} />
+      <ClearExpiredSheet
+        items={clearing ?? []}
+        open={clearing !== null}
+        onClose={() => setClearing(null)}
+      />
       <ItemEditSheet
         item={editingItem}
         open={editingItem !== null}

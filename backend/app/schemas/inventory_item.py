@@ -43,6 +43,27 @@ class StorageLocation(StrEnum):
     PANTRY = "pantry"
 
 
+class BulkItemsRequest(BaseModel):
+    """The items to move, by id (H23 events in bulk)."""
+
+    ids: list[UUID] = Field(..., min_length=1, description="Inventory items to act on")
+
+
+class BulkItemsResponse(BaseModel):
+    """Counters rather than rows, as receipt confirm and the catalog estimate answer.
+
+    `refused` is not a failure: an item already in the bin cannot be thrown away twice, and a
+    cook clearing a shelf should not have the whole action fail because one of them had gone
+    already.
+    """
+
+    changed: int = Field(..., description="Items that actually moved")
+    refused: int = Field(
+        0, description="Items already in the state asked for, or frozen against it"
+    )
+    missing: int = Field(0, description="Ids that matched no item")
+
+
 class InventoryItemBase(BaseModel):
     """Base inventory item schema with common fields."""
 

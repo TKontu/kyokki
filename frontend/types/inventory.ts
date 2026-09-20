@@ -85,6 +85,14 @@ export interface ConsumeRequest {
   quantity: number // > 0
 }
 
+/** What a bulk discard or restore did. Counters, not rows. */
+export interface BulkItemsResponse {
+  changed: number
+  /** Already in that state, or frozen against it. Not an error. */
+  refused: number
+  missing: number
+}
+
 export interface InventoryListParams {
   location?: InventoryLocation
   status?: InventoryItemStatus

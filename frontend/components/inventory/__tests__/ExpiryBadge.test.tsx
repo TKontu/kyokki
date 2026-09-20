@@ -36,9 +36,10 @@ describe('ExpiryBadge', () => {
   })
 
   describe('Expiry urgency levels', () => {
-    it('should render "Expired" for past dates with warning icon', () => {
+    it('says how long ago a past date was, with a warning icon', () => {
+      // The badge used to read the one word "Expired" whatever the age.
       render(<ExpiryBadge expiryDate="2024-01-10" />)
-      expect(screen.getByText(/Expired/i)).toBeInTheDocument()
+      expect(screen.getByText('5 days ago')).toBeInTheDocument()
       expect(screen.getByText('⚠️')).toBeInTheDocument()
     })
 
@@ -176,7 +177,7 @@ describe('ExpiryBadge', () => {
 
     it('should handle very old expired dates', () => {
       render(<ExpiryBadge expiryDate="2023-01-15" />)
-      expect(screen.getByText(/Expired/i)).toBeInTheDocument()
+      expect(screen.getByText(/ago$/)).toBeInTheDocument()
       expect(screen.getByText('⚠️')).toBeInTheDocument()
     })
   })
@@ -193,7 +194,7 @@ describe('ExpiryBadge', () => {
       const badge = container.firstChild as HTMLElement
       // Should contain warning icon, expiry text, and calendar icon
       expect(badge.textContent).toContain('⚠️')
-      expect(badge.textContent).toContain('Expired')
+      expect(badge.textContent).toContain('ago')
       expect(badge.textContent).toContain('📅')
     })
   })
