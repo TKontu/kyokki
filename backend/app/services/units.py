@@ -51,6 +51,16 @@ def canonical_factor(unit: str) -> tuple[Decimal, CanonicalUnit]:
     return _CONVERSIONS[key]
 
 
+def quantise(value: Decimal | float) -> Decimal:
+    """An amount at the precision the columns actually store, `Numeric(10, 2)`.
+
+    Used by consume so the arithmetic matches what is written back (H23): a third of a
+    0.01 dl remainder is not a helping, and a consume that rounds away to nothing is refused
+    rather than logged as something that happened.
+    """
+    return Decimal(str(value)).quantize(_CENT)
+
+
 def to_canonical_decimal(value: Decimal | None, unit: str) -> Decimal | None:
     """Convert an amount to the canonical unit of ``unit``, quantized like Numeric(10, 2)."""
     factor, _ = canonical_factor(unit)

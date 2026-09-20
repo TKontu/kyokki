@@ -1,0 +1,111 @@
+{
+  "$comment": [
+    "The status machine (H23), written once and asserted on both sides of the wire.",
+    "",
+    "The server decides status in backend/app/services/item_status.py. The iPad predicts it",
+    "optimistically in frontend/lib/consumption.ts so a Consume tap feels instant, which means",
+    "the rule is written twice and can drift - and while it is drifting the card shows a label",
+    "the server will contradict a round trip later.",
+    "",
+    "So both read this file: backend/tests/crud/test_quantity_status.py and",
+    "frontend/lib/__tests__/consumption.test.ts. A change to either implementation that is not",
+    "a change to this file fails one of the two suites.",
+    "",
+    "'opened' is whether the pack has ever been opened (opened_date is set). It decides the",
+    "full-again case: a sealed pack corrected upward is still sealed, anything else reads",
+    "opened, because a jar does not re-seal itself.",
+    "",
+    "Cases whose event is not 'consume' are backend-only - the client never predicts a",
+    "correction, a discard or a restore - and are marked serverOnly."
+  ],
+  "partialThreshold": 0.75,
+  "cases": [
+    {
+      "name": "a sealed pack, untouched",
+      "from": "sealed", "event": "consume", "initial": 10, "remaining": 10, "opened": false,
+      "to": "sealed"
+    },
+    {
+      "name": "the first helping opens it",
+      "from": "sealed", "event": "consume", "initial": 10, "remaining": 9, "opened": false,
+      "to": "opened"
+    },
+    {
+      "name": "exactly three quarters left still reads opened",
+      "from": "sealed", "event": "consume", "initial": 10, "remaining": 7.5, "opened": false,
+      "to": "opened"
+    },
+    {
+      "name": "below three quarters is partial",
+      "from": "sealed", "event": "consume", "initial": 10, "remaining": 7, "opened": false,
+      "to": "partial"
+    },
+    {
+      "name": "finishing it empties it",
+      "from": "sealed", "event": "consume", "initial": 10, "remaining": 0, "opened": false,
+      "to": "empty"
+    },
+    {
+      "name": "an opened pack eaten down past the threshold",
+      "from": "opened", "event": "consume", "initial": 10, "remaining": 3, "opened": true,
+      "to": "partial"
+    },
+    {
+      "name": "a partial pack finished",
+      "from": "partial", "event": "consume", "initial": 10, "remaining": 0, "opened": true,
+      "to": "empty"
+    },
+    {
+      "name": "correcting an empty item back up refills it, but it was opened",
+      "from": "empty", "event": "correct", "initial": 10, "remaining": 10, "opened": true,
+      "to": "opened",
+      "serverOnly": true
+    },
+    {
+      "name": "correcting an empty item part way up",
+      "from": "empty", "event": "correct", "initial": 10, "remaining": 3, "opened": true,
+      "to": "partial",
+      "serverOnly": true
+    },
+    {
+      "name": "correcting a partial item above full no longer keeps the stale label",
+      "from": "partial", "event": "correct", "initial": 10, "remaining": 10, "opened": true,
+      "to": "opened",
+      "serverOnly": true
+    },
+    {
+      "name": "correcting a sealed item above full leaves it sealed",
+      "from": "sealed", "event": "correct", "initial": 12, "remaining": 12, "opened": false,
+      "to": "sealed",
+      "serverOnly": true
+    },
+    {
+      "name": "throwing it away",
+      "from": "partial", "event": "discard", "initial": 10, "remaining": 4, "opened": true,
+      "to": "discarded",
+      "serverOnly": true
+    },
+    {
+      "name": "a mis-tap put it in the bin; it comes back opened, never sealed",
+      "from": "discarded", "event": "restore", "initial": 10, "remaining": 4, "opened": true,
+      "to": "opened",
+      "serverOnly": true
+    },
+    {
+      "name": "restoring something that was already finished",
+      "from": "discarded", "event": "restore", "initial": 10, "remaining": 0, "opened": true,
+      "to": "empty",
+      "serverOnly": true
+    }
+  ],
+  "refused": [
+    {
+      "name": "a thrown-away item cannot be eaten",
+      "from": "discarded", "event": "consume"
+    },
+    {
+      "name": "a thrown-away item cannot be corrected",
+      "from": "discarded", "event": "correct"
+    }
+  ]
+}

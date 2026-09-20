@@ -9,6 +9,10 @@
 # `crud/inventory_item.py`'s `row.status = "empty"` is the one that did not get away with
 # it either. H21's `Mapped[]` models remove the whole class.
 #
+# It has come down twice since: Q12 folded the scanner's duplicate expiry formula into
+# `sealed_expiry`, and H23 replaced the hand-rolled status branches with a pure transition
+# table that takes and returns plain values.
+#
 # NOTE: `--update` rewrites this file from scratch and drops comments. Paste them back.
 1	app/api/endpoints/categories.py	return-value
 1	app/api/endpoints/health.py	no-untyped-def
@@ -28,8 +32,7 @@
 1	app/crud/base.py	no-any-return
 2	app/crud/base.py	return-value
 1	app/crud/base.py	unused-ignore
-5	app/crud/inventory_item.py	arg-type
-1	app/crud/inventory_item.py	assignment
+3	app/crud/inventory_item.py	arg-type
 1	app/crud/product_master.py	assignment
 1	app/crud/product_master.py	type-arg
 2	app/crud/shopping_list_item.py	assignment
@@ -52,7 +55,7 @@
 2	app/services/generic_products.py	assignment
 1	app/services/off_service.py	no-any-return
 8	app/services/receipt_processing.py	arg-type
-26	app/services/scanner_service.py	arg-type
+25	app/services/scanner_service.py	arg-type
 6	app/services/scanner_service.py	call-arg
 1	app/services/scanner_service.py	operator
 5	app/services/scanner_service.py	type-arg

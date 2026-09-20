@@ -944,7 +944,27 @@ class TestItemCorrections:
         body = await self._patch(client, item["id"], current_quantity=15)
 
         assert (body["initial_quantity"], body["current_quantity"]) == (15, 15)
+        # Still sealed because this pack was never opened - `opened_date` is unset (H23).
         assert body["status"] == "sealed"
+
+    async def test_correcting_an_opened_item_above_full_stops_lying(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """The stale label: 200/1000 `partial` corrected to 1200 used to stay `partial`.
+
+        `initial_quantity` is raised first, so the old "below full" test read false and the
+        status was never revisited. It reads `opened` now - full again, but a jar does not
+        re-seal itself.
+        """
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 8})
+
+        body = await self._patch(client, item["id"], current_quantity=12)
+
+        assert (body["initial_quantity"], body["current_quantity"]) == (12, 12)
+        assert body["status"] == "opened"
 
     async def test_correcting_an_empty_item_makes_it_active_again(
         self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
@@ -971,9 +991,15 @@ class TestItemCorrections:
 
         assert await _logs_for(seeded_db, item["id"]) == []
 
-    async def test_explicit_status_wins_over_the_quantity_rules(
+    async def test_the_quantity_rules_win_over_an_explicit_status(
         self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
     ) -> None:
+        """The reverse of what this pinned before H23, and deliberately.
+
+        A client used to be able to name any status and have the rules skipped entirely -
+        which is also how `discarded` could become `sealed`. The status is derived from what
+        happened now, so 2 of 10 left is `partial` whatever the body asked for.
+        """
         item = await _create_item(
             client, test_product["id"], initial_quantity=10, current_quantity=10
         )
@@ -982,7 +1008,7 @@ class TestItemCorrections:
             client, item["id"], current_quantity=2, status="opened"
         )
 
-        assert body["status"] == "opened"
+        assert body["status"] == "partial"
 
     async def test_new_expiry_date_is_marked_manual(
         self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
@@ -1187,3 +1213,212 @@ class TestFrozenClock:
         ).json()
 
         assert moved["expiry_date"] == "2026-09-06"
+
+
+class TestDiscardFreezesTheItem:
+    """H23: a thing in the bin is not in the kitchen.
+
+    Before this, the discard was logged and the quantity left alone, and no writer checked the
+    status first - so consuming a discarded item walked it straight back into the list, which
+    was also the only way to undo a mis-tap.
+    """
+
+    async def _discarded(self, client: AsyncClient, product_id: str) -> dict:
+        item = await _create_item(
+            client, product_id, initial_quantity=10, current_quantity=10
+        )
+        body = await client.patch(
+            f"/api/inventory/{item['id']}", json={"status": "discarded"}
+        )
+        assert body.status_code == 200, body.text
+        return body.json()
+
+    async def test_consuming_a_discarded_item_is_refused(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await self._discarded(client, test_product["id"])
+
+        response = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 1}
+        )
+
+        assert response.status_code == 409
+        assert "thrown away" in response.json()["detail"].lower()
+
+    async def test_correcting_a_discarded_item_is_refused(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await self._discarded(client, test_product["id"])
+
+        response = await client.patch(
+            f"/api/inventory/{item['id']}", json={"current_quantity": 5}
+        )
+
+        assert response.status_code == 409
+
+    async def test_it_stays_out_of_the_list(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await self._discarded(client, test_product["id"])
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 1})
+
+        listed = (await client.get("/api/inventory")).json()
+
+        assert item["id"] not in [i["id"] for i in listed]
+
+    async def test_discarding_twice_logs_once(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """The second one is refused outright now, rather than deduped after the fact."""
+        item = await self._discarded(client, test_product["id"])
+
+        again = await client.patch(
+            f"/api/inventory/{item['id']}", json={"status": "discarded"}
+        )
+
+        assert again.status_code == 409
+        logs = await _logs_for(seeded_db, item["id"])
+        assert [log.action for log in logs] == ["discard"]
+
+    async def test_a_mis_tap_can_be_undone(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """Freezing the item would otherwise make Mark as gone permanent.
+
+        No screen shows an inactive item yet, so nothing calls this from the iPad - but the
+        way back exists, and it comes back opened rather than sealed, because it was in the
+        bin.
+        """
+        item = await self._discarded(client, test_product["id"])
+
+        restored = await client.patch(
+            f"/api/inventory/{item['id']}", json={"status": "opened"}
+        )
+
+        assert restored.status_code == 200
+        assert restored.json()["status"] == "opened"
+        listed = (await client.get("/api/inventory")).json()
+        assert item["id"] in [i["id"] for i in listed]
+
+
+class TestConsumeBounds:
+    """The three bounds H23 asks for, at the door rather than in the data."""
+
+    async def test_an_amount_that_rounds_to_nothing_is_refused(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """Quantities store to two decimals; a thousandth of a decilitre is not a helping."""
+        item = await _create_item(client, test_product["id"])
+
+        response = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 0.004}
+        )
+
+        assert response.status_code == 400
+        assert "rounds to nothing" in response.json()["detail"]
+        assert await _logs_for(seeded_db, item["id"]) == []
+
+    async def test_a_unit_of_the_same_kind_is_converted(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """A caller that cannot see the item may say what it means: 0.2 l is 2 dl."""
+        item = await _create_item(
+            client,
+            test_product["id"],
+            initial_quantity=10,
+            current_quantity=10,
+            unit="dl",
+        )
+
+        response = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 0.2, "unit": "l"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["current_quantity"] == 8
+
+    async def test_a_unit_of_a_different_kind_is_refused(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """Subtracting 200 g from a count of twelve apples is a mistake, not a conversion."""
+        item = await _create_item(
+            client,
+            test_product["id"],
+            initial_quantity=12,
+            current_quantity=12,
+            unit="pcs",
+        )
+
+        response = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 200, "unit": "g"}
+        )
+
+        assert response.status_code == 400
+        assert "measured in" in response.json()["detail"]
+
+    async def test_omitting_the_unit_means_the_items_own(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client,
+            test_product["id"],
+            initial_quantity=10,
+            current_quantity=10,
+            unit="dl",
+        )
+
+        response = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 2}
+        )
+
+        assert response.json()["current_quantity"] == 8
+
+
+class TestCreateRefusesIncoherentRows:
+    """A row that could never have come about is refused rather than stored (H23)."""
+
+    async def test_current_above_initial(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        response = await client.post(
+            "/api/inventory",
+            json={
+                "product_master_id": test_product["id"],
+                "initial_quantity": 5,
+                "current_quantity": 10,
+                "unit": "dl",
+                "expiry_date": str(date.today() + timedelta(days=7)),
+            },
+        )
+
+        assert response.status_code == 422
+
+    async def test_expiry_before_purchase(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        response = await client.post(
+            "/api/inventory",
+            json={
+                "product_master_id": test_product["id"],
+                "initial_quantity": 5,
+                "current_quantity": 5,
+                "unit": "dl",
+                "purchase_date": str(date.today()),
+                "expiry_date": str(date.today() - timedelta(days=1)),
+            },
+        )
+
+        assert response.status_code == 422
+
+    async def test_the_ordinary_row_still_goes_in(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client,
+            test_product["id"],
+            initial_quantity=5,
+            current_quantity=3,
+            purchase_date=str(date.today() - timedelta(days=1)),
+        )
+
+        assert item["current_quantity"] == 3

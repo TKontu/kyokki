@@ -1,13 +1,34 @@
-"""One set of status rules for consuming and correcting quantities (MVP-C2, MVP-S4)."""
+"""One set of status rules for consuming and correcting quantities (MVP-C2, MVP-S4, H23).
 
+The table itself is `contracts/status-transitions.json`, read by this file and by
+`frontend/lib/__tests__/consumption.test.ts`. The rule is written twice - once on the server,
+once in the iPad's optimistic update - and the shared file is what stops the two drifting.
+"""
+
+import json
 from datetime import date, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
-from app.crud.inventory_item import apply_quantity_status
+from app.crud.inventory_item import _start_opened_clock
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
+from app.services.item_status import (
+    PARTIAL_THRESHOLD,
+    ItemEvent,
+    ItemFrozen,
+    is_frozen,
+    next_status,
+    opens_the_pack,
+)
+
+CONTRACT = json.loads(
+    (
+        Path(__file__).resolve().parents[3] / "contracts" / "status-transitions.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def _item(status: str = "sealed", initial: int = 10, opened: date | None = None):
@@ -19,121 +40,145 @@ def _item(status: str = "sealed", initial: int = 10, opened: date | None = None)
     )
 
 
-@pytest.mark.parametrize(
-    ("start", "quantity", "status", "opened"),
-    [
-        ("sealed", 10, "sealed", False),
-        ("sealed", 9, "opened", True),
-        ("sealed", 7.5, "opened", True),
-        ("sealed", 7, "partial", True),
-        ("sealed", 0, "empty", False),
-        ("opened", 3, "partial", False),
-        ("empty", 3, "partial", False),
-        ("empty", 10, "opened", False),
-        ("partial", 10, "partial", False),
-    ],
-)
-def test_status_follows_the_remaining_share(start, quantity, status, opened):
-    item = _item(start)
+class TestTheSharedTable:
+    """Every case in `contracts/status-transitions.json`, server side."""
 
-    apply_quantity_status(item, Decimal(str(quantity)))
+    @pytest.mark.parametrize(
+        "case", CONTRACT["cases"], ids=[c["name"] for c in CONTRACT["cases"]]
+    )
+    def test_case(self, case) -> None:
+        assert (
+            next_status(
+                current=case["from"],
+                event=ItemEvent(case["event"]),
+                initial=Decimal(str(case["initial"])),
+                remaining=Decimal(str(case["remaining"])),
+                opened=case["opened"],
+            )
+            == case["to"]
+        )
 
-    assert item.status == status
-    assert (item.opened_date == date.today()) is opened
+    @pytest.mark.parametrize(
+        "case", CONTRACT["refused"], ids=[c["name"] for c in CONTRACT["refused"]]
+    )
+    def test_refused(self, case) -> None:
+        with pytest.raises(ItemFrozen):
+            next_status(
+                current=case["from"],
+                event=ItemEvent(case["event"]),
+                initial=Decimal(10),
+                remaining=Decimal(4),
+                opened=True,
+            )
+
+    def test_the_threshold_is_the_one_both_sides_use(self) -> None:
+        assert Decimal(str(CONTRACT["partialThreshold"])) == PARTIAL_THRESHOLD
 
 
-def test_first_drop_keeps_an_existing_opened_date():
-    item = _item("opened", opened=date(2026, 1, 1))
+class TestFrozen:
+    """Q12 gave the freezer its own expiry source; H23 gives the bin its own rule."""
 
-    apply_quantity_status(item, Decimal(5))
+    def test_only_discarded_refuses_writes(self) -> None:
+        assert is_frozen("discarded")
+        for live in ("sealed", "opened", "partial", "empty"):
+            assert not is_frozen(live)
 
-    assert item.opened_date == date(2026, 1, 1)
+    def test_the_refusal_names_the_event(self) -> None:
+        with pytest.raises(ItemFrozen) as caught:
+            next_status(
+                current="discarded",
+                event=ItemEvent.CONSUME,
+                initial=Decimal(10),
+                remaining=Decimal(9),
+                opened=True,
+            )
+
+        assert caught.value.status == "discarded"
+        assert caught.value.event is ItemEvent.CONSUME
+        assert "Restore it first" in str(caught.value)
+
+
+class TestOpensThePack:
+    """The edge Q5's opened clock hangs on, named instead of re-derived."""
+
+    @pytest.mark.parametrize("to", ["opened", "partial", "empty"])
+    def test_a_sealed_pack_going_anywhere_else_opens_it(self, to) -> None:
+        assert opens_the_pack("sealed", to)
+
+    def test_a_sealed_pack_staying_sealed_does_not(self) -> None:
+        assert not opens_the_pack("sealed", "sealed")
+
+    @pytest.mark.parametrize("current", ["opened", "partial", "empty"])
+    def test_an_already_open_pack_is_not_opened_again(self, current) -> None:
+        assert not opens_the_pack(current, "partial")
 
 
 SEALED_EXPIRY = date(2026, 12, 1)
 
 
-def _pack(
-    unit: str = "dl",
-    opened_days: int | None = 5,
-    expiry: date = SEALED_EXPIRY,
-    piece_grams: Decimal | None = None,
-):
-    """An unopened item whose product may or may not know its opened shelf life."""
-    product = ProductMaster(
-        canonical_name="Cream",
-        category="dairy",
-        storage_type="refrigerator",
-        default_shelf_life_days=14,
-        opened_shelf_life_days=opened_days,
-        avg_piece_grams=piece_grams,
-        unit_type="volume",
-        default_unit=unit,
-    )
-    item = InventoryItem(
-        initial_quantity=Decimal(10),
-        current_quantity=Decimal(10),
-        unit=unit,
-        status="sealed",
-        expiry_date=expiry,
-        expiry_source="calculated",
-    )
-    item.product_master = product
-    return item
-
-
 class TestOpenedClock:
-    """Q5: opening a pack starts a shorter clock."""
+    """Q5: an opened pack stops claiming the shelf life it had sealed.
 
-    def test_opening_a_pack_brings_the_expiry_forward(self):
-        item = _pack()
+    Unchanged by H23 - the clock moved call site, not behaviour - and these are the six
+    invariants that say so.
+    """
 
-        apply_quantity_status(item, Decimal(9))
+    def _item(self, *, opened_days: int | None, piece_grams: Decimal | None = None):
+        product = ProductMaster(
+            canonical_name="Sour cream",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=30,
+            opened_shelf_life_days=opened_days,
+            avg_piece_grams=piece_grams,
+            unit_type="volume",
+            default_unit="dl",
+        )
+        item = InventoryItem(
+            initial_quantity=Decimal(10),
+            current_quantity=Decimal(10),
+            status="sealed",
+            expiry_date=SEALED_EXPIRY,
+            opened_date=date.today(),
+        )
+        item.product_master = product
+        return item
 
-        assert item.opened_date == date.today()
-        assert item.expiry_date == date.today() + timedelta(days=5)
+    def test_opening_brings_the_expiry_forward(self) -> None:
+        item = self._item(opened_days=5)
 
-    def test_opening_never_pushes_the_expiry_out(self):
-        """A jar opened the day before its printed date does not gain five days."""
-        tomorrow = date.today() + timedelta(days=1)
-        item = _pack(expiry=tomorrow)
-
-        apply_quantity_status(item, Decimal(9))
-
-        assert item.expiry_date == tomorrow
-
-    def test_taking_one_apple_does_not_shorten_the_other_twelve(self):
-        """Loose produce is not a pack: a fruit bowl is not opened by eating from it."""
-        item = _pack(unit="pcs", piece_grams=Decimal("125"))
-        item.initial_quantity = Decimal(13)
-        item.current_quantity = Decimal(13)
-
-        apply_quantity_status(item, Decimal(12))
-
-        assert item.expiry_date == SEALED_EXPIRY
-
-    def test_a_carton_counted_as_one_piece_still_gets_the_clock(self):
-        """A litre of milk is stored as 1 pcs; counting in pieces cannot be the test."""
-        item = _pack(unit="pcs")
-        item.initial_quantity = Decimal(1)
-        item.current_quantity = Decimal(1)
-
-        apply_quantity_status(item, Decimal("0.5"))
+        _start_opened_clock(item)
 
         assert item.expiry_date == date.today() + timedelta(days=5)
 
-    def test_a_product_with_no_opened_shelf_life_is_left_alone(self):
-        item = _pack(opened_days=None)
+    def test_opening_never_pushes_the_expiry_out(self) -> None:
+        """A jar opened the day before its printed date does not gain a fortnight."""
+        item = self._item(opened_days=5)
+        item.expiry_date = date.today() + timedelta(days=1)
 
-        apply_quantity_status(item, Decimal(9))
+        _start_opened_clock(item)
+
+        assert item.expiry_date == date.today() + timedelta(days=1)
+
+    def test_loose_produce_is_not_a_pack(self) -> None:
+        """Taking one apple out of a bowl of thirteen does not open anything."""
+        item = self._item(opened_days=2, piece_grams=Decimal("125"))
+
+        _start_opened_clock(item)
 
         assert item.expiry_date == SEALED_EXPIRY
 
-    def test_consuming_again_does_not_restart_the_clock(self):
-        item = _pack()
-        apply_quantity_status(item, Decimal(9))
-        shortened = item.expiry_date
+    def test_without_an_opened_shelf_life_nothing_happens(self) -> None:
+        item = self._item(opened_days=None)
 
-        apply_quantity_status(item, Decimal(4))
+        _start_opened_clock(item)
 
-        assert item.expiry_date == shortened
+        assert item.expiry_date == SEALED_EXPIRY
+
+    def test_without_a_product_nothing_happens(self) -> None:
+        item = self._item(opened_days=5)
+        item.product_master = None
+
+        _start_opened_clock(item)
+
+        assert item.expiry_date == SEALED_EXPIRY
