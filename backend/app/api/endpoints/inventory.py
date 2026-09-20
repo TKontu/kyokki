@@ -19,6 +19,7 @@ from app.schemas.inventory_item import (
 )
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest
+from app.services.item_status import ItemFrozen
 from app.services.quick_add import quick_add
 
 router = APIRouter()
@@ -118,9 +119,18 @@ async def update_inventory_item(
     item_update: InventoryItemUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> InventoryItemResponse:
-    """Update an inventory item."""
-    async with handle_integrity_errors():
-        item = await crud_inventory.update_inventory_item(db, item_id, item_update)
+    """Update an inventory item.
+
+    An item that has been thrown away is frozen: it answers 409 rather than quietly walking
+    back into the kitchen (H23). Sending it an active status is how to bring it back.
+    """
+    try:
+        async with handle_integrity_errors():
+            item = await crud_inventory.update_inventory_item(db, item_id, item_update)
+    except ItemFrozen as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -166,11 +176,19 @@ async def consume_inventory_item(
     consume_request: ConsumeRequest,
     db: AsyncSession = Depends(get_db),
 ) -> InventoryItemResponse:
-    """Consume/reduce quantity from an inventory item."""
+    """Consume/reduce quantity from an inventory item.
+
+    Returns:
+        - 200: Consumed; the body is the item as it now stands.
+        - 400: More than is there, an amount that rounds to nothing, or a unit that is not
+          the same kind of measure as the item's.
+        - 404: No such item.
+        - 409: The item has been thrown away (H23).
+    """
     try:
         async with handle_integrity_errors():
             item = await crud_inventory.consume_inventory_item(
-                db, item_id, consume_request.quantity
+                db, item_id, consume_request.quantity, consume_request.unit
             )
         if not item:
             raise HTTPException(
@@ -187,6 +205,10 @@ async def consume_inventory_item(
         )
 
         return item
+    except ItemFrozen as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

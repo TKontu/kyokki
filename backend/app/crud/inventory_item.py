@@ -13,6 +13,14 @@ from app.crud.consumption_log import add_consumption_log
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.schemas.inventory_item import InventoryItemCreate, InventoryItemUpdate
+from app.services.item_status import (
+    DISCARDED,
+    ItemEvent,
+    is_frozen,
+    next_status,
+    opens_the_pack,
+)
+from app.services.units import quantise, to_canonical_decimal, unit_type_for
 
 # Items in these states are gone from the kitchen and hidden from default listings.
 INACTIVE_STATUSES = ("empty", "discarded")
@@ -72,12 +80,17 @@ async def get_inventory_items(
     return list(result.scalars().all())
 
 
-async def get_inventory_item(db: AsyncSession, item_id: UUID) -> InventoryItem | None:
+async def get_inventory_item(
+    db: AsyncSession, item_id: UUID, *, for_update: bool = False
+) -> InventoryItem | None:
     """Get an inventory item by ID.
 
     Args:
         db: Database session.
         item_id: Inventory item UUID.
+        for_update: Lock the row until the transaction ends. Every writer passes this: consume
+            and correction are read-modify-write, so two callers without it both read 4 and both
+            write 3, losing one change while both log rows land (H23).
 
     Returns:
         Inventory item if found, None otherwise.
@@ -87,6 +100,12 @@ async def get_inventory_item(db: AsyncSession, item_id: UUID) -> InventoryItem |
         .where(InventoryItem.id == item_id)
         .execution_options(populate_existing=True)
     )
+    if for_update:
+        # `of` names the row to lock: `_with_product` uses `selectinload`, which issues its own
+        # SELECT, so the outer statement would lock only this table anyway - but it would not if
+        # anyone swapped in a `joinedload`, and a lock that quietly widens is worse than one that
+        # is explicit.
+        query = query.with_for_update(of=InventoryItem)
     result = await db.execute(query)
     return result.scalar_one_or_none()
 
@@ -137,25 +156,6 @@ def _start_opened_clock(item: InventoryItem) -> None:
         row.expiry_date = opened_expiry
 
 
-def apply_quantity_status(item: InventoryItem, new_quantity: Decimal) -> None:
-    """Status after the remaining quantity changes, for consume and for corrections.
-
-    0 is empty; below the full amount an item is opened (75 % or more left) or partial, and a
-    sealed item gets its opened date. An empty item brought back to full counts as opened.
-    """
-    row: Any = item  # Column-typed model: compare and assign plain values
-    if new_quantity == 0:
-        row.status = "empty"
-    elif new_quantity < row.initial_quantity:
-        if row.status == "sealed":
-            row.opened_date = date.today()
-            _start_opened_clock(item)
-        remaining_percentage = (new_quantity / row.initial_quantity) * 100
-        row.status = "partial" if remaining_percentage < 75 else "opened"
-    elif row.status == "empty":
-        row.status = "opened"
-
-
 def _start_frozen_clock(item: InventoryItem, update_data: dict[str, Any]) -> None:
     """Re-date an item that is going into the freezer (Q12, DEC-10).
 
@@ -179,6 +179,22 @@ def _start_frozen_clock(item: InventoryItem, update_data: dict[str, Any]) -> Non
     update_data["expiry_source"] = "frozen"
 
 
+def _event_for(current: str, update_data: dict[str, Any]) -> ItemEvent:
+    """Which of the four things a PATCH is actually doing (H23).
+
+    The client says what it wants the item to *be*; the table needs to know what *happened*.
+    Only `status` carries that: "Mark as gone" sends `discarded` alone, and asking for an
+    active status on a thrown-away item is the way back. Everything else - a quantity, a date,
+    a location - is a correction.
+    """
+    wanted = update_data.get("status")
+    if wanted == DISCARDED:
+        return ItemEvent.DISCARD
+    if wanted is not None and is_frozen(current):
+        return ItemEvent.RESTORE
+    return ItemEvent.CORRECT
+
+
 async def update_inventory_item(
     db: AsyncSession, item_id: UUID, item_update: InventoryItemUpdate
 ) -> InventoryItem | None:
@@ -191,20 +207,22 @@ async def update_inventory_item(
 
     Returns:
         Updated inventory item if found, None otherwise.
+
+    Raises:
+        ItemFrozen: The item has been thrown away and this is not a restore.
     """
-    db_item = await get_inventory_item(db, item_id)
+    # Locked for the same reason consume is: every decision below - the discard dedupe, the
+    # above-full test, the manual-expiry test, the freezer test - is made against this read,
+    # and two concurrent PATCHes used to make all four of them twice (H23).
+    db_item = await get_inventory_item(db, item_id, for_update=True)
     if not db_item:
         return None
 
-    # Update only provided fields
-    update_data = item_update.model_dump(exclude_unset=True)
-
-    if update_data.get("status") == "discarded" and db_item.status != "discarded":
-        add_consumption_log(
-            db, item=db_item, action="discard", quantity=db_item.current_quantity
-        )
-
     row: Any = db_item
+    update_data = item_update.model_dump(exclude_unset=True)
+    was = str(row.status)
+    event = _event_for(was, update_data)
+
     new_quantity = update_data.pop("current_quantity", None)
     if new_quantity is not None:
         # A correction (MVP-S4): not logged as consumption; raising above the full amount
@@ -212,8 +230,25 @@ async def update_inventory_item(
         if new_quantity > row.initial_quantity:
             row.initial_quantity = new_quantity
         row.current_quantity = new_quantity
-        if "status" not in update_data:
-            apply_quantity_status(db_item, new_quantity)
+
+    remaining = Decimal(str(row.current_quantity))
+    # The status is derived even when the client named one: a PATCH used to be able to set any
+    # status over any other, `discarded -> sealed` included, by suppressing the rules entirely.
+    new_status = next_status(
+        current=was,
+        event=event,
+        initial=Decimal(str(row.initial_quantity)),
+        remaining=remaining,
+        opened=row.opened_date is not None,
+    )
+    update_data.pop("status", None)
+
+    if event is ItemEvent.DISCARD:
+        add_consumption_log(db, item=db_item, action="discard", quantity=remaining)
+    if opens_the_pack(was, new_status):
+        row.opened_date = date.today()
+        _start_opened_clock(db_item)
+    row.status = new_status
 
     if (
         "expiry_date" in update_data
@@ -283,8 +318,25 @@ async def get_active_items_by_product(
     return list(result.scalars().all())
 
 
+def _amount_in_item_units(
+    quantity: Decimal, unit: str | None, item_unit: str
+) -> Decimal:
+    """`quantity` expressed in the unit the item is stored in (H23).
+
+    Omitting the unit means "the item's own", which is what the iPad does. Naming one is for
+    callers that cannot see the item: converting 0.2 l into 2 dl is helpful, subtracting 200 g
+    from a count of twelve apples is not, so a different kind of measure is refused.
+    """
+    if unit is None:
+        return quantise(quantity)
+    if unit_type_for(unit) != unit_type_for(item_unit):
+        raise ValueError(f"Cannot consume {unit} from an item measured in {item_unit}")
+    converted = to_canonical_decimal(quantity, unit)
+    return quantise(converted if converted is not None else quantity)
+
+
 async def consume_inventory_item(
-    db: AsyncSession, item_id: UUID, quantity: Decimal
+    db: AsyncSession, item_id: UUID, quantity: Decimal, unit: str | None = None
 ) -> InventoryItem | None:
     """Consume/reduce quantity from an inventory item.
 
@@ -297,29 +349,50 @@ async def consume_inventory_item(
         Updated inventory item if found, None otherwise.
 
     Raises:
-        ValueError: If trying to consume more than available quantity.
+        ValueError: If the amount is not consumable - more than is there, or so small it
+            rounds away to nothing.
+        ItemFrozen: The item has been thrown away.
     """
-    db_item = await get_inventory_item(db, item_id)
+    # Locked: two taps on Consume used to both read 4, both pass the check below, and both
+    # write 3 - one helping vanished while both log rows landed, so the count and the history
+    # disagreed (H23, `docs/reviews/pipeline-foundations.md`).
+    db_item = await get_inventory_item(db, item_id, for_update=True)
     if not db_item:
         return None
 
-    if quantity > db_item.current_quantity:
+    row: Any = db_item
+    amount = _amount_in_item_units(quantity, unit, str(row.unit))
+    if amount <= 0:
+        # Rounding is what makes this reachable: a third of 0.01 dl is not a helping, and
+        # logging it as one would say something happened that did not.
+        raise ValueError(f"Cannot consume {quantity} - it rounds to nothing")
+    if amount > row.current_quantity:
         raise ValueError(
-            f"Cannot consume {quantity} - only {db_item.current_quantity} available"
+            f"Cannot consume {quantity} - only {row.current_quantity} available"
         )
 
-    # Calculate new quantity
-    new_quantity = db_item.current_quantity - quantity
-    db_item.current_quantity = new_quantity
+    new_quantity = quantise(row.current_quantity - amount)
+    # Raises ItemFrozen for a discarded item, which is the point: it is not in the kitchen.
+    new_status = next_status(
+        current=str(row.status),
+        event=ItemEvent.CONSUME,
+        initial=Decimal(str(row.initial_quantity)),
+        remaining=new_quantity,
+        opened=row.opened_date is not None,
+    )
+
+    if opens_the_pack(str(row.status), new_status):
+        row.opened_date = date.today()
+        _start_opened_clock(db_item)
+    row.current_quantity = new_quantity
+    row.status = new_status
 
     add_consumption_log(
         db,
         item=db_item,
         action="use_full" if new_quantity == 0 else "use_partial",
-        quantity=quantity,
+        quantity=amount,
     )
-
-    apply_quantity_status(db_item, new_quantity)
 
     await db.commit()
     return await _reload(db, db_item.id)

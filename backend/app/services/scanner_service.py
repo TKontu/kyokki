@@ -301,7 +301,10 @@ async def _handle_consume(
             f"No active inventory for {product.canonical_name}. Add it first."
         )
 
-    # Consume from oldest (first due to expiry ASC ordering)
+    # Consume from oldest (first due to expiry ASC ordering). The cap below is advisory:
+    # `consume_inventory_item` re-reads the row under a lock (H23), so if something else got
+    # there first this refuses with a ValueError rather than quietly consuming the wrong
+    # amount. Picking the item is still unlocked; this surface is DEC-7's to settle.
     inv_item = active_items[0]
     consume_qty = min(quantity, inv_item.current_quantity)
     capped = consume_qty < quantity

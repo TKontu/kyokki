@@ -6,6 +6,7 @@ import {
   roundQuantity,
 } from '../consumption'
 import type { InventoryItem } from '@/types/inventory'
+import contract from '../../../contracts/status-transitions.json'
 
 function makeItem(overrides: Partial<InventoryItem> = {}): InventoryItem {
   return {
@@ -193,5 +194,43 @@ describe('consumption', () => {
       applyConsume(item, 100)
       expect(item.current_quantity).toBe(1000)
     })
+
+  describe('the shared status table', () => {
+    // contracts/status-transitions.json is the one copy of the rule. The server answers to it
+    // in backend/tests/crud/test_quantity_status.py; this is the other half, and the reason
+    // the optimistic label on a Consume tap matches what comes back a round trip later.
+    const consumeCases = contract.cases.filter(
+      (c: { event: string; serverOnly?: boolean }) => c.event === 'consume' && !c.serverOnly
+    )
+
+    it.each(consumeCases)('$name', (testCase) => {
+      const { from, initial, remaining, opened, to } = testCase as {
+        from: string
+        initial: number
+        remaining: number
+        opened: boolean
+        to: string
+      }
+      const item = makeItem({
+        status: from,
+        initial_quantity: initial,
+        current_quantity: initial,
+        opened_date: opened ? '2024-01-20' : null,
+      })
+
+      expect(applyConsume(item, initial - remaining).status).toBe(to)
+    })
+
+    it('uses the same threshold the server does', () => {
+      // 75 % exactly is `opened`; a hair under is `partial`.
+      const atThreshold = makeItem({ initial_quantity: 100, current_quantity: 100 })
+      expect(applyConsume(atThreshold, 100 * (1 - contract.partialThreshold)).status).toBe(
+        'opened'
+      )
+      expect(applyConsume(atThreshold, 100 * (1 - contract.partialThreshold) + 1).status).toBe(
+        'partial'
+      )
+    })
+  })
   })
 })

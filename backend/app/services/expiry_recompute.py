@@ -93,8 +93,9 @@ async def recompute_expiry_for_product(
         select(InventoryItem)
         .where(InventoryItem.product_master_id == product.id)
         .where(InventoryItem.status.notin_(INACTIVE_STATUSES))
-        # `of` matters: `get_inventory_item` eager-loads `product_master`, and a bare FOR
-        # UPDATE would try to lock the joined product rows too.
+        # `of` names the row to lock. It changes nothing today - nothing here joins another
+        # table - but it keeps the lock from silently widening if one ever does, which is the
+        # same reason `get_inventory_item` passes it (H23).
         .with_for_update(of=InventoryItem)
     )
     items = list((await db.execute(query)).scalars().all())

@@ -43,6 +43,26 @@ class InventoryItemCreate(InventoryItemBase):
         canonicalize_units(self, "unit", ["initial_quantity", "current_quantity"])
         return self
 
+    @model_validator(mode="after")
+    def coherent_amounts_and_dates(self) -> "InventoryItemCreate":
+        """Refuse a row that could never have come about (H23).
+
+        Both of these were accepted until now, and each one makes the quantity bar or the
+        expiry badge say something impossible for the life of the row. They run after
+        `canonical_units`, so the comparison is between amounts in the same unit.
+        """
+        if self.current_quantity > self.initial_quantity:
+            raise ValueError(
+                f"current_quantity ({self.current_quantity}) cannot exceed "
+                f"initial_quantity ({self.initial_quantity})"
+            )
+        if self.purchase_date is not None and self.expiry_date < self.purchase_date:
+            raise ValueError(
+                f"expiry_date ({self.expiry_date}) cannot be before "
+                f"purchase_date ({self.purchase_date})"
+            )
+        return self
+
 
 class QuickAddRequest(BaseModel):
     """Add stock by hand: an existing product, or a generic product found or created by name.
