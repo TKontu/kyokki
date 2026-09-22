@@ -30,9 +30,12 @@ export interface PaginatedResponse<T> {
   pages: number
 }
 
+/** One query parameter; an array repeats the key (`?action=a&action=b`), as FastAPI reads lists. */
+export type QueryValue = string | number | boolean | undefined | readonly (string | number)[]
+
 export interface RequestOptions {
   headers?: Record<string, string>
-  params?: Record<string, string | number | boolean | undefined>
+  params?: Record<string, QueryValue>
   body?: unknown
 }
 

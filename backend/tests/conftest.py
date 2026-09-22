@@ -98,7 +98,6 @@ async def sample_category(db_session: AsyncSession) -> Category:
         display_name="Dairy",
         icon="🥛",
         default_shelf_life_days=7,
-        meal_contexts=["breakfast"],
         sort_order=1,
     )
     db_session.add(category)

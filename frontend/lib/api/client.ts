@@ -4,7 +4,7 @@
  */
 
 import { APIError, NetworkError } from './errors'
-import type { APIConfig, RequestOptions } from '@/types/api'
+import type { APIConfig, QueryValue, RequestOptions } from '@/types/api'
 
 /**
  * Human-readable message for a failed response. FastAPI sends `{ detail: string }` for
@@ -74,15 +74,17 @@ export class APIClient {
   ): Promise<T> {
     const url = `${this.baseURL}${path}`
 
-    // Build query string from params
-    const queryString = options?.params
-      ? '?' +
-        new URLSearchParams(
-          Object.entries(options.params)
-            .filter(([, v]) => v !== undefined)
-            .map(([k, v]) => [k, String(v)])
-        ).toString()
-      : ''
+    // Build query string from params; nothing left to send means no '?' at all
+    const query = new URLSearchParams(
+      Object.entries(options?.params ?? {}).flatMap(([k, v]) =>
+        v === undefined
+          ? []
+          : Array.isArray(v)
+            ? v.map((each) => [k, String(each)])
+            : [[k, String(v)]]
+      )
+    ).toString()
+    const queryString = query ? `?${query}` : ''
 
     try {
       const response = await fetch(url + queryString, {
@@ -128,7 +130,7 @@ export class APIClient {
    */
   async get<T>(
     path: string,
-    params?: Record<string, string | number | boolean | undefined>
+    params?: Record<string, QueryValue>
   ): Promise<T> {
     return this.request<T>('GET', path, { params })
   }

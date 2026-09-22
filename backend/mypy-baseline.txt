@@ -40,7 +40,6 @@
 1	app/crud/shopping_list_item.py	no-any-return
 3	app/main.py	no-untyped-def
 1	app/models/category.py	misc
-1	app/models/category.py	var-annotated
 1	app/models/consumption_log.py	misc
 1	app/models/inventory_item.py	misc
 4	app/models/inventory_item.py	no-any-return

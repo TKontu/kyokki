@@ -56,7 +56,6 @@ it('adds a new product from the home page and shows it in the list', async () =>
           display_name: 'Frozen',
           icon: '🧊',
           default_shelf_life_days: 180,
-          meal_contexts: null,
           sort_order: 1,
           default_storage: 'freezer',
         },

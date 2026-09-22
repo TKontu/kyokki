@@ -6,6 +6,7 @@
 import { useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import inventoryAPI from '@/lib/api/inventory'
+import { consumptionLogKeys } from '@/hooks/useConsumptionLog'
 import { productKeys } from '@/hooks/useProducts'
 import { applyConsume } from '@/lib/consumption'
 import type {
@@ -108,6 +109,7 @@ export function useUpdateInventoryItem() {
       queryClient.setQueryData(inventoryKeys.detail(updatedItem.id), updatedItem)
       // Invalidate lists to reflect changes
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: consumptionLogKeys.all })
     },
   })
 }
@@ -132,6 +134,7 @@ export function useBulkInventoryMove() {
     retry: false,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: consumptionLogKeys.all })
     },
   })
 }
@@ -156,6 +159,7 @@ export function useRestoreInventoryItem() {
       const restored = await inventoryAPI.update(id, { status: 'opened' })
       queryClient.setQueryData(inventoryKeys.detail(restored.id), restored)
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: consumptionLogKeys.all })
       return restored
     },
     [queryClient]
@@ -215,6 +219,7 @@ export function useConsumeInventoryItem() {
     onSettled: () => {
       // Success or failure, refetch so lists match the server (empty items drop out)
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: consumptionLogKeys.all })
     },
   })
 }
@@ -255,6 +260,7 @@ export function useDeleteInventoryItem() {
         list?.filter((item) => item.id !== id)
       )
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: consumptionLogKeys.all })
     },
   })
 }

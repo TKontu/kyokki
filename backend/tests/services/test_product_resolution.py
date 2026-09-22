@@ -55,7 +55,6 @@ async def categories(db_session: AsyncSession) -> None:
                 display_name=category_id.title(),
                 icon="*",
                 default_shelf_life_days=days,
-                meal_contexts=[],
                 sort_order=order,
             )
         )

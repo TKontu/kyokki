@@ -29,7 +29,6 @@ class TestMatchingService:
             display_name="Dairy",
             icon="🥛",
             default_shelf_life_days=7,
-            meal_contexts=["breakfast"],
             sort_order=1,
         )
         db_session.add(category)
@@ -305,7 +304,6 @@ class TestMatchingService:
             display_name="Produce",
             icon="🥬",
             default_shelf_life_days=5,
-            meal_contexts=["cooking"],
             sort_order=2,
         )
         db_session.add(category)
@@ -387,7 +385,6 @@ class TestAliasFirstMatching:
                 display_name="Dairy & Eggs",
                 icon="🥛",
                 default_shelf_life_days=7,
-                meal_contexts=["breakfast"],
                 sort_order=1,
             )
         )
@@ -565,7 +562,6 @@ class TestGenericNameMatching:
                 display_name="Meat",
                 icon="🥩",
                 default_shelf_life_days=3,
-                meal_contexts=["dinner"],
                 sort_order=1,
             )
         )

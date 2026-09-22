@@ -8,52 +8,43 @@ from app.schemas.types import JsonDecimal
 
 
 class ConsumptionAction(StrEnum):
-    """What happened to the food, as recorded rather than as decided.
+    """What happened to an item's quantity, one row per event (H46).
 
     The distinction this whole column exists for is `discard` against the two `use_` values:
-    thrown away is waste, eaten is not, and reducing waste is the point of the app. Nothing
-    reads the log back yet - that is H46.
+    thrown away is waste, eaten is not, and reducing waste is the point of the app. The other
+    two make the history replayable: `restore` brings a thrown-away item back, `correct` is
+    the cook fixing a number by hand. Neither is consumption, and a waste total must not count
+    them.
 
-    `ADJUST` is declared and never written: a correction is deliberately not consumption
-    (`crud/inventory_item.update_inventory_item`). H46 decides whether it should be.
+    Follows `services.item_status.ItemEvent`, with consume split in two so "finished it" can
+    be told from "had some".
     """
 
     USE_PARTIAL = "use_partial"
     USE_FULL = "use_full"
     DISCARD = "discard"
-    ADJUST = "adjust"
+    RESTORE = "restore"
+    CORRECT = "correct"
 
 
-class ConsumptionLogBase(BaseModel):
-    """Base consumption log schema with common fields."""
+class ConsumptionLogResponse(BaseModel):
+    """One event in an item's history, readable on its own.
 
-    inventory_item_id: UUID = Field(..., description="Inventory item ID")
-    product_master_id: UUID = Field(..., description="Product master ID")
-    action: ConsumptionAction = Field(..., description="What happened to the food")
-    quantity_consumed: JsonDecimal = Field(..., gt=0, description="Quantity consumed")
-    consumption_context: str | None = Field(
-        None, description="Context: breakfast, lunch, dinner, snack, cooking"
-    )
-
-
-class ConsumptionLogCreate(ConsumptionLogBase):
-    """Schema for creating a new consumption log entry."""
-
-    pass
-
-
-class ConsumptionLogUpdate(BaseModel):
-    """Schema for updating a consumption log entry."""
-
-    action: str | None = None
-    quantity_consumed: JsonDecimal | None = Field(None, gt=0)
-    consumption_context: str | None = None
-
-
-class ConsumptionLogResponse(ConsumptionLogBase):
-    """Schema for consumption log API responses."""
+    `quantity_consumed` is how much the event moved, always positive - the name predates
+    `restore` and `correct`, which move food the other way; `quantity_after` is what was left
+    once it had. A correction can go either way, and the pair is what says which.
+    """
 
     id: UUID
+    inventory_item_id: UUID
+    product_master_id: UUID
+    product_name: str = Field(..., description="The product's name, for display")
+    unit: str = Field(..., description="The unit both quantities are in")
+    action: ConsumptionAction = Field(..., description="What happened")
+    quantity_consumed: JsonDecimal = Field(
+        ..., gt=0, description="How much the event moved"
+    )
+    quantity_after: JsonDecimal = Field(..., ge=0, description="What was left after it")
     logged_at: datetime
 
     model_config = {"from_attributes": True}

@@ -516,7 +516,6 @@ class TestReceiptItems:
                     display_name=name,
                     icon=None,
                     default_shelf_life_days=7,
-                    meal_contexts=[],
                     sort_order=1,
                 )
             )

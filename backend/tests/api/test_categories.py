@@ -86,7 +86,6 @@ class TestCreateCategory:
             "display_name": "Spices & Herbs",
             "icon": "🌿",
             "default_shelf_life_days": 180,
-            "meal_contexts": ["cooking"],
             "sort_order": 130,
         }
 

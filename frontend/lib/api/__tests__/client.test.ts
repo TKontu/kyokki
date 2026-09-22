@@ -56,6 +56,29 @@ describe('APIClient', () => {
         expect.any(Object)
       )
     })
+
+    it('sends no bare ? when every parameter is undefined', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+      })
+
+      await client.get('/test', { param1: undefined })
+      expect(mockFetch).toHaveBeenCalledWith(`${BASE_URL}/test`, expect.any(Object))
+    })
+
+    it('repeats the key for an array, which is how FastAPI reads a list', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+      })
+
+      await client.get('/test', { action: ['use_full', 'discard'], limit: 5 })
+      expect(mockFetch).toHaveBeenCalledWith(
+        `${BASE_URL}/test?action=use_full&action=discard&limit=5`,
+        expect.any(Object)
+      )
+    })
   })
 
   describe('POST requests', () => {

@@ -78,7 +78,6 @@ async def _probe(db_session: AsyncSession) -> None:
             display_name="Isolation probe",
             icon="🔬",
             default_shelf_life_days=1,
-            meal_contexts=[],
             sort_order=99,
         )
     )

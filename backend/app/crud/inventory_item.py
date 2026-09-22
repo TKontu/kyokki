@@ -2,7 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -28,6 +28,20 @@ from app.services.units import quantise, to_canonical_decimal, unit_type_for
 
 # Items in these states are gone from the kitchen and hidden from default listings.
 INACTIVE_STATUSES = ("empty", "discarded")
+
+
+def _track_consumed_at(row: Any, was: str, now: str) -> None:
+    """Keep `consumed_at` saying when the item left the kitchen (H46).
+
+    Stamped on the way out - finished or thrown away - and kept when an empty item is then
+    discarded, because it was already gone. Cleared when it comes back: a restore, or a
+    correction that finds some left after all.
+    """
+    if now in INACTIVE_STATUSES:
+        if was not in INACTIVE_STATUSES or row.consumed_at is None:
+            row.consumed_at = datetime.now(UTC)
+    else:
+        row.consumed_at = None
 
 
 def _with_product(
@@ -227,10 +241,11 @@ async def update_inventory_item(
     was = str(row.status)
     event = _event_for(was, update_data)
 
+    before = Decimal(str(row.current_quantity))
     new_quantity = update_data.pop("current_quantity", None)
     if new_quantity is not None:
-        # A correction (MVP-S4): not logged as consumption; raising above the full amount
-        # makes the new amount full, so the quantity bar stays sensible
+        # A correction (MVP-S4): raising above the full amount makes the new amount full, so
+        # the quantity bar stays sensible
         if new_quantity > row.initial_quantity:
             row.initial_quantity = new_quantity
         row.current_quantity = new_quantity
@@ -247,10 +262,35 @@ async def update_inventory_item(
     )
     update_data.pop("status", None)
 
+    # One row per PATCH, named after what it did. A discard or restore that also names an
+    # amount logs that amount as the one thrown away or brought back; only a plain correction
+    # is logged as `correct`, and only when the number actually moved - a new date or a new
+    # shelf is not part of the quantity's history.
     if event is ItemEvent.DISCARD:
         add_consumption_log(
-            db, item=db_item, action=ConsumptionAction.DISCARD, quantity=remaining
+            db,
+            item=db_item,
+            action=ConsumptionAction.DISCARD,
+            quantity=remaining,
+            quantity_after=Decimal(0),
         )
+    elif event is ItemEvent.RESTORE:
+        add_consumption_log(
+            db,
+            item=db_item,
+            action=ConsumptionAction.RESTORE,
+            quantity=remaining,
+            quantity_after=remaining,
+        )
+    elif remaining != before:
+        add_consumption_log(
+            db,
+            item=db_item,
+            action=ConsumptionAction.CORRECT,
+            quantity=remaining - before,
+            quantity_after=remaining,
+        )
+    _track_consumed_at(row, was, str(new_status))
     if opens_the_pack(was, new_status):
         row.opened_date = date.today()
         _start_opened_clock(db_item)
@@ -299,9 +339,10 @@ async def move_many(
     none of it does.
 
     Every row still goes through H23's transition, so an item already in the bin is **refused**
-    rather than discarded twice, and the waste log gets exactly one row per item that actually
-    moved. `refused` and `missing` are counted rather than raised: a cook clearing thirteen
-    things does not want the whole action to fail because one of them was already gone.
+    rather than discarded twice, and the log gets exactly one row per item that actually
+    moved - none for an item that was already empty, since nothing was thrown away. `refused`
+    and `missing` are counted rather than raised: a cook clearing thirteen things does not
+    want the whole action to fail because one of them was already gone.
     """
     if not item_ids:
         return BulkResult(changed=[], refused=0, missing=0)
@@ -333,13 +374,17 @@ async def move_many(
             refused += 1
             continue
 
-        if event is ItemEvent.DISCARD:
-            add_consumption_log(
-                db,
-                item=item,
-                action=ConsumptionAction.DISCARD,
-                quantity=Decimal(str(row.current_quantity)),
-            )
+        remaining = Decimal(str(row.current_quantity))
+        add_consumption_log(
+            db,
+            item=item,
+            action=ConsumptionAction.DISCARD
+            if event is ItemEvent.DISCARD
+            else ConsumptionAction.RESTORE,
+            quantity=remaining,
+            quantity_after=Decimal(0) if event is ItemEvent.DISCARD else remaining,
+        )
+        _track_consumed_at(row, was, str(new_status))
         row.status = new_status
         changed.append(
             MovedInventoryItem(
@@ -464,6 +509,7 @@ async def consume_inventory_item(
     if opens_the_pack(str(row.status), new_status):
         row.opened_date = date.today()
         _start_opened_clock(db_item)
+    _track_consumed_at(row, str(row.status), str(new_status))
     row.current_quantity = new_quantity
     row.status = new_status
 
@@ -474,6 +520,7 @@ async def consume_inventory_item(
         if new_quantity == 0
         else ConsumptionAction.USE_PARTIAL,
         quantity=amount,
+        quantity_after=new_quantity,
     )
 
     await db.commit()

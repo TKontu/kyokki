@@ -16,8 +16,8 @@ const push = jest.fn()
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push, back: jest.fn() }) }))
 
 const CATEGORIES = [
-  { id: 'dairy', display_name: 'Dairy & Eggs', icon: '🥛', default_shelf_life_days: 7, meal_contexts: null, sort_order: 20, default_storage: 'refrigerator' },
-  { id: 'meat', display_name: 'Meat & Poultry', icon: '🥩', default_shelf_life_days: 5, meal_contexts: null, sort_order: 10, default_storage: 'refrigerator' },
+  { id: 'dairy', display_name: 'Dairy & Eggs', icon: '🥛', default_shelf_life_days: 7, sort_order: 20, default_storage: 'refrigerator' },
+  { id: 'meat', display_name: 'Meat & Poultry', icon: '🥩', default_shelf_life_days: 5, sort_order: 10, default_storage: 'refrigerator' },
 ]
 
 function item(index: number, overrides: Partial<ExtractedItem> = {}): ExtractedItem {

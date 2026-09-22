@@ -6,12 +6,7 @@ from app.schemas.category import (
     CategoryResponse,
     CategoryUpdate,
 )
-from app.schemas.consumption_log import (
-    ConsumptionLogBase,
-    ConsumptionLogCreate,
-    ConsumptionLogResponse,
-    ConsumptionLogUpdate,
-)
+from app.schemas.consumption_log import ConsumptionAction, ConsumptionLogResponse
 from app.schemas.inventory_item import (
     InventoryItemBase,
     InventoryItemCreate,
@@ -70,9 +65,7 @@ __all__ = [
     "InventoryItemUpdate",
     "InventoryItemResponse",
     # Consumption Log
-    "ConsumptionLogBase",
-    "ConsumptionLogCreate",
-    "ConsumptionLogUpdate",
+    "ConsumptionAction",
     "ConsumptionLogResponse",
     # Shopping List Item
     "ShoppingListItemBase",

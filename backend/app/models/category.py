@@ -1,4 +1,4 @@
-from sqlalchemy import ARRAY, Column, Integer, String
+from sqlalchemy import Column, Integer, String
 
 from app.db.base_class import Base
 
@@ -22,7 +22,4 @@ class Category(Base):
     # (Q12/DEC-10). NULL means freezing does not change the clock for this category -
     # nothing useful happens to a frozen bottle of squash.
     frozen_shelf_life_days = Column(Integer, nullable=True)
-    meal_contexts = Column(
-        ARRAY(String), nullable=True
-    )  # ["breakfast", "cooking", etc.]
     sort_order = Column(Integer, nullable=False, default=0)
