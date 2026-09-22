@@ -111,6 +111,7 @@ class TestMergeMovesEveryReference:
                     action="use_partial",
                     quantity_consumed=Decimal("250"),
                     quantity_after=Decimal("750"),
+                    unit="g",
                 ),
             ]
         )
@@ -189,6 +190,7 @@ class TestMergeMovesEveryReference:
                     action="use_full",
                     quantity_consumed=Decimal("750"),
                     quantity_after=Decimal("0"),
+                    unit="g",
                 ),
             ]
         )

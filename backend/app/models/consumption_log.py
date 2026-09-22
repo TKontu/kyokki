@@ -27,9 +27,11 @@ class ConsumptionLog(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     inventory_item_id = Column(
         UUID(as_uuid=True),
-        # Deleting an item (entered by mistake, MVP-S4) removes its history too
-        ForeignKey("inventory_item.id", ondelete="CASCADE"),
-        nullable=False,
+        # The record outlives the item (operator, 2026-09-22): deleting an item used to delete
+        # what it wasted with it, and the waste metrics would then be quietly short. The row
+        # keeps its own `unit`, so a detached one still says what 250 of something means.
+        ForeignKey("inventory_item.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     product_master_id = Column(
@@ -41,6 +43,9 @@ class ConsumptionLog(Base):
     )  # schemas.consumption_log.ConsumptionAction
     quantity_consumed = Column(Numeric(10, 2), nullable=False)
     quantity_after = Column(Numeric(10, 2), nullable=False)
+    unit = Column(
+        String, nullable=False
+    )  # The item's unit, copied so the row can stand alone
 
     batch_id = Column(
         UUID(as_uuid=True), nullable=False, default=uuid.uuid4, index=True
@@ -65,5 +70,9 @@ class ConsumptionLog(Base):
         return str(self.product_master.canonical_name)
 
     @property
-    def unit(self) -> str:
-        return str(self.inventory_item.unit)
+    def item_status(self) -> str | None:
+        """Where the item stands now, or None once it has been deleted.
+
+        What tells the Gone screen whether this row can still be put back.
+        """
+        return None if self.inventory_item is None else str(self.inventory_item.status)

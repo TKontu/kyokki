@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +19,8 @@ __all__ = [
     "add_consumption_log",
     "list_consumption_logs",
     "newest_batch",
+    "newest_batch_before",
+    "summarise_consumption",
 ]
 
 
@@ -52,6 +54,7 @@ def add_consumption_log(
         action=action,
         quantity_consumed=abs(quantity),
         quantity_after=quantity_after,
+        unit=item.unit,
         batch_id=batch_id or uuid4(),
         previous=previous,
     )
@@ -113,17 +116,72 @@ async def list_consumption_logs(
     return list(result.scalars().all())
 
 
+async def newest_batch_before(db: AsyncSession, batch_id: UUID) -> list[ConsumptionLog]:
+    """The batch logged before this one, for undo to step over one it cannot reverse."""
+    logged_at = await db.scalar(
+        select(func.min(ConsumptionLog.logged_at)).where(
+            ConsumptionLog.batch_id == batch_id
+        )
+    )
+    if logged_at is None:
+        return []
+    return await _batch_at(
+        db,
+        select(ConsumptionLog.batch_id)
+        .where(ConsumptionLog.logged_at < logged_at)
+        .order_by(ConsumptionLog.logged_at.desc(), ConsumptionLog.id.desc())
+        .limit(1),
+    )
+
+
+async def summarise_consumption(
+    db: AsyncSession,
+    *,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> dict[str, dict[str, Any]]:
+    """How much of what happened in a window, per action.
+
+    `{"discard": {"events": 8, "totals": {"g": 1400, "pcs": 6}}}`. Totals are kept apart by
+    unit because adding grams to pieces would be a number that means nothing; the screen shows
+    them side by side, and the later metrics work reads the same shape.
+    """
+    query = select(
+        ConsumptionLog.action,
+        ConsumptionLog.unit,
+        func.count().label("events"),
+        func.sum(ConsumptionLog.quantity_consumed).label("total"),
+    ).group_by(ConsumptionLog.action, ConsumptionLog.unit)
+
+    if since is not None:
+        query = query.where(ConsumptionLog.logged_at >= since)
+    if until is not None:
+        query = query.where(ConsumptionLog.logged_at < until)
+
+    summary: dict[str, dict[str, Any]] = {}
+    for action, unit, events, total in await db.execute(query):
+        per_action = summary.setdefault(action, {"events": 0, "totals": {}})
+        per_action["events"] += events
+        per_action["totals"][unit] = total
+    return summary
+
+
 async def newest_batch(db: AsyncSession) -> list[ConsumptionLog]:
     """The rows of the most recent action, with their item and product loaded.
 
     The most recent action is the batch of the newest row. Empty when nothing has been logged.
     """
-    newest = await db.execute(
+    return await _batch_at(
+        db,
         select(ConsumptionLog.batch_id)
         .order_by(ConsumptionLog.logged_at.desc(), ConsumptionLog.id.desc())
-        .limit(1)
+        .limit(1),
     )
-    batch_id = newest.scalar_one_or_none()
+
+
+async def _batch_at(db: AsyncSession, pick_batch: Select[Any]) -> list[ConsumptionLog]:
+    """The rows of whichever batch `pick_batch` names, item and product loaded."""
+    batch_id = (await db.execute(pick_batch)).scalar_one_or_none()
     if batch_id is None:
         return []
     result = await db.execute(

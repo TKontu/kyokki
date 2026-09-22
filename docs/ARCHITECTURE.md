@@ -31,7 +31,9 @@
 >   store) points at the chosen generic product. Quick add (`POST /api/inventory/quick-add`,
   MVP-S3) uses the same product rules (`services/generic_products.py`).
 >   `consumption_log` gets one row per quantity event (consume, correct, discard, restore) and
->   is read back through `GET /api/consumption-log` since H46; waste is `?action=discard`.
+>   is read back through `GET /api/consumption-log` since H46; waste is `?action=discard`. The
+>   **Gone** screen shows it, `/summary` totals a window, and the rows survive the deletion of
+>   the item they describe, so metrics cover everything ever thrown away.
 > - **MVP decisions (see `docs/TODO.md`):** polling instead of WebSockets on the iPad,
 >   FastAPI `BackgroundTasks` instead of Celery, `<input type="file" capture>` instead of
 >   `getUserMedia`, LLM-based extraction stays the general core with a generic heuristic
@@ -176,11 +178,14 @@ inventory_item (
 -- Consumption history
 consumption_log (
   id UUID PK,
-  inventory_item_id FK,
+  inventory_item_id FK NULL,       -- ON DELETE SET NULL: the record outlives the item
   product_master_id FK,
   action VARCHAR,                  -- use_partial, use_full, discard, restore, correct
   quantity_consumed DECIMAL,       -- how much the event moved, always > 0
   quantity_after DECIMAL,          -- what was left after it (H46)
+  unit VARCHAR,                    -- the item's unit, copied so a detached row still reads
+  batch_id UUID,                   -- the rows one action wrote, undone together
+  previous JSONB NULL,             -- the item before the event, for undo; NULL pre-undo
   logged_at TIMESTAMP
 )
 

@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud import consumption_log as crud_consumption_log
 from app.db.session import get_db
-from app.schemas.consumption_log import ConsumptionAction, ConsumptionLogResponse
+from app.schemas.consumption_log import (
+    ActionSummary,
+    ConsumptionAction,
+    ConsumptionLogResponse,
+)
 
 router = APIRouter()
 
@@ -55,3 +59,28 @@ async def list_consumption_log(
         offset=offset,
     )
     return [ConsumptionLogResponse.model_validate(log) for log in logs]
+
+
+@router.get("/summary", response_model=dict[str, ActionSummary])
+async def summarise_consumption_log(
+    since: datetime | None = None,
+    until: datetime | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, ActionSummary]:
+    """What happened in a window, per action: how many times, and how much of each unit.
+
+    The Gone screen's header ("Thrown away 8 · 1.4 kg, 6 pcs") over a window the list would
+    need several pages to cover, and the seam the later metrics work reads.
+
+    Args:
+        since: Only events logged at or after this moment.
+        until: Only events logged before this moment.
+        db: Database session.
+
+    Returns:
+        A mapping of action to its counts; actions with nothing in the window are absent.
+    """
+    summary = await crud_consumption_log.summarise_consumption(
+        db, since=since, until=until
+    )
+    return {action: ActionSummary(**counts) for action, counts in summary.items()}

@@ -105,7 +105,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
         }
       >
         <p className="text-base text-ui-text dark:text-ui-dark-text">
-          {`Delete ${name}? This removes the item and its history. Use Mark as gone if it was thrown away.`}
+          {`Delete ${name}? This removes the item; what it wasted stays on Gone. Use Mark as gone if it was thrown away.`}
         </p>
       </BottomSheet>
     )

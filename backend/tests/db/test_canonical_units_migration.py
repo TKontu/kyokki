@@ -101,6 +101,7 @@ async def legacy_rows(db_session: AsyncSession) -> dict:
             action="use_partial",
             quantity_consumed=Decimal("250"),
             quantity_after=Decimal("750"),
+            unit="ml",
         ),
         "eggs": ConsumptionLog(
             inventory_item_id=items["eggs"].id,
@@ -108,6 +109,7 @@ async def legacy_rows(db_session: AsyncSession) -> dict:
             action="use_partial",
             quantity_consumed=Decimal("2"),
             quantity_after=Decimal("10"),
+            unit="unit",
         ),
     }
     shopping = {

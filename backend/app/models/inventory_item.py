@@ -57,10 +57,11 @@ class InventoryItem(Base):
     # Relationships
     product_master = relationship("ProductMaster", back_populates="inventory_items")
     receipt = relationship("Receipt", back_populates="inventory_items")
+    # No delete cascade: the waste record outlives the item (operator, 2026-09-22). The FK is
+    # ON DELETE SET NULL, and `passive_deletes` leaves that to the database.
     consumption_logs = relationship(
         "ConsumptionLog",
         back_populates="inventory_item",
-        cascade="all, delete-orphan",
         passive_deletes=True,
     )
 

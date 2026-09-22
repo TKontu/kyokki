@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 URL = "/api/consumption-log"
 
 
-async def _product(client: AsyncClient, name: str) -> dict:
+async def _product(
+    client: AsyncClient, name: str, unit: str = "dl", unit_type: str = "volume"
+) -> dict:
     response = await client.post(
         "/api/products",
         json={
@@ -19,22 +21,24 @@ async def _product(client: AsyncClient, name: str) -> dict:
             "category": "dairy",
             "storage_type": "refrigerator",
             "default_shelf_life_days": 7,
-            "unit_type": "volume",
-            "default_unit": "dl",
+            "unit_type": unit_type,
+            "default_unit": unit,
         },
     )
     assert response.status_code == 201, response.text
     return response.json()
 
 
-async def _item(client: AsyncClient, product_id: str, quantity: int = 10) -> dict:
+async def _item(
+    client: AsyncClient, product_id: str, quantity: int = 10, unit: str = "dl"
+) -> dict:
     response = await client.post(
         "/api/inventory",
         json={
             "product_master_id": product_id,
             "initial_quantity": quantity,
             "current_quantity": quantity,
-            "unit": "dl",
+            "unit": unit,
             "expiry_date": str(date.today() + timedelta(days=7)),
         },
     )
@@ -63,7 +67,8 @@ async def milk(client: AsyncClient, seeded_db: AsyncSession) -> dict:
 
 @pytest.fixture
 async def cream(client: AsyncClient, seeded_db: AsyncSession) -> dict:
-    return await _product(client, "Cream")
+    """Measured in grams, so a summary has two units to keep apart."""
+    return await _product(client, "Cream", unit="g", unit_type="weight")
 
 
 class TestReadingTheHistory:
@@ -136,7 +141,7 @@ class TestReadingTheHistory:
     ) -> None:
         first = await _item(client, milk["id"])
         second = await _item(client, milk["id"])
-        other = await _item(client, cream["id"])
+        other = await _item(client, cream["id"], unit="g")
         for item in (first, second, other):
             await _consume(client, item["id"], 1)
 
@@ -182,15 +187,94 @@ class TestReadingTheHistory:
 
         assert [r["id"] for r in first + second] == everything[:4]
 
-    async def test_a_deleted_item_takes_its_history_with_it(
+    async def test_the_record_outlives_the_item(
         self, client: AsyncClient, milk: dict
     ) -> None:
+        """Deleting an item used to delete its history; metrics would then miss the waste."""
         item = await _item(client, milk["id"])
         await _consume(client, item["id"], 1)
 
         await client.delete(f"/api/inventory/{item['id']}")
 
-        assert (await client.get(URL)).json() == []
+        (row,) = (await client.get(URL)).json()
+        assert row["inventory_item_id"] is None
+        assert row["item_status"] is None
+        # Detached, and still readable: 1 what?
+        assert (row["quantity_consumed"], row["unit"]) == (1.0, "dl")
+        assert row["product_name"] == "Milk"
+
+
+class TestWhetherItCanComeBack:
+    async def test_a_row_says_where_its_item_stands_now(
+        self, client: AsyncClient, milk: dict
+    ) -> None:
+        """The Gone screen offers "Put it back" on exactly the rows whose item is in the bin."""
+        binned = await _item(client, milk["id"])
+        eaten = await _item(client, milk["id"])
+        await _discard(client, binned["id"])
+        await _consume(client, eaten["id"], 10)
+
+        rows = {
+            r["inventory_item_id"]: r["item_status"]
+            for r in (await client.get(URL)).json()
+        }
+
+        assert rows[binned["id"]] == "discarded"
+        assert rows[eaten["id"]] == "empty"
+
+    async def test_it_follows_the_item_back_out_of_the_bin(
+        self, client: AsyncClient, milk: dict
+    ) -> None:
+        item = await _item(client, milk["id"])
+        await _discard(client, item["id"])
+
+        await client.post("/api/inventory/restore", json={"ids": [item["id"]]})
+
+        discarded = [
+            r for r in (await client.get(URL)).json() if r["action"] == "discard"
+        ]
+        assert [r["item_status"] for r in discarded] == ["opened"]
+
+
+class TestTheSummary:
+    """The Gone screen's header, and the seam the later metrics work reads."""
+
+    async def test_it_counts_events_and_totals_each_unit(
+        self, client: AsyncClient, milk: dict, cream: dict
+    ) -> None:
+        litres = await _item(client, milk["id"], quantity=10)
+        grams = await _item(client, cream["id"], quantity=400, unit="g")
+        eaten = await _item(client, milk["id"], quantity=5)
+        await _discard(client, litres["id"])
+        await _discard(client, grams["id"])
+        await _consume(client, eaten["id"], 5)
+
+        summary = (await client.get(f"{URL}/summary")).json()
+
+        assert summary["discard"] == {"events": 2, "totals": {"dl": 10.0, "g": 400.0}}
+        assert summary["use_full"] == {"events": 1, "totals": {"dl": 5.0}}
+
+    async def test_it_counts_nothing_before_the_window(
+        self, client: AsyncClient, milk: dict
+    ) -> None:
+        item = await _item(client, milk["id"])
+        await _discard(client, item["id"])
+        (row,) = (await client.get(URL)).json()
+
+        before = (
+            await client.get(f"{URL}/summary", params={"since": row["logged_at"]})
+        ).json()
+        after = (
+            await client.get(f"{URL}/summary", params={"until": row["logged_at"]})
+        ).json()
+
+        assert before["discard"]["events"] == 1
+        assert after == {}
+
+    async def test_an_empty_history_summarises_to_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        assert (await client.get(f"{URL}/summary")).json() == {}
 
 
 class TestRefusedAtTheDoor:

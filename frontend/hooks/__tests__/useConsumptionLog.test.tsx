@@ -14,6 +14,7 @@ import type { ConsumptionLogEntry } from '@/types/consumption'
 const entry = (overrides: Partial<ConsumptionLogEntry> = {}): ConsumptionLogEntry => ({
   id: 'l1',
   inventory_item_id: 'i1',
+  item_status: 'discarded',
   product_master_id: 'p1',
   product_name: 'Milk',
   unit: 'dl',

@@ -189,7 +189,7 @@ describe('ItemEditSheet', () => {
 
     expect(
       screen.getByText(
-        'Delete Oat drink? This removes the item and its history. Use Mark as gone if it was thrown away.'
+        'Delete Oat drink? This removes the item; what it wasted stays on Gone. Use Mark as gone if it was thrown away.'
       )
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
