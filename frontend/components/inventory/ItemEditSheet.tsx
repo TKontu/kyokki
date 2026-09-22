@@ -17,13 +17,9 @@ import {
   fieldLabelClass,
 } from '@/components/ui/formStyles'
 import { ProductEditSheet } from '@/components/products/ProductEditSheet'
-import {
-  useDeleteInventoryItem,
-  useRestoreInventoryItem,
-  useUpdateInventoryItem,
-} from '@/hooks/useInventory'
+import { useDeleteInventoryItem, useUpdateInventoryItem } from '@/hooks/useInventory'
 import { useProduct } from '@/hooks/useProducts'
-import { useToast, type ToastOptions } from '@/hooks/useToast'
+import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { formatQuantity } from '@/lib/consumption'
 import { isInactive, locationOptions } from '@/lib/stock'
@@ -44,7 +40,6 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const toast = useToast()
   const update = useUpdateInventoryItem()
   const remove = useDeleteInventoryItem()
-  const restore = useRestoreInventoryItem()
 
   const [quantity, setQuantity] = useState(String(item.current_quantity))
   const [expiry, setExpiry] = useState(item.expiry_date.split('T')[0])
@@ -65,35 +60,17 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const busy = update.isPending || remove.isPending
   const canSave = quantityValid && Object.keys(changes).length > 0 && !busy
 
-  const patch = (
-    data: InventoryItemUpdate,
-    success: string,
-    options?: ToastOptions
-  ) => {
+  const patch = (data: InventoryItemUpdate, success: string) => {
     update.mutate(
       { id: item.id, data },
       {
         onSuccess: () => {
-          toast.success(success, options)
+          toast.success(success)
           onClose()
         },
         onError: (error) => toast.error(errorText(error, `Could not save ${name}`)),
       }
     )
-  }
-
-  /**
-   * Put it back, from the toast that said it was gone.
-   *
-   * This runs **after the sheet has closed**, so it may not touch `update` or any other
-   * component-scoped mutation: `restore` and `toast` both come from providers that outlive it.
-   * Marking something gone used to be the one action with no way back (H23 froze discarded
-   * items, and the old way back was the bug it fixed).
-   */
-  const undoMarkAsGone = () => {
-    restore(item.id)
-      .then(() => toast.success(`Back in the kitchen · ${name}`))
-      .catch((error) => toast.error(errorText(error, `Could not restore ${name}`)))
   }
 
   const confirmDelete = () => {
@@ -159,13 +136,9 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
                 variant="secondary"
                 size="lg"
                 disabled={busy}
-                onClick={() =>
-                  patch({ status: 'discarded' }, `Marked as gone · ${name}`, {
-                    // Long enough to read a name and change your mind; the default 3 s is not.
-                    duration: 8000,
-                    action: { label: 'Undo', onClick: undoMarkAsGone },
-                  })
-                }
+                // The way back from a mis-tap is the header's Undo, which names what it reverses
+                // and does not vanish after a few seconds (2026-09-22)
+                onClick={() => patch({ status: 'discarded' }, `Marked as gone · ${name}`)}
               >
                 Mark as gone
               </Button>
@@ -173,7 +146,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
             {isInactive(item) && (
               // The sheet has always rendered a one-column footer for a gone item; this is
               // what belongs in it. Reachable once a list shows inactive items - until then
-              // the Undo on the toast is the way back (H23's `restore`).
+              // the header's Undo is the way back.
               <Button
                 variant="secondary"
                 size="lg"

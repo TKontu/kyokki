@@ -6,8 +6,8 @@ import type { InventoryItem, InventoryListParams } from '@/types/inventory'
 
 export interface InventoryListProps {
   params?: InventoryListParams
-  onConsume?: (id: string) => void
-  onEdit?: (id: string) => void
+  onConsume?: (id: string, amount: number) => void
+  onMore?: (id: string) => void
   /** Offered beside the Expired heading. Absent means no clear is on offer. */
   onClearExpired?: (items: InventoryItem[]) => void
   className?: string
@@ -43,8 +43,8 @@ interface StockSectionProps {
   /** `urgent` is the orange of "use this now"; `past` is the red of "this is compost". */
   tone?: 'plain' | 'urgent' | 'past'
   showLocation: boolean
-  onConsume?: (id: string) => void
-  onEdit?: (id: string) => void
+  onConsume?: (id: string, amount: number) => void
+  onMore?: (id: string) => void
   /** Rendered beside the count - the Expired section's way of offering to clear itself. */
   action?: React.ReactNode
 }
@@ -70,7 +70,7 @@ function StockSection({
   tone = 'plain',
   showLocation,
   onConsume,
-  onEdit,
+  onMore,
   action,
 }: StockSectionProps) {
   const headingId = useId()
@@ -97,7 +97,7 @@ function StockSection({
               productCategory={item.category_name}
               showLocation={showLocation}
               onConsume={onConsume}
-              onEdit={onEdit}
+              onMore={onMore}
             />
           </li>
         ))}
@@ -109,7 +109,7 @@ function StockSection({
 export function InventoryList({
   params,
   onConsume,
-  onEdit,
+  onMore,
   onClearExpired,
   className = '',
 }: InventoryListProps) {
@@ -161,7 +161,7 @@ export function InventoryList({
           showLocation
           action={onClearExpired && <ClearExpired items={expired} onClear={onClearExpired} />}
           onConsume={onConsume}
-          onEdit={onEdit}
+          onMore={onMore}
         />
       )}
       {expiringSoon.length > 0 && (
@@ -171,7 +171,7 @@ export function InventoryList({
           tone="urgent"
           showLocation
           onConsume={onConsume}
-          onEdit={onEdit}
+          onMore={onMore}
         />
       )}
       {groups.map((group) => (
@@ -181,7 +181,7 @@ export function InventoryList({
           items={group.items}
           showLocation={false}
           onConsume={onConsume}
-          onEdit={onEdit}
+          onMore={onMore}
         />
       ))}
     </div>

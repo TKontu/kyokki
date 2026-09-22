@@ -17,6 +17,7 @@ import type {
   QuickAddRequest,
   Unit,
 } from '@/types/inventory'
+import type { UndoPreview, UndoResponse } from '@/types/consumption'
 import type { Vocabulary } from '@/types/vocabulary'
 
 /** Every value of each enum the API shares with us, in the order the schemas declare them. */
@@ -143,6 +144,19 @@ export async function restoreMany(ids: string[]): Promise<BulkItemsResponse> {
   return apiClient.post<BulkItemsResponse>('/inventory/restore', { ids })
 }
 
+/** What the header's Undo would reverse next, or null when there is nothing to undo. */
+export async function undoPreview(): Promise<UndoPreview | null> {
+  return apiClient.get<UndoPreview | null>('/inventory/undo')
+}
+
+/**
+ * Undo the action the preview showed. A 409 means something newer happened in between (or
+ * nothing is left to undo): fetch the preview again rather than guess.
+ */
+export async function undo(batchId: string): Promise<UndoResponse> {
+  return apiClient.post<UndoResponse>('/inventory/undo', { batch_id: batchId })
+}
+
 // Export as a namespace object for easier imports
 const inventoryAPI = {
   list,
@@ -154,6 +168,8 @@ const inventoryAPI = {
   consume,
   discardMany,
   restoreMany,
+  undoPreview,
+  undo,
 }
 
 export default inventoryAPI

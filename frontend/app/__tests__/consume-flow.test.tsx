@@ -1,6 +1,9 @@
 /**
- * End-to-end consume flow on the home page against msw-mocked API endpoints:
- * list -> Consume -> sheet -> ½ -> optimistic list update -> toast (or rollback on error).
+ * End-to-end consume flow on the home page against msw-mocked API endpoints.
+ *
+ * One tap on the card consumes (operator, 2026-09-22): no sheet, no confirmation, the quantity
+ * bar moves at once and the header's Undo names what just happened. "…" still opens the sheet
+ * with every amount - optimistic update, toast, rollback on error.
  */
 
 import React from 'react'
@@ -10,6 +13,7 @@ import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
 import Home from '../page'
+import type { UndoPreview } from '@/types/consumption'
 import type { InventoryItem } from '@/types/inventory'
 
 const MILK: InventoryItem = {
@@ -56,13 +60,116 @@ function remaining(label: string) {
   return screen.queryByRole('progressbar', { name: label })
 }
 
+/**
+ * The endpoints every render of the page asks for, plus the ones a test adds. The test's come
+ * first: within one `server.use` the first matching handler wins, so they override the defaults.
+ */
+function api(...handlers: Parameters<typeof server.use>) {
+  server.use(
+    ...handlers,
+    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
+    http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null))
+  )
+}
+
 async function openSheetAndTap(label: string) {
-  fireEvent.click(await screen.findByRole('button', { name: /consume/i }))
+  fireEvent.click(await screen.findByRole('button', { name: 'More for Oat Milk' }))
   const sheet = await screen.findByRole('dialog', { name: 'Oat Milk' })
   fireEvent.click(within(sheet).getByRole('button', { name: label }))
 }
 
-describe('Consume flow', () => {
+describe('One tap on the card', () => {
+  it('consumes a quarter at once, with no sheet and no toast', async () => {
+    let stored: InventoryItem = MILK
+    const bodies: unknown[] = []
+    api(
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
+      http.post(`${API_URL}/inventory/:id/consume`, async ({ request }) => {
+        bodies.push(await request.json())
+        stored = { ...MILK, current_quantity: 750, status: 'opened' }
+        return HttpResponse.json(stored)
+      })
+    )
+
+    renderHome()
+    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+
+    await waitFor(() => expect(remaining('750 of 1000 dl remaining')).toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(bodies).toEqual([{ quantity: 250 }]))
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('consumes again on every tap', async () => {
+    let stored: InventoryItem = MILK
+    const bodies: unknown[] = []
+    api(
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
+      http.post(`${API_URL}/inventory/:id/consume`, async ({ request }) => {
+        const { quantity } = (await request.json()) as { quantity: number }
+        bodies.push(quantity)
+        stored = { ...stored, current_quantity: stored.current_quantity - quantity, status: 'opened' }
+        return HttpResponse.json(stored)
+      })
+    )
+
+    renderHome()
+    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+    await waitFor(() => expect(remaining('750 of 1000 dl remaining')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+
+    await waitFor(() => expect(remaining('500 of 1000 dl remaining')).toBeInTheDocument())
+    await waitFor(() => expect(bodies).toEqual([250, 250]))
+  })
+
+  it('rolls back and says why when a tap fails', async () => {
+    api(
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
+      http.post(`${API_URL}/inventory/:id/consume`, () =>
+        HttpResponse.json({ detail: 'Oat Milk has been thrown away' }, { status: 409 })
+      )
+    )
+
+    renderHome()
+    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Oat Milk has been thrown away')
+    await waitFor(() => expect(remaining('1000 of 1000 dl remaining')).toBeInTheDocument())
+  })
+
+  it('the header Undo then names the tap, which is the confirmation and the way back', async () => {
+    let undoable: UndoPreview | null = null
+    api(
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
+      http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(undoable)),
+      http.post(`${API_URL}/inventory/:id/consume`, () => {
+        undoable = {
+          batch_id: 'b1',
+          logged_at: '2026-09-22T08:00:00+00:00',
+          steps: [
+            {
+              inventory_item_id: 'item-milk',
+              product_name: 'Oat Milk',
+              unit: 'dl',
+              action: 'use_partial',
+              quantity_consumed: 250,
+            },
+          ],
+        }
+        return HttpResponse.json({ ...MILK, current_quantity: 750, status: 'opened' })
+      })
+    )
+
+    renderHome()
+    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+
+    expect(
+      await screen.findByRole('button', { name: 'Undo −250 dl · Oat Milk' })
+    ).toBeEnabled()
+  })
+})
+
+describe('The sheet behind "…"', () => {
   it('updates the list immediately, sends the amount, and confirms with a toast', async () => {
     let stored: InventoryItem = MILK
     let releaseConsume: () => void = () => {}
@@ -71,9 +178,8 @@ describe('Consume flow', () => {
     })
     const consumeBodies: unknown[] = []
 
-    server.use(
-      http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
-    http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
+    api(
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
       http.post(`${API_URL}/inventory/:id/consume`, async ({ request, params }) => {
         consumeBodies.push({ id: params.id, body: await request.json() })
         await consumeReleased
@@ -106,8 +212,7 @@ describe('Consume flow', () => {
     const consumeReleased = new Promise<void>((resolve) => {
       releaseConsume = resolve
     })
-    server.use(
-    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
+    api(
       http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
       http.post(`${API_URL}/inventory/:id/consume`, async () => {
         await consumeReleased
@@ -129,8 +234,7 @@ describe('Consume flow', () => {
   })
 
   it('rolls the list back and shows the server error when consuming fails', async () => {
-    server.use(
-    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
+    api(
       http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
       http.post(`${API_URL}/inventory/:id/consume`, () =>
         HttpResponse.json({ detail: 'Cannot consume 500 - only 100 available' }, { status: 400 })

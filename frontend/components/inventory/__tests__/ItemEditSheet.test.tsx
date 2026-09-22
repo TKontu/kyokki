@@ -154,9 +154,8 @@ describe('ItemEditSheet', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(calls).toEqual([{ method: 'PATCH', body: { status: 'discarded' } }])
     expect(await screen.findByText('Marked as gone · Oat drink')).toBeInTheDocument()
-    // H23 froze discarded items, so this is the only way back from a mis-tap until a screen
-    // lists them. The sheet has closed by now; the Undo does not depend on it.
-    expect(screen.getByRole('button', { name: 'Undo' })).toBeInTheDocument()
+    // The way back is the header's Undo now, not an eight-second button on the toast
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
   })
 
   it('offers Put it back instead, for an item already gone', () => {

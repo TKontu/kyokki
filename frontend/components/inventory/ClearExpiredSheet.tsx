@@ -41,29 +41,13 @@ export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetPro
   const noun = count === 1 ? 'item' : 'items'
   const ids = items.map((item) => item.id)
 
-  const undo = () => {
-    move.mutate(
-      { ids, event: 'restore' },
-      {
-        onSuccess: (result) =>
-          toast.success(
-            `Back in the kitchen · ${result.changed} ${result.changed === 1 ? 'item' : 'items'}`
-          ),
-        onError: (error) => toast.error(errorText(error, 'Could not put them back')),
-      }
-    )
-  }
-
   const clear = () => {
     move.mutate(
       { ids, event: 'discard' },
       {
         onSuccess: (result) => {
-          toast.success(`Thrown away · ${result.changed} ${noun}`, {
-            // Long enough to change your mind about throwing away a shelf of food.
-            duration: 8000,
-            action: { label: 'Undo', onClick: undo },
-          })
+          // The header's Undo takes the whole shelf back as one step
+          toast.success(`Thrown away · ${result.changed} ${noun}`)
           onClose()
         },
         onError: (error) => toast.error(errorText(error, `Could not clear ${count} ${noun}`)),

@@ -3,7 +3,6 @@
  * TanStack Query hooks for inventory management
  */
 
-import { useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import inventoryAPI from '@/lib/api/inventory'
 import { consumptionLogKeys } from '@/hooks/useConsumptionLog'
@@ -137,33 +136,6 @@ export function useBulkInventoryMove() {
       queryClient.invalidateQueries({ queryKey: consumptionLogKeys.all })
     },
   })
-}
-
-/**
- * Put a thrown-away item back in the kitchen (H23's `restore`).
- *
- * A plain async function rather than a mutation, and that is the point: the Undo lives on a
- * toast raised by `ItemEditSheet`, which closes itself on success - so by the time anyone taps
- * it the sheet has unmounted and its mutation observer is gone. The query client and the API
- * module both outlive it.
- *
- * The status sent is only a signal. The server reads it to classify the event, drops it, and
- * derives the result: `opened`, or `empty` when nothing is left. It never comes back `sealed`,
- * because it was in the bin. So take the status from the response rather than predicting it.
- */
-export function useRestoreInventoryItem() {
-  const queryClient = useQueryClient()
-
-  return useCallback(
-    async (id: string) => {
-      const restored = await inventoryAPI.update(id, { status: 'opened' })
-      queryClient.setQueryData(inventoryKeys.detail(restored.id), restored)
-      queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
-      queryClient.invalidateQueries({ queryKey: consumptionLogKeys.all })
-      return restored
-    },
-    [queryClient]
-  )
 }
 
 /**
