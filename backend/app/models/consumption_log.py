@@ -9,10 +9,12 @@ from app.db.base_class import Base
 
 
 class ConsumptionLog(Base):
-    """History of product consumption and adjustments.
+    """History of an item's quantity, one row per event (H46).
 
-    Tracks when and how items are used, enabling usage patterns
-    and waste reduction insights.
+    Each row can be read on its own: what happened (`action`), how much it moved
+    (`quantity_consumed`, kept under its old name although a restore or a correction moves
+    food the other way) and what was left (`quantity_after`), in the item's unit. Waste is the
+    `discard` rows.
     """
 
     __tablename__ = "consumption_log"
@@ -29,14 +31,11 @@ class ConsumptionLog(Base):
         UUID(as_uuid=True), ForeignKey("product_master.id"), nullable=False, index=True
     )
 
-    # Action tracking
     action = Column(
         String, nullable=False, index=True
-    )  # use_partial, use_full, discard, adjust
+    )  # schemas.consumption_log.ConsumptionAction
     quantity_consumed = Column(Numeric(10, 2), nullable=False)
-    consumption_context = Column(
-        String, nullable=True, index=True
-    )  # breakfast, lunch, dinner, snack, cooking
+    quantity_after = Column(Numeric(10, 2), nullable=False)
 
     logged_at = Column(
         DateTime(timezone=True),
@@ -48,3 +47,13 @@ class ConsumptionLog(Base):
     # Relationships
     inventory_item = relationship("InventoryItem", back_populates="consumption_logs")
     product_master = relationship("ProductMaster")
+
+    # Read-only details for API responses. Callers must eager-load inventory_item and
+    # product_master (see crud.consumption_log.list_consumption_logs).
+    @property
+    def product_name(self) -> str:
+        return str(self.product_master.canonical_name)
+
+    @property
+    def unit(self) -> str:
+        return str(self.inventory_item.unit)

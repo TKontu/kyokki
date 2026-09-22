@@ -67,7 +67,6 @@ describe('TypeScript Types', () => {
         display_name: 'Dairy Products',
         icon: '🥛',
         default_shelf_life_days: 7,
-        meal_contexts: ['breakfast', 'lunch'],
         sort_order: 0,
         default_storage: 'refrigerator',
       }

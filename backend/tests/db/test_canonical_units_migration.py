@@ -41,7 +41,6 @@ async def legacy_rows(db_session: AsyncSession) -> dict:
             display_name="Dairy & Eggs",
             icon=None,
             default_shelf_life_days=7,
-            meal_contexts=[],
             sort_order=1,
         )
     )
@@ -101,12 +100,14 @@ async def legacy_rows(db_session: AsyncSession) -> dict:
             product_master_id=products["milk"].id,
             action="use_partial",
             quantity_consumed=Decimal("250"),
+            quantity_after=Decimal("750"),
         ),
         "eggs": ConsumptionLog(
             inventory_item_id=items["eggs"].id,
             product_master_id=products["eggs"].id,
             action="use_partial",
             quantity_consumed=Decimal("2"),
+            quantity_after=Decimal("10"),
         ),
     }
     shopping = {

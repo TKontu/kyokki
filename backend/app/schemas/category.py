@@ -17,9 +17,6 @@ class CategoryBase(BaseModel):
         gt=0,
         description="How long this keeps frozen, from the day it goes in; null if freezing does not apply (Q12)",
     )
-    meal_contexts: list[str] | None = Field(
-        None, description="Meal contexts where this category is used"
-    )
     sort_order: int = Field(0, description="Display sort order")
 
 
@@ -35,7 +32,6 @@ class CategoryUpdate(BaseModel):
     display_name: str | None = None
     icon: str | None = None
     default_shelf_life_days: int | None = Field(None, gt=0)
-    meal_contexts: list[str] | None = None
     sort_order: int | None = None
 
 

@@ -24,7 +24,6 @@ SEED_CATEGORIES = [
         "icon": "🥩",
         "default_shelf_life_days": 5,
         "frozen_shelf_life_days": 180,
-        "meal_contexts": ["cooking", "grilling"],
         "sort_order": 10,
     },
     {
@@ -33,7 +32,6 @@ SEED_CATEGORIES = [
         "icon": "🐟",
         "default_shelf_life_days": 3,
         "frozen_shelf_life_days": 120,
-        "meal_contexts": ["cooking"],
         "sort_order": 20,
     },
     {
@@ -42,7 +40,6 @@ SEED_CATEGORIES = [
         "icon": "🥛",
         "default_shelf_life_days": 7,
         "frozen_shelf_life_days": 90,
-        "meal_contexts": ["breakfast", "cooking", "baking"],
         "sort_order": 30,
     },
     {
@@ -51,7 +48,6 @@ SEED_CATEGORIES = [
         "icon": "🧀",
         "default_shelf_life_days": 25,
         "frozen_shelf_life_days": 180,
-        "meal_contexts": ["snack", "cooking"],
         "sort_order": 40,
     },
     {
@@ -60,7 +56,6 @@ SEED_CATEGORIES = [
         "icon": "🥬",
         "default_shelf_life_days": 5,
         "frozen_shelf_life_days": 240,
-        "meal_contexts": ["cooking", "salad", "snack"],
         "sort_order": 50,
     },
     {
@@ -69,7 +64,6 @@ SEED_CATEGORIES = [
         "icon": "🍎",
         "default_shelf_life_days": 7,
         "frozen_shelf_life_days": 240,
-        "meal_contexts": ["breakfast", "snack", "dessert"],
         "sort_order": 60,
     },
     {
@@ -78,7 +72,6 @@ SEED_CATEGORIES = [
         "icon": "🍞",
         "default_shelf_life_days": 5,
         "frozen_shelf_life_days": 90,
-        "meal_contexts": ["breakfast", "sandwich"],
         "sort_order": 70,
     },
     {
@@ -87,7 +80,6 @@ SEED_CATEGORIES = [
         "icon": "🧊",
         "default_shelf_life_days": 90,
         "frozen_shelf_life_days": 365,
-        "meal_contexts": ["cooking"],
         "sort_order": 80,
     },
     {
@@ -96,7 +88,6 @@ SEED_CATEGORIES = [
         "icon": "🥫",
         "default_shelf_life_days": 365,
         "frozen_shelf_life_days": None,
-        "meal_contexts": ["cooking", "baking"],
         "sort_order": 90,
     },
     {
@@ -105,7 +96,6 @@ SEED_CATEGORIES = [
         "icon": "🥤",
         "default_shelf_life_days": 30,
         "frozen_shelf_life_days": None,
-        "meal_contexts": ["breakfast", "snack"],
         "sort_order": 100,
     },
     {
@@ -114,7 +104,6 @@ SEED_CATEGORIES = [
         "icon": "🍯",
         "default_shelf_life_days": 180,
         "frozen_shelf_life_days": None,
-        "meal_contexts": ["cooking"],
         "sort_order": 110,
     },
     {
@@ -123,7 +112,6 @@ SEED_CATEGORIES = [
         "icon": "🍿",
         "default_shelf_life_days": 60,
         "frozen_shelf_life_days": None,
-        "meal_contexts": ["snack"],
         "sort_order": 120,
     },
 ]

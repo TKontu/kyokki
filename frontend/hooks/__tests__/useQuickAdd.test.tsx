@@ -101,7 +101,6 @@ describe('useCategories', () => {
             display_name: 'Dairy & Eggs',
             icon: '🥛',
             default_shelf_life_days: 7,
-            meal_contexts: null,
             sort_order: 1,
             default_storage: 'refrigerator',
           },

@@ -10,7 +10,6 @@ export interface Category {
   display_name: string // Human-readable name
   icon: string | null // Emoji icon
   default_shelf_life_days: number // > 0
-  meal_contexts: string[] | null // e.g., ["breakfast", "lunch"]
   sort_order: number // Display order (default: 0)
   default_storage: StorageType // Where its products are kept by default (response only)
 }
@@ -20,7 +19,6 @@ export interface CategoryCreate {
   display_name: string
   icon?: string | null
   default_shelf_life_days: number // > 0
-  meal_contexts?: string[] | null
   sort_order?: number // default: 0
 }
 
@@ -28,6 +26,5 @@ export interface CategoryUpdate {
   display_name?: string
   icon?: string | null
   default_shelf_life_days?: number // > 0
-  meal_contexts?: string[] | null
   sort_order?: number
 }

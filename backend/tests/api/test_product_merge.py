@@ -110,6 +110,7 @@ class TestMergeMovesEveryReference:
                     product_master_id=source_id,
                     action="use_partial",
                     quantity_consumed=Decimal("250"),
+                    quantity_after=Decimal("750"),
                 ),
             ]
         )
@@ -187,6 +188,7 @@ class TestMergeMovesEveryReference:
                     product_master_id=source_id,
                     action="use_full",
                     quantity_consumed=Decimal("750"),
+                    quantity_after=Decimal("0"),
                 ),
             ]
         )

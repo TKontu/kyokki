@@ -576,9 +576,19 @@ async def _create_item(client: AsyncClient, product_id: str, **overrides) -> dic
 
 async def _logs_for(db: AsyncSession, item_id: str) -> list[ConsumptionLog]:
     result = await db.execute(
-        select(ConsumptionLog).where(ConsumptionLog.inventory_item_id == UUID(item_id))
+        select(ConsumptionLog)
+        .where(ConsumptionLog.inventory_item_id == UUID(item_id))
+        .order_by(ConsumptionLog.logged_at)
     )
     return list(result.scalars().all())
+
+
+def _history(logs: list[ConsumptionLog]) -> list[tuple[str, float, float]]:
+    """Each row as (action, how much it moved, what was left) - enough to replay the item."""
+    return [
+        (str(log.action), float(log.quantity_consumed), float(log.quantity_after))
+        for log in logs
+    ]
 
 
 def _assert_product_fields(item: dict) -> None:
@@ -806,6 +816,139 @@ class TestConsumptionLogWrites:
         assert await _logs_for(seeded_db, item["id"]) == []
 
 
+class TestConsumptionHistory:
+    """H46: every change to an item's quantity leaves one row that can be read on its own."""
+
+    async def _patch(self, client: AsyncClient, item_id: str, **fields) -> dict:
+        response = await client.patch(f"/api/inventory/{item_id}", json=fields)
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    async def test_the_rows_replay_the_item(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """Consume, correct, throw away, bring back: four events, four rows."""
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 3})
+        await self._patch(client, item["id"], current_quantity=5)
+        await self._patch(client, item["id"], status="discarded")
+        await self._patch(client, item["id"], status="opened")
+
+        assert _history(await _logs_for(seeded_db, item["id"])) == [
+            ("use_partial", 3.0, 7.0),
+            ("correct", 2.0, 5.0),
+            ("discard", 5.0, 0.0),
+            ("restore", 5.0, 5.0),
+        ]
+
+    async def test_a_correction_upward_says_so_in_what_was_left(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=4
+        )
+
+        await self._patch(client, item["id"], current_quantity=6)
+
+        assert _history(await _logs_for(seeded_db, item["id"])) == [
+            ("correct", 2.0, 6.0)
+        ]
+
+    async def test_a_correction_to_the_same_amount_logs_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=4
+        )
+
+        await self._patch(
+            client,
+            item["id"],
+            current_quantity=4,
+            expiry_date=str(date.today() + timedelta(days=3)),
+        )
+
+        assert await _logs_for(seeded_db, item["id"]) == []
+
+    async def test_throwing_away_an_empty_item_is_not_waste(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """It used to log a discard of 0, which nothing reading the log could make sense of."""
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 10})
+
+        await self._patch(client, item["id"], status="discarded")
+
+        assert _history(await _logs_for(seeded_db, item["id"])) == [
+            ("use_full", 10.0, 0.0)
+        ]
+
+    async def test_bulk_discard_and_restore_log_both_ways(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=8
+        )
+
+        await client.post("/api/inventory/discard", json={"ids": [item["id"]]})
+        await client.post("/api/inventory/restore", json={"ids": [item["id"]]})
+
+        assert _history(await _logs_for(seeded_db, item["id"])) == [
+            ("discard", 8.0, 0.0),
+            ("restore", 8.0, 8.0),
+        ]
+
+    async def test_consumed_at_is_when_it_left_the_kitchen(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+        assert item["consumed_at"] is None
+
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 4})
+        partly = (await client.get(f"/api/inventory/{item['id']}")).json()
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 6})
+        finished = (await client.get(f"/api/inventory/{item['id']}")).json()
+        binned = await self._patch(client, item["id"], status="discarded")
+
+        assert partly["consumed_at"] is None
+        assert finished["consumed_at"] is not None
+        # Already gone before it went in the bin, so the moment it went stays the same
+        assert binned["consumed_at"] == finished["consumed_at"]
+
+    async def test_coming_back_clears_consumed_at(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+        binned = await self._patch(client, item["id"], status="discarded")
+
+        restored = await self._patch(client, item["id"], status="opened")
+
+        assert binned["consumed_at"] is not None
+        assert restored["consumed_at"] is None
+
+    async def test_finding_some_left_after_all_clears_consumed_at(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=2
+        )
+        await client.post(f"/api/inventory/{item['id']}/consume", json={"quantity": 2})
+
+        corrected = await self._patch(client, item["id"], current_quantity=1)
+
+        assert corrected["status"] != "empty"
+        assert corrected["consumed_at"] is None
+
+
 class TestCanonicalUnitsOnWrite:
     """MVP-U1: requests may use any known unit; stored and returned in dl | tsp | tbsp | g | pcs."""
 
@@ -983,16 +1126,19 @@ class TestItemCorrections:
         listed = (await client.get("/api/inventory")).json()
         assert item["id"] in [i["id"] for i in listed]
 
-    async def test_a_correction_is_not_logged(
+    async def test_a_correction_is_logged_but_not_as_consumption(
         self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
     ) -> None:
+        """It used to write nothing, so the log could not explain where the 8 went (H46)."""
         item = await _create_item(
             client, test_product["id"], initial_quantity=10, current_quantity=10
         )
 
         await self._patch(client, item["id"], current_quantity=2)
 
-        assert await _logs_for(seeded_db, item["id"]) == []
+        assert _history(await _logs_for(seeded_db, item["id"])) == [
+            ("correct", 8.0, 2.0)
+        ]
 
     async def test_the_quantity_rules_win_over_an_explicit_status(
         self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
@@ -1566,6 +1712,10 @@ class TestBulkDiscardAndRestore:
 
         back = (await client.get(f"/api/inventory/{item['id']}")).json()
         assert back["status"] == "empty"
+        # Nothing was thrown away and nothing came back, so only the helping is history
+        assert _history(await _logs_for(seeded_db, item["id"])) == [
+            ("use_full", 10.0, 0.0)
+        ]
 
     async def test_an_empty_list_is_refused_at_the_door(
         self, client: AsyncClient, seeded_db: AsyncSession

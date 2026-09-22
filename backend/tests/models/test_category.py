@@ -17,7 +17,6 @@ class TestCategoryModel:
             display_name="Dairy Products",
             icon="🥛",
             default_shelf_life_days=7,
-            meal_contexts=["breakfast", "cooking"],
             sort_order=1,
         )
 
@@ -29,7 +28,6 @@ class TestCategoryModel:
         assert category.display_name == "Dairy Products"
         assert category.icon == "🥛"
         assert category.default_shelf_life_days == 7
-        assert category.meal_contexts == ["breakfast", "cooking"]
         assert category.sort_order == 1
 
     async def test_read_category(self, db_session):
@@ -40,7 +38,6 @@ class TestCategoryModel:
             display_name="Meat & Fish",
             icon="🥩",
             default_shelf_life_days=5,
-            meal_contexts=["lunch", "dinner"],
             sort_order=2,
         )
         db_session.add(category)

@@ -30,7 +30,8 @@
 >   confirm since MVP-R2: each confirmed line's printed name (per chain, `unknown` without a
 >   store) points at the chosen generic product. Quick add (`POST /api/inventory/quick-add`,
   MVP-S3) uses the same product rules (`services/generic_products.py`).
->   `consumption_log` is written on consume and discard since MVP-S1; nothing reads it yet.
+>   `consumption_log` gets one row per quantity event (consume, correct, discard, restore) and
+>   is read back through `GET /api/consumption-log` since H46; waste is `?action=discard`.
 > - **MVP decisions (see `docs/TODO.md`):** polling instead of WebSockets on the iPad,
 >   FastAPI `BackgroundTasks` instead of Celery, `<input type="file" capture>` instead of
 >   `getUserMedia`, LLM-based extraction stays the general core with a generic heuristic
@@ -169,7 +170,7 @@ inventory_item (
   location VARCHAR,                -- main_fridge, freezer, pantry
   notes TEXT,
   created_at TIMESTAMP,
-  consumed_at TIMESTAMP NULL
+  consumed_at TIMESTAMP NULL       -- when it went empty or in the bin; cleared on restore (H46)
 )
 
 -- Consumption history
@@ -177,9 +178,9 @@ consumption_log (
   id UUID PK,
   inventory_item_id FK,
   product_master_id FK,
-  action VARCHAR,                  -- use_partial, use_full, discard, adjust
-  quantity_consumed DECIMAL,
-  consumption_context VARCHAR,     -- breakfast, lunch, dinner, snack, cooking
+  action VARCHAR,                  -- use_partial, use_full, discard, restore, correct
+  quantity_consumed DECIMAL,       -- how much the event moved, always > 0
+  quantity_after DECIMAL,          -- what was left after it (H46)
   logged_at TIMESTAMP
 )
 
@@ -220,7 +221,6 @@ category (
   display_name VARCHAR,
   icon VARCHAR,                    -- emoji
   default_shelf_life_days INT,     -- Fallback: meat=5, cheese=25, etc.
-  meal_contexts VARCHAR[],         -- ["breakfast", "cooking"]
   sort_order INT
 )
 ```

@@ -856,7 +856,10 @@ Ordered by expected value once MVP is live.
 6. Home Assistant REST endpoints (`HOME_ASSISTANT_SPEC.md`).
 7. Barcode scanning in the PWA camera; Raspberry Pi scanner station.
 8. Multi-receipt batch, consumption learning, analytics. (Mealie recipes moved to the agent
-   track's AG0/AG5; meal plans stay here.)
+   track's AG0/AG5; meal plans stay here.) H46 gives this a history to learn from. It dropped
+   `consumption_context` and `category.meal_contexts` because nothing wrote or read them
+   (operator, 2026-09-22): a meal or recipe context on consume comes back with whatever records
+   it - most likely the agent track cooking a recipe, or an optional field on the consume API.
 9. Learned store templates (`ADAPTIVE_PARSER_SPEC.md`): chain-specific parse rules that
    skip the LLM for known formats. Generalising accelerator, not a core dependency.
 10. More receipt drop-in adapters: e-receipt e-mail (IMAP) ingestion, a watched folder, and the
@@ -1302,6 +1305,44 @@ Two things from the daily-loop audit done while planning H23/H24, one of which *
 - [ ] **Nothing reads the waste log back.** This round writes the right rows; H46 is what would
   let anyone see them. The number the clear is being honest about is still invisible.
 
+##### H46: a consumption history that can be read back, 2026-09-22
+The log was written and never read, and it could not have been: corrections and restores left
+no row, `adjust` was declared and never used, and clearing an item that was already empty
+logged a discard of 0 that `ConsumptionLogResponse` (`gt=0`) would have refused to serialise.
+
+- [x] **One row per quantity event, readable on its own.** `ConsumptionAction` is
+  `use_partial | use_full | discard | restore | correct`, following `ItemEvent`; `adjust` is
+  gone. Every row carries `quantity_after` beside the amount it moved, so a correction upward
+  can be told from one downward and a run of rows replays the item.
+- [x] **Corrections and restores are logged**, bulk ones included. A correction is logged only
+  when the number moved - a new date or shelf is not part of the quantity's history - and a
+  PATCH that discards or restores *and* names an amount logs one row, as the discard or restore.
+- [x] **An event that moved nothing writes nothing**, enforced in `add_consumption_log`:
+  finishing an item and then clearing it is not waste.
+- [x] **`consumed_at` is written**: stamped when an item goes empty or in the bin, kept when an
+  empty item is then binned, cleared by a restore or by a correction that finds some left.
+- [x] **`GET /api/consumption-log`**, shaped like the receipts list: `limit`/`offset`, newest
+  first with `id` as the tie-break, filters `action` (repeatable), `product_master_id`,
+  `inventory_item_id`, `since` (inclusive) and `until` (exclusive). Rows carry `product_name`
+  and `unit`. Read-only, so nothing to broadcast.
+- [x] **`quantity_consumed` kept its name** although restore and correct move food the other
+  way: renaming it would have meant rewriting `a4f8c2d91e37_canonical_units`, whose test runs
+  the historical migration against today's schema.
+- [x] **The migration backfills honestly.** `use_full` and `discard` rows get 0; `use_partial`
+  gets the item's current quantity plus everything consumed since - exact unless it was ever
+  corrected by hand, which was not logged and cannot be recovered. Zero-quantity discards are
+  deleted. Moot after the fresh-database redeploy, but `upgrade head` has to work on the homelab
+  until then.
+- [x] **Dead fields dropped** (operator, 2026-09-22): `consumption_context` and
+  `category.meal_contexts`. See post-MVP item 8 for how they come back.
+- [x] Frontend: `types/consumption.ts` (checked by `check_vocabularies`), `lib/api/consumptionLog`
+  and `useConsumptionLog`; every inventory mutation that moves a quantity invalidates it. The
+  API client repeats a key for an array param, and stopped sending a bare `?` when every param
+  is undefined. **No screen**: the waste view, and whether it is also where "Put it back" lives,
+  is the next decision - it runs into the question the operator set aside above, how long
+  something stays visible after it is binned. `consumed_at` is the column that question needs.
+- [x] mypy **150 → 149**: the untyped `ARRAY` column went with `meal_contexts`.
+
 
 ---
 
@@ -1450,6 +1491,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Friction Q12: [x] a correction reaches the food (#73)  [x] the freezer clock, DEC-10 (#74)
 - Hardening H2 (started early, operator call 2026-09-20): [x] H23 (PR #75)  [x] H24 (#76)  [ ] H21  [ ] H22 (DEC-9)  [ ] H25  [ ] H26  [ ] H27  [ ] H28
 - Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)
+- Hardening H4: [x] H46 consumption history  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H45  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
