@@ -3,7 +3,8 @@
 from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
-from uuid import UUID
+from typing import Any
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +14,12 @@ from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
 from app.schemas.consumption_log import ConsumptionAction
 
-__all__ = ["ConsumptionAction", "add_consumption_log", "list_consumption_logs"]
+__all__ = [
+    "ConsumptionAction",
+    "add_consumption_log",
+    "list_consumption_logs",
+    "newest_batch",
+]
 
 
 def add_consumption_log(
@@ -23,6 +29,8 @@ def add_consumption_log(
     action: ConsumptionAction,
     quantity: Decimal,
     quantity_after: Decimal,
+    previous: dict[str, Any],
+    batch_id: UUID | None = None,
 ) -> ConsumptionLog | None:
     """Stage a consumption log row in the caller's transaction.
 
@@ -32,6 +40,9 @@ def add_consumption_log(
     An event that moved nothing writes nothing (H46): clearing an item that was already empty
     is not waste, and restoring it brings nothing back. Returns the row, or None when none was
     written.
+
+    `previous` is the item as it was before the event, for undo to put back. Rows written by
+    one action share a `batch_id`, so they are undone together; a lone event gets its own.
     """
     if quantity == 0:
         return None
@@ -41,6 +52,8 @@ def add_consumption_log(
         action=action,
         quantity_consumed=abs(quantity),
         quantity_after=quantity_after,
+        batch_id=batch_id or uuid4(),
+        previous=previous,
     )
     db.add(log)
     return log
@@ -97,4 +110,32 @@ async def list_consumption_logs(
         query = query.limit(limit)
 
     result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+async def newest_batch(db: AsyncSession) -> list[ConsumptionLog]:
+    """The rows of the most recent action, with their item and product loaded.
+
+    The most recent action is the batch of the newest row. Empty when nothing has been logged.
+    """
+    newest = await db.execute(
+        select(ConsumptionLog.batch_id)
+        .order_by(ConsumptionLog.logged_at.desc(), ConsumptionLog.id.desc())
+        .limit(1)
+    )
+    batch_id = newest.scalar_one_or_none()
+    if batch_id is None:
+        return []
+    result = await db.execute(
+        select(ConsumptionLog)
+        .where(ConsumptionLog.batch_id == batch_id)
+        .options(
+            selectinload(ConsumptionLog.inventory_item),
+            selectinload(ConsumptionLog.product_master),
+        )
+        .order_by(ConsumptionLog.logged_at, ConsumptionLog.id)
+        # A fresh read every time: undo re-reads under its locks and must see another
+        # request's commit rather than this session's cached rows
+        .execution_options(populate_existing=True)
+    )
     return list(result.scalars().all())

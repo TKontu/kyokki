@@ -4,8 +4,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
-from uuid import UUID
+from typing import Any, cast
+from uuid import UUID, uuid4
 
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,53 @@ from app.services.units import quantise, to_canonical_decimal, unit_type_for
 
 # Items in these states are gone from the kitchen and hidden from default listings.
 INACTIVE_STATUSES = ("empty", "discarded")
+
+
+#: What an event in the consumption log can change on an item, and so what undo puts back.
+#: Location and the dates are here because the PATCH that corrects a quantity may move those
+#: in the same request, and the undo reverses the request, not half of it.
+SNAPSHOT_FIELDS = (
+    "current_quantity",
+    "initial_quantity",
+    "status",
+    "opened_date",
+    "expiry_date",
+    "expiry_source",
+    "location",
+    "consumed_at",
+)
+
+
+def snapshot(item: InventoryItem) -> dict[str, Any]:
+    """The item's undoable fields as JSON, taken before an event changes them."""
+    row: Any = item
+    values: dict[str, Any] = {}
+    for field in SNAPSHOT_FIELDS:
+        value = getattr(row, field)
+        if isinstance(value, Decimal):
+            value = str(value)
+        elif isinstance(value, date):  # datetime is a date too
+            value = value.isoformat()
+        values[field] = value
+    return values
+
+
+def apply_snapshot(item: InventoryItem, values: dict[str, Any]) -> None:
+    """Put an item back the way `snapshot` found it."""
+    row: Any = item
+    row.current_quantity = Decimal(values["current_quantity"])
+    row.initial_quantity = Decimal(values["initial_quantity"])
+    row.status = values["status"]
+    row.opened_date = _parse_date(values["opened_date"])
+    row.expiry_date = _parse_date(values["expiry_date"])
+    row.expiry_source = values["expiry_source"]
+    row.location = values["location"]
+    consumed_at = values["consumed_at"]
+    row.consumed_at = datetime.fromisoformat(consumed_at) if consumed_at else None
+
+
+def _parse_date(value: str | None) -> date | None:
+    return date.fromisoformat(value) if value else None
 
 
 def _track_consumed_at(row: Any, was: str, now: str) -> None:
@@ -237,6 +284,7 @@ async def update_inventory_item(
         return None
 
     row: Any = db_item
+    previous = snapshot(db_item)
     update_data = item_update.model_dump(exclude_unset=True)
     was = str(row.status)
     event = _event_for(was, update_data)
@@ -273,6 +321,7 @@ async def update_inventory_item(
             action=ConsumptionAction.DISCARD,
             quantity=remaining,
             quantity_after=Decimal(0),
+            previous=previous,
         )
     elif event is ItemEvent.RESTORE:
         add_consumption_log(
@@ -281,6 +330,7 @@ async def update_inventory_item(
             action=ConsumptionAction.RESTORE,
             quantity=remaining,
             quantity_after=remaining,
+            previous=previous,
         )
     elif remaining != before:
         add_consumption_log(
@@ -289,6 +339,7 @@ async def update_inventory_item(
             action=ConsumptionAction.CORRECT,
             quantity=remaining - before,
             quantity_after=remaining,
+            previous=previous,
         )
     _track_consumed_at(row, was, str(new_status))
     if opens_the_pack(was, new_status):
@@ -354,6 +405,8 @@ async def move_many(
     )
     found = list((await db.execute(query)).scalars().all())
 
+    # One action, one step for undo: a cleared shelf comes back together
+    batch_id = uuid4()
     changed: list[MovedInventoryItem] = []
     refused = 0
     for item in found:
@@ -378,6 +431,8 @@ async def move_many(
         add_consumption_log(
             db,
             item=item,
+            previous=snapshot(item),
+            batch_id=batch_id,
             action=ConsumptionAction.DISCARD
             if event is ItemEvent.DISCARD
             else ConsumptionAction.RESTORE,
@@ -486,6 +541,7 @@ async def consume_inventory_item(
         return None
 
     row: Any = db_item
+    previous = snapshot(db_item)
     amount = _amount_in_item_units(quantity, unit, str(row.unit))
     if amount <= 0:
         # Rounding is what makes this reachable: a third of 0.01 dl is not a helping, and
@@ -521,10 +577,25 @@ async def consume_inventory_item(
         else ConsumptionAction.USE_PARTIAL,
         quantity=amount,
         quantity_after=new_quantity,
+        previous=previous,
     )
 
     await db.commit()
     return await _reload(db, db_item.id)
+
+
+async def lock_inventory_items(
+    db: AsyncSession, item_ids: Sequence[UUID]
+) -> dict[UUID, InventoryItem]:
+    """Lock several items for the rest of the transaction, keyed by id."""
+    query = (
+        select(InventoryItem)
+        .where(InventoryItem.id.in_(list(item_ids)))
+        .with_for_update(of=InventoryItem)
+        .execution_options(populate_existing=True)
+    )
+    found = (await db.execute(query)).scalars().all()
+    return {cast(UUID, item.id): item for item in found}
 
 
 async def _reload(db: AsyncSession, item_id: UUID) -> InventoryItem:

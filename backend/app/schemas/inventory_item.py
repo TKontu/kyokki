@@ -43,6 +43,34 @@ class StorageLocation(StrEnum):
     PANTRY = "pantry"
 
 
+class UndoStepResponse(BaseModel):
+    """One change the next undo would reverse."""
+
+    inventory_item_id: UUID
+    product_name: str
+    unit: str
+    action: str = Field(..., description="A ConsumptionAction")
+    quantity_consumed: JsonDecimal = Field(..., description="How much the change moved")
+
+
+class UndoPreviewResponse(BaseModel):
+    """What the header's Undo would reverse: the most recent action, one or many items."""
+
+    batch_id: UUID = Field(
+        ..., description="Send this back to undo exactly this action"
+    )
+    logged_at: datetime
+    steps: list[UndoStepResponse]
+
+
+class UndoRequest(BaseModel):
+    batch_id: UUID = Field(..., description="The batch the preview showed")
+
+
+class UndoResponse(BaseModel):
+    undone: int = Field(..., description="How many items were put back")
+
+
 class BulkItemsRequest(BaseModel):
     """The items to move, by id (H23 events in bulk)."""
 

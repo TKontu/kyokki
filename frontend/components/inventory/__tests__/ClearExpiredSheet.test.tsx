@@ -2,7 +2,8 @@
  * Clearing the expired shelf.
  *
  * The destructive action of the pair: it throws food away, in bulk, on one tap. So it confirms
- * first, says out loud what it records, and offers the undo the API makes possible.
+ * first, and says out loud what it records. The way back is the header's Undo, which takes the
+ * whole cleared shelf back as one step.
  */
 
 import React from 'react'
@@ -110,7 +111,7 @@ describe('ClearExpiredSheet', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('throws them away in one request and offers an undo', async () => {
+  it('throws them away in one request', async () => {
     const calls = mockApi()
     renderSheet()
 
@@ -120,13 +121,8 @@ describe('ClearExpiredSheet', () => {
     // One call, not one per item: clearing a shelf is a single transaction.
     expect(calls[0]).toEqual({ path: 'discard', ids: ['item-1', 'item-2'] })
     expect(await screen.findByText('Thrown away · 2 items')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
-
-    await waitFor(() => expect(calls).toHaveLength(2))
-    // The same ids come back out of the bin that went in.
-    expect(calls[1]).toEqual({ path: 'restore', ids: ['item-1', 'item-2'] })
-    expect(await screen.findByText('Back in the kitchen · 2 items')).toBeInTheDocument()
+    // No Undo of its own on the toast: the header's Undo takes the whole shelf back
+    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
   })
 
   it('keeps the sheet open and says so when the clear fails', async () => {

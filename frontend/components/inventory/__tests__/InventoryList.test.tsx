@@ -256,20 +256,20 @@ describe('TestInventoryListGrouping', () => {
 // ---------------------------------------------------------------------------
 
 describe('TestInventoryListCallbacks', () => {
-  it('forwards onConsume to each card', () => {
+  it('forwards onConsume to each card, with the amount tapped', () => {
     const onConsume = jest.fn()
     mockItems([MOCK_ITEM_A])
     render(<InventoryList onConsume={onConsume} />)
-    fireEvent.click(screen.getByRole('button', { name: /consume/i }))
-    expect(onConsume).toHaveBeenCalledWith('item-aaa')
+    fireEvent.click(screen.getByRole('button', { name: /^Consume/ }))
+    expect(onConsume).toHaveBeenCalledWith('item-aaa', 250)
   })
 
-  it('forwards onEdit to each card', () => {
-    const onEdit = jest.fn()
+  it('forwards onMore to each card', () => {
+    const onMore = jest.fn()
     mockItems([MOCK_ITEM_A])
-    render(<InventoryList onEdit={onEdit} />)
-    fireEvent.click(screen.getByRole('button', { name: /edit/i }))
-    expect(onEdit).toHaveBeenCalledWith('item-aaa')
+    render(<InventoryList onMore={onMore} />)
+    fireEvent.click(screen.getByRole('button', { name: 'More for Oat Milk' }))
+    expect(onMore).toHaveBeenCalledWith('item-aaa')
   })
 
   it('renders no action buttons when no callbacks provided', () => {
@@ -283,10 +283,10 @@ describe('TestInventoryListCallbacks', () => {
     mockItems([MOCK_ITEM_B, MOCK_ITEM_A, MOCK_ITEM_URGENT])
     render(<InventoryList onConsume={onConsume} />)
 
-    fireEvent.click(within(sectionNamed(/Expiring soon/)).getByRole('button', { name: /consume/i }))
-    fireEvent.click(within(sectionNamed(/Pantry/)).getByRole('button', { name: /consume/i }))
+    fireEvent.click(within(sectionNamed(/Expiring soon/)).getByRole('button', { name: /^Consume/ }))
+    fireEvent.click(within(sectionNamed(/Pantry/)).getByRole('button', { name: /^Consume/ }))
 
-    expect(onConsume.mock.calls).toEqual([['item-urgent'], ['item-bbb']])
+    expect(onConsume.mock.calls.map(([id]) => id)).toEqual(['item-urgent', 'item-bbb'])
   })
 })
 

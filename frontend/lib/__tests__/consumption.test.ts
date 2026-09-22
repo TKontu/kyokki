@@ -1,5 +1,6 @@
 import {
   applyConsume,
+  cardActions,
   consumptionOptions,
   formatQuantity,
   isCountable,
@@ -232,5 +233,44 @@ describe('consumption', () => {
       )
     })
   })
+  })
+})
+
+describe('cardActions: what one tap on the card does', () => {
+  it('takes one piece of something counted, and offers the rest as "All"', () => {
+    const { step, finish } = cardActions(
+      makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 4 })
+    )
+
+    expect(step).toMatchObject({ amount: 1, label: '−1' })
+    expect(finish).toMatchObject({ amount: 4, label: 'All 4' })
+  })
+
+  it('takes a quarter of the pack of something measured, labelled with the amount', () => {
+    const { step, finish } = cardActions(
+      makeItem({ unit: 'dl', initial_quantity: 10, current_quantity: 7.5 })
+    )
+
+    expect(step).toMatchObject({ amount: 2.5, label: '−¼ · 2.5 dl' })
+    expect(finish).toMatchObject({ amount: 7.5, label: 'Done' })
+  })
+
+  it('makes finishing the big button when a step would take all of it anyway', () => {
+    const counted = cardActions(makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 1 }))
+    const measured = cardActions(
+      makeItem({ unit: 'dl', initial_quantity: 10, current_quantity: 2 })
+    )
+
+    expect(counted.step).toMatchObject({ key: 'done', amount: 1, label: 'All 1' })
+    expect(counted.finish).toBeUndefined()
+    expect(measured.step).toMatchObject({ key: 'done', amount: 2 })
+    expect(measured.finish).toBeUndefined()
+  })
+
+  it('offers nothing to consume on something already gone', () => {
+    const { step, finish } = cardActions(makeItem({ status: 'empty', current_quantity: 0 }))
+
+    expect(step).toBeUndefined()
+    expect(finish).toBeUndefined()
   })
 })

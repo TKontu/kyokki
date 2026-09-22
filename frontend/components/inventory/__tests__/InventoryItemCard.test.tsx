@@ -223,103 +223,90 @@ describe('TestInventoryItemCardStatus', () => {
 // ---------------------------------------------------------------------------
 
 describe('TestInventoryItemCardActions', () => {
-  it('consume button calls onConsume with item id', () => {
+  // One tap consumes, no sheet (operator, 2026-09-22): the big button is the usual step and is
+  // meant to be pressed again; "Done"/"All" finishes it; "…" is for any other amount.
+
+  it('one tap on the big button consumes a quarter of a measured pack', () => {
+    const onConsume = jest.fn()
+    render(<InventoryItemCard item={MOCK_ITEM} productName="Oat Milk" onConsume={onConsume} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+
+    expect(onConsume).toHaveBeenCalledWith('abc123', 250)
+    expect(screen.getByRole('button', { name: 'Consume 250 dl of Oat Milk' })).toHaveTextContent(
+      '−¼ · 250 dl'
+    )
+  })
+
+  it('the big button can be pressed again and again', () => {
+    const onConsume = jest.fn()
+    render(<InventoryItemCard item={MOCK_ITEM} productName="Oat Milk" onConsume={onConsume} />)
+
+    const step = screen.getByRole('button', { name: 'Consume 250 dl of Oat Milk' })
+    fireEvent.click(step)
+    fireEvent.click(step)
+
+    expect(onConsume).toHaveBeenCalledTimes(2)
+  })
+
+  it('takes one piece of something counted, and "All" takes the rest', () => {
     const onConsume = jest.fn()
     render(
       <InventoryItemCard
-        item={MOCK_ITEM}
-        productName="Oat Milk"
+        item={{ ...MOCK_ITEM, unit: 'pcs', initial_quantity: 6, current_quantity: 4 }}
+        productName="Apples"
         onConsume={onConsume}
       />
     )
-    fireEvent.click(screen.getByRole('button', { name: /consume/i }))
-    expect(onConsume).toHaveBeenCalledWith('abc123')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Consume 1 pcs of Apples' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Apples' }))
+
+    expect(onConsume.mock.calls).toEqual([
+      ['abc123', 1],
+      ['abc123', 4],
+    ])
+    expect(screen.getByRole('button', { name: 'Finish Apples' })).toHaveTextContent('All 4')
   })
 
-  it('edit button calls onEdit with item id', () => {
-    const onEdit = jest.fn()
-    render(
-      <InventoryItemCard
-        item={MOCK_ITEM}
-        productName="Oat Milk"
-        onEdit={onEdit}
-      />
-    )
-    fireEvent.click(screen.getByRole('button', { name: /edit/i }))
-    expect(onEdit).toHaveBeenCalledWith('abc123')
+  it('"Done" finishes a measured item', () => {
+    const onConsume = jest.fn()
+    render(<InventoryItemCard item={MOCK_ITEM} productName="Oat Milk" onConsume={onConsume} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Oat Milk' }))
+
+    expect(onConsume).toHaveBeenCalledWith('abc123', 750)
   })
 
-  it('renders no footer when no handlers provided', () => {
+  it('"…" opens the sheet for any other amount', () => {
+    const onMore = jest.fn()
+    render(<InventoryItemCard item={MOCK_ITEM} productName="Oat Milk" onMore={onMore} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'More for Oat Milk' }))
+
+    expect(onMore).toHaveBeenCalledWith('abc123')
+  })
+
+  it.each(['empty', 'discarded'] as const)(
+    'offers nothing to consume on a %s item, but "…" still opens it',
+    (status) => {
+      render(
+        <InventoryItemCard
+          item={{ ...MOCK_ITEM, status, current_quantity: status === 'empty' ? 0 : 750 }}
+          productName="Oat Milk"
+          onConsume={jest.fn()}
+          onMore={jest.fn()}
+        />
+      )
+
+      expect(screen.queryByRole('button', { name: /^Consume|^Finish/ })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'More for Oat Milk' })).toBeInTheDocument()
+    }
+  )
+
+  it('renders no buttons when no handlers are provided', () => {
     render(<InventoryItemCard item={MOCK_ITEM} productName="Oat Milk" />)
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
-  })
-
-  it('renders only consume button when only onConsume provided', () => {
-    render(
-      <InventoryItemCard
-        item={MOCK_ITEM}
-        productName="Oat Milk"
-        onConsume={jest.fn()}
-      />
-    )
-    expect(screen.getByRole('button', { name: /consume/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /edit/i })).not.toBeInTheDocument()
-  })
-
-  it('renders only edit button when only onEdit provided', () => {
-    render(
-      <InventoryItemCard
-        item={MOCK_ITEM}
-        productName="Oat Milk"
-        onEdit={jest.fn()}
-      />
-    )
-    expect(screen.getByRole('button', { name: /edit/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /consume/i })).not.toBeInTheDocument()
-  })
-
-  it('consume button is disabled for empty items', () => {
-    render(
-      <InventoryItemCard
-        item={{ ...MOCK_ITEM, status: 'empty' }}
-        productName="Oat Milk"
-        onConsume={jest.fn()}
-      />
-    )
-    expect(screen.getByRole('button', { name: /consume/i })).toBeDisabled()
-  })
-
-  it('consume button is disabled for discarded items', () => {
-    render(
-      <InventoryItemCard
-        item={{ ...MOCK_ITEM, status: 'discarded' }}
-        productName="Oat Milk"
-        onConsume={jest.fn()}
-      />
-    )
-    expect(screen.getByRole('button', { name: /consume/i })).toBeDisabled()
-  })
-
-  it('consume button is enabled for active items', () => {
-    render(
-      <InventoryItemCard
-        item={MOCK_ITEM}
-        productName="Oat Milk"
-        onConsume={jest.fn()}
-      />
-    )
-    expect(screen.getByRole('button', { name: /consume/i })).not.toBeDisabled()
-  })
-
-  it('edit button is not disabled for empty items', () => {
-    render(
-      <InventoryItemCard
-        item={{ ...MOCK_ITEM, status: 'empty' }}
-        productName="Oat Milk"
-        onEdit={jest.fn()}
-      />
-    )
-    expect(screen.getByRole('button', { name: /edit/i })).not.toBeDisabled()
   })
 })
 
@@ -328,28 +315,18 @@ describe('TestInventoryItemCardActions', () => {
 // ---------------------------------------------------------------------------
 
 describe('TestInventoryItemCardTouchTargets', () => {
-  it('consume button has min-h-touch class (44px touch target)', () => {
+  it('every button on the card is at least a 44px touch target', () => {
     render(
       <InventoryItemCard
         item={MOCK_ITEM}
         productName="Oat Milk"
         onConsume={jest.fn()}
+        onMore={jest.fn()}
       />
     )
-    const btn = screen.getByRole('button', { name: /consume/i })
-    expect(btn.className).toContain('min-h-touch')
-  })
-
-  it('edit button has min-h-touch class (44px touch target)', () => {
-    render(
-      <InventoryItemCard
-        item={MOCK_ITEM}
-        productName="Oat Milk"
-        onEdit={jest.fn()}
-      />
-    )
-    const btn = screen.getByRole('button', { name: /edit/i })
-    expect(btn.className).toContain('min-h-touch')
+    for (const button of screen.getAllByRole('button')) {
+      expect(button.className).toContain('min-h-touch')
+    }
   })
 })
 

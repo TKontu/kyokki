@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
 import { ExpiryBadge } from './ExpiryBadge'
 import { QuantityBar } from './QuantityBar'
+import { cardActions, formatQuantity, type ConsumptionOption } from '@/lib/consumption'
 import type { InventoryItem } from '@/types/inventory'
 
 export interface InventoryItemCardProps {
@@ -17,8 +18,10 @@ export interface InventoryItemCardProps {
   productCategory?: string
   /** Hide the location when the surrounding section already names it. */
   showLocation?: boolean
-  onConsume?: (id: string) => void
-  onEdit?: (id: string) => void
+  /** One tap, no sheet: consume `amount` of the item, in its own unit. */
+  onConsume?: (id: string, amount: number) => void
+  /** "…": the sheet with every other amount, and Edit. */
+  onMore?: (id: string) => void
   className?: string
 }
 
@@ -37,11 +40,13 @@ export const InventoryItemCard: React.FC<InventoryItemCardProps> = ({
   productCategory,
   showLocation = true,
   onConsume,
-  onEdit,
+  onMore,
   className = '',
 }) => {
   const inactive = isInactive(item.status)
-  const hasActions = onConsume !== undefined || onEdit !== undefined
+  const { step, finish } = onConsume ? cardActions(item) : {}
+  const hasActions = step !== undefined || onMore !== undefined
+  const consume = (option: ConsumptionOption) => onConsume?.(item.id, option.amount)
 
   // Unknown locations (the API accepts any string) show their raw value rather than vanish
   const locationLabel = showLocation
@@ -84,24 +89,42 @@ export const InventoryItemCard: React.FC<InventoryItemCardProps> = ({
       </CardContent>
 
       {hasActions && (
-        <CardFooter className="justify-end">
-          {onConsume && (
+        <CardFooter className="gap-2">
+          {step && (
+            // The act the cook almost always means, sized to be hit without looking and
+            // pressed again for a second helping
             <Button
-              variant="primary"
-              size="md"
-              disabled={inactive}
-              onClick={() => onConsume(item.id)}
+              variant={step.key === 'done' ? 'secondary' : 'primary'}
+              size="xl"
+              className="flex-1"
+              aria-label={
+                step.key === 'done'
+                  ? `Finish ${productName}`
+                  : `Consume ${formatQuantity(step.amount)} ${item.unit} of ${productName}`
+              }
+              onClick={() => consume(step)}
             >
-              Consume
+              {step.label}
             </Button>
           )}
-          {onEdit && (
+          {finish && (
+            <Button
+              variant="secondary"
+              size="md"
+              aria-label={`Finish ${productName}`}
+              onClick={() => consume(finish)}
+            >
+              {finish.label}
+            </Button>
+          )}
+          {onMore && (
             <Button
               variant="ghost"
               size="md"
-              onClick={() => onEdit(item.id)}
+              aria-label={`More for ${productName}`}
+              onClick={() => onMore(item.id)}
             >
-              Edit
+              …
             </Button>
           )}
         </CardFooter>

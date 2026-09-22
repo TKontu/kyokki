@@ -38,3 +38,23 @@ export interface ConsumptionLogParams {
   limit?: number // 1-200, default 50
   offset?: number
 }
+
+/** One change the header's Undo would reverse. */
+export interface UndoStep {
+  inventory_item_id: string
+  product_name: string
+  unit: string
+  action: Vocabulary<ConsumptionAction>
+  quantity_consumed: number
+}
+
+/** The most recent action on stock, as one step for Undo: one item, or a whole cleared shelf. */
+export interface UndoPreview {
+  batch_id: string // Send back to undo exactly this, and nothing newer
+  logged_at: string // ISO datetime
+  steps: UndoStep[]
+}
+
+export interface UndoResponse {
+  undone: number // How many items were put back
+}

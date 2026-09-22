@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.db.base_class import Base
@@ -15,6 +15,11 @@ class ConsumptionLog(Base):
     (`quantity_consumed`, kept under its old name although a restore or a correction moves
     food the other way) and what was left (`quantity_after`), in the item's unit. Waste is the
     `discard` rows.
+
+    Each row is also a step the general undo can take back: `previous` holds the item's fields
+    as they were just before the event, and `batch_id` ties together the rows one action wrote,
+    so a cleared shelf comes back in one step. `previous` is NULL on rows logged before undo
+    existed; those cannot be undone.
     """
 
     __tablename__ = "consumption_log"
@@ -36,6 +41,11 @@ class ConsumptionLog(Base):
     )  # schemas.consumption_log.ConsumptionAction
     quantity_consumed = Column(Numeric(10, 2), nullable=False)
     quantity_after = Column(Numeric(10, 2), nullable=False)
+
+    batch_id = Column(
+        UUID(as_uuid=True), nullable=False, default=uuid.uuid4, index=True
+    )
+    previous = Column(JSONB, nullable=True)  # crud.inventory_item.snapshot
 
     logged_at = Column(
         DateTime(timezone=True),

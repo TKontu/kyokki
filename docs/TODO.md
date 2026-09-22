@@ -866,8 +866,8 @@ Ordered by expected value once MVP is live.
     Kyokki PWA as an Android share target. MVP covers the Telegram bot (T1) and iPad upload (R6).
 11. Runtime simplification for single-node installs: one uvicorn worker with in-process
     broadcast, Redis optional (scanner mode state moves to Postgres).
-12. Undo for consume: a backend endpoint that reverses a consume (quantity, status,
-    `opened_date`) and removes its `consumption_log` row, then an Undo action on C2's toast.
+12. ~~Undo for consume~~ — done 2026-09-22 as the general undo (`POST /api/inventory/undo`),
+    in the header rather than on a toast; it reverses any logged change, consume included.
 13. Product name languages: generic names are English since MVP-R2; offer Finnish (or any
     language) names, e.g. a per-product display name or translation at extraction time.
 
@@ -1343,6 +1343,44 @@ logged a discard of 0 that `ConsumptionLogResponse` (`gt=0`) would have refused 
   something stays visible after it is binned. `consumed_at` is the column that question needs.
 - [x] mypy **150 → 149**: the untyped `ARRAY` column went with `meal_contexts`.
 
+##### One-tap consume and one general undo (operator trial), 2026-09-22
+The operator trialled the stock screen after H46 and found consuming too cumbersome: Consume
+opened a sheet, and the sheet asked how much. *"Consuming shall work single click. Otherwise it
+is too hard and users will [not] keep the system up to date."* The sheet may stay as an option
+for an arbitrary amount; the usual amount must be one tap.
+
+- [x] **The card consumes.** A big step button - one piece, or a quarter of a measured pack,
+  labelled with the amount (`−¼ · 2.5 dl`) - meant to be pressed again for a second helping; a
+  smaller **All n** / **Done** beside it; and **…** for the sheet with every other amount. When
+  a step would take everything anyway, finishing *is* the big button (`cardActions` in
+  `lib/consumption.ts`, derived from the same Q4 options as the sheet).
+- [x] **No success toast on a card tap.** The bar moves at once, and the header's Undo names
+  what just happened. Failed taps still toast, every one of them - `mutateAsync`, because
+  per-call callbacks on `mutate` only fire for the last of a quick run.
+- [x] **Edit moved behind "…"**, as **Edit item** at the foot of the sheet.
+- [x] **One general undo in the header** (operator: *"one general undo, not toast specific"*).
+  It always says what it would reverse (`↶ Undo  −1 pcs · Apples`), reverses the most recent
+  change to stock whichever item and whoever made it, and pressing again steps further back.
+  It reaches consume, finish, mark as gone, a cleared shelf (as one step), a restore and a
+  quantity correction - everything H46 logs. Adding an item and moving it between shelves are
+  not logged, so they are not steps.
+- [x] **Built on H46's log.** Each row now keeps `previous` - the item's quantities, status,
+  dates, location and `consumed_at` just before the event - and a `batch_id` shared by the rows
+  of one action. Undo puts `previous` back and **deletes** the rows: an undone helping was never
+  eaten, and a waste total must not count it. Opening a pack shortens its expiry (Q5), and undo
+  puts the old date back too.
+- [x] **Safe on a shared kitchen.** `POST /api/inventory/undo` takes the `batch_id` the preview
+  showed; if the Telegram bot or another screen changed stock in between, it answers 409 and
+  the header shows the newer thing instead of undoing it. The batch is re-read under row locks,
+  so two undos cannot both land. A discard's row says 0 left while the item keeps its frozen
+  quantity (H23), and the "has it moved since" check knows that.
+- [x] Rows from before this change have no `previous` and stop the walk back rather than being
+  skipped - undoing something older underneath them would be wrong. Moot after the wipe.
+- [x] **The toast Undos are gone** - Mark as gone (#77) and the cleared shelf (#78) - along with
+  `useRestoreInventoryItem`, which only they used. "Put it back" in the sheet stays.
+- [ ] **Not undoable:** adding stock (quick add, receipt confirm), deleting an item (its history
+  goes with it), and date or shelf edits made without a quantity change.
+
 
 ---
 
@@ -1490,7 +1528,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Friction Q11: [x] shelf-life provenance + catalog estimates (#70)  [x] products screen (#71, landed on main by #72)
 - Friction Q12: [x] a correction reaches the food (#73)  [x] the freezer clock, DEC-10 (#74)
 - Hardening H2 (started early, operator call 2026-09-20): [x] H23 (PR #75)  [x] H24 (#76)  [ ] H21  [ ] H22 (DEC-9)  [ ] H25  [ ] H26  [ ] H27  [ ] H28
-- Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)
+- Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)  [x] one-tap consume + general undo (operator trial)
 - Hardening H4: [x] H46 consumption history  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H45  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 

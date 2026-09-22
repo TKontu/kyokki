@@ -2,9 +2,10 @@
 
 /**
  * ConsumptionSheet Component
- * Bottom sheet with one-tap consumption. The options come from the item itself (Q4): pieces
- * lead with a large "1" because eating one apple is what happens, measured things offer
- * fractions labelled with the amount.
+ * Every amount the item offers, behind the card's "…". The card's own buttons cover the usual
+ * step and finishing it in one tap (operator, 2026-09-22); this is for the rest. The options
+ * come from the item itself (Q4): pieces lead with a large "1", measured things offer fractions
+ * labelled with the amount. Edit lives here too, which is what took it off the card.
  */
 
 import React from 'react'
@@ -25,6 +26,8 @@ export interface ConsumptionSheetProps {
   item: InventoryItem | null
   open: boolean
   onClose: () => void
+  /** Open the edit sheet for this item instead. */
+  onEdit?: () => void
 }
 
 function successMessage(item: InventoryItem, option: ConsumptionOption): string {
@@ -37,7 +40,7 @@ function successMessage(item: InventoryItem, option: ConsumptionOption): string 
   return `Consumed ${formatQuantity(option.amount)} ${item.unit} · ${item.product_name}`
 }
 
-export function ConsumptionSheet({ item, open, onClose }: ConsumptionSheetProps) {
+export function ConsumptionSheet({ item, open, onClose, onEdit }: ConsumptionSheetProps) {
   const consume = useConsumeInventoryItem()
   const toast = useToast()
 
@@ -106,6 +109,11 @@ export function ConsumptionSheet({ item, open, onClose }: ConsumptionSheetProps)
                   </Button>
                 ))}
               </div>
+            )}
+            {onEdit && (
+              <Button size="lg" variant="ghost" fullWidth onClick={onEdit}>
+                Edit item
+              </Button>
             )}
           </div>
         )

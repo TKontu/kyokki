@@ -1,7 +1,7 @@
 """API endpoints for Inventory CRUD operations."""
 
 from decimal import Decimal
-from typing import cast
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -20,7 +20,12 @@ from app.schemas.inventory_item import (
     InventoryStatus,
     QuickAddRequest,
     StorageLocation,
+    UndoPreviewResponse,
+    UndoRequest,
+    UndoResponse,
+    UndoStepResponse,
 )
+from app.services import undo as undo_service
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest
 from app.services.item_status import ItemEvent, ItemFrozen
@@ -53,6 +58,68 @@ async def list_inventory(
         include_inactive=include_inactive,
     )
     return items
+
+
+# Declared before `/{item_id}`, which would otherwise take "undo" for an id and answer 422
+@router.get("/undo", response_model=UndoPreviewResponse | None)
+async def preview_undo(
+    db: AsyncSession = Depends(get_db),
+) -> UndoPreviewResponse | None:
+    """What the header's Undo would reverse next, or null when there is nothing to undo.
+
+    The most recent change to stock - whichever item, whoever made it: a consume, a finish, a
+    mark as gone, a cleared shelf (all its items, as one step), a restore or a quantity
+    correction. Send its `batch_id` back to undo exactly that.
+    """
+    found = await undo_service.preview(db)
+    if found is None:
+        return None
+    batch_id, logged_at, steps = found
+    return UndoPreviewResponse(
+        batch_id=batch_id,
+        logged_at=logged_at,
+        steps=[
+            UndoStepResponse(
+                inventory_item_id=step.inventory_item_id,
+                product_name=step.product_name,
+                unit=step.unit,
+                action=step.action,
+                quantity_consumed=step.quantity_consumed,
+            )
+            for step in steps
+        ],
+    )
+
+
+@router.post("/undo", response_model=UndoResponse)
+async def undo_last_change(
+    request: UndoRequest, db: AsyncSession = Depends(get_db)
+) -> UndoResponse:
+    """Undo the most recent change to stock; press again to step further back.
+
+    Returns:
+        - 200: How many items were put back.
+        - 409: Nothing to undo, or something newer happened after the preview was shown -
+          the caller should fetch the preview again rather than guess.
+    """
+    try:
+        async with handle_integrity_errors():
+            items = await undo_service.undo(db, request.batch_id)
+    except undo_service.UndoConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+    for item in items:
+        row: Any = item
+        await broadcast_inventory_update(
+            inventory_item_id=row.id,
+            action="updated",
+            current_quantity=row.current_quantity,
+            status=row.status,
+            product_name=row.product_name,
+        )
+    return UndoResponse(undone=len(items))
 
 
 @router.get("/{item_id}", response_model=InventoryItemResponse)

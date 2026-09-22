@@ -103,6 +103,28 @@ export function consumptionOptions(item: InventoryItem): ConsumptionOption[] {
   return [...partial, finish]
 }
 
+/**
+ * The consume buttons on a stock card: one tap, no sheet (operator, 2026-09-22).
+ *
+ * `step` is the big button and is meant to be pressed again and again - one piece, or a
+ * quarter of the pack. `finish` is the smaller "All n" / "Done" beside it. When a step would
+ * take everything anyway, finishing *is* the step and there is no second button. Nothing at
+ * all for an item that is already gone. Any other amount is the sheet's job.
+ */
+export function cardActions(item: InventoryItem): {
+  step?: ConsumptionOption
+  finish?: ConsumptionOption
+} {
+  const options = consumptionOptions(item)
+  const finish = options.find((option) => option.key === 'done')
+  if (!finish || finish.disabled) return {}
+
+  // The smallest thing on offer - one piece, or a quarter - is the one worth repeating
+  const first = options.find((option) => option.key !== 'done')
+  if (!first) return { step: finish }
+  return { step: { ...first, label: `−${first.label}` }, finish }
+}
+
 function todayIsoDate(): string {
   const now = new Date()
   const month = String(now.getMonth() + 1).padStart(2, '0')
