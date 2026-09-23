@@ -129,7 +129,10 @@ export function InventoryList({
     )
   }
 
-  if (isError) {
+  // Only when there is nothing to show instead. A dropped poll used to blank the fridge
+  // display; the stock already on screen is still the best answer anyone has, and the header's
+  // banner is what says how old it is (H45).
+  if (isError && !items) {
     return (
       <p role="alert" className={`text-sm text-red-600 dark:text-red-400 py-4 ${className}`.trim()}>
         {error instanceof Error ? error.message : 'Failed to load inventory.'}
@@ -146,7 +149,8 @@ export function InventoryList({
       <p
         className={`text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary py-4 ${className}`.trim()}
       >
-        No items found. Scan a product to add it to your inventory.
+        No items found. Add one with + Add, or share a receipt to the Telegram bot - you can
+        also scan one on the Scan screen.
       </p>
     )
   }

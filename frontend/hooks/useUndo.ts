@@ -29,6 +29,8 @@ export function useUndo() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    // Named for the status banner, which offers a failed one back (H45)
+    meta: { label: 'Undo' },
     mutationFn: (batchId: string) => inventoryAPI.undo(batchId),
     // Not idempotent in the way a retry would need: a second attempt after a lost response
     // would be refused as stale at best, and at worst undo the step before as well.

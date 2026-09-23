@@ -95,7 +95,8 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
         title={name}
         footer={
           <div className="grid grid-cols-2 gap-3">
-            <Button variant="secondary" size="lg" onClick={() => setConfirmingDelete(false)}>
+            {/* The safe one is focused, so Enter on a confirm never deletes (H45) */}
+            <Button data-primary variant="secondary" size="lg" onClick={() => setConfirmingDelete(false)}>
               Cancel
             </Button>
             <Button variant="danger" size="lg" loading={remove.isPending} onClick={confirmDelete}>
@@ -127,7 +128,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
       title={name}
       footer={
         <div className="flex flex-col gap-3">
-          <Button size="lg" fullWidth disabled={!canSave} loading={update.isPending} onClick={() => patch(changes, `Saved · ${name}`)}>
+          <Button data-primary size="lg" fullWidth disabled={!canSave} loading={update.isPending} onClick={() => patch(changes, `Saved · ${name}`)}>
             Save
           </Button>
           <div className="grid grid-cols-2 gap-3">

@@ -68,6 +68,33 @@ function howLong(days: number): string {
   return `${weeks} week${weeks > 1 ? 's' : ''}`
 }
 
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+
+/**
+ * How long ago something happened, for a screen that has to admit when it is out of date.
+ *
+ * Minutes and hours, in the same bare voice as `howLong`, and then the date: "37 hours ago" is
+ * a number nobody converts, and a wall display saying "13 January" is the honest answer. A
+ * moment in the future - two clocks disagreeing - reads as "just now" rather than counting up.
+ */
+export function formatAgo(when: string | number, now: Date = new Date()): string {
+  const at = typeof when === 'number' ? when : new Date(when).getTime()
+  const ago = now.getTime() - at
+
+  if (ago < MINUTE_MS) return 'just now'
+  if (ago < HOUR_MS) {
+    const minutes = Math.floor(ago / MINUTE_MS)
+    return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  }
+  if (ago < DAY_MS) {
+    const hours = Math.floor(ago / HOUR_MS)
+    return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  }
+  return new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })
+}
+
 /**
  * Format expiry date as human-readable string
  *

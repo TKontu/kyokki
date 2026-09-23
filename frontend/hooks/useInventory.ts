@@ -64,6 +64,8 @@ export function useCreateInventoryItem() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    // Named for the status banner, which offers a failed one back (H45)
+    meta: { label: 'Add' },
     mutationFn: (data: InventoryItemCreate) => inventoryAPI.create(data),
     onSuccess: () => {
       // Invalidate all list queries to refetch
@@ -79,6 +81,8 @@ export function useQuickAddInventoryItem() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    // Named for the status banner, which offers a failed one back (H45)
+    meta: { label: 'Quick add' },
     mutationFn: (data: QuickAddRequest) => inventoryAPI.quickAdd(data),
     // Adding is not idempotent: a retry after a lost response would add the stock twice.
     retry: false,
@@ -97,6 +101,8 @@ export function useUpdateInventoryItem() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    // Named for the status banner, which offers a failed one back (H45)
+    meta: { label: 'Save' },
     mutationFn: ({ id, data }: { id: string; data: InventoryItemUpdate }) =>
       inventoryAPI.update(id, data),
     // The only mutation here that used to retry. A correction is not idempotent - a quantity
@@ -126,6 +132,8 @@ export function useBulkInventoryMove() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    // Named for the status banner, which offers a failed one back (H45)
+    meta: { label: 'Clear' },
     mutationFn: ({ ids, event }: { ids: string[]; event: 'discard' | 'restore' }) =>
       event === 'discard'
         ? inventoryAPI.discardMany(ids)
@@ -145,6 +153,8 @@ export function useConsumeInventoryItem() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    // Named for the status banner, which offers a failed one back (H45)
+    meta: { label: 'Consume' },
     mutationFn: ({ id, data }: { id: string; data: ConsumeRequest }) =>
       inventoryAPI.consume(id, data),
     // Consuming is not idempotent: retrying after a lost response would consume twice, and
@@ -203,6 +213,8 @@ export function useDeleteInventoryItem() {
   const queryClient = useQueryClient()
 
   return useMutation({
+    // Named for the status banner, which offers a failed one back (H45)
+    meta: { label: 'Delete' },
     mutationFn: (id: string) => inventoryAPI.delete(id),
     // A retried DELETE after a lost response would only 404; report the first outcome instead.
     retry: false,

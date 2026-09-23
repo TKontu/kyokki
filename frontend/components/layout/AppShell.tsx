@@ -9,6 +9,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { StatusBanner } from './StatusBanner'
 
 interface Destination {
   href: string
@@ -82,7 +83,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )
         })}
       </nav>
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0 flex-1">
+        {/* Above every screen, and silent unless something is wrong (H45) */}
+        <StatusBanner />
+        {children}
+      </div>
     </div>
   )
 }

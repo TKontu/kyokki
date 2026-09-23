@@ -157,7 +157,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
           <Button variant="secondary" size="lg" onClick={() => setSelection(null)}>
             Back
           </Button>
-          <Button size="lg" disabled={!canAdd} loading={quickAdd.isPending} onClick={submit}>
+          <Button data-primary size="lg" disabled={!canAdd} loading={quickAdd.isPending} onClick={submit}>
             Add
           </Button>
         </div>

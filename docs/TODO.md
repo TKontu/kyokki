@@ -1407,6 +1407,44 @@ with 7-day and All filters, and the history kept for good because metrics will b
 - [ ] **Not shown yet:** a waste rate or a trend. The summary endpoint is the shape those need;
   the operator asked for the data to be kept first.
 
+##### H45: the display says when it is out of touch, 2026-09-23
+An unattended wall display had no way to admit anything was wrong. A failed poll **replaced the
+whole list** with a red line, so one dropped request blanked the fridge; a poll that failed
+quietly left month-old stock looking exactly like this morning's; and a failed tap left a toast
+that was gone in five seconds, on a screen nobody was necessarily watching. The one-tap round
+made the last one worse: a card tap raises no success toast by design, so a failure that is
+missed leaves no trace at all.
+
+- [x] **One banner above every screen** (`components/layout/StatusBanner.tsx`, mounted in
+  `AppShell`), silent unless something is wrong - a banner that is always there is one nobody
+  reads. Three states in priority order: **actions that failed** (with Retry and Dismiss per
+  action), **not reaching the kitchen server** (with what is on screen dated, and Try again),
+  and **last updated N minutes ago** once nothing has landed for 90 s.
+- [x] **`useBackendStatus`** derives it all from the queries the open page already runs - no
+  polling of its own and nothing to keep in sync. A 404 is not "unreachable": only a network
+  failure, a 5xx or `onlineManager` being offline is, because a banner that cries wolf is
+  ignored.
+- [x] **`useFailedActions`** reads the mutation cache rather than each call site, which would
+  have been forgotten at the next one. Retry re-runs the same mutation with the same variables
+  (`mutation.execute`, what `Mutation.continue()` does for a paused one); the row clears itself
+  when it lands. Each inventory mutation carries `meta: { label }` - that is what the banner
+  calls it.
+- [x] **The list stops blanking itself.** `InventoryList` shows its error only when there is no
+  stock to show; with cached stock it keeps rendering and lets the banner carry the staleness.
+- [x] **Sheet focus lands on the action the sheet is named after** (`[data-primary]`), and on
+  the *safe* control in a destructive confirm, so Enter never throws food away. A disabled
+  primary - Save before anything changed - falls back rather than leaving focus on the body.
+- [x] **The empty-stock copy names the real ways in**: + Add, a receipt to the Telegram bot, or
+  the Scan screen. It used to say "Scan a product", naming a barcode scanner with no screen
+  behind it and a backend router being quarantined under H41/DEC-7.
+- [x] **The row's "toasts stay for the happy path" is no longer true** and the row is wrong
+  rather than unfinished: since the one-tap round a card consume has no success toast, and the
+  quantity bar plus the header's Undo are the confirmation. Toasts now carry errors and the
+  results of deliberate, watched actions (Save, Delete, Put it back).
+- [ ] **Not covered:** the receipt worker and the LLM gateway have no health of their own here.
+  `ReceiptsBanner` still speaks for the pipeline, and H34's timeouts are what would make
+  "gateway unreachable" a state worth showing separately.
+
 
 ---
 
@@ -1555,7 +1593,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Friction Q12: [x] a correction reaches the food (#73)  [x] the freezer clock, DEC-10 (#74)
 - Hardening H2 (started early, operator call 2026-09-20): [x] H23 (PR #75)  [x] H24 (#76)  [ ] H21  [ ] H22 (DEC-9)  [ ] H25  [ ] H26  [ ] H27  [ ] H28
 - Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)  [x] one-tap consume + general undo (operator trial)  [x] the Gone screen (waste visible, kept for metrics)
-- Hardening H4: [x] H46 consumption history  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H45  [ ] H47
+- Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)

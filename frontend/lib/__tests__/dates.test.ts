@@ -5,6 +5,7 @@
 
 import {
   calculateDaysUntilExpiry,
+  formatAgo,
   getExpiryUrgency,
   formatExpiryDate,
   getExpiryColor,
@@ -244,5 +245,42 @@ describe('Date Utilities', () => {
       expect(formatted).toBe('5 days')
       expect(color).toContain('green')
     })
+  })
+})
+
+describe('formatAgo: how old the thing on screen is', () => {
+  const MOCK_NOW = new Date('2024-01-15T12:00:00Z')
+
+  beforeEach(() => {
+    jest.useFakeTimers()
+    jest.setSystemTime(MOCK_NOW)
+  })
+
+  afterEach(() => {
+    jest.useRealTimers()
+  })
+
+  it.each([
+    [0, 'just now'],
+    [30_000, 'just now'],
+    [60_000, '1 minute ago'],
+    [4 * 60_000, '4 minutes ago'],
+    [60 * 60_000, '1 hour ago'],
+    [5 * 60 * 60_000, '5 hours ago'],
+  ])('reads %i ms back as "%s"', (ago, expected) => {
+    expect(formatAgo(MOCK_NOW.getTime() - ago)).toBe(expected)
+  })
+
+  it('stops counting hours at a day and gives the date instead', () => {
+    // "37 hours ago" is a number nobody converts; a wall display should say the day.
+    expect(formatAgo(new Date('2024-01-13T23:00:00Z').getTime())).toBe('13 January')
+  })
+
+  it('takes an ISO string as readily as a timestamp', () => {
+    expect(formatAgo('2024-01-15T11:56:00Z')).toBe('4 minutes ago')
+  })
+
+  it('does not count into the future when a clock disagrees', () => {
+    expect(formatAgo(MOCK_NOW.getTime() + 60_000)).toBe('just now')
   })
 })
