@@ -34,6 +34,8 @@ const PEAS: InventoryItem = {
   notes: null,
   created_at: '2026-09-14T10:00:00Z',
   consumed_at: null,
+  opened_shelf_life_days: null,
+  avg_piece_grams: null,
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
@@ -154,4 +156,47 @@ it('brings a gone item back with the header Undo, not a toast that times out', a
 
   await waitFor(() => expect(screen.getByText('Peas')).toBeInTheDocument())
   expect(undone).toEqual([{ batch_id: 'batch-peas' }])
+})
+
+it('saves only what the cook changed when the item moves under the open sheet', async () => {
+  // The H25 bug, end to end: consuming from the card while the edit sheet was open, then
+  // saving an expiry, used to send the old quantity too - putting the helping back as a
+  // correction, which the history then recorded as one.
+  let stock: InventoryItem[] = [PEAS]
+  const patches: Partial<InventoryItem>[] = []
+  server.use(
+    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
+    http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
+    http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null)),
+    http.post(`${API_URL}/inventory/item-peas/consume`, async () => {
+      stock = [{ ...PEAS, current_quantity: 375, status: 'partial' }]
+      return HttpResponse.json(stock[0])
+    }),
+    http.patch(`${API_URL}/inventory/item-peas`, async ({ request }) => {
+      const body = (await request.json()) as Partial<InventoryItem>
+      patches.push(body)
+      return HttpResponse.json({ ...stock[0], ...body })
+    })
+  )
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <Home />
+      </ToastProvider>
+    </QueryClientProvider>
+  )
+  await waitFor(() => expect(screen.getByText('Peas')).toBeInTheDocument())
+
+  openEdit('Peas')
+  fireEvent.change(screen.getByLabelText('Expiry'), { target: { value: '2099-04-01' } })
+  // Somebody eats a quarter of the peas while the sheet sits open
+  fireEvent.click(screen.getByRole('button', { name: 'Consume 125 g of Peas' }))
+  await waitFor(() => expect(screen.getByLabelText('Quantity (g)')).toHaveValue(375))
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+  await waitFor(() => expect(patches).toHaveLength(1))
+  expect(patches[0]).toEqual({ expiry_date: '2099-04-01' })
 })

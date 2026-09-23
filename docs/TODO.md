@@ -1441,10 +1441,45 @@ missed leaves no trace at all.
   rather than unfinished: since the one-tap round a card consume has no success toast, and the
   quantity bar plus the header's Undo are the confirmation. Toasts now carry errors and the
   results of deliberate, watched actions (Save, Delete, Put it back).
-- [ ] **Not covered:** the receipt worker and the LLM gateway have no health of their own here.
+- [ ] **Not covered (H45):** the receipt worker and the LLM gateway have no health of their own here.
   `ReceiptsBanner` still speaks for the pipeline, and H34's timeouts are what would make
   "gateway unreachable" a state worth showing separately.
 
+
+##### H25: a sheet shows the truth while it is open, 2026-09-23
+The edit sheet seeded its inputs at mount and diffed them against the **live** item, which
+`app/page.tsx` deliberately re-reads from the cache. Nothing kept the two in step, so a poll, a
+tap on a card or another device made two things happen: **Save armed itself with no keystroke**,
+and one press wrote the mounted snapshot back over the server's newer value. Editing an expiry
+while somebody consumed 250 dl sent the old quantity too - putting the helping back as a
+*correction*, which H46's history then recorded as one. One-tap consume made it easy to reach.
+
+- [x] **`useFieldEdit`** (`hooks/useFieldEdit.ts`): an untouched field **follows** the record, a
+  touched field keeps what the cook typed, and only touched-and-different fields are sent.
+- [x] **A touched field that also moved says so** (operator ruling): *"Quantity changed to 2
+  while this was open"*, with **Keep mine** and **Use 2**. Only a field the cook edited can
+  raise one - anything else follows the server, which is what they would want and never notice.
+- [x] **`ProductEditSheet` got the same treatment.** Its comment already claimed it ("Send only
+  what changed, so two cooks editing different fields do not fight") and its shape was identical.
+- [x] `ItemEditForm` is keyed by item id, so a sheet that ever swapped items in place would
+  start clean rather than inherit the last one's edits.
+- [x] **Quick add stops asserting what it cannot know.** A typed name is resolved server-side by
+  normalised name or learned synonym, so "Milk" typed by hand used to land as `pcs` on the real
+  `dl` Milk. `unit` is optional on `QuickAddRequest` now, and unit and location are sent only
+  when the cook chose them; the server falls back to the resolved product's own (and to the
+  category for a genuinely new product, which is what the sheet was guessing anyway).
+- [x] **"Create new" waits for the search to answer for the word on screen.** It rendered on
+  "text, and no exact match in the loaded rows", which is true during the 250 ms debounce and
+  while `keepPreviousData` holds the last term's rows - exactly the window in which tapping it
+  makes the duplicate the check exists to prevent. `useProductSearch` gained `settled`.
+- [x] **The consume mirror predicts the opened clock** (Q5, operator ruling). `InventoryItem`
+  now carries the product's `opened_shelf_life_days` and `avg_piece_grams`, so `applyConsume`
+  mirrors `_start_opened_clock`: forward only, and loose produce exempt. The card used to keep
+  the old badge until the refetch landed and then jump, sometimes green to red and out of its
+  shelf into *Expiring soon*.
+- [ ] **Still live-vs-snapshot elsewhere:** the receipt review rows. They are rebuilt from the
+  receipt on every refetch, but nothing there is editable while a request is in flight, so no
+  cook has lost work to it yet.
 
 ---
 
@@ -1591,7 +1626,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Friction Q7-Q10: [x] Q7 (PR #66)  [x] Q8 (#67)  [x] Q9+Q10 (#68) - the first real receipt
 - Friction Q11: [x] shelf-life provenance + catalog estimates (#70)  [x] products screen (#71, landed on main by #72)
 - Friction Q12: [x] a correction reaches the food (#73)  [x] the freezer clock, DEC-10 (#74)
-- Hardening H2 (started early, operator call 2026-09-20): [x] H23 (PR #75)  [x] H24 (#76)  [ ] H21  [ ] H22 (DEC-9)  [ ] H25  [ ] H26  [ ] H27  [ ] H28
+- Hardening H2 (started early, operator call 2026-09-20): [x] H23 (PR #75)  [x] H24 (#76)  [x] H25  [ ] H21  [ ] H22 (DEC-9)  [ ] H26  [ ] H27  [ ] H28
 - Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)  [x] one-tap consume + general undo (operator trial)  [x] the Gone screen (waste visible, kept for metrics)
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track

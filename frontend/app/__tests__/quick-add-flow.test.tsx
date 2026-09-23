@@ -34,6 +34,8 @@ const PEAS: InventoryItem = {
   notes: null,
   created_at: '2026-09-14T10:00:00Z',
   consumed_at: null,
+  opened_shelf_life_days: null,
+  avg_piece_grams: null,
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))

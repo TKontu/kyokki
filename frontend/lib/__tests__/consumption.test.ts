@@ -31,6 +31,8 @@ function makeItem(overrides: Partial<InventoryItem> = {}): InventoryItem {
     notes: null,
     created_at: '2024-01-01T10:00:00Z',
     consumed_at: null,
+    opened_shelf_life_days: null,
+    avg_piece_grams: null,
     ...overrides,
   }
 }
@@ -272,5 +274,67 @@ describe('cardActions: what one tap on the card does', () => {
 
     expect(step).toBeUndefined()
     expect(finish).toBeUndefined()
+  })
+})
+
+describe('applyConsume and the opened clock (Q5)', () => {
+  // Mirrors backend/app/crud/inventory_item.py `_start_opened_clock`. The card used to show
+  // the old expiry until the server answered, then jump - sometimes green to red (H25).
+  beforeEach(() => {
+    jest.useFakeTimers()
+    jest.setSystemTime(new Date('2024-02-01T12:00:00Z'))
+  })
+
+  afterEach(() => jest.useRealTimers())
+
+  it('brings the date forward when a pack is opened', () => {
+    const sealed = makeItem({
+      status: 'sealed',
+      expiry_date: '2024-03-01',
+      opened_shelf_life_days: 3,
+    })
+
+    expect(applyConsume(sealed, 250).expiry_date).toBe('2024-02-04')
+  })
+
+  it('never lengthens it: a jar opened the day before its date keeps that date', () => {
+    const sealed = makeItem({
+      status: 'sealed',
+      expiry_date: '2024-02-02',
+      opened_shelf_life_days: 14,
+    })
+
+    expect(applyConsume(sealed, 250).expiry_date).toBe('2024-02-02')
+  })
+
+  it('leaves loose produce alone, because taking one apple opens nothing', () => {
+    const apples = makeItem({
+      status: 'sealed',
+      unit: 'pcs',
+      initial_quantity: 13,
+      current_quantity: 13,
+      expiry_date: '2024-03-01',
+      opened_shelf_life_days: 3,
+      avg_piece_grams: 150,
+    })
+
+    expect(applyConsume(apples, 1).expiry_date).toBe('2024-03-01')
+  })
+
+  it('says nothing about the date when the product does not know how long it keeps', () => {
+    const sealed = makeItem({ status: 'sealed', expiry_date: '2024-03-01' })
+
+    expect(applyConsume(sealed, 250).expiry_date).toBe('2024-03-01')
+  })
+
+  it('leaves an already-opened pack on its clock', () => {
+    const opened = makeItem({
+      status: 'opened',
+      opened_date: '2024-01-20',
+      expiry_date: '2024-02-10',
+      opened_shelf_life_days: 3,
+    })
+
+    expect(applyConsume(opened, 250).expiry_date).toBe('2024-02-10')
   })
 })

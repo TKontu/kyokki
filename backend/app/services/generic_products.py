@@ -81,7 +81,7 @@ class ProductResolver:
     async def resolve(
         self,
         *,
-        unit: str,
+        unit: str | None = None,
         quantity: Decimal | float,
         product_id: UUID | None = None,
         name: str | None = None,
@@ -161,7 +161,9 @@ class ProductResolver:
         elif pack_grams:
             natural_unit = "g"
         else:
-            natural_unit = unit
+            # Nothing to resolve to and nothing said: one of a thing (H25). Only quick add
+            # reaches this without a unit; a receipt line always printed one.
+            natural_unit = unit or "pcs"
         product = ProductMaster(
             # Hand-typed names ("oat drink") read like extracted generic names ("Oat drink")
             canonical_name=tidy[:1].upper() + tidy[1:],
@@ -223,14 +225,20 @@ def build_inventory_item(
     product: ProductMaster,
     *,
     quantity: Decimal | float,
-    unit: str,
+    unit: str | None = None,
     purchase_date: date,
     expiry_date: date | None = None,
     location: str | None = None,
     receipt_id: UUID | None = None,
 ) -> InventoryItem:
-    """A sealed item: expiry and location come from the product unless overridden."""
-    quantity, unit = quantity_for_product(product, quantity, unit)
+    """A sealed item: unit, expiry and location come from the product unless overridden.
+
+    The unit is the product's own when the caller did not name one (H25): quick add resolves a
+    typed name to a product the client cannot see, so its guess would be about the wrong thing.
+    """
+    quantity, unit = quantity_for_product(
+        product, quantity, unit or str(product.default_unit)
+    )
     if expiry_date is not None:
         expiry, source = expiry_date, "manual"
     else:

@@ -54,11 +54,14 @@ export function ProductSearch({
   )
 
   const trimmed = term.trim()
-  const results = trimmed ? (search.data ?? []) : []
-  // Offering "new" for a name that already exists is how duplicates got made.
+  const results = trimmed && search.settled ? (search.data ?? []) : []
+  // Offering "new" for a name that already exists is how duplicates got made - and so is
+  // offering it before the search for *this* word has answered, when nothing can be known yet
+  // (H25).
   const exactMatch = results.some(
     (product) => product.canonical_name.toLowerCase() === trimmed.toLowerCase()
   )
+  const offerNew = Boolean(trimmed) && search.settled && !exactMatch
 
   return (
     <>
@@ -90,7 +93,7 @@ export function ProductSearch({
             </button>
           </li>
         ))}
-        {trimmed && !exactMatch && (
+        {offerNew && (
           <li>
             <button
               type="button"

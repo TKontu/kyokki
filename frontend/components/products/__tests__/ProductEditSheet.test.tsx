@@ -60,15 +60,20 @@ function renderSheet(product: ProductMaster = PRODUCT, onClose = jest.fn()) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  render(
+  const sheet = (current: ProductMaster) => (
     <QueryClientProvider client={client}>
       <ToastProvider>
-        <ProductEditSheet product={product} onClose={onClose} />
+        <ProductEditSheet product={current} onClose={onClose} />
       </ToastProvider>
     </QueryClientProvider>
   )
+  const { rerender } = render(sheet(product))
+  // What a refetch, or another cook, does to an open sheet
+  moved = (next: Partial<ProductMaster>) => rerender(sheet({ ...product, ...next }))
   return onClose
 }
+
+let moved: (next: Partial<ProductMaster>) => void
 
 const save = () => screen.getByRole('button', { name: 'Save' })
 
@@ -178,5 +183,47 @@ describe('ProductEditSheet', () => {
 
     expect(await screen.findByText('Record already exists.')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
+  })
+})
+
+describe('while the product moves underneath the sheet (H25)', () => {
+  it('follows the server for a field nobody has touched', () => {
+    renderSheet()
+
+    moved({ default_shelf_life_days: 9 })
+
+    expect(screen.getByLabelText('Keeps for')).toHaveValue(9)
+    expect(save()).toBeDisabled()
+  })
+
+  it('does not arm Save by itself', () => {
+    renderSheet()
+
+    moved({ canonical_name: 'Minced beef', default_shelf_life_days: 9 })
+
+    expect(save()).toBeDisabled()
+  })
+
+  it('sends only the field the cook touched', async () => {
+    const patches = mockApi()
+    renderSheet()
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Minced beef' } })
+    moved({ default_shelf_life_days: 9 })
+    fireEvent.click(save())
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toEqual({ canonical_name: 'Minced beef' })
+  })
+
+  it('says so when a field the cook is editing moved as well', () => {
+    renderSheet()
+
+    fireEvent.change(screen.getByLabelText('Keeps for'), { target: { value: '3' } })
+    moved({ default_shelf_life_days: 9 })
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Keeps for changed to 9 while this was open'
+    )
   })
 })

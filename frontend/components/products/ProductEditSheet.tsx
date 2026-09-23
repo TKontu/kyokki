@@ -12,7 +12,6 @@
  * `unit_type` is derived server-side from `default_unit`, so it is never sent.
  */
 
-import { useState } from 'react'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Button from '@/components/ui/Button'
 import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
@@ -25,7 +24,14 @@ import { useToast } from '@/hooks/useToast'
 import { useUpdateProduct } from '@/hooks/useProducts'
 import { isAPIError } from '@/lib/api/errors'
 import type { Unit } from '@/types/inventory'
+import { useFieldEdit } from '@/hooks/useFieldEdit'
+import { FieldMoved } from '@/components/ui/FieldMoved'
 import type { ProductMaster, ProductMasterUpdate } from '@/types/product'
+
+/** An empty input is how "not known" is written in this sheet. */
+function blankIfNull(value: number | null): string {
+  return value == null ? '' : String(value)
+}
 
 const UNITS: Unit[] = ['pcs', 'g', 'dl', 'tsp', 'tbsp']
 
@@ -51,18 +57,20 @@ export function ProductEditSheet({
   const toast = useToast()
   const save = useUpdateProduct()
 
-  const [name, setName] = useState(product.canonical_name)
-  const [shelfLife, setShelfLife] = useState(String(product.default_shelf_life_days))
-  const [openedShelfLife, setOpenedShelfLife] = useState(
-    product.opened_shelf_life_days == null ? '' : String(product.opened_shelf_life_days)
-  )
-  const [pieceGrams, setPieceGrams] = useState(
-    product.avg_piece_grams == null ? '' : String(product.avg_piece_grams)
-  )
-  const [packGrams, setPackGrams] = useState(
-    product.pack_grams == null ? '' : String(product.pack_grams)
-  )
-  const [unit, setUnit] = useState<Unit>(product.default_unit)
+  // Each field follows the product until the cook touches it, and says so if what they are
+  // editing moves underneath them (H25) - two cooks on two screens is the case this is for.
+  const nameField = useFieldEdit(product.canonical_name)
+  const shelfLifeField = useFieldEdit(String(product.default_shelf_life_days))
+  const openedField = useFieldEdit(blankIfNull(product.opened_shelf_life_days))
+  const pieceField = useFieldEdit(blankIfNull(product.avg_piece_grams))
+  const packField = useFieldEdit(blankIfNull(product.pack_grams))
+  const unitField = useFieldEdit(product.default_unit)
+  const name = nameField.value
+  const shelfLife = shelfLifeField.value
+  const openedShelfLife = openedField.value
+  const pieceGrams = pieceField.value
+  const packGrams = packField.value
+  const unit = unitField.value as Unit
 
   const shelfLifeValue = positiveOrNull(shelfLife)
   const openedValue = positiveOrNull(openedShelfLife)
@@ -77,22 +85,19 @@ export function ProductEditSheet({
     pieceValue !== undefined &&
     packValue !== undefined
 
-  // Send only what changed, so two cooks editing different fields do not fight.
+  // Send only what changed, so two cooks editing different fields do not fight - and only
+  // what *this* cook changed, so a field that moved underneath is left where the server has it.
   const changes: ProductMasterUpdate = {}
-  if (name.trim() !== product.canonical_name) changes.canonical_name = name.trim()
-  if (shelfLifeValue !== product.default_shelf_life_days && valid) {
+  if (nameField.changed && name.trim() !== product.canonical_name) {
+    changes.canonical_name = name.trim()
+  }
+  if (shelfLifeField.changed && valid) {
     changes.default_shelf_life_days = shelfLifeValue as number
   }
-  if (openedValue !== product.opened_shelf_life_days) {
-    changes.opened_shelf_life_days = openedValue ?? null
-  }
-  if (pieceValue !== product.avg_piece_grams) {
-    changes.avg_piece_grams = pieceValue ?? null
-  }
-  if (packValue !== product.pack_grams) {
-    changes.pack_grams = packValue ?? null
-  }
-  if (unit !== product.default_unit) changes.default_unit = unit
+  if (openedField.changed) changes.opened_shelf_life_days = openedValue ?? null
+  if (pieceField.changed) changes.avg_piece_grams = pieceValue ?? null
+  if (packField.changed) changes.pack_grams = packValue ?? null
+  if (unitField.changed) changes.default_unit = unit
 
   const dirty = Object.keys(changes).length > 0
 
@@ -143,9 +148,10 @@ export function ProductEditSheet({
         type="text"
         aria-label="Name"
         value={name}
-        onChange={(event) => setName(event.target.value)}
+        onChange={(event) => nameField.set(event.target.value)}
         className={`${fieldInputClass} mt-1`}
       />
+      <FieldMoved label="Name" field={nameField} />
 
       <div className="mt-4 flex flex-wrap gap-4">
         <div className="w-32">
@@ -159,10 +165,11 @@ export function ProductEditSheet({
             min="1"
             aria-label="Keeps for"
             value={shelfLife}
-            onChange={(event) => setShelfLife(event.target.value)}
+            onChange={(event) => shelfLifeField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
           <p className={fieldHintClass}>days, sealed</p>
+          <FieldMoved label="Keeps for" field={shelfLifeField} />
         </div>
 
         <div className="w-32">
@@ -176,10 +183,11 @@ export function ProductEditSheet({
             min="1"
             aria-label="Once opened"
             value={openedShelfLife}
-            onChange={(event) => setOpenedShelfLife(event.target.value)}
+            onChange={(event) => openedField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
           <p className={fieldHintClass}>days, blank if unknown</p>
+          <FieldMoved label="Once opened" field={openedField} />
         </div>
 
         <div className="w-32">
@@ -194,7 +202,7 @@ export function ProductEditSheet({
             step="any"
             aria-label="One piece"
             value={pieceGrams}
-            onChange={(event) => setPieceGrams(event.target.value)}
+            onChange={(event) => pieceField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
           <p className={fieldHintClass}>grams, blank if unknown</p>
@@ -212,7 +220,7 @@ export function ProductEditSheet({
             step="any"
             aria-label="One pack"
             value={packGrams}
-            onChange={(event) => setPackGrams(event.target.value)}
+            onChange={(event) => packField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
           <p className={fieldHintClass}>grams, blank if unknown</p>
@@ -226,7 +234,7 @@ export function ProductEditSheet({
           className="grid-cols-5"
           value={unit}
           options={UNITS.map((value) => ({ value, label: value }))}
-          onChange={setUnit}
+          onChange={unitField.set}
         />
       </div>
     </BottomSheet>

@@ -35,6 +35,10 @@ export interface InventoryItem {
   notes: string | null
   created_at: string // ISO datetime
   consumed_at: string | null // ISO datetime
+  // The product's two numbers, so the screen can predict what a consume does to the expiry
+  // (Q5, H25): opening a pack shortens the clock, and loose produce is not a pack.
+  opened_shelf_life_days: number | null
+  avg_piece_grams: number | null
 }
 
 export interface InventoryItemCreate {
@@ -62,7 +66,9 @@ export interface QuickAddRequest {
   name?: string
   category?: string // Category id, required for a new product
   quantity: number // > 0
-  unit: string // dl, tsp, tbsp, g, pcs (ml, l, kg, kpl convert on write)
+  // Omit it and the resolved product's own unit is used: a typed name may resolve to a product
+  // this screen has never seen, whose unit is the right one (H25).
+  unit?: string // dl, tsp, tbsp, g, pcs (ml, l, kg, kpl convert on write)
   // A form may offer back a location the API itself sent (an unknown storage type, say). Sending
   // it is better than silently omitting the field; an invalid one comes back as a 400 (H04).
   location?: Vocabulary<InventoryLocation> // default from the product's storage type

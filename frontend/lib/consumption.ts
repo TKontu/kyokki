@@ -3,6 +3,7 @@
  * The status rules mirror backend/app/crud/inventory_item.py consume_inventory_item.
  */
 
+import { toISODate } from '@/lib/dates'
 import { isInactive as isGone } from '@/lib/stock'
 import type { InventoryItem, Unit } from '@/types/inventory'
 
@@ -132,7 +133,30 @@ function todayIsoDate(): string {
   return `${now.getFullYear()}-${month}-${day}`
 }
 
-/** The item as the backend will return it after consuming `amount`. Pure. */
+/**
+ * The expiry once a pack is opened (Q5), mirroring `_start_opened_clock` in
+ * backend/app/crud/inventory_item.py.
+ *
+ * Opening can only bring the date forward - a jar opened the day before its printed date does
+ * not gain a fortnight - and **loose produce is not a pack**: taking one apple out of a bowl of
+ * thirteen opens nothing, and the tell is the piece weight.
+ */
+function openedExpiry(item: InventoryItem, openedDate: string): string {
+  if (item.avg_piece_grams !== null) return item.expiry_date
+  if (item.opened_shelf_life_days === null) return item.expiry_date
+  const opened = new Date(openedDate)
+  opened.setDate(opened.getDate() + item.opened_shelf_life_days)
+  const shortened = toISODate(opened)
+  return shortened < item.expiry_date.split('T')[0] ? shortened : item.expiry_date
+}
+
+/**
+ * The item as the backend will return it after consuming `amount`. Pure.
+ *
+ * It predicts the opened clock too (H25): without that the card kept the old expiry badge
+ * until the refetch landed, and then jumped - sometimes from green straight to red, and out of
+ * its shelf into "Expiring soon". One tap does that often enough to matter.
+ */
 export function applyConsume(item: InventoryItem, amount: number): InventoryItem {
   const remaining = Math.max(0, roundQuantity(item.current_quantity - amount))
 
@@ -144,10 +168,15 @@ export function applyConsume(item: InventoryItem, amount: number): InventoryItem
     return { ...item, current_quantity: remaining }
   }
 
+  const opensThePack = item.status === 'sealed'
+  const openedDate = opensThePack ? todayIsoDate() : item.opened_date
+
   return {
     ...item,
     current_quantity: remaining,
-    opened_date: item.status === 'sealed' ? todayIsoDate() : item.opened_date,
+    opened_date: openedDate,
+    expiry_date:
+      opensThePack && openedDate ? openedExpiry(item, openedDate) : item.expiry_date,
     status: remaining / item.initial_quantity < PARTIAL_THRESHOLD ? 'partial' : 'opened',
   }
 }
