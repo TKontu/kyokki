@@ -1,26 +1,27 @@
 # Handoff
-Generated-UTC: 2026-09-23T13:50:00Z
-Base-SHA: aaf473d6a02373cef1736bbc404a23baee1e1a3f
+Generated-UTC: 2026-09-23T19:15:00Z
+Base-SHA: 267786212eb7d2e14691c0f8376d44eff63d4ca1
 
 ## Round delta
 
-One increment on `feat/h45-status-surface`: **H45, the display says when it is out of touch.**
+One increment on `feat/h25-one-source-of-truth`: **H25, a sheet shows the truth while it is
+open.**
 
-- **One banner above every screen** (`components/layout/StatusBanner.tsx` in `AppShell`),
-  silent unless something is wrong. In priority: **actions that failed**, each with Retry and
-  Dismiss; **not reaching the kitchen server**, with what is on screen dated and a Try again;
-  **last updated N minutes ago**, once nothing has landed for 90 s.
-- **`useBackendStatus`** derives that from the queries the open page already runs — no polling
-  of its own. A 404 is not "unreachable"; a network failure, a 5xx or being offline is.
-- **`useFailedActions`** reads the mutation cache, so no call site has to remember it. Retry
-  re-runs the same mutation with the same variables and the row clears when it lands. Every
-  inventory mutation now carries `meta: { label }`, which is what the banner calls it.
-- **The list stops blanking itself**: `InventoryList` shows its error only when there is no
-  stock to show; otherwise the banner carries the staleness.
-- **Sheet focus lands on `[data-primary]`** — the safe control in a destructive confirm — and
-  falls back when that is disabled. **Empty-stock copy** names + Add, Telegram and Scan.
+- **`useFieldEdit`** (`hooks/useFieldEdit.ts`): an untouched field follows the record, a touched
+  field keeps what the cook typed, and only touched-and-different fields are sent. Save can no
+  longer arm itself, and a background change can no longer be written back over the server.
+- **A touched field that also moved says so** — "Quantity changed to 2 while this was open",
+  with **Keep mine** and **Use 2** (`components/ui/FieldMoved.tsx`).
+- Both sheets: `ItemEditSheet` and `ProductEditSheet`. `ItemEditForm` is keyed by item id.
+- **Quick add stops guessing**: `unit` is optional on `QuickAddRequest`, and unit and location
+  are sent only when the cook chose them; the server falls back to the resolved product's own.
+- **"Create new" waits for the search to answer** for the word on screen (`settled` on
+  `useProductSearch`) — the debounce window is where duplicate products were made.
+- **The consume mirror predicts the opened clock** (Q5): items now carry the product's
+  `opened_shelf_life_days` and `avg_piece_grams`, so the expiry badge no longer jumps after a
+  tap. `applyConsume` mirrors `_start_opened_clock`, loose produce exempt.
 
-Before this: #82 the Gone screen, #81 one-tap consume and the general Undo, #80 H46.
+Before this: #83 the status banner, #82 the Gone screen, #81 one-tap consume and Undo, #80 H46.
 
 ## Active PRs and conflicts
 
@@ -40,22 +41,23 @@ wave owns it together with `docs/TODO.md`.
   `frontend/.next/cache` (left by Windows); build from a copy outside the share.
 - **Mixed line endings** (H44 open): about a third of the files are CRLF. Edit them without
   converting, or the diff becomes the whole file.
-- **Two alerts can be on screen at once** now — the banner and an error toast — so a test that
+- **Two alerts can be on screen at once** (the status banner and an error toast), so a test that
   wants one should assert on its text, not on `role="alert"`.
-- **The homelab is mid-upgrade**: three migrations are queued (`e4b9a7c2d815`, `f6c2d8e1a947`,
-  `a3f7b21c6d40`), all rehearsed against seeded rows. The operator intends a redeploy with
-  fresh databases.
-- **The banner does not speak for the receipt worker or the LLM gateway.** `ReceiptsBanner`
-  still carries the pipeline, and H34's timeouts are what would make a gateway state honest.
+- **No migration this round**, though the API grew: `opened_shelf_life_days` and
+  `avg_piece_grams` are read off the loaded product, like `product_name`. Three migrations are
+  still queued for the homelab (`e4b9a7c2d815`, `f6c2d8e1a947`, `a3f7b21c6d40`).
+- **A quick add may now omit `unit`.** The server takes the resolved product's, and `pcs` only
+  when there is nothing to resolve to. Anything else posting to `/quick-add` gets the same
+  fallback rather than a 422.
 - **DEC-5** gates H31, the last agent-track prerequisite. **DEC-6** (Next.js), **DEC-7**
   (scanner), **DEC-8** (retention) and **DEC-9** (categories, gating H22) are open.
 
 ## Next action
 
-Operator: three of the five MVP-P3 receipts remain, plus the redeploy. On the iPad, the thing to
-judge is whether 90 s is the right silence before "last updated" appears.
+Operator: three of the five MVP-P3 receipts remain, plus the redeploy. Worth judging on the
+iPad: whether the "changed while this was open" line reads clearly enough to act on.
 
-Code: land this branch once CI is green. Then **H25** — `ItemEditSheet` diffs against the live
-item (`app/page.tsx` feeds it the cached one), so a quantity that changes while the sheet is
-open is silently re-raised on Save; the one-tap round made that easier to hit. Then H47
-(Telegram hygiene, 1h).
+Code: land this branch once CI is green. Then **H47** (Telegram hygiene, 1h: exit non-zero on
+the 409 from a second instance, keep gateway internals out of `failure_text`, document a dev
+token) — the smallest open row with no decision attached. H26/H27 (extraction honesty, the
+heuristic parser) are the ones to do if the remaining MVP-P3 receipts give trouble.

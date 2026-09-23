@@ -32,6 +32,8 @@ const OAT: InventoryItem = {
   notes: null,
   created_at: '2026-09-10T10:00:00Z',
   consumed_at: null,
+  opened_shelf_life_days: null,
+  avg_piece_grams: null,
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
@@ -62,15 +64,20 @@ function renderSheet(item: InventoryItem = OAT, onClose = jest.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  render(
+  const sheet = (current: InventoryItem) => (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <ItemEditSheet item={item} open onClose={onClose} />
+        <ItemEditSheet item={current} open onClose={onClose} />
       </ToastProvider>
     </QueryClientProvider>
   )
+  const { rerender } = render(sheet(item))
+  // What the 30s poll, a tap on a card or another device does to an open sheet
+  moved = (next: Partial<InventoryItem>) => rerender(sheet({ ...item, ...next }))
   return onClose
 }
+
+let moved: (next: Partial<InventoryItem>) => void
 
 function change(label: string, value: string) {
   fireEvent.change(screen.getByLabelText(label), { target: { value } })
@@ -254,5 +261,92 @@ describe('ItemEditSheet', () => {
     fireEvent.click(save())
 
     expect(await screen.findByText('Could not save Oat drink')).toBeInTheDocument()
+  })
+})
+
+describe('while the item moves underneath the sheet (H25)', () => {
+  // It used to seed the inputs at mount and diff them against the live item, so a background
+  // change armed Save by itself and one press wrote the stale snapshot back over the server.
+
+  it('shows what the server now says, for a field nobody has touched', () => {
+    mockApi()
+    renderSheet()
+
+    moved({ current_quantity: 2 })
+
+    expect(screen.getByLabelText('Quantity (dl)')).toHaveValue(2)
+    expect(save()).toBeDisabled()
+  })
+
+  it('does not arm Save by itself', () => {
+    mockApi()
+    renderSheet()
+
+    moved({ current_quantity: 2, location: 'freezer' })
+
+    expect(save()).toBeDisabled()
+  })
+
+  it('sends only the field the cook touched, not the one that moved', async () => {
+    // The bug: editing the expiry while another device consumed also sent the old quantity,
+    // resurrecting the helping as a correction.
+    const calls = mockApi()
+    renderSheet()
+
+    change('Expiry', '2026-10-15')
+    moved({ current_quantity: 2 })
+    fireEvent.click(save())
+
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0].body).toEqual({ expiry_date: '2026-10-15' })
+  })
+
+  it('says so when a field the cook is editing moved as well', () => {
+    mockApi()
+    renderSheet()
+
+    change('Quantity (dl)', '4')
+    moved({ current_quantity: 2 })
+
+    expect(screen.getByRole('status')).toHaveTextContent('Quantity changed to 2 while this was open')
+  })
+
+  it('keeps the cook\'s value when they say so, and still saves only that', async () => {
+    const calls = mockApi()
+    renderSheet()
+    change('Quantity (dl)', '4')
+    moved({ current_quantity: 2 })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }))
+    fireEvent.click(save())
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0].body).toEqual({ current_quantity: 4 })
+  })
+
+  it('takes the new value when they say so, and then has nothing to save', () => {
+    mockApi()
+    renderSheet()
+    change('Quantity (dl)', '4')
+    moved({ current_quantity: 2 })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use 2' }))
+
+    expect(screen.getByLabelText('Quantity (dl)')).toHaveValue(2)
+    expect(save()).toBeDisabled()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('says so about the expiry too', () => {
+    mockApi()
+    renderSheet()
+
+    change('Expiry', '2026-10-15')
+    moved({ expiry_date: '2026-10-02' })
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Expiry changed to 2026-10-02 while this was open'
+    )
   })
 })

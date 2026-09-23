@@ -85,6 +85,8 @@ function created(overrides: Partial<InventoryItem> = {}): InventoryItem {
     notes: null,
     created_at: '2026-09-14T10:00:00Z',
     consumed_at: null,
+    opened_shelf_life_days: null,
+    avg_piece_grams: null,
     ...overrides,
   }
 }
@@ -207,12 +209,14 @@ describe('QuickAddSheet', () => {
     fireEvent.click(addButton())
 
     await waitFor(() => expect(bodies).toHaveLength(1))
+    // No location: the cook never chose one, and the server derives the same shelf from the
+    // category. What it must not do is take a guess made from the category to a product that
+    // turns out to exist (H25).
     expect(bodies[0]).toEqual({
       name: 'Peas',
       category: 'frozen',
       quantity: 500,
       unit: 'g',
-      location: 'freezer',
     })
     expect(await screen.findByText('Added 500 g · Peas')).toBeInTheDocument()
   })
@@ -342,5 +346,50 @@ describe('QuickAddSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: /back/i }))
 
     expect(screen.getByLabelText('Product')).toHaveValue('milk')
+  })
+})
+
+describe('what the sheet does not claim to know (H25)', () => {
+  it('sends no unit for a typed name, because it may resolve to a product with its own', async () => {
+    // "Milk" typed by hand used to be sent as `pcs`, and landed as pcs on the real dl Milk.
+    const bodies = mockApi({ products: [] })
+    renderSheet()
+
+    search('Oat drink')
+    fireEvent.click(await screen.findByRole('button', { name: 'Create new: Oat drink' }))
+    fireEvent.click(await screen.findByRole('radio', { name: /dairy/i }))
+    type('Quantity', '2')
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ name: 'Oat drink', category: 'dairy', quantity: 2 })
+  })
+
+  it('still sends the unit of a product the cook picked', async () => {
+    const bodies = mockApi()
+    renderSheet()
+
+    search('milk')
+    fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ product_id: 'prod-milk', unit: 'dl' })
+  })
+
+  it('does not offer "Create new" until the search has answered for this word', async () => {
+    // Tapping it in the debounce window made exactly the duplicate the check exists to prevent.
+    mockApi()
+    renderSheet()
+
+    jest.useFakeTimers()
+    type('Product', 'Milk')
+    expect(screen.queryByRole('button', { name: /create new/i })).not.toBeInTheDocument()
+    act(() => {
+      jest.advanceTimersByTime(SEARCH_DEBOUNCE_MS)
+    })
+    jest.useRealTimers()
+
+    expect(await screen.findByRole('button', { name: 'Milk' })).toBeInTheDocument()
   })
 })

@@ -17,7 +17,9 @@ import {
   fieldLabelClass,
 } from '@/components/ui/formStyles'
 import { ProductEditSheet } from '@/components/products/ProductEditSheet'
+import { FieldMoved } from '@/components/ui/FieldMoved'
 import { useDeleteInventoryItem, useUpdateInventoryItem } from '@/hooks/useInventory'
+import { useFieldEdit } from '@/hooks/useFieldEdit'
 import { useProduct } from '@/hooks/useProducts'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
@@ -41,10 +43,13 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const update = useUpdateInventoryItem()
   const remove = useDeleteInventoryItem()
 
-  const [quantity, setQuantity] = useState(String(item.current_quantity))
-  const [expiry, setExpiry] = useState(item.expiry_date.split('T')[0])
+  const quantityField = useFieldEdit(String(item.current_quantity))
+  const expiryField = useFieldEdit(item.expiry_date.split('T')[0])
   // A plain string: the item may already sit in a location this build does not know (H04)
-  const [location, setLocation] = useState<string>(item.location)
+  const locationField = useFieldEdit(item.location)
+  const quantity = quantityField.value
+  const expiry = expiryField.value
+  const location = locationField.value
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [editingProduct, setEditingProduct] = useState(false)
   const product = useProduct(editingProduct ? item.product_master_id : null)
@@ -53,10 +58,11 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const amount = Number(quantity)
   const quantityValid = quantity.trim() !== '' && Number.isFinite(amount) && amount >= 0
 
+  // Only what the cook touched and actually changed: what moved underneath is not theirs
   const changes: InventoryItemUpdate = {}
-  if (quantityValid && amount !== item.current_quantity) changes.current_quantity = amount
-  if (expiry && expiry !== item.expiry_date.split('T')[0]) changes.expiry_date = expiry
-  if (location !== item.location) changes.location = location
+  if (quantityValid && quantityField.changed) changes.current_quantity = amount
+  if (expiry && expiryField.changed) changes.expiry_date = expiry
+  if (locationField.changed) changes.location = location
   const busy = update.isPending || remove.isPending
   const canSave = quantityValid && Object.keys(changes).length > 0 && !busy
 
@@ -190,9 +196,10 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
             min="0"
             step="any"
             value={quantity}
-            onChange={(event) => setQuantity(event.target.value)}
+            onChange={(event) => quantityField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
+          <FieldMoved label="Quantity" field={quantityField} />
           {quantityValid ? (
             <p className={fieldHintClass}>
               {`0 marks it used up. More than ${formatQuantity(item.initial_quantity)} ${item.unit} raises the full amount.`}
@@ -212,9 +219,10 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
             id="item-edit-expiry"
             type="date"
             value={expiry}
-            onChange={(event) => setExpiry(event.target.value)}
+            onChange={(event) => expiryField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
+          <FieldMoved label="Expiry" field={expiryField} />
         </div>
 
         <ChoiceGroup
@@ -222,8 +230,9 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           name="item-edit-location"
           value={location}
           options={locationOptions(item.location)}
-          onChange={setLocation}
+          onChange={locationField.set}
         />
+        <FieldMoved label="Location" field={locationField} />
         {/* Q12/DEC-10: freezing restarts the clock, and taking it back out deliberately
             does not - nothing records when it went in, and thawed food keeps for a day
             or two whatever it was. Say both, because a date that moves on its own is
@@ -242,7 +251,9 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
 
 export function ItemEditSheet({ item, open, onClose }: ItemEditSheetProps) {
   // Mount the form only while open, so it starts from the item's current values each time.
-  return open && item ? <ItemEditForm item={item} onClose={onClose} /> : null
+  // Keyed by item: the form's fields follow the item they were opened on, and a sheet that
+  // ever swapped items in place would start clean rather than inherit the last one's edits.
+  return open && item ? <ItemEditForm key={item.id} item={item} onClose={onClose} /> : null
 }
 
 export default ItemEditSheet

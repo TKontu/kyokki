@@ -135,3 +135,87 @@ class TestCategoryDefaultStorage:
         assert categories["frozen"]["default_storage"] == "freezer"
         assert categories["bread"]["default_storage"] == "pantry"
         assert categories["dairy"]["default_storage"] == "refrigerator"
+
+
+class TestTheClientNeedNotGuessTheUnit:
+    """H25: a typed name resolves to a product the client cannot see, so it stops asserting."""
+
+    async def test_a_typed_name_takes_the_unit_the_product_is_counted_in(
+        self, client: AsyncClient, seeded_db
+    ):
+        """Typing "Milk" used to land as `pcs` on the real `dl` Milk, whatever it resolved to."""
+        await client.post(
+            URL,
+            json={"name": "Milk", "category": "dairy", "quantity": 10, "unit": "dl"},
+        )
+
+        response = await client.post(URL, json={"name": "milk", "quantity": 5})
+
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert (body["unit"], body["current_quantity"]) == ("dl", 5)
+
+    async def test_a_new_product_without_a_unit_is_counted_in_pieces(
+        self, client: AsyncClient, seeded_db
+    ):
+        """Nothing to resolve to and nothing said: one of a thing is the honest default."""
+        response = await client.post(
+            URL, json={"name": "Chilli sauce", "category": "condiments", "quantity": 1}
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["unit"] == "pcs"
+
+    async def test_a_unit_the_cook_chose_is_still_honoured(
+        self, client: AsyncClient, seeded_db
+    ):
+        response = await client.post(
+            URL,
+            json={"name": "Cream", "category": "dairy", "quantity": 2, "unit": "dl"},
+        )
+
+        assert response.json()["unit"] == "dl"
+
+
+class TestTheItemCarriesWhatTheScreenNeeds:
+    """H25: the iPad predicts the opened clock (Q5), so it needs the product's two numbers."""
+
+    async def test_every_item_says_how_long_it_keeps_once_opened(
+        self, client: AsyncClient, seeded_db
+    ):
+        item = (
+            await client.post(
+                URL,
+                json={
+                    "name": "Cream",
+                    "category": "dairy",
+                    "quantity": 2,
+                    "unit": "dl",
+                },
+            )
+        ).json()
+
+        assert "opened_shelf_life_days" in item
+        assert "avg_piece_grams" in item
+
+    async def test_they_follow_the_product(self, client: AsyncClient, seeded_db):
+        item = (
+            await client.post(
+                URL,
+                json={
+                    "name": "Yoghurt",
+                    "category": "dairy",
+                    "quantity": 5,
+                    "unit": "dl",
+                },
+            )
+        ).json()
+
+        await client.patch(
+            f"/api/products/{item['product_master_id']}",
+            json={"opened_shelf_life_days": 3, "avg_piece_grams": 125},
+        )
+
+        listed = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert listed["opened_shelf_life_days"] == 3
+        assert listed["avg_piece_grams"] == 125.0

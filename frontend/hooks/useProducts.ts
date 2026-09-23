@@ -37,16 +37,28 @@ export function useProductList(params?: ProductListParams) {
  *  with fake timers instead of waiting on the wall clock (H06). */
 export const SEARCH_DEBOUNCE_MS = 250
 
-/** Products whose name contains the term; waits for typing to pause, skips empty terms. */
+/**
+ * Products whose name contains the term; waits for typing to pause, skips empty terms.
+ *
+ * `settled` says the rows on hand are the answer **for this word**: not still debouncing, not
+ * in flight, and not the previous term's rows held over by `keepPreviousData`. Offering to
+ * create a product before then is how duplicates got made (H25).
+ */
 export function useProductSearch(term: string) {
-  const search = useDebouncedValue(term.trim(), SEARCH_DEBOUNCE_MS)
-  return useQuery({
+  const trimmed = term.trim()
+  const search = useDebouncedValue(trimmed, SEARCH_DEBOUNCE_MS)
+  const query = useQuery({
     queryKey: productKeys.list({ search }),
     queryFn: () => productsAPI.list({ search }),
     enabled: search.length > 0,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   })
+  return {
+    ...query,
+    settled:
+      search === trimmed && !query.isFetching && !query.isPlaceholderData && !query.isPending,
+  }
 }
 
 /**

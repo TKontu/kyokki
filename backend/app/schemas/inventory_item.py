@@ -162,8 +162,13 @@ class QuickAddRequest(BaseModel):
     )
     category: str | None = Field(None, description="Category id for a new product")
     quantity: JsonDecimal = Field(..., gt=0, description="Amount in unit")
-    unit: str = Field(
-        ..., description="Unit: dl, tsp, tbsp, g, pcs (others convert on write)"
+    unit: str | None = Field(
+        None,
+        description=(
+            "Unit: dl, tsp, tbsp, g, pcs (others convert on write). Omit it and the "
+            "resolved product's own unit is used - a typed name may resolve to a product "
+            "the client has never seen"
+        ),
     )
     location: StorageLocation | None = Field(
         None, description="Default follows the product's storage type"
@@ -208,6 +213,14 @@ class InventoryItemResponse(InventoryItemBase):
 
     id: UUID
     product_name: str = Field(..., description="Product canonical name")
+    # The two numbers the iPad needs to predict what a consume does to the expiry (Q5, H25):
+    # opening a pack shortens the clock, and loose produce is not a pack at all.
+    opened_shelf_life_days: int | None = Field(
+        None, description="How long this keeps once opened; null if it does not apply"
+    )
+    avg_piece_grams: JsonDecimal | None = Field(
+        None, description="Roughly what one piece weighs, when sold loose and counted"
+    )
     category: str = Field(..., description="Category ID, e.g. dairy")
     category_name: str = Field(..., description="Category display name")
     category_icon: str | None = Field(None, description="Category emoji icon")

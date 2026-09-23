@@ -33,6 +33,8 @@ describe('TypeScript Types', () => {
         notes: null,
         created_at: '2024-01-01T00:00:00Z',
         consumed_at: null,
+        opened_shelf_life_days: null,
+        avg_piece_grams: null,
       }
       expect(item.id).toBeDefined()
     })

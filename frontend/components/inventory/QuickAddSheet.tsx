@@ -55,6 +55,10 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
   const [selection, setSelection] = useState<Selection | null>(null)
   const [categoryId, setCategoryId] = useState<string | null>(null)
   const [quantity, setQuantity] = useState('1')
+  // Whether these two are the cook's answer or the sheet's guess (H25): a typed name may
+  // resolve to a product the client has never seen, whose own unit and shelf are the right
+  // ones - so a guess is left out of the request rather than sent as if it were chosen.
+  const [chosen, setChosen] = useState({ unit: false, location: false })
   const [unit, setUnit] = useState<Unit>('pcs')
   // A plain string: a product may name a storage type this build does not know (H04)
   const [location, setLocation] = useState<string>('main_fridge')
@@ -73,6 +77,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
   const pickExisting = (product: ProductMaster) => {
     setSelection({ kind: 'existing', product })
     setQuantity(String(product.default_quantity ?? 1))
+    setChosen({ unit: true, location: true })
     setUnit(product.default_unit)
     setLocation(locationFor(product.storage_type))
     setExpiry(addDaysISO(product.default_shelf_life_days))
@@ -83,6 +88,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
     setSelection({ kind: 'new', name })
     setCategoryId(null)
     setQuantity('1')
+    setChosen({ unit: false, location: false })
     setUnit('pcs')
     setLocation('main_fridge')
     setExpiry('')
@@ -91,6 +97,8 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
 
   const pickCategory = (category: Category) => {
     setCategoryId(category.id)
+    // The category's shelf is a default to show, not an answer to send: the server derives the
+    // same one, and would derive a better one if the name resolves to an existing product.
     setLocation(locationFor(category.default_storage))
     if (!expiryTouched) {
       setExpiry(addDaysISO(category.default_shelf_life_days))
@@ -111,8 +119,8 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
         ? { product_id: selection.product.id }
         : { name: selection.name, category: categoryId ?? undefined }),
       quantity: amount,
-      unit,
-      location,
+      ...(chosen.unit ? { unit } : {}),
+      ...(chosen.location ? { location } : {}),
       ...(expiryTouched && expiry ? { expiry_date: expiry } : {}),
     }
 
@@ -220,7 +228,10 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
           className="grid-cols-5"
           value={unit}
           options={UNITS.map((option) => ({ value: option, label: option }))}
-          onChange={setUnit}
+          onChange={(next) => {
+            setChosen((was) => ({ ...was, unit: true }))
+            setUnit(next)
+          }}
         />
 
         <ChoiceGroup
@@ -228,7 +239,10 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
           name="quick-add-location"
           value={location}
           options={locationOptions(location)}
-          onChange={setLocation}
+          onChange={(next) => {
+            setChosen((was) => ({ ...was, location: true }))
+            setLocation(next)
+          }}
         />
 
         <div>

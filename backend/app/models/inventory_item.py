@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import Column, Date, DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
@@ -71,6 +72,16 @@ class InventoryItem(Base):
     @property
     def product_name(self) -> str:
         return self.product_master.canonical_name
+
+    @property
+    def opened_shelf_life_days(self) -> int | None:
+        days = self.product_master.opened_shelf_life_days
+        return None if days is None else int(days)
+
+    @property
+    def avg_piece_grams(self) -> Decimal | None:
+        grams = self.product_master.avg_piece_grams
+        return None if grams is None else Decimal(str(grams))
 
     @property
     def category(self) -> str:
