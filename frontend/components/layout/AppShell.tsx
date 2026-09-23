@@ -31,6 +31,9 @@ export const DESTINATIONS: Destination[] = [
   // The catalog (Q11). Until it existed the product editor could only be reached from an
   // item that happened to be in stock, so most products could not be corrected at all.
   { href: '/products', label: 'Products', icon: '🏷️' },
+  // What left the kitchen, and the waste it cost (2026-09-22). The only screen that lists
+  // items no longer in stock, which is what makes "Put it back" reachable at all.
+  { href: '/gone', label: 'Gone', icon: '🗑️' },
 ]
 
 export function isActive(destination: Destination, pathname: string): boolean {

@@ -41,10 +41,18 @@ describe('AppShell', () => {
     )
   })
 
+  it('offers Gone, the only screen that shows what is no longer in stock', () => {
+    renderShell()
+
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    expect(within(nav).getByRole('link', { name: /gone/i })).toHaveAttribute('href', '/gone')
+  })
+
   it.each([
     ['/', /stock/i],
     ['/scan', /scan/i],
     ['/receipts', /receipts/i],
+    ['/gone', /gone/i],
   ])('marks %s as the current page', (path, name) => {
     pathname = path
     renderShell()

@@ -109,6 +109,7 @@ class TestNothingToUndo:
                 action="use_partial",
                 quantity_consumed=Decimal("1"),
                 quantity_after=Decimal("9"),
+                unit="dl",
                 batch_id=uuid4(),
                 previous=None,
             )
@@ -277,9 +278,11 @@ class TestSomeoneElseGotThereFirst:
         assert response.status_code == 409
         assert (await _get(client, item["id"]))["current_quantity"] == 7.0
 
-    async def test_a_deleted_item_takes_its_undo_with_it(
+    async def test_a_deleted_item_is_stepped_over(
         self, client: AsyncClient, cream: dict
     ) -> None:
+        """Its waste row stays (2026-09-22), but nothing can be put back into a deleted item,
+        so undo walks past it to the change before rather than refusing forever."""
         kept = await _item(client, cream["id"])
         deleted = await _item(client, cream["id"])
         await _consume(client, kept["id"], 1)

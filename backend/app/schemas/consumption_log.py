@@ -27,6 +27,15 @@ class ConsumptionAction(StrEnum):
     CORRECT = "correct"
 
 
+class ActionSummary(BaseModel):
+    """What one kind of event added up to in a window."""
+
+    events: int = Field(..., description="How many times it happened")
+    totals: dict[str, JsonDecimal] = Field(
+        ..., description="How much, per unit - grams and pieces do not add up"
+    )
+
+
 class ConsumptionLogResponse(BaseModel):
     """One event in an item's history, readable on its own.
 
@@ -36,7 +45,12 @@ class ConsumptionLogResponse(BaseModel):
     """
 
     id: UUID
-    inventory_item_id: UUID
+    inventory_item_id: UUID | None = Field(
+        None, description="None once the item has been deleted; the record stays"
+    )
+    item_status: str | None = Field(
+        None, description="Where the item stands now, or None if it is gone"
+    )
     product_master_id: UUID
     product_name: str = Field(..., description="The product's name, for display")
     unit: str = Field(..., description="The unit both quantities are in")

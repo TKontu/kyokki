@@ -1299,11 +1299,9 @@ Two things from the daily-loop audit done while planning H23/H24, one of which *
   H24 closed the request bodies and left the query string open, so `?status=banana` answered
   `200 []` - "no such items" rather than "no such status". The screen listing thrown-away things
   filters on exactly that.
-- [ ] **Still nothing lists inactive items**, so "Put it back" is reachable only through the
-  Undo window. A screen for them forces a question the app has no answer to - how long should
-  something stay visible after you bin it - and the operator set it aside.
-- [ ] **Nothing reads the waste log back.** This round writes the right rows; H46 is what would
-  let anyone see them. The number the clear is being honest about is still invisible.
+- [x] **Something lists inactive items now** - the Gone screen, 2026-09-22. The question this
+  was parked on got its answer: 30 days by default, with 7-day and All filters.
+- [x] **The waste log is read back** - H46 gave it an endpoint, the Gone screen shows it.
 
 ##### H46: a consumption history that can be read back, 2026-09-22
 The log was written and never read, and it could not have been: corrections and restores left
@@ -1378,8 +1376,36 @@ for an arbitrary amount; the usual amount must be one tap.
   skipped - undoing something older underneath them would be wrong. Moot after the wipe.
 - [x] **The toast Undos are gone** - Mark as gone (#77) and the cleared shelf (#78) - along with
   `useRestoreInventoryItem`, which only they used. "Put it back" in the sheet stays.
-- [ ] **Not undoable:** adding stock (quick add, receipt confirm), deleting an item (its history
-  goes with it), and date or shelf edits made without a quantity change.
+- [ ] **Not undoable:** adding stock (quick add, receipt confirm), deleting an item, and date
+  or shelf edits made without a quantity change.
+
+##### The Gone screen: waste you can see, and kept, 2026-09-22
+Waste had been recorded on every discard since MVP-S1 and read by nothing; the number the app
+exists to reduce was invisible, and `restore` still had no screen. The question this was parked
+on - how long something stays visible after you bin it - was answered: **30 days by default,
+with 7-day and All filters, and the history kept for good because metrics will be built on it.**
+
+- [x] **`/gone`**, a fifth destination in the rail. One list, newest first, grouped by day
+  (Today / Yesterday / the date): what was thrown away and what was finished, each with its
+  amount. Part-used helpings, corrections and restores are history, not "gone", and stay off it.
+- [x] **A summary header** over the same window - `GET /api/consumption-log/summary` returns
+  events and totals **per unit**, because grams and pieces do not add up. One `GROUP BY`, so a
+  month costs one request rather than paging the month into the browser. This is the seam the
+  later metrics work (post-MVP 8) reads.
+- [x] **"Put it back"** on any row whose item is still in the bin - the first screen from which
+  H23's `restore` is reachable without catching the Undo in time. Rows carry `item_status` so
+  the button appears on exactly those.
+- [x] **The record outlives the item** (operator ruling). `consumption_log.inventory_item_id`
+  was `ON DELETE CASCADE`: deleting a mistyped item took its waste with it, and every metric
+  would have been quietly short. It is `SET NULL` now, and the row carries its own `unit`,
+  because `250` means nothing once the item it pointed at is gone. Migration `a3f7b21c6d40`
+  backfills the unit from the item. H22 owns the FK rules in general; this one is settled here.
+- [x] The delete confirm says what is true now: it removes the item, and what it wasted stays.
+- [x] **Undo steps over a batch whose item was deleted** rather than refusing forever. Safe in a
+  way skipping a `previous IS NULL` row is not: nothing can happen to an item that does not
+  exist, so there is no order to get wrong.
+- [ ] **Not shown yet:** a waste rate or a trend. The summary endpoint is the shape those need;
+  the operator asked for the data to be kept first.
 
 
 ---
@@ -1528,7 +1554,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Friction Q11: [x] shelf-life provenance + catalog estimates (#70)  [x] products screen (#71, landed on main by #72)
 - Friction Q12: [x] a correction reaches the food (#73)  [x] the freezer clock, DEC-10 (#74)
 - Hardening H2 (started early, operator call 2026-09-20): [x] H23 (PR #75)  [x] H24 (#76)  [ ] H21  [ ] H22 (DEC-9)  [ ] H25  [ ] H26  [ ] H27  [ ] H28
-- Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)  [x] one-tap consume + general undo (operator trial)
+- Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)  [x] one-tap consume + general undo (operator trial)  [x] the Gone screen (waste visible, kept for metrics)
 - Hardening H4: [x] H46 consumption history  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H45  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 

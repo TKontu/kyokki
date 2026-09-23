@@ -1020,9 +1020,10 @@ class TestItemCorrections:
         assert response.status_code == 200, response.text
         return response.json()
 
-    async def test_delete_after_consume_removes_item_and_history(
+    async def test_delete_removes_the_item_but_keeps_what_it_wasted(
         self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
     ) -> None:
+        """The record outlives the item (2026-09-22): metrics must not miss deleted rows."""
         item = await _create_item(
             client, test_product["id"], initial_quantity=10, current_quantity=10
         )
@@ -1033,9 +1034,13 @@ class TestItemCorrections:
 
         assert response.status_code == 204
         assert (await client.get(f"/api/inventory/{item['id']}")).status_code == 404
+        # Detached from the item it can no longer point at, and still readable on its own
         assert await _logs_for(seeded_db, item["id"]) == []
+        (row,) = (await client.get("/api/consumption-log")).json()
+        assert (row["inventory_item_id"], row["item_status"]) == (None, None)
+        assert (row["quantity_consumed"], row["unit"]) == (5.0, "dl")
 
-    async def test_delete_after_discard_removes_item_and_history(
+    async def test_delete_after_discard_keeps_the_waste_row(
         self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
     ) -> None:
         item = await _create_item(client, test_product["id"])
@@ -1044,7 +1049,8 @@ class TestItemCorrections:
         response = await client.delete(f"/api/inventory/{item['id']}")
 
         assert response.status_code == 204
-        assert await _logs_for(seeded_db, item["id"]) == []
+        rows = (await client.get("/api/consumption-log")).json()
+        assert [(r["action"], r["item_status"]) for r in rows] == [("discard", None)]
 
     async def test_correcting_to_zero_empties_and_hides_the_item(
         self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict

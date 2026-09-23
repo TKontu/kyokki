@@ -58,6 +58,11 @@ async def _undoable_batch(db: AsyncSession) -> list[Any]:
     # rather than being skipped: undoing something older underneath it would be wrong.
     if not rows or any(row.previous is None for row in rows):
         return []
+    # A deleted item keeps its waste record (2026-09-22) but cannot be put back. Skipping to
+    # the batch before is safe in a way skipping a `previous IS NULL` row is not: nothing can
+    # have happened to an item that no longer exists, so there is no order to get wrong.
+    if all(row.inventory_item_id is None for row in rows):
+        return await crud_log.newest_batch_before(db, rows[0].batch_id)
     return rows
 
 

@@ -3,6 +3,7 @@
  * Mirror backend schema: /backend/app/schemas/consumption_log.py
  */
 
+import type { InventoryItemStatus } from './inventory'
 import type { Vocabulary } from './vocabulary'
 
 /**
@@ -19,7 +20,8 @@ export type ConsumptionAction =
 /** One event in an item's history, readable on its own. */
 export interface ConsumptionLogEntry {
   id: string
-  inventory_item_id: string
+  inventory_item_id: string | null // null once the item was deleted; the record stays
+  item_status: Vocabulary<InventoryItemStatus> | null // null when the item is gone
   product_master_id: string
   product_name: string
   unit: string // The unit both quantities are in
@@ -58,3 +60,13 @@ export interface UndoPreview {
 export interface UndoResponse {
   undone: number // How many items were put back
 }
+
+/** What one kind of event added up to in a window. Grams and pieces are kept apart. */
+export interface ActionSummary {
+  events: number
+  totals: Record<string, number>
+}
+
+/** `GET /api/consumption-log/summary`: action -> its counts. Absent means nothing happened. */
+export type ConsumptionSummary = Partial<Record<ConsumptionAction, ActionSummary>> &
+  Record<string, ActionSummary | undefined>
