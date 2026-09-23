@@ -62,7 +62,8 @@ export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetPro
       title={`Clear ${count} expired ${noun}?`}
       footer={
         <div className="grid grid-cols-2 gap-3">
-          <Button variant="secondary" size="lg" disabled={move.isPending} onClick={onClose}>
+          {/* Throwing a shelf away is the destructive one; focus stays on the way out (H45) */}
+          <Button data-primary variant="secondary" size="lg" disabled={move.isPending} onClick={onClose}>
             Cancel
           </Button>
           <Button

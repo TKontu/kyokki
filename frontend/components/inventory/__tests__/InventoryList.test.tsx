@@ -135,6 +135,22 @@ describe('TestInventoryListError', () => {
     render(<InventoryList />)
     expect(screen.queryByText('Oat Milk')).not.toBeInTheDocument()
   })
+
+  it('keeps the stock it already has when a refresh fails', () => {
+    // A dropped poll used to blank the fridge display. The stock is still the best answer
+    // anyone has; the header's banner is what says how old it is (H45).
+    mockUseInventoryList.mockReturnValue({
+      isLoading: false,
+      isError: true,
+      error: new Error('Network request failed'),
+      data: [MOCK_ITEM_A],
+    })
+
+    render(<InventoryList />)
+
+    expect(screen.getByText('Oat Milk')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -148,10 +164,12 @@ describe('TestInventoryListEmpty', () => {
     expect(screen.getByText(/No items found/i)).toBeInTheDocument()
   })
 
-  it('renders suggestion to scan a product', () => {
+  it('names the ways stock actually gets in', () => {
+    // It used to say "Scan a product", naming a barcode scanner with no screen behind it.
     mockItems([])
     render(<InventoryList />)
-    expect(screen.getByText(/Scan a product/i)).toBeInTheDocument()
+    expect(screen.getByText(/\+ Add/)).toBeInTheDocument()
+    expect(screen.getByText(/Telegram/i)).toBeInTheDocument()
   })
 
   it('hides empty and discarded items', () => {

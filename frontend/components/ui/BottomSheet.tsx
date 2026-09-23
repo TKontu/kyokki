@@ -59,7 +59,13 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
-    (focusableIn(panel)[0] ?? panel).focus();
+    // The action the sheet is named after, when it says which it is: focus used to land on the
+    // ✕, and the primary sits past every field in the form (H45). A destructive sheet marks its
+    // *safe* control instead, so Enter never throws food away.
+    // `:not([disabled])` matters: Save starts disabled until something changes, and focusing a
+    // disabled button silently leaves focus on the body, outside the trap.
+    const primary = panel.querySelector<HTMLElement>('[data-primary]:not([disabled])');
+    (primary ?? focusableIn(panel)[0] ?? panel).focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {

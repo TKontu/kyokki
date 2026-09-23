@@ -160,6 +160,42 @@ describe('BottomSheet', () => {
       expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement);
     });
 
+    it('lands on the action the sheet is for, not the close button', () => {
+      // On a tablet the cook opens a sheet to do the thing it is named after; a keyboard or a
+      // switch lands on ✕ otherwise, and the primary sits past everything in the form (H45).
+      render(
+        <BottomSheet open onClose={jest.fn()} title="Quick add">
+          <input aria-label="Name" />
+          <button data-primary>Add</button>
+        </BottomSheet>
+      )
+
+      expect(document.activeElement).toHaveTextContent('Add')
+    })
+
+    it('falls back when the primary is disabled, rather than focusing nothing', () => {
+      render(
+        <BottomSheet open onClose={jest.fn()} title="Edit">
+          <input aria-label="Quantity" />
+          <button data-primary disabled>
+            Save
+          </button>
+        </BottomSheet>
+      )
+
+      expect(document.activeElement).toHaveAttribute('aria-label', 'Close')
+    })
+
+    it('falls back to the first focusable when nothing claims to be primary', () => {
+      render(
+        <BottomSheet open onClose={jest.fn()} title="Plain">
+          <input aria-label="Name" />
+        </BottomSheet>
+      )
+
+      expect(document.activeElement).toHaveAttribute('aria-label', 'Close')
+    })
+
     it('wraps Tab from the last focusable element to the first', () => {
       render(<Harness />);
       openSheet();

@@ -5,6 +5,7 @@
 
 import React from 'react'
 import { render, screen, within } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppShell } from '../AppShell'
 
 let pathname = '/'
@@ -15,10 +16,15 @@ beforeEach(() => {
 })
 
 function renderShell() {
+  // The shell carries the status banner (H45), which reads the query cache; in the app it is
+  // always inside the providers.
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
-    <AppShell>
-      <main>the page</main>
-    </AppShell>
+    <QueryClientProvider client={client}>
+      <AppShell>
+        <main>the page</main>
+      </AppShell>
+    </QueryClientProvider>
   )
 }
 

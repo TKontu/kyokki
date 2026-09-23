@@ -124,6 +124,7 @@ export function ProductEditSheet({
             Cancel
           </Button>
           <Button
+            data-primary
             fullWidth
             disabled={!dirty || !valid || save.isPending}
             loading={save.isPending}

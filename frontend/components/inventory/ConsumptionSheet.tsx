@@ -83,6 +83,7 @@ export function ConsumptionSheet({ item, open, onClose, onEdit }: ConsumptionShe
             {lead && (
               <Button
                 key={lead.key}
+                data-primary
                 size="xl"
                 fullWidth
                 variant={lead.key === 'done' ? 'secondary' : 'primary'}

@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
+import { StatusBanner } from '@/components/layout'
 import Home from '../page'
 import type { UndoPreview } from '@/types/consumption'
 import type { InventoryItem } from '@/types/inventory'
@@ -50,6 +51,8 @@ function renderHome() {
   render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
+        {/* AppShell renders this above every page; the flow needs it to show a failed tap */}
+        <StatusBanner />
         <Home />
       </ToastProvider>
     </QueryClientProvider>
@@ -133,7 +136,8 @@ describe('One tap on the card', () => {
     renderHome()
     fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Oat Milk has been thrown away')
+    // Both the toast and the banner are alerts now, so name what it should say
+    expect(await screen.findByText('Oat Milk has been thrown away')).toBeInTheDocument()
     await waitFor(() => expect(remaining('1000 of 1000 dl remaining')).toBeInTheDocument())
   })
 
@@ -246,12 +250,39 @@ describe('The sheet behind "…"', () => {
 
     await openSheetAndTap('½ · 500 dl')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Cannot consume 500 - only 100 available'
-    )
+    expect(
+      await screen.findByText('Cannot consume 500 - only 100 available')
+    ).toBeInTheDocument()
     await waitFor(() =>
       expect(remaining('1000 of 1000 dl remaining')).toBeInTheDocument()
     )
     expect(remaining('500 of 1000 dl remaining')).not.toBeInTheDocument()
+  })
+})
+
+describe('When a tap does not land', () => {
+  it('leaves it in the banner to retry, because a toast would be gone in five seconds', async () => {
+    let reachable = false
+    const attempts: unknown[] = []
+    api(
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
+      http.post(`${API_URL}/inventory/:id/consume`, async ({ request }) => {
+        attempts.push(await request.json())
+        if (!reachable) return HttpResponse.json({ detail: 'Nope' }, { status: 503 })
+        return HttpResponse.json({ ...MILK, current_quantity: 750, status: 'opened' })
+      })
+    )
+
+    renderHome()
+    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+
+    expect(await screen.findByText('Consume failed')).toBeInTheDocument()
+
+    reachable = true
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Consume' }))
+
+    await waitFor(() => expect(screen.queryByText('Consume failed')).not.toBeInTheDocument())
+    // The same helping, sent again - not a second one
+    expect(attempts).toEqual([{ quantity: 250 }, { quantity: 250 }])
   })
 })
