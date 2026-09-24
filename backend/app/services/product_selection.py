@@ -28,7 +28,19 @@ Same thing means a home cook would put them on one shopping-list line.
 Different variety, plant milk vs dairy milk, or a different cut are DIFFERENT products:
 - "Oat milk" is not "Milk". "Sour cream" is not "Cream". "Peanut butter" is not "Butter".
 - "Cherry tomato" is not "Tomato". "Pineapple" is not "Apple".
+Sharing a word does not make two products the same: "Tortilla chips" is not "Tortilla",
+"Lemonade" is not "Lemon", "Chocolate milk" is not "Chocolate".
+The candidates are only the nearest names in the catalog, not a list that contains the
+answer. If none of them is the same thing, answer null: null is a good answer, and a
+wrong pick is worse than none.
 Only pick a product whose id appears in that line's candidates.
+
+Example. Lines:
+[{"id": "a", "n": "ARLA LAKTOOSITON MAITO", "g": "Lactose-free milk", "c": "dairy",
+  "candidates": [{"p": "p1", "name": "Lactose-free milk"}, {"p": "p2", "name": "Milk"}]},
+ {"id": "b", "n": "HARTWALL LIMONADI", "g": "Lemonade", "c": "beverages",
+  "candidates": [{"p": "p3", "name": "Orange juice"}, {"p": "p4", "name": "Lemon"}]}]
+Answer: {"r": [{"id": "a", "p": "p1"}, {"id": "b", "p": null}]}
 
 Answer with JSON only: {"r": [{"id": "<line id>", "p": "<product id>" or null}]}
 

@@ -1,0 +1,99 @@
+{
+  "about": "H53: the four wrong matches the operator reported on 2026-09-24 (Q14), each with the catalog shape that produced it. `must_offer` is the product the shortlist has to contain (null when the right product is not in the catalog); `answer` is what selection should pick (null: none of the candidates is the same thing).",
+  "cases": [
+    {
+      "id": "ketchup-known",
+      "printed": "HEINZ KETCHUP 1KG",
+      "generic": "Ketchup",
+      "category": "condiments",
+      "catalog": [
+        ["Taco sauce", "condiments"],
+        ["Ketchup", "condiments"],
+        ["Mustard", "condiments"],
+        ["Mayonnaise", "condiments"],
+        ["Salsa", "condiments"],
+        ["Soy sauce", "condiments"]
+      ],
+      "must_offer": "Ketchup",
+      "answer": "Ketchup"
+    },
+    {
+      "id": "ketchup-new",
+      "printed": "HEINZ KETCHUP 1KG",
+      "generic": "Ketchup",
+      "category": "condiments",
+      "catalog": [
+        ["Taco sauce", "condiments"],
+        ["Mustard", "condiments"],
+        ["Mayonnaise", "condiments"],
+        ["Salsa", "condiments"],
+        ["Soy sauce", "condiments"]
+      ],
+      "must_offer": null,
+      "answer": null
+    },
+    {
+      "id": "melon",
+      "printed": "HUNAJAMELONI",
+      "generic": "Honeydew",
+      "category": "fruits",
+      "catalog": [
+        ["Apple", "fruits"],
+        ["Banana", "fruits"],
+        ["Grape", "fruits"],
+        ["Kiwi", "fruits"],
+        ["Lime", "fruits"],
+        ["Mango", "fruits"],
+        ["Melon", "fruits"]
+      ],
+      "must_offer": "Melon",
+      "answer": "Melon"
+    },
+    {
+      "id": "pear-juice",
+      "printed": "PÄÄRYNÄMEHU 1L",
+      "generic": "Pear juice",
+      "category": "beverages",
+      "catalog": [
+        ["Orange juice", "beverages"],
+        ["Apple juice", "beverages"],
+        ["Multivitamin juice", "beverages"],
+        ["Oat drink", "beverages"],
+        ["Coffee", "beverages"]
+      ],
+      "must_offer": null,
+      "answer": null
+    },
+    {
+      "id": "taco-shells-known",
+      "printed": "TACO SHELLS 12KPL",
+      "generic": "Taco shells",
+      "category": "pantry",
+      "catalog": [
+        ["Taco sauce", "condiments"],
+        ["Taco shells", "pantry"],
+        ["Tortilla", "bread"],
+        ["Salsa", "condiments"],
+        ["Rice", "pantry"],
+        ["Pasta", "pantry"]
+      ],
+      "must_offer": "Taco shells",
+      "answer": "Taco shells"
+    },
+    {
+      "id": "taco-shells-new",
+      "printed": "TACO SHELLS 12KPL",
+      "generic": "Taco shells",
+      "category": "pantry",
+      "catalog": [
+        ["Taco sauce", "condiments"],
+        ["Tortilla", "bread"],
+        ["Salsa", "condiments"],
+        ["Rice", "pantry"],
+        ["Pasta", "pantry"]
+      ],
+      "must_offer": null,
+      "answer": null
+    }
+  ]
+}

@@ -1,61 +1,63 @@
 # Handoff
-Generated-UTC: 2026-09-24T18:35:09Z
-Base-SHA: d72a3f7ec83568ea19854160b57a06f9578ae6c7
+Generated-UTC: 2026-09-24T19:56:37Z
+Base-SHA: e60b95af689cdbeb0294b113287acfbb56c5c14c
 
 ## Round delta
 
-Since the last handoff: H51 merged as PR #85 (with the wave V plan as a docs commit).
+Merged since the last handoff: H52 (#86, re-configurable product, migration `c2d9e4a17b35`) and
+H55 (#87, `ready_meals` category).
 
-Uncommitted on `feat/h52-product-is-reconfigurable` (cut from the SHA above): **H52, the
-product is re-configurable**. Backend, frontend, one migration (`c2d9e4a17b35`, head).
+On `feat/h53-shortlist` (cut from the SHA above): **H53, a shortlist that contains the answer**
+(Q14). Backend only, no migration.
 
-- Product editor: category picker; frozen life per product (blank = the category's); a
-  "Matching names" list with "yours" / "auto" chips and a two-tap remove.
-- `product_master.frozen_shelf_life_days` (nullable); `_start_frozen_clock` prefers it.
-- A category change carries `storage_type` and, for a `category` placeholder, the new
-  category's shelf life, re-dating `calculated` stock.
-- `GET /products/{id}/names`, `DELETE …/names/{name_id}` (409 canonical),
-  `DELETE …/aliases/{alias_id}`; new `crud/store_product_alias.py`, `schemas/product_names.py`.
-- A rename now keeps `product_name` true (old canonical row → `cook`, new name canonical).
-  This was a latent bug found while building H52.
-- `broadcast_product_update` (new `product_update` message; nothing listens yet).
-- `NameSource` added to `scripts/check_vocabularies.py`.
+- `TrigramRetriever` ranks the whole catalog on one score, in this order:
+  1. a shared whole word;
+  2. `similarity` or `word_similarity`, whichever is higher, checked in both directions;
+  3. the line's category, as a tiebreak.
+
+  It replaces the alphabetical category fill, and products with no name row are included.
+- The selection prompt now says a shared word does not mean the same product and that null is a
+  good answer, with a worked example (not the reported pairs).
+- `tests/fixtures/resolution/reported_pairs.json` covers the four reported pairs. The retriever
+  tests are deterministic. `tests/services/test_live_selection.py` is marked `requires_vllm`.
 
 Verified:
-- Backend: 1056 passed, 1 skipped. ruff clean, mypy baseline none new, vocabularies agree.
-- Migration: `alembic upgrade`/`downgrade`/`upgrade` and `alembic check` clean on the local database.
-- Frontend: 693 passed, tsc and lint clean, `next build` ok.
-- The new tests failed before the implementation.
+- Backend: 1082 passed, 1 skipped. ruff clean, mypy baseline none new, vocabularies agree.
+- The melon case, the category ranking and the canonical-name fallback failed on the old
+  retriever. The prompt tests failed on the old prompt.
+- **The live selection test has not run:** the gateway `192.168.0.247:9003` refuses connections
+  from this container.
 
 ## Active PRs and conflicts
 
-None open. Do not stage `.claude/README.md` or `.claude/templates/profiles/python-fastapi.md`:
-modified before these sessions, unrelated.
+The H53 PR (this branch). Do not stage `.claude/README.md` or
+`.claude/templates/profiles/python-fastapi.md`: they were modified before these sessions and are
+unrelated.
 
 ## Non-obvious decisions or blockers
 
-- **Stock already in the freezer is not re-dated** when a product's frozen life changes;
-  nothing records when it went in. Open checkbox under "H52 as built" in `docs/TODO.md`.
-- A cook-typed or model-estimated shelf life does not follow a category change; only the
-  `category` placeholder does.
-- **Sandbox quirks in this container:** binaries under `node_modules/.bin` and
-  `backend/.venv/bin` are not executable, so call them through the interpreter:
-  - `node node_modules/jest/bin/jest.js`
-  - `node node_modules/typescript/bin/tsc --noEmit`
-  - `node node_modules/next/dist/bin/next lint`
-  - `.venv/bin/python -m alembic`
-
-  Writes to `frontend/.next` are refused, so run `next build` from a copy in the scratchpad
-  with `node_modules` symlinked.
+- **Run the live selection test on the homelab:**
+  `pytest tests/services/test_live_selection.py -m requires_vllm -v`. The null cases are what
+  the prompt change is for. If they still pick, the next lever is a JSON schema on the selection
+  request (spec §3.3 asks for one; `select_products` sends none).
+- **Operator, after deploying:** move "Ready meal: fish soup" to Ready Meals in the product
+  editor. Also H56: *Estimate the guesses* on the products page.
+- Stock already in the freezer is not re-dated when a product's frozen life changes (open box
+  under "H52 as built").
+- `tests/services/test_storage.py` cannot be collected on its own because of an import cycle
+  (storage → schemas → category → storage). The full suite passes. Noted under "H55 as built".
+- **Sandbox quirks in this container:**
+  - Binaries under `node_modules/.bin` and `backend/.venv/bin` are not executable, so call them
+    through `node …/jest.js`, `node …/tsc`, `node …/next` and `.venv/bin/python -m …`.
+  - `frontend/.next` is not writable, so build from a scratchpad copy.
+  - Several files are CRLF: edit them with an ending-preserving helper and check
+    `git diff --stat` before committing.
 - DB env for tests and alembic: `POSTGRES_SERVER=localhost POSTGRES_USER=kyokki
   POSTGRES_PASSWORD=kyokki POSTGRES_DB=kyokki REDIS_HOST=localhost KYOKKI_TEST_REQUIRE_DB=1`.
-- `pytest -m "not requires_db"` overrides the ini's marker exclusions, so add the three
-  `requires_*` markers back or the connection tests fail on network alone.
-- 54 of 65 homelab products still carry the category placeholder (H56 is an operator action).
-  After deploying H52, the migrate job applies `c2d9e4a17b35`.
 
 ## Next action
 
-Commit and open the PR for this branch (`/commit-push-pr`). Then the H5 order continues:
-**H55** (`ready_meals` category), H53, H54, H57, H58. Wave V (the fridge view, V1-V4) is
-planned and not started; its order relative to the rest of H5 is the operator's call.
+Merge the H53 PR. Next is **H54** (a Finnish glossary in the extraction prompt). Its merge gate
+is a before/after run on the 49-line fixture, which needs the gateway. Plan it for a session that
+can reach the homelab, or have the operator run the measurement. H57 (seed shelf lives) and H58
+(shelf-life audit view) need no gateway. Wave V (V1-V4) is planned and not started.

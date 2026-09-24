@@ -848,7 +848,7 @@ today; H51 stops the matcher memorising its own mistakes; the rest follow. Findi
 | H56 | operator | **Run the estimate.** Products → *Estimate the guesses*, dry run, then apply. On the homelab 54 of 65 products still carry their category's placeholder and 60 have no opened shelf life; the route exists since Q11 and has never been applied | 10 min | Q15 |
 | H51 | backend | **A model guess never becomes a key.** ✅ A kept selection is still learned as a `model` synonym (operator ruling 2026-09-24: learn, do not silence), but tier 4 resolves a `model` row `verified = False` (the "auto" chip); the generic name is the cook's word only when the cook changed the product or typed the name; a `cook` or `canonical` claim re-points a `model` row (the cook's correction, or creating the product by that name, moves the key); "New product: <name>" looks the name up without model synonyms; the four reported pairs as confirm-then-resolve tests. No migration | 2h | Q13 |
 | H52 | both | **The product is re-configurable.** ✅ (operator ask 2026-09-24: category, shelf life, frozen life, matching names). The editor gains a category picker (`ChoiceGroup` over `useCategories`, PATCH already accepts it); **frozen life per product, falling back to the category** (nullable `product_master.frozen_shelf_life_days` + migration, `_start_frozen_clock` prefers it, field in schema, type and sheet); `GET /products/{id}/names` listing learned names and printed receipt names with their source, `DELETE` for either, listed in the sheet with a remove control, canonical rows not removable. The cleanup path for keys already written | 5h | Q13, issue 3 |
-| H53 | backend | **A shortlist that contains the answer.** The same-category fill in `TrigramRetriever` ranks by trigram over the whole category instead of taking the first five names alphabetically (a fruits line sees Apple, Banana, Grape, Kiwi, Lime and never Melon); an exact word hit on a canonical name is always offered; the selection prompt carries a null example; the reported pairs pinned as a fixture, deterministic parts unit-tested, the model part behind `requires_vllm` | 3h | Q14 |
+| H53 | backend | **A shortlist that contains the answer.** ✅ The same-category fill in `TrigramRetriever` ranks by trigram over the whole category instead of taking the first five names alphabetically (a fruits line sees Apple, Banana, Grape, Kiwi, Lime and never Melon); an exact word hit on a canonical name is always offered; the selection prompt carries a null example; the reported pairs pinned as a fixture, deterministic parts unit-tested, the model part behind `requires_vllm` | 3h | Q14 |
 | H54 | pipeline | **A Finnish glossary for extraction.** A short list of terms the model misreads (rypäle = grape, not raisin; tikkuperunat = french fries, not potato; mehu = juice; riisipiirakka = Karelian pasty; valmisruoka / ateria = ready meal) in `_INSTRUCTIONS`, measured on the 49-line fixture before and after: two prompt edits have silently killed the shelf-life estimates (Q7, Q8), so the fixture run is the merge gate | 2h | Q14 |
 | H55 | backend | **A `ready_meals` category** (issue 2). ✅ Seed row (fridge, 4 days, frozen 90), `CATEGORY_STORAGE`, `PLAUSIBLE_DAYS`, the OFF mapping, `test_seed_categories`. Seed-only per DEC-9; `kyokki-migrate` reseeds on every deploy, so it ships itself and the extraction prompt offers it at once. The one existing ready meal (fish soup, filed under frozen) is moved by hand | 1h | issue 2 |
 | H57 | backend | **Placeholders that are not wrong.** Seed defaults revisited per category (today carrot and potato inherit 5 days, tea 30, tortilla 5, egg 7); a migration updates category rows still at the old value and leaves edited ones alone; products already created keep theirs, which is what H56 is for | 1h | Q15 |
@@ -1570,6 +1570,23 @@ model's word, rather than not learned - it pre-fills as "auto" and the cook's ne
 moves it; the product itself must stay re-configurable by the cook (category, shelf life,
 frozen life, matching names), which is H52 as widened above; frozen life lives per product
 with the category as fallback.
+
+##### H53 as built — a shortlist that contains the answer
+- [x] `TrigramRetriever` ranks the whole catalog on one score: a whole word in common, then
+  the better of `similarity` and `word_similarity` (both ways), then the line's category as a
+  tiebreak. The alphabetical category fill is gone; a product with no `product_name` row is
+  ranked by its canonical name. A shared word is always offered unless more than five
+  products share it.
+- [x] The selection prompt says a shared word is not sameness and that null is a good answer,
+  with a worked example of each outcome (deliberately not the reported pairs).
+- [x] `tests/fixtures/resolution/reported_pairs.json`: ketchup (with and without Ketchup in the
+  catalog), HUNAJAMELONI / Honeydew, PÄÄRYNÄMEHU / Pear juice, taco shells (with and without).
+  Deterministic: every case's product is shortlisted (melon failed before this). Model:
+  `tests/services/test_live_selection.py`, `requires_vllm`.
+- [ ] **The live selection test has not been run**: the gateway (`192.168.0.247:9003`) is not
+  reachable from the dev container. Run `pytest tests/services/test_live_selection.py -m
+  requires_vllm -v` on the homelab; the null cases (ketchup-new, pear-juice, taco-shells-new)
+  are the ones the prompt change is for. H54 measures extraction on the same gateway.
 
 ##### H55 as built — a category for ready meals
 - [x] Seed row `ready_meals` ("Ready Meals" 🍲, fridge, 4 days, frozen 90, sort 75, between
