@@ -69,6 +69,9 @@ async def fetch_product_from_off(barcode: str) -> dict[str, Any]:
         raise OffApiError(f"Failed to fetch product {barcode}: {str(e)}") from e
 
 
+_READY_MEAL = re.compile(r"\b(meals?|soups?|prepared dish(es)?|ready-made)\b")
+
+
 def map_off_category_to_system(off_category: str | None) -> str:
     """Map Open Food Facts category to system category.
 
@@ -87,6 +90,11 @@ def map_off_category_to_system(off_category: str | None) -> str:
     # Frozen (check first before produce, as "frozen vegetables" should be frozen)
     if "frozen" in category_lower:
         return "frozen"
+
+    # Ready meals, before the ingredient checks: "Meals with chicken" is a meal (H55).
+    # Whole words only - oatmeal and cornmeal are flour, not dinner.
+    if _READY_MEAL.search(category_lower):
+        return "ready_meals"
 
     # Dairy products
     if any(

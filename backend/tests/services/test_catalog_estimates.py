@@ -241,3 +241,19 @@ class TestRefreshCatalogShelfLives:
         result = await refresh_catalog_shelf_lives(db_session, apply=True)
 
         assert (result.considered, result.answered, result.changes) == (0, 0, [])
+
+
+class TestPlausibleBands:
+    def test_every_seeded_category_has_its_own_band(self) -> None:
+        """H55: a new category must not fall through to the loose default band."""
+        from app.db.seed_categories import SEED_CATEGORIES
+        from app.services.catalog_estimates import PLAUSIBLE_DAYS
+
+        assert {c["id"] for c in SEED_CATEGORIES} <= set(PLAUSIBLE_DAYS)
+
+    def test_a_ready_meal_does_not_keep_for_months(self) -> None:
+        from app.services.catalog_estimates import PLAUSIBLE_DAYS
+
+        low, high = PLAUSIBLE_DAYS["ready_meals"]
+        assert low >= 1
+        assert high <= 30
