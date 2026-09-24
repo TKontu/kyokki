@@ -42,6 +42,10 @@ capabilities working together on the kitchen iPad, over the LAN, with no laptop 
 8. Backend and frontend CI are green on `main`; no secrets tracked; a written runbook takes the
    prod compose stack from zero to "iPad shows inventory".
 
+> **Amendment (2026-09-24, wave V):** in items 1 and 2, "quantity bars" becomes "a staleness
+> colour per tile" and "¼ ½ ¾ or Done" becomes "a consumed toggle". Amounts leave the UI only;
+> the backend keeps them. See "Operator friction log — the stock screen should look like a fridge".
+
 **Explicitly outside MVP:** offline mode and service worker, HTTPS/Traefik, WebSocket live
 updates (polling is the MVP answer), GS1 DataMatrix, barcode camera scanning, hardware scanner
 stations, shopping list UI, minimum-stock automation, Home Assistant, batch receipts,
@@ -850,6 +854,19 @@ today; H51 stops the matcher memorising its own mistakes; the rest follow. Findi
 | H57 | backend | **Placeholders that are not wrong.** Seed defaults revisited per category (today carrot and potato inherit 5 days, tea 30, tortilla 5, egg 7); a migration updates category rows still at the old value and leaves edited ones alone; products already created keep theirs, which is what H56 is for | 1h | Q15 |
 | H58 | frontend | **A shelf-life audit view.** Products sorted by provenance, values at the edge of their category band flagged, so a wrong estimate is caught on the iPad rather than in a spreadsheet | 2h | Q15 |
 
+#### Wave V — the fridge view (operator ask 2026-09-24)
+
+Frontend only, and independent of the backend H5 items, so it can run beside them; its order
+against H52/H53 is the operator's call. Order V1 → V2 and V3 in parallel → V4. Findings and
+rulings under "Operator friction log — the stock screen should look like a fridge". Not started.
+
+| ID | Side | Increment | Est. | Depends on |
+| --- | --- | --- | --- | --- |
+| V1 | frontend | **Staleness tiers and the tile.** `lib/staleness.ts` `stalenessOf(item, today)` on top of `calculateDaysUntilExpiry`: `stale` (expired or ≤ 1 day, red), `soon` (2-3 days, orange), `week` (4-7 days, green), `later` (8+, blue), `consumed` (status `empty`, grey). `IngredientTile`: rounded box, category emoji (`category_icon`), name, colour, no numbers; the tier also named in `aria-label` and carried by a shape or pattern cue, so colour is never the only signal. The demo-only `ExpiryBadge` in `components/ui/Badge.tsx` (its own thresholds) removed. Tests on every tier boundary | 3h | — |
+| V2 | frontend | **Presence, not amounts** (UI only). A tile tap toggles consumed: on is the existing consume of everything left (status `empty`), off is a PATCH `current_quantity = initial_quantity` (a `correct` event, logged and undoable; `restore` would leave an empty item empty). Out of the UI: `QuantityBar`, the ¼ ½ ¾ / −1 buttons and the "left" line in `ConsumptionSheet` (which shrinks to Edit, Gone, Delete), the quantity field in `ItemEditSheet`, the quantity and unit inputs in `QuickAddSheet` (sends the product's `default_quantity`/`default_unit`, else 1 pcs), amounts on the Gone rows and in `summaryLine`, the undo label, and the receipt review's quantity and unit columns. `lib/consumption.ts` keeps `applyConsume` for the optimistic update and loses the fraction ladder; `contracts/status-transitions.json` unchanged. No backend change | 5h | V1 |
+| V3 | frontend | **The fridge main view.** `/` becomes fridge-shaped: a **Going stale** shelf across the top (tiers `stale` and `soon`), then areas. `lib/fridge.ts` owns one `AREAS` map: Meat & fish (meat, fish), Veggies (produce), Fruits (fruits), Dairy (dairy, cheese), Bread, Drinks (beverages), Pantry (pantry, condiments, snacks), Freezer (`location = freezer`, overrides the category), Other (unknown category). An area shows its tiles' colours as a strip of dots, not a count. Replaces the location grouping of `InventoryList` / `buildStockView` (`lib/stock.ts`). Landscape iPad first | 6h | V1 |
+| V4 | frontend | **Area drill-down grid.** An area tap opens `/area/[id]` (a route, so the back gesture works): a grid of `IngredientTile`s, stale first, no numbers. Tap toggles consumed (V2); "…" or a long press opens the edit sheet. Items consumed in the last 24 h stay as grey tiles at the end, so a mis-tap can be taken back: `include_inactive` plus a client filter on `consumed_at`, and a `consumed_since` query param as a backend follow-up if the payload grows | 4h | V2, V3 |
+
 Report keys: Processing = `pipeline-receipt-processing.md`, Confirm = `pipeline-receipt-confirm.md`,
 F1 = `pipeline-foundations.md`, F2 = `pipeline-foundations-2.md`, F3 = `pipeline-foundations-3.md`.
 
@@ -887,6 +904,13 @@ Ordered by expected value once MVP is live.
     in the header rather than on a toast; it reverses any logged change, consume included.
 13. Product name languages: generic names are English since MVP-R2; offer Finnish (or any
     language) names, e.g. a per-product display name or translation at extraction time.
+14. Meal sections (breakfast, lunch, dinner, snack) in the fridge view (asked 2026-09-24,
+    deferred from wave V). Needs a per-product meal tag (model and migration) and an operator
+    call on tags versus rules; the meal context of item 8 is the same data.
+15. A recipes view inside the fridge view (asked 2026-09-24, deferred from wave V). Belongs to
+    the agent track (AG0/AG5, Mealie or its alternative).
+16. Ingredient images beyond the category emoji: a product image field, from the OFF
+    `image_url` in `off_data` or an upload (asked 2026-09-24; V1 starts with the emoji).
 
 #### Operator friction log — the quantity and consumption model is too crude (2026-09-16)
 Renamed F1-F6 -> **Q1-Q6** on 2026-09-17: `MVP-F1` and `MVP-F2` already exist in Wave 1, and
@@ -1560,6 +1584,37 @@ with the category as fallback.
   reads "auto".
 - [ ] Quick add still resolves a typed name through a model synonym; H52 gives the cook the
   remove control.
+
+#### Operator friction log — the stock screen should look like a fridge (2026-09-24)
+
+Four asks from the operator, condensed:
+
+1. **Scrap amounts.** Track existence only, with a consumed toggle per item instead of counts.
+2. **Staleness by colour on the item tiles**, no numbers: red = going stale, orange = a couple
+   of days, green = close to a week, blue = more, a neutral colour = consumed.
+3. **A main view shaped like a fridge**, with areas for categories (meat, veggies, fruits,
+   pantry, freezer, …), a separate section for what is going stale, meal sections (breakfast,
+   lunch, dinner, snack) and recipes integrated.
+4. **An area tap opens a grid** of small rounded tiles for its ingredients: no numbers,
+   staleness by colour, optional images.
+
+- **Q16 — amounts cost more attention than they save.** The stock card shows a quantity bar,
+  "350 / 500 g" and ¼ ½ ¾ / −1 buttons; the question in the kitchen is only "is it there, and
+  is it going off". Today's colours come from `getExpiryUrgency` (`lib/dates.ts`: expired, today,
+  tomorrow, ≤ 3 days, fresh; red, orange, yellow, green), with no blue tier and no consumed
+  tier, and the stock is grouped by location, never by category.
+
+**Operator rulings, 2026-09-24 (planning wave V):**
+- Amounts go from the **UI only**. `initial_quantity`, `current_quantity` and `unit` stay in the
+  backend, so receipt confirm, the status machine, the H46 history and undo are unchanged, and
+  consumption learning (post-MVP 8) is not foreclosed. The tiers are a frontend vocabulary
+  (`lib/staleness.ts`), not an API field.
+- "Toasts" in the ask means the **item tiles**, not the pop-up `Toast`.
+- **Meal sections and recipes are deferred** (post-MVP 14 and 15; recipes belong to the agent track).
+- Images start as the **category emoji** (`category_icon` is on every item already); a real
+  image field is post-MVP 16.
+
+Increments: wave V above (V1-V4). Amends MVP acceptance items 1 and 2 (note under the list).
 
 ---
 

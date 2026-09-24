@@ -45,3 +45,8 @@ modified before this session, unrelated to H51.
 Commit and open the PR for this branch (template in `CLAUDE.md`; `/commit-push-pr`), then
 start **H52** from its row in `docs/TODO.md` (wave H5): category picker,
 `frozen_shelf_life_days` per product + migration, `GET/DELETE /products/{id}/names`.
+
+Also planned, not started: **wave V, the fridge view** (V1-V4 in `docs/TODO.md`, operator ask
+2026-09-24): staleness-coloured tiles, amounts out of the UI with a consumed toggle, a
+fridge-shaped main view by category area, an area drill-down grid. Frontend only; its order
+relative to H52 is the operator's call.
