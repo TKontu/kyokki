@@ -16,13 +16,16 @@ later receipt from that chain. These tests pin the new answers: nothing for the 
 and Ground beef for the sixth once a synonym exists.
 """
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.seed_categories import seed_categories
 from app.models.category import Category
 from app.models.product_master import ProductMaster
 from app.models.store_product_alias import StoreProductAlias
@@ -442,3 +445,127 @@ class TestRetrieval:
         )
 
         assert "Ground beef" in {c.name for c in candidates}
+
+
+REPORTED_PAIRS = json.loads(
+    (
+        Path(__file__).parent.parent / "fixtures" / "resolution" / "reported_pairs.json"
+    ).read_text(encoding="utf-8")
+)["cases"]
+
+
+@pytest.fixture
+async def seeded(db_session: AsyncSession) -> None:
+    await seed_categories(db_session)
+    await db_session.commit()
+
+
+async def _names(db: AsyncSession, line: ResolvableLine) -> list[str]:
+    return [c.name for c in await TrigramRetriever(db).candidates(line)]
+
+
+class TestAShortlistThatContainsTheAnswer:
+    """H53 (Q14): the answer has to be on the shortlist before the model can pick it.
+
+    Trigram over whole names missed Finnish compounds, and when it found fewer than five the
+    rest were the category's products in alphabetical order - a fruits line saw Apple,
+    Banana, Grape, Kiwi and Lime and never Melon.
+    """
+
+    @pytest.mark.parametrize(
+        "case", [c for c in REPORTED_PAIRS if c["must_offer"]], ids=lambda c: c["id"]
+    )
+    async def test_each_reported_line_is_offered_its_product(
+        self, db_session: AsyncSession, seeded, case
+    ) -> None:
+        for name, category in case["catalog"]:
+            await _product(db_session, name, category)
+
+        offered = await _names(
+            db_session, _line(case["printed"], case["generic"], case["category"])
+        )
+
+        assert case["must_offer"] in offered
+
+    async def test_the_category_competes_on_similarity_not_the_alphabet(
+        self, db_session: AsyncSession, seeded
+    ) -> None:
+        for name in ("Apple", "Banana", "Grape", "Kiwi", "Lime", "Mango", "Melon"):
+            await _product(db_session, name, "fruits")
+
+        offered = await _names(db_session, _line("HUNAJAMELONI", "Honeydew", "fruits"))
+
+        assert offered[0] == "Melon"
+
+    async def test_a_whole_word_in_common_ranks_first(
+        self, db_session: AsyncSession, seeded
+    ) -> None:
+        for name, category in (
+            ("Taco sauce", "condiments"),
+            ("Taco shells", "pantry"),
+            ("Tortilla", "bread"),
+        ):
+            await _product(db_session, name, category)
+
+        offered = await _names(
+            db_session, _line("TACO SHELLS 12KPL", "Taco shells", "pantry")
+        )
+
+        assert offered[:2] == ["Taco shells", "Taco sauce"]
+
+    async def test_a_shared_word_beats_near_misses(
+        self, db_session: AsyncSession, seeded
+    ) -> None:
+        """Five names that merely look alike cannot push out one that shares a word."""
+        for name in ("Peach", "Peanut", "Peas", "Pecan", "Pearl barley"):
+            await _product(db_session, name, "pantry")
+        await _product(db_session, "Pear", "fruits")
+
+        offered = await _names(db_session, _line("PÄÄRYNÄ", "Pear", None))
+
+        assert offered[0] == "Pear"
+
+    async def test_a_product_with_no_name_row_is_found_by_its_own_name(
+        self, db_session: AsyncSession, seeded
+    ) -> None:
+        """Open Food Facts enrichment writes straight to `product_master`."""
+        db_session.add(
+            ProductMaster(
+                id=uuid4(),
+                canonical_name="Melon",
+                category="fruits",
+                storage_type="refrigerator",
+                default_shelf_life_days=7,
+                unit_type="count",
+                default_unit="pcs",
+            )
+        )
+        await db_session.commit()
+
+        offered = await _names(db_session, _line("HUNAJAMELONI", None, None))
+
+        assert offered == ["Melon"]
+
+    async def test_a_line_with_only_a_printed_name_still_works(
+        self, db_session: AsyncSession, seeded
+    ) -> None:
+        await _product(db_session, "Ketchup", "condiments")
+
+        offered = await _names(db_session, _line("KETCHUP", None, None))
+
+        assert offered == ["Ketchup"]
+
+    async def test_nothing_alike_and_no_category_offers_nothing(
+        self, db_session: AsyncSession, seeded
+    ) -> None:
+        """An empty shortlist means no model call for the line (spec §3.3)."""
+        await _product(db_session, "Ketchup", "condiments")
+
+        assert await _names(db_session, _line("XYZZY", "Plumbus", None)) == []
+
+    async def test_a_line_with_no_usable_words_does_not_break_the_query(
+        self, db_session: AsyncSession, seeded
+    ) -> None:
+        await _product(db_session, "Ketchup", "condiments")
+
+        assert await _names(db_session, _line("400G", None, None)) == []

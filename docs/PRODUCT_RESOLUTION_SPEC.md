@@ -120,11 +120,17 @@ Rules the service enforces, not the caller:
 
 Retrieval is the only place similarity survives, and it only builds shortlists:
 
-- `pg_trgm` similarity over `product_name.name` against the generic name and the printed name
-  (Postgres 15 ships the extension; one migration enables it and adds a GIN index).
-- Same-category products are included when the line has a category, so "Oat milk" always sees
-  every dairy product even when the trigram score is poor.
-- k = 5 per line, deduplicated by product. An empty shortlist means no call for that line.
+- Every product is ranked on one score over its keys (`product_name.name`, and its own
+  canonical name for a product with no row), against the generic and the printed name:
+  first a whole word in common ("taco shells" and Taco shells), then `pg_trgm` similarity -
+  the better of whole-name `similarity` and `word_similarity` both ways, so "melon" is found
+  inside "hunajameloni" - then being in the line's category, as a tiebreak.
+- Eligible: a shared word, similarity at or above 0.2, or the line's category. So "Oat milk"
+  still sees the dairy products when trigram is poor, but they compete on similarity; before
+  H53 (Q14) the spare slots went to the category in alphabetical order, and a fruits line saw
+  Apple, Banana, Grape, Kiwi, Lime and never Melon.
+- k = 5 per line, one row per product. An empty shortlist means no call for that line. The
+  query scans the catalog, which suits a household's few hundred products.
 
 The selection call is one request per receipt, only for unresolved lines with candidates:
 
@@ -136,6 +142,12 @@ Lines: [{"id": line_id, "n": printed, "g": generic, "c": category,
          "candidates": [{"p": product_id, "name": ...}, ...]}]
 Answer: {"r": [{"id": line_id, "p": product_id or null}]}
 ```
+
+The prompt also says that sharing a word is not sameness and that null is a good answer, with
+a worked example in which one line picks and another answers null (H53: the reported pairs
+were the nearest candidate picked when none was right). The examples are not the reported
+pairs, which `tests/fixtures/resolution/reported_pairs.json` pins for the retriever and, behind
+`requires_vllm`, for the model.
 
 Strict JSON schema as in extraction; `p` validated against the offered set. Expected cost on
 the homelab: a dozen unresolved lines with five candidates each is a few hundred tokens of

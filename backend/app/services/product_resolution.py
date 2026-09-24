@@ -30,7 +30,7 @@ resolves, but unverified, so the review row shows it as "auto" rather than "know
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -101,11 +101,23 @@ class Resolution:
 
 
 class TrigramRetriever:
-    """Shortlists candidates with `pg_trgm`, plus everything in the line's category.
+    """The shortlist for a line: the products most like it, ranked over the whole catalog.
 
-    Behind an interface on purpose: an embedding retriever (pgvector plus a model on
-    the gateway) can replace this without resolution or the prompt changing. Not needed
-    for a household-sized catalog (spec §3.3).
+    Every product competes on the same score (H53, Q14):
+
+    1. a whole word in common with one of its names ("taco shells" and Taco shells), which
+       is why a shared word is always offered unless more than ``limit`` products share one;
+    2. then trigram similarity - the better of whole-name and word similarity, so "melon"
+       is found inside the Finnish compound "hunajameloni";
+    3. then being in the line's category, which only breaks ties.
+
+    This replaced trigram over names with the rest of the slots filled by the category in
+    alphabetical order, which showed a fruits line Apple, Banana, Grape, Kiwi and Lime and
+    never Melon. A product with no ``product_name`` row is ranked by its canonical name,
+    the same fallback `known_names` uses.
+
+    It scans the catalog, which is right for a household's few hundred products; the GIN
+    index was never usable for a ``similarity() >= floor`` filter in any case.
     """
 
     def __init__(self, db: AsyncSession, limit: int = CANDIDATES_PER_LINE):
@@ -113,55 +125,62 @@ class TrigramRetriever:
         self.limit = limit
 
     async def candidates(self, line: ResolvableLine) -> list[Candidate]:
-        found: dict[UUID, Candidate] = {}
+        generic = normalize_product_name(line.generic)
+        printed = normalize_product_name(line.printed)
+        if not generic and not printed:
+            return []
+        words = sorted(
+            {
+                word
+                for word in f"{generic} {printed}".split()
+                if len(word) >= 3 and word.isalpha()
+            }
+        )
 
-        for term in (line.generic, line.printed):
-            key = normalize_product_name(term)
-            if not key:
-                continue
-            rows = (
-                await self.db.execute(
-                    text(
-                        """
-                        SELECT pn.product_master_id AS pid,
-                               pm.canonical_name     AS name,
-                               similarity(pn.name, :q) AS sim
+        rows = (
+            await self.db.execute(
+                text(
+                    """
+                    WITH keys AS (
+                        SELECT pn.product_master_id AS pid, pn.name AS key
                         FROM product_name pn
-                        JOIN product_master pm ON pm.id = pn.product_master_id
-                        WHERE similarity(pn.name, :q) >= :floor
-                        ORDER BY sim DESC
-                        LIMIT :k
-                        """
+                        UNION ALL
+                        SELECT pm.id, lower(btrim(pm.canonical_name))
+                        FROM product_master pm
                     ),
-                    {"q": key, "floor": TRIGRAM_FLOOR, "k": self.limit},
-                )
-            ).all()
-            for pid, name, _ in rows:
-                found.setdefault(pid, Candidate(product_id=pid, name=str(name)))
-
-        # Same-category products, so "Oat milk" always sees every dairy product even
-        # when the trigram score is poor (spec §3.3).
-        if line.category and len(found) < self.limit:
-            same_category = (
-                (
-                    await self.db.execute(
-                        select(ProductMaster)
-                        .where(ProductMaster.category == line.category)
-                        .order_by(ProductMaster.canonical_name)
-                        .limit(self.limit)
+                    scored AS (
+                        SELECT k.pid,
+                               bool_or(string_to_array(k.key, ' ') && :words) AS hit,
+                               max(greatest(
+                                   similarity(k.key, :g), similarity(k.key, :p),
+                                   word_similarity(k.key, :g), word_similarity(:g, k.key),
+                                   word_similarity(k.key, :p), word_similarity(:p, k.key)
+                               )) AS sim
+                        FROM keys k
+                        GROUP BY k.pid
                     )
-                )
-                .scalars()
-                .all()
+                    SELECT pm.id, pm.canonical_name
+                    FROM scored s
+                    JOIN product_master pm ON pm.id = s.pid
+                    WHERE s.hit OR s.sim >= :floor OR pm.category = :c
+                    ORDER BY s.hit DESC, s.sim DESC,
+                             (pm.category = :c) DESC, pm.canonical_name
+                    LIMIT :k
+                    """
+                ),
+                {
+                    # An empty term scores 0 rather than matching everything; NULL
+                    # would make the whole greatest() NULL.
+                    "g": generic or printed,
+                    "p": printed or generic,
+                    "words": words,
+                    "c": line.category or "",
+                    "floor": TRIGRAM_FLOOR,
+                    "k": self.limit,
+                },
             )
-            for product in same_category:
-                product_id = cast(UUID, product.id)
-                found.setdefault(
-                    product_id,
-                    Candidate(product_id=product_id, name=str(product.canonical_name)),
-                )
-
-        return list(found.values())[: self.limit]
+        ).all()
+        return [Candidate(product_id=pid, name=str(name)) for pid, name in rows]
 
 
 class ProductResolution:
