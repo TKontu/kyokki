@@ -21,6 +21,11 @@ Tiers, in order, stopping at the first hit:
 
 Nothing falls back to similarity. If the model is unreachable, unresolved lines stay
 unresolved and the receipt still completes.
+
+A name is verified when the catalog stands behind it: the product's own name or a word
+the cook used. A synonym the model taught (`product_name.source = model`) still
+resolves, but unverified, so the review row shows it as "auto" rather than "known"
+(H51, Q13) and the cook's correction at confirm re-points it.
 """
 
 from collections.abc import Iterable, Sequence
@@ -207,9 +212,12 @@ class ProductResolution:
                 normalize_product_name(line.printed)
             )
             if named is not None:
-                # A catalog name is a key the cook's own catalog stands behind.
+                # A catalog name is a key. The cook's catalog stands behind its own
+                # names and the cook's words; a model's synonym only pre-fills (H51).
                 results[line.line_id] = Resolution(
-                    product=named, source="name", verified=True
+                    product=named.product,
+                    source="name",
+                    verified=named.source != "model",
                 )
                 continue
 

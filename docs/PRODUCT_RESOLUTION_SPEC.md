@@ -96,7 +96,7 @@ resolve(lines, chain, catalog):
     alias = aliases[(chain, normalised(printed))]
          or aliases[(any chain, normalised(printed))] -> product, source=alias, verified=alias.manually_verified
     name  = product_names[normalised(generic)]
-         or product_names[normalised(printed)]        -> product, source=name, verified=True
+         or product_names[normalised(printed)]        -> product, source=name, verified=(name.source != model)
     else                                              -> unresolved
 
   if unresolved and catalog not empty:
@@ -162,15 +162,31 @@ the line's `resolution.product_id`:
 
 Alias precedence in resolution: verified before unverified, then occurrence count, then
 recency. An unverified alias still pre-fills the row, but the row shows it as "auto" (3.5).
-A synonym learned from the model (`source=model`) is a key like any other; it is what makes
-"Minced beef" hit "Ground beef" next week without the prompt carrying the catalog.
+A synonym learned from the model (`source=model`) is a key that pre-fills; it is what makes
+"Minced beef" hit "Ground beef" next week without the prompt carrying the catalog. It is not
+the cook's word, so it resolves **unverified** and the row shows it as "auto" (H51, Q13).
+
+The generic name is learned as the cook's (`source=cook`) only when the cook acted on the
+line: changed the product, or typed the name. Keeping what was proposed - an alias, a name
+hit, a selection - says nothing about the model's generic name for that line, so it is
+learned as `model`. A cook-verified alias for TUMMA RYPÄLE says the line is Grape; it does
+not make "Raisin" the cook's word for it.
+
+**A model claim yields.** Among `cook` and `canonical` rows the first claim wins and a clash
+is a merge (3.7). A `model` row is displaced by either: the cook changing a ketchup line from
+Taco sauce to Ketchup re-points "ketchup", and creating a product called Ketchup gives it its
+own name whatever a model once guessed for the word. "New product: <name>" from the review
+row (a name with no product id) looks the name up without model synonyms, for the same
+reason. Before H51 the first claim won regardless of source, so one unnoticed guess was a
+key for ever.
 
 ### 3.5 Review row
 
 The row today offers include or skip. It gains:
 
-- The proposed product as a chip with its provenance: **known** (alias verified or name),
-  **auto** (model selection or unverified alias).
+- The proposed product as a chip with its provenance: **known** (alias verified, or a name
+  the cook or the catalog itself stands behind), **auto** (model selection, unverified alias,
+  or a name the model taught).
 - **Change**: opens the existing product search (`useProductSearch`, ILIKE on the API) with a
   "New product: <generic name>" entry at the top. This is the deferred "attach an existing
   product per line" and the missing "detach" in one control.

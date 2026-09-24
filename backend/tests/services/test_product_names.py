@@ -41,6 +41,23 @@ async def _product(
     return product
 
 
+async def _row(db: AsyncSession, key: str) -> ProductName:
+    return (
+        (await db.execute(select(ProductName).where(ProductName.name == key)))
+        .scalars()
+        .one()
+    )
+
+
+async def _count(db: AsyncSession, key: str) -> int:
+    rows = (
+        (await db.execute(select(ProductName).where(ProductName.name == key)))
+        .scalars()
+        .all()
+    )
+    return len(rows)
+
+
 @pytest.fixture
 async def categories(db_session: AsyncSession) -> None:
     for category_id in ("meat", "dairy"):
@@ -134,10 +151,70 @@ class TestLookup:
 
         found = await known_names(db_session, ["Ground beef", "MILK", "Nothing"])
 
-        assert {key: p.id for key, p in found.items()} == {
+        assert {key: k.product.id for key, k in found.items()} == {
             "ground beef": beef.id,
             "milk": milk.id,
         }
+        assert {k.source for k in found.values()} == {"canonical"}
+
+    async def test_known_names_carry_their_source(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        """Resolution needs to tell the cook's word from a model's guess (H51)."""
+        beef = await _product(db_session, "Ground beef")
+        await learn_product_name(db_session, beef, "Beef mince", "cook")
+        await learn_product_name(db_session, beef, "Minced beef", "model")
+        await db_session.commit()
+
+        found = await known_names(
+            db_session, ["Ground beef", "Beef mince", "Minced beef"]
+        )
+
+        assert {key: k.source for key, k in found.items()} == {
+            "ground beef": "canonical",
+            "beef mince": "cook",
+            "minced beef": "model",
+        }
+
+    async def test_a_product_without_a_name_row_is_known_by_its_canonical_name(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        """Open Food Facts enrichment writes straight to `product_master`."""
+        product = ProductMaster(
+            id=uuid4(),
+            canonical_name="Feta",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=5,
+            unit_type="weight",
+            default_unit="g",
+        )
+        db_session.add(product)
+        await db_session.commit()
+
+        found = await known_names(db_session, ["feta"])
+
+        assert found["feta"].product.id == product.id
+        assert found["feta"].source == "canonical"
+
+    async def test_the_cooks_lookup_can_skip_model_names(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        """A cook typing "Ketchup" as a new product must not be handed the product a
+        model once guessed for that word (H51)."""
+        sauce = await _product(db_session, "Taco sauce")
+        await learn_product_name(db_session, sauce, "Ketchup", "model")
+        await learn_product_name(db_session, sauce, "Salsa", "cook")
+        await db_session.commit()
+
+        assert await product_for_name(db_session, "Ketchup", trust_model=False) is None
+        salsa = await product_for_name(db_session, "Salsa", trust_model=False)
+        assert salsa is not None and salsa.id == sauce.id
+        own = await product_for_name(db_session, "Taco sauce", trust_model=False)
+        assert own is not None and own.id == sauce.id
+        # The default still honours a model synonym: that is what makes it useful.
+        trusted = await product_for_name(db_session, "Ketchup")
+        assert trusted is not None and trusted.id == sauce.id
 
 
 class TestLearning:
@@ -181,11 +258,12 @@ class TestLearning:
         rows = (await db_session.execute(select(ProductName))).scalars().all()
         assert len(rows) == 1
 
-    async def test_a_name_another_product_already_claims_is_left_alone(
+    async def test_a_cook_or_canonical_claim_is_never_re_pointed(
         self, db_session: AsyncSession, categories
     ) -> None:
-        """First claim wins. A genuine clash is resolved by merge (spec §3.7), never by
-        silently repointing a key the rest of the catalog depends on."""
+        """First claim wins among the cook's and canonical rows. A genuine clash is
+        resolved by merge (spec §3.7), never by silently repointing a key the rest of
+        the catalog depends on."""
         beef = await _product(db_session, "Ground beef")
         pork = await _product(db_session, "Ground pork")
 
@@ -195,6 +273,67 @@ class TestLearning:
 
         found = await product_for_name(db_session, "Ground beef")
         assert found is not None and found.id == beef.id
+
+    async def test_a_cook_claim_is_not_re_pointed_by_a_model_learn(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        ketchup = await _product(db_session, "Ketchup")
+        sauce = await _product(db_session, "Taco sauce")
+        await learn_product_name(db_session, ketchup, "Tomato ketchup", "cook")
+
+        assert (
+            await learn_product_name(db_session, sauce, "Tomato ketchup", "model")
+            is False
+        )
+
+        found = await product_for_name(db_session, "Tomato ketchup")
+        assert found is not None and found.id == ketchup.id
+
+    async def test_a_model_claim_yields_to_the_cook(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        """The reported case (Q13): "ketchup" guessed for Taco sauce once, and the
+        cook's correction could never move it. Now it does."""
+        sauce = await _product(db_session, "Taco sauce")
+        ketchup = await _product(db_session, "Heinz")
+        await learn_product_name(db_session, sauce, "Ketchup", "model")
+
+        assert await learn_product_name(db_session, ketchup, "Ketchup", "cook") is True
+
+        row = await _row(db_session, "ketchup")
+        assert (row.product_master_id, row.source) == (ketchup.id, "cook")
+        assert await _count(db_session, "ketchup") == 1
+
+    async def test_a_model_claim_yields_to_a_canonical_name(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        """Creating a product called Ketchup must leave it resolvable by its own name,
+        whatever a model once guessed for that word."""
+        sauce = await _product(db_session, "Taco sauce")
+        await learn_product_name(db_session, sauce, "Ketchup", "model")
+
+        ketchup = await _product(db_session, "Ketchup")
+
+        row = await _row(db_session, "ketchup")
+        assert (row.product_master_id, row.source) == (ketchup.id, "canonical")
+        found = await product_for_name(db_session, "Ketchup")
+        assert found is not None and found.id == ketchup.id
+
+    async def test_the_cook_confirming_a_model_synonym_upgrades_it(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        """Same product, stronger word: the row is upgraded, not duplicated. Returns
+        False because no row was added - merge counts on that (H16)."""
+        beef = await _product(db_session, "Ground beef")
+        await learn_product_name(db_session, beef, "Minced beef", "model")
+
+        assert (
+            await learn_product_name(db_session, beef, "Minced beef", "cook") is False
+        )
+
+        row = await _row(db_session, "minced beef")
+        assert (row.product_master_id, row.source) == (beef.id, "cook")
+        assert await _count(db_session, "minced beef") == 1
 
     async def test_an_empty_name_teaches_nothing(
         self, db_session: AsyncSession, categories

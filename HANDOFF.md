@@ -1,63 +1,52 @@
 # Handoff
-Generated-UTC: 2026-09-23T19:15:00Z
-Base-SHA: 267786212eb7d2e14691c0f8376d44eff63d4ca1
+Generated-UTC: 2026-09-24T17:33:54Z
+Base-SHA: 52b317a34c823bfa7e25f7f1d4bdbdd63369c25b
 
 ## Round delta
 
-One increment on `feat/h25-one-source-of-truth`: **H25, a sheet shows the truth while it is
-open.**
+Uncommitted on `feat/h51-model-guess-is-not-a-key` (cut from the SHA above): **H51, a model
+guess never becomes a key** (Q13). Backend only, no migration, no frontend change.
 
-- **`useFieldEdit`** (`hooks/useFieldEdit.ts`): an untouched field follows the record, a touched
-  field keeps what the cook typed, and only touched-and-different fields are sent. Save can no
-  longer arm itself, and a background change can no longer be written back over the server.
-- **A touched field that also moved says so** — "Quantity changed to 2 while this was open",
-  with **Keep mine** and **Use 2** (`components/ui/FieldMoved.tsx`).
-- Both sheets: `ItemEditSheet` and `ProductEditSheet`. `ItemEditForm` is keyed by item id.
-- **Quick add stops guessing**: `unit` is optional on `QuickAddRequest`, and unit and location
-  are sent only when the cook chose them; the server falls back to the resolved product's own.
-- **"Create new" waits for the search to answer** for the word on screen (`settled` on
-  `useProductSearch`) — the debounce window is where duplicate products were made.
-- **The consume mirror predicts the opened clock** (Q5): items now carry the product's
-  `opened_shelf_life_days` and `avg_piece_grams`, so the expiry badge no longer jumps after a
-  tap. `applyConsume` mirrors `_start_opened_clock`, loose produce exempt.
+- `known_names` returns `KnownName(product, source)`; tier 4 resolves a `product_name` row
+  the model taught as `("name", verified=False)`, so the review row shows "auto".
+- Confirm learns the generic name as the cook's only when the cook changed the product or
+  typed the name; keeping an alias, a name hit or a selection learns it as `model`.
+- `learn_product_name` re-points a `model` row to a `cook` or `canonical` claim, upgrades a
+  product's own `model` row to `cook` in place (returns False; merge counts on it).
+- `product_for_name(trust_model=False)` when confirm gets a name with no product id, so
+  "New product: Ketchup" creates Ketchup instead of resolving to a model's guess.
+- Also uncommitted from the same session: wave H5 (H51-H58) and the 2026-09-24 friction log
+  in `docs/TODO.md`, the H5 row in `docs/backend_TODO.md`, spec §3.2/3.4/3.5 wording.
 
-Before this: #83 the status banner, #82 the Gone screen, #81 one-tap consume and Undo, #80 H46.
+Verified: 1028 passed, 1 skipped (external-service markers excluded); ruff and mypy baseline
+clean; the 20 new tests fail on the stashed old code.
 
 ## Active PRs and conflicts
 
-This branch's PR, if opened. **`HANDOFF.md` is tracked, not gitignored** — the last PR of each
-wave owns it together with `docs/TODO.md`.
+None open. Do not stage `.claude/README.md` or `.claude/templates/profiles/python-fastapi.md`:
+modified before this session, unrelated to H51.
 
 ## Non-obvious decisions or blockers
 
-- **The Linux dev container runs everything.** PostgreSQL 16 and Redis are installed
-  (`sudo service postgresql start`, `sudo service redis-server start`; role and database
-  `kyokki`/`kyokki`). Settings go in env vars, not the repo-root `.env`, which belongs to the
-  Windows setup: `POSTGRES_SERVER=localhost POSTGRES_USER=kyokki POSTGRES_PASSWORD=kyokki
-  POSTGRES_DB=kyokki REDIS_HOST=localhost KYOKKI_TEST_REQUIRE_DB=1`.
-- **The share is mounted without exec** (`file_mode=0664`): backend tools as
-  `backend/.venv/bin/python -m …` (its `bin/ruff` links to `~/.local/share/kyokki-tools`),
-  frontend tools as `node node_modules/<pkg>/…`. `next build` cannot write
-  `frontend/.next/cache` (left by Windows); build from a copy outside the share.
-- **Mixed line endings** (H44 open): about a third of the files are CRLF. Edit them without
-  converting, or the diff becomes the whole file.
-- **Two alerts can be on screen at once** (the status banner and an error toast), so a test that
-  wants one should assert on its text, not on `role="alert"`.
-- **No migration this round**, though the API grew: `opened_shelf_life_days` and
-  `avg_piece_grams` are read off the loaded product, like `product_name`. Three migrations are
-  still queued for the homelab (`e4b9a7c2d815`, `f6c2d8e1a947`, `a3f7b21c6d40`).
-- **A quick add may now omit `unit`.** The server takes the resolved product's, and `pcs` only
-  when there is nothing to resolve to. Anything else posting to `/quick-add` gets the same
-  fallback rather than a 422.
-- **DEC-5** gates H31, the last agent-track prerequisite. **DEC-6** (Next.js), **DEC-7**
-  (scanner), **DEC-8** (retention) and **DEC-9** (categories, gating H22) are open.
+- **Operator rulings 2026-09-24:** a kept selection is *learned* (as `model`), not silenced;
+  the product stays re-configurable by the cook (category, shelf life, frozen life, matching
+  names) - that is H52 as widened; frozen life is per product with the category as fallback.
+- **This container had no Postgres.** Installed with apt this session (`sudo service
+  postgresql start`, `redis-server start`; role/db `kyokki`/`kyokki`, `CREATEDB` so the suite
+  can make `kyokki_test`). Run tests with the env in the previous handoff and
+  `backend/.venv/bin/python -m pytest` by absolute path; a relative `.venv/bin/python` failed
+  after `cd` once.
+- `pytest -m "not requires_db"` overrides the ini's marker exclusions, so add the three
+  `requires_*` markers back or the connection tests fail on network alone.
+- 54 of 65 homelab products still carry the category placeholder (H56 is an operator action).
 
 ## Next action
 
-Operator: three of the five MVP-P3 receipts remain, plus the redeploy. Worth judging on the
-iPad: whether the "changed while this was open" line reads clearly enough to act on.
+Commit and open the PR for this branch (template in `CLAUDE.md`; `/commit-push-pr`), then
+start **H52** from its row in `docs/TODO.md` (wave H5): category picker,
+`frozen_shelf_life_days` per product + migration, `GET/DELETE /products/{id}/names`.
 
-Code: land this branch once CI is green. Then **H47** (Telegram hygiene, 1h: exit non-zero on
-the 409 from a second instance, keep gateway internals out of `failure_text`, document a dev
-token) — the smallest open row with no decision attached. H26/H27 (extraction honesty, the
-heuristic parser) are the ones to do if the remaining MVP-P3 receipts give trouble.
+Also planned, not started: **wave V, the fridge view** (V1-V4 in `docs/TODO.md`, operator ask
+2026-09-24): staleness-coloured tiles, amounts out of the UI with a consumed toggle, a
+fridge-shaped main view by category area, an area drill-down grid. Frontend only; its order
+relative to H52 is the operator's call.

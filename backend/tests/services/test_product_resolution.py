@@ -117,8 +117,28 @@ class TestTheSpecTable:
         self, db_session: AsyncSession, catalog
     ) -> None:
         """ "Minced beef" scores 64 against "Ground beef" - unreachable for any
-        threshold that also tolerates OCR noise. One confirm teaches it."""
+        threshold that also tolerates OCR noise. One confirm teaches it.
+
+        A synonym the model taught pre-fills the row but is not the cook's word, so it
+        resolves unverified and the row shows it as "auto" (H51, Q13). Before that it
+        was a key that won outright, which is how "ketchup" stayed Taco sauce for ever.
+        """
         await learn_product_name(db_session, catalog["beef"], "Minced beef", "model")
+        await db_session.commit()
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("ATRIA JAUHELIHA", "Minced beef", "meat")], chain="s-group"
+        )
+
+        result = resolved["ATRIA JAUHELIHA"]
+        assert result.product is not None
+        assert result.product.id == catalog["beef"].id
+        assert (result.source, result.verified) == ("name", False)
+
+    async def test_a_synonym_the_cook_taught_is_verified(
+        self, db_session: AsyncSession, catalog
+    ) -> None:
+        await learn_product_name(db_session, catalog["beef"], "Minced beef", "cook")
         await db_session.commit()
 
         resolved = await ProductResolution(db_session).resolve(
@@ -154,6 +174,31 @@ class TestDeterministicTiers:
 
         result = resolved["VALIO MAITO"]
         assert result.product is not None and result.product.id == catalog["milk"].id
+        assert (result.source, result.verified) == ("name", True)
+
+    async def test_a_product_with_no_name_row_is_still_a_verified_key(
+        self, db_session: AsyncSession, catalog
+    ) -> None:
+        """Open Food Facts enrichment writes straight to `product_master`; a product's
+        own name is the strongest key there is."""
+        feta = ProductMaster(
+            id=uuid4(),
+            canonical_name="Feta",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=7,
+            unit_type="weight",
+            default_unit="g",
+        )
+        db_session.add(feta)
+        await db_session.commit()
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("COOP FETA PDO", "Feta", "dairy")], chain="s-group"
+        )
+
+        result = resolved["COOP FETA PDO"]
+        assert result.product is not None and result.product.id == feta.id
         assert (result.source, result.verified) == ("name", True)
 
     async def test_an_alias_wins_over_everything_else(

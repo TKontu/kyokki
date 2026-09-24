@@ -23,6 +23,11 @@
 > and C2). Both were decided on 2026-09-13: `dl | tsp | tbsp | g | pcs`, and JSON numbers
 > (shipped in MVP-S1, PR #27).
 
+> **2026-09-24 — wave V (the fridge view) in `docs/TODO.md`** supersedes, in the UI,
+> Increment 1.4 QuantityBar and the MVP-C2 ConsumptionSheet fractions (amounts leave the UI,
+> a tile tap toggles consumed), and turns the MVP-S2 location groups into category areas with
+> a drill-down grid of staleness-coloured tiles. Planned, not started.
+
 **Stack:** Next.js 14, TypeScript, Tailwind, PWA, Zustand, React Query
 **Approach:** 47 small increments with full test coverage from day 1
 **Estimated Time:** ~170 hours (4-5 weeks)
