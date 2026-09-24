@@ -14,9 +14,56 @@ import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
 import ProductEditSheet from '../ProductEditSheet'
-import type { ProductMaster } from '@/types/product'
+import type { Category } from '@/types/category'
+import type { ProductMaster, ProductNames } from '@/types/product'
+
+const CATEGORIES: Category[] = [
+  {
+    id: 'meat',
+    display_name: 'Meat',
+    icon: '🥩',
+    default_shelf_life_days: 5,
+    frozen_shelf_life_days: 180,
+    sort_order: 1,
+    default_storage: 'refrigerator',
+  },
+  {
+    id: 'fish',
+    display_name: 'Fish',
+    icon: '🐟',
+    default_shelf_life_days: 3,
+    frozen_shelf_life_days: 120,
+    sort_order: 2,
+    default_storage: 'refrigerator',
+  },
+]
+
+const NAMES: ProductNames = {
+  names: [
+    { id: 'n-own', name: 'ground beef', source: 'canonical', removable: false },
+    { id: 'n-cook', name: 'jauheliha', source: 'cook', removable: true },
+    { id: 'n-guess', name: 'minced pork', source: 'model', removable: true },
+  ],
+  printed: [
+    {
+      id: 'a-1',
+      store_chain: 's-market',
+      receipt_name: 'NAUDAN JAUHELIHA 400G',
+      source: 'model',
+      verified: false,
+      occurrence_count: 2,
+      last_seen: '2026-09-20T10:00:00Z',
+    },
+  ],
+}
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+beforeEach(() => {
+  server.use(
+    http.get(`${API_URL}/categories`, () => HttpResponse.json(CATEGORIES)),
+    http.get(`${API_URL}/products/p-1/names`, () => HttpResponse.json(NAMES))
+  )
+})
 afterEach(() => {
   server.resetHandlers()
   jest.useRealTimers()
@@ -30,6 +77,7 @@ const PRODUCT: ProductMaster = {
   storage_type: 'refrigerator',
   default_shelf_life_days: 5,
   opened_shelf_life_days: null,
+  frozen_shelf_life_days: null,
   avg_piece_grams: null,
   pack_grams: null,
   shelf_life_source: 'category',
@@ -225,5 +273,133 @@ describe('while the product moves underneath the sheet (H25)', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'Keeps for changed to 9 while this was open'
     )
+  })
+})
+
+describe('category and frozen life (H52)', () => {
+  it('moves the product to another category', async () => {
+    const patches = mockApi()
+    renderSheet()
+
+    fireEvent.click(await screen.findByRole('radio', { name: /Fish/ }))
+    fireEvent.click(save())
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toEqual({ category: 'fish' })
+  })
+
+  it('says a placeholder shelf life follows the category', async () => {
+    renderSheet()
+
+    expect(await screen.findByText(/follows the category/)).toBeInTheDocument()
+  })
+
+  it('does not say so once the cook has set the shelf life', async () => {
+    renderSheet({ ...PRODUCT, shelf_life_source: 'cook' })
+
+    await screen.findByRole('radio', { name: /Fish/ })
+    expect(screen.queryByText(/follows the category/)).not.toBeInTheDocument()
+  })
+
+  it("shows the category's frozen life when the product has none", async () => {
+    renderSheet()
+
+    expect(await screen.findByPlaceholderText('180')).toBeInTheDocument()
+    expect(screen.getByLabelText('Once frozen')).toHaveValue(null)
+  })
+
+  it('sets a frozen life of its own', async () => {
+    const patches = mockApi()
+    renderSheet()
+
+    fireEvent.change(screen.getByLabelText('Once frozen'), { target: { value: '30' } })
+    fireEvent.click(save())
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toEqual({ frozen_shelf_life_days: 30 })
+  })
+
+  it('clearing it hands the frozen life back to the category', async () => {
+    const patches = mockApi()
+    renderSheet({ ...PRODUCT, frozen_shelf_life_days: 30 })
+
+    fireEvent.change(screen.getByLabelText('Once frozen'), { target: { value: '' } })
+    fireEvent.click(save())
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toEqual({ frozen_shelf_life_days: null })
+  })
+
+  it('says so when the category moved while the sheet was open', async () => {
+    renderSheet()
+
+    fireEvent.click(await screen.findByRole('radio', { name: /Fish/ }))
+    moved({ category: 'dairy' })
+
+    expect(screen.getByRole('status')).toHaveTextContent('Category changed')
+  })
+})
+
+describe('matching names (H52)', () => {
+  it('lists the names with whose word each is', async () => {
+    renderSheet()
+
+    const guess = await screen.findByText('minced pork')
+    expect(guess.closest('li')).toHaveTextContent('auto')
+    expect(screen.getByText('jauheliha').closest('li')).toHaveTextContent('yours')
+    expect(screen.getByText('NAUDAN JAUHELIHA 400G').closest('li')).toHaveTextContent(
+      's-market'
+    )
+  })
+
+  it('offers no way to remove the product’s own name', async () => {
+    renderSheet()
+
+    await screen.findByText('ground beef')
+    expect(
+      screen.queryByRole('button', { name: 'Remove ground beef' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('removes a name on the second tap', async () => {
+    const removed: string[] = []
+    let names = NAMES
+    server.use(
+      http.get(`${API_URL}/products/p-1/names`, () => HttpResponse.json(names)),
+      http.delete(`${API_URL}/products/p-1/names/:nameId`, ({ params }) => {
+        removed.push(String(params.nameId))
+        names = { ...names, names: names.names.filter((n) => n.id !== params.nameId) }
+        return new HttpResponse(null, { status: 204 })
+      })
+    )
+    renderSheet()
+
+    const remove = await screen.findByRole('button', { name: 'Remove minced pork' })
+    fireEvent.click(remove)
+    expect(removed).toEqual([])
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm remove minced pork' }))
+
+    await waitFor(() => expect(removed).toEqual(['n-guess']))
+    await waitFor(() => expect(screen.queryByText('minced pork')).not.toBeInTheDocument())
+  })
+
+  it('removes a printed name through its own route', async () => {
+    const removed: string[] = []
+    server.use(
+      http.delete(`${API_URL}/products/p-1/aliases/:aliasId`, ({ params }) => {
+        removed.push(String(params.aliasId))
+        return new HttpResponse(null, { status: 204 })
+      })
+    )
+    renderSheet()
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Remove NAUDAN JAUHELIHA 400G' })
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Confirm remove NAUDAN JAUHELIHA 400G' })
+    )
+
+    await waitFor(() => expect(removed).toEqual(['a-1']))
   })
 })

@@ -47,6 +47,7 @@ describe('TypeScript Types', () => {
         storage_type: 'refrigerator',
         default_shelf_life_days: 7,
         opened_shelf_life_days: 3,
+        frozen_shelf_life_days: null,
     avg_piece_grams: null,
   pack_grams: null,
   shelf_life_source: 'category',
@@ -69,6 +70,7 @@ describe('TypeScript Types', () => {
         display_name: 'Dairy Products',
         icon: '🥛',
         default_shelf_life_days: 7,
+        frozen_shelf_life_days: null,
         sort_order: 0,
         default_storage: 'refrigerator',
       }

@@ -8,6 +8,7 @@ operations on it - look a name up, and learn a new one.
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -190,3 +191,51 @@ async def learn_product_name(
     db.add(ProductName(product_master_id=product.id, name=key, source=source))
     await db.flush()
     return True
+
+
+class UnknownName(LookupError):
+    """No such name row, or it belongs to another product."""
+
+
+class CanonicalName(ValueError):
+    """The product's own name: it is changed by renaming the product, not removed."""
+
+
+async def names_for_product(db: AsyncSession, product_id: UUID) -> list[ProductName]:
+    """Every name that resolves to this product, its own name first (H52)."""
+    rows = (
+        (
+            await db.execute(
+                select(ProductName)
+                .where(ProductName.product_master_id == product_id)
+                .order_by(ProductName.source != "canonical", ProductName.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(rows)
+
+
+async def forget_product_name(
+    db: AsyncSession, product_id: UUID, name_id: UUID
+) -> None:
+    """Remove a learned name, so the word stops meaning this product (H52).
+
+    The cleanup path for keys H51 could not reach: a synonym written before it - "ketchup"
+    for Taco sauce - was the cook's word as far as the table knew. The next line with the
+    word goes back through selection.
+    """
+    row = await db.get(ProductName, name_id)
+    if row is None or row.product_master_id != product_id:
+        raise UnknownName(str(name_id))
+    if str(row.source) == "canonical":
+        raise CanonicalName(str(row.name))
+    forgotten = {
+        "product_name": str(row.name),
+        "product_id": str(product_id),
+        "source": str(row.source),
+    }
+    await db.delete(row)
+    await db.commit()
+    logger.info("Product name forgotten", extra=forgotten)

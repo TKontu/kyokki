@@ -1,52 +1,61 @@
 # Handoff
-Generated-UTC: 2026-09-24T17:33:54Z
-Base-SHA: 52b317a34c823bfa7e25f7f1d4bdbdd63369c25b
+Generated-UTC: 2026-09-24T18:35:09Z
+Base-SHA: d72a3f7ec83568ea19854160b57a06f9578ae6c7
 
 ## Round delta
 
-Uncommitted on `feat/h51-model-guess-is-not-a-key` (cut from the SHA above): **H51, a model
-guess never becomes a key** (Q13). Backend only, no migration, no frontend change.
+Since the last handoff: H51 merged as PR #85 (with the wave V plan as a docs commit).
 
-- `known_names` returns `KnownName(product, source)`; tier 4 resolves a `product_name` row
-  the model taught as `("name", verified=False)`, so the review row shows "auto".
-- Confirm learns the generic name as the cook's only when the cook changed the product or
-  typed the name; keeping an alias, a name hit or a selection learns it as `model`.
-- `learn_product_name` re-points a `model` row to a `cook` or `canonical` claim, upgrades a
-  product's own `model` row to `cook` in place (returns False; merge counts on it).
-- `product_for_name(trust_model=False)` when confirm gets a name with no product id, so
-  "New product: Ketchup" creates Ketchup instead of resolving to a model's guess.
-- Also uncommitted from the same session: wave H5 (H51-H58) and the 2026-09-24 friction log
-  in `docs/TODO.md`, the H5 row in `docs/backend_TODO.md`, spec §3.2/3.4/3.5 wording.
+Uncommitted on `feat/h52-product-is-reconfigurable` (cut from the SHA above): **H52, the
+product is re-configurable**. Backend, frontend, one migration (`c2d9e4a17b35`, head).
 
-Verified: 1028 passed, 1 skipped (external-service markers excluded); ruff and mypy baseline
-clean; the 20 new tests fail on the stashed old code.
+- Product editor: category picker; frozen life per product (blank = the category's); a
+  "Matching names" list with "yours" / "auto" chips and a two-tap remove.
+- `product_master.frozen_shelf_life_days` (nullable); `_start_frozen_clock` prefers it.
+- A category change carries `storage_type` and, for a `category` placeholder, the new
+  category's shelf life, re-dating `calculated` stock.
+- `GET /products/{id}/names`, `DELETE …/names/{name_id}` (409 canonical),
+  `DELETE …/aliases/{alias_id}`; new `crud/store_product_alias.py`, `schemas/product_names.py`.
+- A rename now keeps `product_name` true (old canonical row → `cook`, new name canonical).
+  This was a latent bug found while building H52.
+- `broadcast_product_update` (new `product_update` message; nothing listens yet).
+- `NameSource` added to `scripts/check_vocabularies.py`.
+
+Verified:
+- Backend: 1056 passed, 1 skipped. ruff clean, mypy baseline none new, vocabularies agree.
+- Migration: `alembic upgrade`/`downgrade`/`upgrade` and `alembic check` clean on the local database.
+- Frontend: 693 passed, tsc and lint clean, `next build` ok.
+- The new tests failed before the implementation.
 
 ## Active PRs and conflicts
 
 None open. Do not stage `.claude/README.md` or `.claude/templates/profiles/python-fastapi.md`:
-modified before this session, unrelated to H51.
+modified before these sessions, unrelated.
 
 ## Non-obvious decisions or blockers
 
-- **Operator rulings 2026-09-24:** a kept selection is *learned* (as `model`), not silenced;
-  the product stays re-configurable by the cook (category, shelf life, frozen life, matching
-  names) - that is H52 as widened; frozen life is per product with the category as fallback.
-- **This container had no Postgres.** Installed with apt this session (`sudo service
-  postgresql start`, `redis-server start`; role/db `kyokki`/`kyokki`, `CREATEDB` so the suite
-  can make `kyokki_test`). Run tests with the env in the previous handoff and
-  `backend/.venv/bin/python -m pytest` by absolute path; a relative `.venv/bin/python` failed
-  after `cd` once.
+- **Stock already in the freezer is not re-dated** when a product's frozen life changes;
+  nothing records when it went in. Open checkbox under "H52 as built" in `docs/TODO.md`.
+- A cook-typed or model-estimated shelf life does not follow a category change; only the
+  `category` placeholder does.
+- **Sandbox quirks in this container:** binaries under `node_modules/.bin` and
+  `backend/.venv/bin` are not executable, so call them through the interpreter:
+  - `node node_modules/jest/bin/jest.js`
+  - `node node_modules/typescript/bin/tsc --noEmit`
+  - `node node_modules/next/dist/bin/next lint`
+  - `.venv/bin/python -m alembic`
+
+  Writes to `frontend/.next` are refused, so run `next build` from a copy in the scratchpad
+  with `node_modules` symlinked.
+- DB env for tests and alembic: `POSTGRES_SERVER=localhost POSTGRES_USER=kyokki
+  POSTGRES_PASSWORD=kyokki POSTGRES_DB=kyokki REDIS_HOST=localhost KYOKKI_TEST_REQUIRE_DB=1`.
 - `pytest -m "not requires_db"` overrides the ini's marker exclusions, so add the three
   `requires_*` markers back or the connection tests fail on network alone.
 - 54 of 65 homelab products still carry the category placeholder (H56 is an operator action).
+  After deploying H52, the migrate job applies `c2d9e4a17b35`.
 
 ## Next action
 
-Commit and open the PR for this branch (template in `CLAUDE.md`; `/commit-push-pr`), then
-start **H52** from its row in `docs/TODO.md` (wave H5): category picker,
-`frozen_shelf_life_days` per product + migration, `GET/DELETE /products/{id}/names`.
-
-Also planned, not started: **wave V, the fridge view** (V1-V4 in `docs/TODO.md`, operator ask
-2026-09-24): staleness-coloured tiles, amounts out of the UI with a consumed toggle, a
-fridge-shaped main view by category area, an area drill-down grid. Frontend only; its order
-relative to H52 is the operator's call.
+Commit and open the PR for this branch (`/commit-push-pr`). Then the H5 order continues:
+**H55** (`ready_meals` category), H53, H54, H57, H58. Wave V (the fridge view, V1-V4) is
+planned and not started; its order relative to the rest of H5 is the operator's call.

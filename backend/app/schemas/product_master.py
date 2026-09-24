@@ -32,6 +32,11 @@ class ProductMasterBase(BaseModel):
     opened_shelf_life_days: int | None = Field(
         None, gt=0, description="Shelf life after opening"
     )
+    frozen_shelf_life_days: int | None = Field(
+        None,
+        gt=0,
+        description="Days it keeps once frozen; null falls back to the category (H52)",
+    )
     unit_type: str = Field(
         ...,
         description="Unit type: volume, weight, count (derived from default_unit on write)",
@@ -78,6 +83,7 @@ class ProductMasterUpdate(BaseModel):
     )
     avg_piece_grams: JsonDecimal | None = Field(None, gt=0)
     opened_shelf_life_days: int | None = Field(None, gt=0)
+    frozen_shelf_life_days: int | None = Field(None, gt=0)
     unit_type: str | None = None
     default_unit: str | None = None
     default_quantity: JsonDecimal | None = Field(None, gt=0)

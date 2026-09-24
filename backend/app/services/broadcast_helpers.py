@@ -52,7 +52,9 @@ def _serialize_value(value: Any) -> Any:
 
 
 def _build_message(
-    message_type: Literal["receipt_status", "inventory_update", "shopping_list_update"],
+    message_type: Literal[
+        "receipt_status", "inventory_update", "shopping_list_update", "product_update"
+    ],
     entity_id: UUID,
     data: dict[str, Any],
 ) -> dict[str, Any]:
@@ -237,6 +239,28 @@ async def broadcast_shopping_list_update(
             "unit": unit,
             "priority": priority,
             "is_purchased": is_purchased,
+        },
+    )
+    await publish_message(message)
+
+
+async def broadcast_product_update(
+    product_id: UUID,
+    action: Literal["updated", "name_forgotten", "alias_forgotten"],
+    product_name: str | None = None,
+) -> None:
+    """Broadcast a change to a product or the names that resolve to it (H52).
+
+    Nothing on the iPad listens for it yet; it keeps the rule that every mutating
+    endpoint broadcasts, so a second screen can refresh when one lands.
+    """
+    message = _build_message(
+        message_type="product_update",
+        entity_id=product_id,
+        data={
+            "product_id": product_id,
+            "action": action,
+            "product_name": product_name,
         },
     )
     await publish_message(message)

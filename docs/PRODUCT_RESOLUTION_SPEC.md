@@ -180,6 +180,15 @@ row (a name with no product id) looks the name up without model synonyms, for th
 reason. Before H51 the first claim won regardless of source, so one unnoticed guess was a
 key for ever.
 
+**The cook can take a key back (H52).** The product editor lists every `product_name` row and
+printed alias that resolves to the product, with its source, and removes any of them
+(`DELETE /api/products/{id}/names/{name_id}`, `DELETE /api/products/{id}/aliases/{alias_id}`)
+except the canonical row: that one is the product's own name and changes by renaming. A
+rename keeps the table true - the old canonical row becomes the cook's word (the old name
+still finds the product, and is now removable), and the new name is learned as canonical
+under the same first-claim rule. A removed name sends the next line with that word back
+through selection.
+
 ### 3.5 Review row
 
 The row today offers include or skip. It gains:

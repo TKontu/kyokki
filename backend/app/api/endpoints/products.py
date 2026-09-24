@@ -1,5 +1,6 @@
 """API endpoints for Product CRUD operations."""
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import handle_integrity_errors, reference_conflict_detail
 from app.crud import product_master as crud_product
+from app.crud import store_product_alias as crud_alias
 from app.crud.product_master import MovedInventoryItem
 from app.db.session import get_db
 from app.schemas.product_master import (
@@ -19,7 +21,15 @@ from app.schemas.product_master import (
     ProductMergeRequest,
     ProductMergeResponse,
 )
-from app.services.broadcast_helpers import broadcast_inventory_update
+from app.schemas.product_names import (
+    PrintedNameEntry,
+    ProductNameEntry,
+    ProductNamesResponse,
+)
+from app.services.broadcast_helpers import (
+    broadcast_inventory_update,
+    broadcast_product_update,
+)
 from app.services.catalog_estimates import refresh_catalog_shelf_lives
 from app.services.expiry_recompute import recompute_expiry_for_product
 from app.services.llm_extractor import LLMExtractionError
@@ -32,6 +42,12 @@ from app.services.product_merge import (
     MergeIntoItself,
     UnknownProduct,
     merge_products,
+)
+from app.services.product_names import (
+    CanonicalName,
+    UnknownName,
+    forget_product_name,
+    names_for_product,
 )
 
 router = APIRouter()
@@ -105,12 +121,73 @@ async def update_product(
             detail=f"Product with ID '{product_id}' not found",
         )
 
-    if "default_shelf_life_days" in product_update.model_dump(exclude_unset=True):
+    changed = product_update.model_dump(exclude_unset=True)
+    if "default_shelf_life_days" in changed or "category" in changed:
         moved = await recompute_expiry_for_product(db, product)
         await db.commit()
         await _announce(moved, str(product.canonical_name))
 
+    await broadcast_product_update(
+        product_id, action="updated", product_name=str(product.canonical_name)
+    )
     return product
+
+
+@router.get("/{product_id}/names", response_model=ProductNamesResponse)
+async def list_product_names(
+    product_id: UUID, db: AsyncSession = Depends(get_db)
+) -> ProductNamesResponse:
+    """The names and printed receipt names that resolve to this product (H52)."""
+    product = await crud_product.get_product(db, product_id)
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with ID '{product_id}' not found",
+        )
+    names = await names_for_product(db, product_id)
+    aliases = await crud_alias.aliases_for_product(db, product_id)
+    return ProductNamesResponse(
+        names=[_name_entry(row) for row in names],
+        printed=[_printed_entry(alias) for alias in aliases],
+    )
+
+
+@router.delete("/{product_id}/names/{name_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def forget_name(
+    product_id: UUID, name_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    """Stop a learned name meaning this product. The canonical name answers 409."""
+    try:
+        async with handle_integrity_errors():
+            await forget_product_name(db, product_id, name_id)
+    except UnknownName:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This product has no such name",
+        ) from None
+    except CanonicalName:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A product's own name cannot be removed; rename the product instead",
+        ) from None
+    await broadcast_product_update(product_id, action="name_forgotten")
+
+
+@router.delete(
+    "/{product_id}/aliases/{alias_id}", status_code=status.HTTP_204_NO_CONTENT
+)
+async def forget_printed_name(
+    product_id: UUID, alias_id: UUID, db: AsyncSession = Depends(get_db)
+) -> None:
+    """Stop a printed receipt name resolving to this product (H52)."""
+    async with handle_integrity_errors():
+        deleted = await crud_alias.delete_alias(db, product_id, alias_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This product has no such printed name",
+        )
+    await broadcast_product_update(product_id, action="alias_forgotten")
 
 
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -135,6 +212,29 @@ async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Product with ID '{product_id}' not found",
         )
+
+
+def _name_entry(row: Any) -> ProductNameEntry:
+    """A `product_name` row as the editor lists it; `Any` for the Column-typed model."""
+    return ProductNameEntry(
+        id=row.id,
+        name=row.name,
+        source=row.source,
+        removable=row.source != "canonical",
+    )
+
+
+def _printed_entry(alias: Any) -> PrintedNameEntry:
+    """A `store_product_alias` row as the editor lists it."""
+    return PrintedNameEntry(
+        id=alias.id,
+        store_chain=alias.store_chain,
+        receipt_name=alias.receipt_name,
+        source=alias.source,
+        verified=alias.manually_verified,
+        occurrence_count=alias.occurrence_count,
+        last_seen=alias.last_seen,
+    )
 
 
 async def _announce(items: list[MovedInventoryItem], product_name: str) -> None:

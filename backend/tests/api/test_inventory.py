@@ -1338,6 +1338,72 @@ class TestFrozenClock:
         assert moved["expiry_date"] == "2026-09-06"
         assert moved["expiry_source"] == "calculated"
 
+    async def test_the_products_own_frozen_life_wins(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """H52: bacon is meat, but it does not keep 180 days frozen."""
+        product = (
+            await client.post(
+                "/api/products", json={**self.PRODUCT, "frozen_shelf_life_days": 30}
+            )
+        ).json()
+        item = await self._stock(client, product["id"])
+
+        moved = (
+            await client.patch(
+                f"/api/inventory/{item['id']}", json={"location": "freezer"}
+            )
+        ).json()
+
+        assert moved["expiry_date"] == (date.today() + timedelta(days=30)).isoformat()
+        assert moved["expiry_source"] == "frozen"
+
+    async def test_no_frozen_life_of_its_own_falls_back_to_the_category(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (
+            await client.post(
+                "/api/products", json={**self.PRODUCT, "frozen_shelf_life_days": None}
+            )
+        ).json()
+        item = await self._stock(client, product["id"])
+
+        moved = (
+            await client.patch(
+                f"/api/inventory/{item['id']}", json={"location": "freezer"}
+            )
+        ).json()
+
+        assert moved["expiry_date"] == (date.today() + timedelta(days=180)).isoformat()
+
+    async def test_a_product_can_freeze_where_its_category_does_not(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """The cook knows orange juice freezes even if the beverages row does not say."""
+        product = (
+            await client.post(
+                "/api/products",
+                json={
+                    **self.PRODUCT,
+                    "canonical_name": "Orange juice",
+                    "category": "beverages",
+                    "unit_type": "volume",
+                    "default_unit": "dl",
+                    "frozen_shelf_life_days": 90,
+                },
+            )
+        ).json()
+        item = await self._stock(client, product["id"], unit="dl")
+
+        moved = (
+            await client.patch(
+                f"/api/inventory/{item['id']}", json={"location": "freezer"}
+            )
+        ).json()
+
+        assert moved["expiry_date"] == (date.today() + timedelta(days=90)).isoformat()
+        assert moved["expiry_source"] == "frozen"
+
     async def test_moving_it_anywhere_else_changes_no_date(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:

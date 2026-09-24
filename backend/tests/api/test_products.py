@@ -1040,3 +1040,435 @@ class TestCorrectionReachesTheFood:
 
         unchanged = (await client.get(f"/api/inventory/{item['id']}")).json()
         assert unchanged["expiry_date"] == "2026-09-06"
+
+
+class TestProductFrozenLife:
+    """H52: frozen life lives on the product, and falls back to the category."""
+
+    PRODUCT = {
+        "canonical_name": "Bacon",
+        "category": "meat",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 5,
+        "unit_type": "weight",
+        "default_unit": "g",
+    }
+
+    async def test_a_new_product_has_none_of_its_own(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        assert product["frozen_shelf_life_days"] is None
+
+    async def test_the_cook_can_set_it_and_take_it_back(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        set_ = await client.patch(
+            f"/api/products/{product['id']}", json={"frozen_shelf_life_days": 30}
+        )
+        cleared = await client.patch(
+            f"/api/products/{product['id']}", json={"frozen_shelf_life_days": None}
+        )
+
+        assert set_.json()["frozen_shelf_life_days"] == 30
+        assert cleared.json()["frozen_shelf_life_days"] is None
+
+    async def test_zero_days_is_refused(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"frozen_shelf_life_days": 0}
+        )
+
+        assert response.status_code == 422
+
+
+class TestCategoryChange:
+    """H52: a product filed under the wrong category can be moved, and a placeholder
+    shelf life moves with it - it only ever meant "what the category says"."""
+
+    PRODUCT = {
+        "canonical_name": "Salmon fillet",
+        "category": "meat",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 5,
+        "unit_type": "weight",
+        "default_unit": "g",
+    }
+
+    async def _stock(self, client: AsyncClient, product_id: str) -> dict:
+        response = await client.post(
+            "/api/inventory",
+            json={
+                "product_master_id": product_id,
+                "initial_quantity": 400,
+                "current_quantity": 400,
+                "unit": "g",
+                "purchase_date": "2026-09-01",
+                "expiry_date": "2026-09-06",
+                "expiry_source": "calculated",
+                "location": "main_fridge",
+            },
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    async def test_a_placeholder_follows_the_new_category(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        assert product["shelf_life_source"] == "category"
+
+        moved = (
+            await client.patch(
+                f"/api/products/{product['id']}", json={"category": "fish"}
+            )
+        ).json()
+
+        assert moved["category"] == "fish"
+        assert moved["default_shelf_life_days"] == 3
+        assert moved["shelf_life_source"] == "category"
+
+    async def test_the_stock_it_dated_moves_too(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+
+        await client.patch(f"/api/products/{product['id']}", json={"category": "fish"})
+
+        after = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert after["expiry_date"] == "2026-09-04"
+
+    async def test_a_shelf_life_the_cook_typed_stays(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        await client.patch(
+            f"/api/products/{product['id']}", json={"default_shelf_life_days": 10}
+        )
+
+        moved = (
+            await client.patch(
+                f"/api/products/{product['id']}", json={"category": "fish"}
+            )
+        ).json()
+
+        assert moved["default_shelf_life_days"] == 10
+        assert moved["shelf_life_source"] == "cook"
+
+    async def test_a_shelf_life_sent_with_the_category_wins(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        moved = (
+            await client.patch(
+                f"/api/products/{product['id']}",
+                json={"category": "fish", "default_shelf_life_days": 2},
+            )
+        ).json()
+
+        assert moved["default_shelf_life_days"] == 2
+        assert moved["shelf_life_source"] == "cook"
+
+    async def test_storage_follows_the_category(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """For stock added later; what is in the kitchen already stays where it is."""
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        item = await self._stock(client, product["id"])
+
+        moved = (
+            await client.patch(
+                f"/api/products/{product['id']}", json={"category": "pantry"}
+            )
+        ).json()
+
+        assert moved["storage_type"] == "pantry"
+        after = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert after["location"] == "main_fridge"
+
+    async def test_an_unknown_category_is_refused(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"category": "nonsense"}
+        )
+
+        assert response.status_code in (400, 409)
+
+
+class TestRenameKeepsNames:
+    """H52: a rename used to leave `product_name` behind - the old canonical row stayed
+    canonical (and so unremovable) and the new name had no row at all."""
+
+    PRODUCT = {
+        "canonical_name": "Taco sauce",
+        "category": "condiments",
+        "storage_type": "pantry",
+        "default_shelf_life_days": 180,
+        "unit_type": "weight",
+        "default_unit": "g",
+    }
+
+    async def _names(self, client: AsyncClient, product_id: str) -> dict[str, str]:
+        response = await client.get(f"/api/products/{product_id}/names")
+        assert response.status_code == 200, response.text
+        return {row["name"]: row["source"] for row in response.json()["names"]}
+
+    async def test_the_new_name_is_canonical_and_the_old_one_the_cooks(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        await client.patch(
+            f"/api/products/{product['id']}", json={"canonical_name": "Salsa"}
+        )
+
+        assert await self._names(client, product["id"]) == {
+            "salsa": "canonical",
+            "taco sauce": "cook",
+        }
+
+    async def test_both_names_still_find_it(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        from app.services.product_names import known_names
+
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        await client.patch(
+            f"/api/products/{product['id']}", json={"canonical_name": "Salsa"}
+        )
+
+        found = await known_names(seeded_db, ["Salsa", "Taco sauce"])
+
+        assert {str(k.product.id) for k in found.values()} == {product["id"]}
+
+    async def test_a_name_another_product_owns_stays_theirs(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """First claim wins; the canonical-name fallback still finds the renamed one."""
+        from app.models.product_name import ProductName
+        from app.services.product_names import product_for_name
+
+        other = (
+            await client.post(
+                "/api/products", json={**self.PRODUCT, "canonical_name": "Ketchup"}
+            )
+        ).json()
+        seeded_db.add(
+            ProductName(
+                product_master_id=UUID(other["id"]), name="salsa", source="cook"
+            )
+        )
+        await seeded_db.commit()
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"canonical_name": "Salsa"}
+        )
+
+        assert response.status_code == 200
+        assert "salsa" not in await self._names(client, product["id"])
+        assert str((await product_for_name(seeded_db, "Salsa")).id) == other["id"]
+
+    async def test_renaming_back_makes_the_old_name_canonical_again(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        await client.patch(
+            f"/api/products/{product['id']}", json={"canonical_name": "Salsa"}
+        )
+        await client.patch(
+            f"/api/products/{product['id']}", json={"canonical_name": "Taco sauce"}
+        )
+
+        assert await self._names(client, product["id"]) == {
+            "taco sauce": "canonical",
+            "salsa": "cook",
+        }
+
+    async def test_renaming_to_the_same_name_changes_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+
+        await client.patch(
+            f"/api/products/{product['id']}", json={"canonical_name": "Taco sauce"}
+        )
+
+        assert await self._names(client, product["id"]) == {"taco sauce": "canonical"}
+
+
+class TestProductNames:
+    """H52: the names a product answers to, and the cook's way to take one back.
+
+    Q13 wrote "ketchup" as a key for Taco sauce; H51 stopped new ones being trusted, and
+    this is the cleanup for the keys already written.
+    """
+
+    PRODUCT = {
+        "canonical_name": "Taco sauce",
+        "category": "condiments",
+        "storage_type": "pantry",
+        "default_shelf_life_days": 180,
+        "unit_type": "weight",
+        "default_unit": "g",
+    }
+
+    async def _product(self, client: AsyncClient, **overrides) -> dict:
+        response = await client.post(
+            "/api/products", json={**self.PRODUCT, **overrides}
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    async def _learn(
+        self, db: AsyncSession, product_id: str, name: str, source: str
+    ) -> None:
+        from app.models.product_name import ProductName
+
+        db.add(
+            ProductName(product_master_id=UUID(product_id), name=name, source=source)
+        )
+        await db.commit()
+
+    async def _alias(
+        self, db: AsyncSession, product_id: str, printed: str, **fields
+    ) -> None:
+        db.add(
+            StoreProductAlias(
+                id=uuid4(),
+                product_master_id=UUID(product_id),
+                store_chain="s-market",
+                receipt_name=printed,
+                **fields,
+            )
+        )
+        await db.commit()
+
+    async def test_lists_learned_and_printed_names_with_their_source(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await self._product(client)
+        await self._learn(seeded_db, product["id"], "ketchup", "model")
+        await self._learn(seeded_db, product["id"], "tacokastike", "cook")
+        await self._alias(
+            seeded_db,
+            product["id"],
+            "PIRKKA TACOKASTIKE",
+            source="model",
+            manually_verified=False,
+        )
+
+        response = await client.get(f"/api/products/{product['id']}/names")
+
+        assert response.status_code == 200
+        body = response.json()
+        names = {row["name"]: row for row in body["names"]}
+        assert names["taco sauce"]["source"] == "canonical"
+        assert names["taco sauce"]["removable"] is False
+        assert names["ketchup"]["source"] == "model"
+        assert names["ketchup"]["removable"] is True
+        assert names["tacokastike"]["source"] == "cook"
+        [printed] = body["printed"]
+        assert printed["receipt_name"] == "PIRKKA TACOKASTIKE"
+        assert printed["store_chain"] == "s-market"
+        assert printed["source"] == "model"
+        assert printed["verified"] is False
+
+    async def test_an_unknown_product_is_404(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        response = await client.get(f"/api/products/{uuid4()}/names")
+
+        assert response.status_code == 404
+
+    async def test_removing_a_learned_name_stops_it_resolving(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """The reported pair: "ketchup" must stop meaning Taco sauce."""
+        from app.services.product_names import known_names
+
+        product = await self._product(client)
+        await self._learn(seeded_db, product["id"], "ketchup", "model")
+        listed = (await client.get(f"/api/products/{product['id']}/names")).json()
+        ketchup = next(row for row in listed["names"] if row["name"] == "ketchup")
+
+        response = await client.delete(
+            f"/api/products/{product['id']}/names/{ketchup['id']}"
+        )
+
+        assert response.status_code == 204
+        assert await known_names(seeded_db, ["ketchup"]) == {}
+
+    async def test_the_canonical_name_cannot_be_removed(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """Rename the product instead; without it the product has no key at all."""
+        product = await self._product(client)
+        listed = (await client.get(f"/api/products/{product['id']}/names")).json()
+        [canonical] = listed["names"]
+
+        response = await client.delete(
+            f"/api/products/{product['id']}/names/{canonical['id']}"
+        )
+
+        assert response.status_code == 409
+        after = (await client.get(f"/api/products/{product['id']}/names")).json()
+        assert [row["name"] for row in after["names"]] == ["taco sauce"]
+
+    async def test_a_name_of_another_product_is_404(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await self._product(client)
+        other = await self._product(client, canonical_name="Ketchup")
+        await self._learn(seeded_db, other["id"], "tomato ketchup", "cook")
+        listed = (await client.get(f"/api/products/{other['id']}/names")).json()
+        theirs = next(row for row in listed["names"] if row["name"] == "tomato ketchup")
+
+        response = await client.delete(
+            f"/api/products/{product['id']}/names/{theirs['id']}"
+        )
+
+        assert response.status_code == 404
+
+    async def test_removing_a_printed_name_forgets_the_alias(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await self._product(client)
+        await self._alias(seeded_db, product["id"], "PIRKKA KETCHUP", source="model")
+        listed = (await client.get(f"/api/products/{product['id']}/names")).json()
+        [printed] = listed["printed"]
+
+        response = await client.delete(
+            f"/api/products/{product['id']}/aliases/{printed['id']}"
+        )
+
+        assert response.status_code == 204
+        after = (await client.get(f"/api/products/{product['id']}/names")).json()
+        assert after["printed"] == []
+
+    async def test_a_printed_name_of_another_product_is_404(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await self._product(client)
+        other = await self._product(client, canonical_name="Ketchup")
+        await self._alias(seeded_db, other["id"], "PIRKKA KETCHUP")
+        listed = (await client.get(f"/api/products/{other['id']}/names")).json()
+        [theirs] = listed["printed"]
+
+        response = await client.delete(
+            f"/api/products/{product['id']}/aliases/{theirs['id']}"
+        )
+
+        assert response.status_code == 404

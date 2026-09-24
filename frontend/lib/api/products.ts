@@ -4,6 +4,7 @@ import type {
   ProductListParams,
   ProductMaster,
   ProductMasterUpdate,
+  ProductNames,
 } from '@/types/product'
 
 export async function list(params?: ProductListParams): Promise<ProductMaster[]> {
@@ -41,5 +42,20 @@ export async function estimate(apply = false): Promise<CatalogEstimateResponse> 
   )
 }
 
-const productsAPI = { list, get, update, estimate }
+/** The names and printed receipt names that resolve to a product (H52). */
+export async function names(id: string): Promise<ProductNames> {
+  return apiClient.get<ProductNames>(`/products/${id}/names`)
+}
+
+/** Stop a learned name meaning this product. The canonical name answers 409. */
+export async function forgetName(id: string, nameId: string): Promise<void> {
+  return apiClient.delete<void>(`/products/${id}/names/${nameId}`)
+}
+
+/** Stop a printed receipt name resolving to this product. */
+export async function forgetPrintedName(id: string, aliasId: string): Promise<void> {
+  return apiClient.delete<void>(`/products/${id}/aliases/${aliasId}`)
+}
+
+const productsAPI = { list, get, update, estimate, names, forgetName, forgetPrintedName }
 export default productsAPI
