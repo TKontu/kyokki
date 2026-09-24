@@ -128,6 +128,11 @@ class _Confirmation:
                 pack_grams=line.get("pack_grams"),
                 shelf_life_days=line.get("shelf_life_days"),
                 opened_shelf_life_days=line.get("opened_shelf_life_days"),
+                # A name without a product id is the cook's own word ("New product:
+                # Ketchup"), and it must not resolve to the product a model once
+                # guessed for that word (H51). With a product id the name is the
+                # model's generic and its synonyms are welcome.
+                trust_model_names=item.product_id is not None,
             )
         except InvalidProductRequest as exc:
             raise InvalidConfirmItem(f"Item {position}: {exc}") from exc
@@ -136,7 +141,20 @@ class _Confirmation:
         return product
 
     @staticmethod
-    def _provenance(line: dict[str, Any], product: ProductMaster) -> tuple[str, bool]:
+    def _resolution(line: dict[str, Any]) -> dict[str, Any]:
+        resolution = line.get("resolution")
+        return resolution if isinstance(resolution, dict) else {}
+
+    @classmethod
+    def _kept(cls, line: dict[str, Any], product: ProductMaster) -> bool:
+        """Whether the cook ended up with the product the line proposed."""
+        proposed = cls._resolution(line).get("product_id")
+        return proposed is not None and str(proposed) == str(product.id)
+
+    @classmethod
+    def _provenance(
+        cls, line: dict[str, Any], product: ProductMaster
+    ) -> tuple[str, bool]:
         """How the cook's choice relates to what was proposed (spec §3.4).
 
         Returns the alias `source` and whether it is verified memory. The whole point
@@ -144,19 +162,16 @@ class _Confirmation:
         line, so a guess the cook merely did not notice became a key that won outright
         for every later receipt from that chain.
         """
-        resolution = line.get("resolution")
-        resolution = resolution if isinstance(resolution, dict) else {}
-        proposed = resolution.get("product_id")
-        kept = proposed is not None and str(proposed) == str(product.id)
-
-        if not kept:
+        if not cls._kept(line, product):
             # Changed, attached or detached: the cook's own word either way.
             return "cook", True
 
+        resolution = cls._resolution(line)
         source = str(resolution.get("source") or "")
         if source == "name":
-            # A catalog name matched. A key, not a judgement, but a reliable one.
-            return "name", True
+            # A catalog name matched. A key, not a judgement - but only as reliable as
+            # the name: a synonym the model taught resolved unverified (H51).
+            return "name", bool(resolution.get("verified"))
         if source == "alias":
             return str(resolution.get("alias_source") or "cook"), bool(
                 resolution.get("verified")
@@ -171,12 +186,18 @@ class _Confirmation:
 
         It is what makes "Minced beef" hit "Ground beef" next week without the
         extraction prompt carrying the catalog.
+
+        The name is the cook's word only when the cook acted on this line: changed the
+        product, or typed the name. Keeping what was proposed - an alias, a name hit, a
+        selection - says nothing about the model's generic name for the line, so that is
+        learned as the model's (H51). A cook-verified alias for TUMMA RYPÄLE says the
+        line is Grape; it does not make "Raisin" the cook's word for it.
         """
-        source, _ = self._provenance(line, product)
+        cook_acted = not self._kept(line, product) or item.name is not None
         learned = item.name or line.get("generic_name")
         if learned:
             await learn_product_name(
-                self.db, product, learned, "cook" if source == "cook" else "model"
+                self.db, product, learned, "cook" if cook_acted else "model"
             )
 
     async def learn_alias(self, line: dict[str, Any], product: ProductMaster) -> None:

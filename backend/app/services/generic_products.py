@@ -90,8 +90,14 @@ class ProductResolver:
         pack_grams: float | None = None,
         shelf_life_days: int | None = None,
         opened_shelf_life_days: int | None = None,
+        trust_model_names: bool = True,
     ) -> tuple[ProductMaster, bool]:
         """Return ``(product, created)``.
+
+        ``trust_model_names=False`` makes a typed name skip synonyms the model taught
+        (H51): the cook naming a product has refused whatever was proposed for the line.
+        The per-transaction cache is keyed by name alone, so two lines typed with the
+        same name on one receipt share the first outcome; harmless, and rare.
 
         Raises:
             InvalidProductRequest: unknown ``product_id``, no name, or a new product without a
@@ -130,7 +136,7 @@ class ProductResolver:
 
         # Any known name, not just the canonical one: "Minced beef" finds Ground beef
         # once a confirm has learned the synonym (spec §3.1).
-        existing = await product_for_name(self.db, tidy)
+        existing = await product_for_name(self.db, tidy, trust_model=trust_model_names)
         if existing is not None:
             self._by_name[key] = existing
             return (

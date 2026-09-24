@@ -13,9 +13,20 @@ from app.models.category import Category
 from app.models.inventory_item import InventoryItem
 from app.models.non_food_name import NonFoodName
 from app.models.product_master import ProductMaster
+from app.models.product_name import ProductName
 from app.models.receipt import Receipt
 from app.models.store_product_alias import StoreProductAlias
 from app.schemas.receipt import ConfirmedItemCreate, ReceiptStatus
+from app.services.product_names import (
+    learn_product_name,
+    normalize_product_name,
+    product_for_name,
+)
+from app.services.product_resolution import (
+    ProductResolution,
+    Resolution,
+    ResolvableLine,
+)
 from app.services.receipt_confirm import (
     InvalidConfirmItem,
     ReceiptNotConfirmable,
@@ -61,7 +72,15 @@ def broadcasts():
 @pytest.fixture
 async def categories(db_session: AsyncSession) -> None:
     for order, (category_id, days) in enumerate(
-        [("dairy", 7), ("meat", 3), ("frozen", 180), ("bread", 5)]
+        [
+            ("dairy", 7),
+            ("meat", 3),
+            ("frozen", 180),
+            ("bread", 5),
+            ("condiments", 180),
+            ("fruits", 7),
+            ("beverages", 30),
+        ]
     ):
         db_session.add(
             Category(
@@ -646,3 +665,298 @@ class TestLearningProvenance:
         assert (
             await db_session.execute(select(StoreProductAlias))
         ).scalars().all() == []
+
+
+# The pairs the operator reported on 2026-09-24 (Q13), as (printed, generic, the product the
+# model guessed, the product the cook meant). `right` is never named exactly like the
+# generic, so a model row for the generic can exist before the cook's correction.
+REPORTED_PAIRS = [
+    ("HEINZ KETCHUP", "Ketchup", "Taco sauce", "Tomato ketchup", "condiments"),
+    ("MELONI", "Melon", "Mango", "Honeydew", "fruits"),
+    ("PÄÄRYNÄMEHU", "Pear juice", "Orange juice", "Juice", "beverages"),
+    ("TACO SHELLS", "Taco shells", "Taco sauce", "Tortilla", "condiments"),
+]
+
+
+async def _product(db: AsyncSession, name: str, category: str) -> ProductMaster:
+    """A product that owns its canonical name, the way confirm and POST create them.
+
+    The `milk` fixture writes no `product_name` row on purpose (it predates H11); these
+    tests are about name rows, so they need products that have one.
+    """
+    product = ProductMaster(
+        id=uuid4(),
+        canonical_name=name,
+        category=category,
+        storage_type="pantry",
+        default_shelf_life_days=30,
+        unit_type="count",
+        default_unit="pcs",
+    )
+    db.add(product)
+    await db.flush()
+    await learn_product_name(db, product, name, "canonical")
+    await db.commit()
+    return product
+
+
+async def _receipt_with(
+    db: AsyncSession,
+    printed: str,
+    generic: str,
+    category: str,
+    resolution: dict,
+    chain: str = "s-group",
+) -> Receipt:
+    """A completed receipt with one readable line carrying the given resolution."""
+    receipt = Receipt(
+        id=uuid4(),
+        image_path=f"data/receipts/{uuid4()}.pdf",
+        store_chain=chain,
+        purchase_date=PURCHASED,
+        processing_status=ReceiptStatus.COMPLETED,
+        ocr_structured={
+            "method": "text",
+            "lines": [
+                {
+                    "name": printed,
+                    "generic_name": generic,
+                    "category": category,
+                    "resolution": resolution,
+                }
+            ],
+        },
+        items_extracted=1,
+        items_matched=0,
+    )
+    db.add(receipt)
+    await db.commit()
+    return receipt
+
+
+async def _name_row(db: AsyncSession, name: str) -> ProductName | None:
+    return (
+        (
+            await db.execute(
+                select(ProductName).where(
+                    ProductName.name == normalize_product_name(name)
+                )
+            )
+        )
+        .scalars()
+        .one_or_none()
+    )
+
+
+async def _alias_for(db: AsyncSession, printed: str) -> StoreProductAlias:
+    return (
+        (
+            await db.execute(
+                select(StoreProductAlias).where(
+                    StoreProductAlias.receipt_name == printed
+                )
+            )
+        )
+        .scalars()
+        .one()
+    )
+
+
+async def _resolve_again(
+    db: AsyncSession, printed: str, generic: str, category: str
+) -> Resolution:
+    """What the next receipt sees for the same generic name under a *different* printed
+    name and chain: the alias confirm just wrote must not be what answers."""
+    line = ResolvableLine(
+        line_id="next", printed=f"{printed} 2", generic=generic, category=category
+    )
+    resolved = await ProductResolution(db).resolve([line], chain="k-group")
+    return resolved["next"]
+
+
+def _selected(product: ProductMaster) -> dict:
+    return {
+        "product_id": str(product.id),
+        "source": "selected",
+        "verified": False,
+        "candidates": [],
+    }
+
+
+class TestModelGuessesDoNotBecomeKeys:
+    """Q13 (H51): a model selection the cook did not contradict is remembered, but it is
+    never the cook's word. It resolves as "auto", and the cook's next correction moves it.
+
+    Before this, `learn_names` wrote the generic name as a synonym of whatever product was
+    kept, tier 4 called every synonym verified, and the first claim won for ever: once
+    "ketchup" meant Taco sauce, every later ketchup line was Taco sauce, shown as "known".
+    """
+
+    @pytest.mark.parametrize(
+        ("printed", "generic", "wrong", "right", "category"), REPORTED_PAIRS
+    )
+    async def test_a_kept_selection_is_learned_but_resolves_unverified(
+        self,
+        db_session: AsyncSession,
+        categories,
+        printed,
+        generic,
+        wrong,
+        right,
+        category,
+    ):
+        guessed = await _product(db_session, wrong, category)
+        receipt = await _receipt_with(
+            db_session, printed, generic, category, _selected(guessed)
+        )
+
+        await confirm_receipt(
+            db_session, receipt.id, [_item(index=0, product_id=guessed.id)], []
+        )
+
+        row = await _name_row(db_session, generic)
+        assert row is not None
+        assert (row.product_master_id, row.source) == (guessed.id, "model")
+
+        again = await _resolve_again(db_session, printed, generic, category)
+        assert again.product is not None and again.product.id == guessed.id
+        assert (again.source, again.verified) == ("name", False)
+
+    @pytest.mark.parametrize(
+        ("printed", "generic", "wrong", "right", "category"), REPORTED_PAIRS
+    )
+    async def test_changing_the_product_re_points_the_model_name(
+        self,
+        db_session: AsyncSession,
+        categories,
+        printed,
+        generic,
+        wrong,
+        right,
+        category,
+    ):
+        """The reported case: the cook corrected it once and it kept coming back."""
+        guessed = await _product(db_session, wrong, category)
+        meant = await _product(db_session, right, category)
+        await learn_product_name(db_session, guessed, generic, "model")
+        await db_session.commit()
+        receipt = await _receipt_with(
+            db_session, printed, generic, category, _selected(guessed)
+        )
+
+        await confirm_receipt(
+            db_session, receipt.id, [_item(index=0, product_id=meant.id)], []
+        )
+
+        row = await _name_row(db_session, generic)
+        assert row is not None
+        assert (row.product_master_id, row.source) == (meant.id, "cook")
+
+        again = await _resolve_again(db_session, printed, generic, category)
+        assert again.product is not None and again.product.id == meant.id
+        assert (again.source, again.verified) == ("name", True)
+
+    async def test_a_new_product_named_like_a_model_synonym_escapes_it(
+        self, db_session: AsyncSession, categories
+    ):
+        """ "New product: Ketchup" on the review screen sends a name and no product id.
+        That must create Ketchup, not hand back the Taco sauce a model once guessed for
+        the word, and the new product must own its name."""
+        guessed = await _product(db_session, "Taco sauce", "condiments")
+        await learn_product_name(db_session, guessed, "Ketchup", "model")
+        await db_session.commit()
+        receipt = await _receipt_with(
+            db_session, "HEINZ KETCHUP", "Ketchup", "condiments", _selected(guessed)
+        )
+
+        result = await confirm_receipt(
+            db_session,
+            receipt.id,
+            [_item(index=0, name="Ketchup", category="condiments")],
+            [],
+        )
+
+        assert result.products_created == 1
+        created = await product_for_name(db_session, "Ketchup")
+        assert created is not None and created.id != guessed.id
+        assert created.canonical_name == "Ketchup"
+        row = await _name_row(db_session, "Ketchup")
+        assert row is not None
+        assert (row.product_master_id, row.source) == (created.id, "canonical")
+        alias = await _alias_for(db_session, "HEINZ KETCHUP")
+        assert (alias.product_master_id, alias.source) == (created.id, "cook")
+
+    async def test_a_cook_claim_is_not_re_pointed_by_a_kept_selection(
+        self, db_session: AsyncSession, categories
+    ):
+        guessed = await _product(db_session, "Taco sauce", "condiments")
+        meant = await _product(db_session, "Tomato ketchup", "condiments")
+        await learn_product_name(db_session, meant, "Ketchup", "cook")
+        await db_session.commit()
+        receipt = await _receipt_with(
+            db_session, "HEINZ KETCHUP", "Ketchup", "condiments", _selected(guessed)
+        )
+
+        await confirm_receipt(
+            db_session, receipt.id, [_item(index=0, product_id=guessed.id)], []
+        )
+
+        row = await _name_row(db_session, "Ketchup")
+        assert row is not None
+        assert (row.product_master_id, row.source) == (meant.id, "cook")
+
+    async def test_a_kept_cook_alias_learns_the_generic_name_as_the_models(
+        self, db_session: AsyncSession, categories
+    ):
+        """TUMMA RYPÄLE -> Grape is the cook's alias; "Raisin" is what the model called
+        the line. Keeping the alias says nothing about the model's word."""
+        grape = await _product(db_session, "Grape", "fruits")
+        receipt = await _receipt_with(
+            db_session,
+            "TUMMA RYPÄLE 500G",
+            "Raisin",
+            "fruits",
+            {
+                "product_id": str(grape.id),
+                "source": "alias",
+                "alias_source": "cook",
+                "verified": True,
+                "candidates": [],
+            },
+        )
+
+        await confirm_receipt(
+            db_session, receipt.id, [_item(index=0, product_id=grape.id)], []
+        )
+
+        row = await _name_row(db_session, "Raisin")
+        assert row is not None
+        assert (row.product_master_id, row.source) == (grape.id, "model")
+        alias = await _alias_for(db_session, "TUMMA RYPÄLE 500G")
+        assert (alias.source, alias.manually_verified) == ("cook", True)
+
+    async def test_a_kept_unverified_name_hit_writes_an_unverified_alias(
+        self, db_session: AsyncSession, categories
+    ):
+        """The twin of `test_keeping_a_name_result_is_a_verified_key`: a name hit
+        through a model synonym is "auto", and keeping it does not make it "known"."""
+        guessed = await _product(db_session, "Taco sauce", "condiments")
+        receipt = await _receipt_with(
+            db_session,
+            "HEINZ KETCHUP",
+            "Ketchup",
+            "condiments",
+            {
+                "product_id": str(guessed.id),
+                "source": "name",
+                "verified": False,
+                "candidates": [],
+            },
+        )
+
+        await confirm_receipt(
+            db_session, receipt.id, [_item(index=0, product_id=guessed.id)], []
+        )
+
+        alias = await _alias_for(db_session, "HEINZ KETCHUP")
+        assert (alias.source, alias.manually_verified) == ("name", False)

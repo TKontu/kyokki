@@ -341,6 +341,9 @@ class TestCollidingRows:
         )
         assert len(rows) == 1
         assert str(rows[0].product_master_id) == target["id"]
+        # The merge is the cook's act, so the target's model guess for the name
+        # becomes the cook's word - upgraded in place, not duplicated (H51).
+        assert rows[0].source == "cook"
         resolved = await product_for_name(seeded_db, "Minced Beef")
         assert resolved is not None and str(resolved.id) == target["id"]
 

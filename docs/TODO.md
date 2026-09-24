@@ -833,6 +833,23 @@ starts after H2, because it needs the status machine, the vocabularies and the a
 | H46 | backend | **A consumption history that can be read back.** Event vocabulary (consume, correct, discard, restore), `consumed_at` written, corrections logged, `meal_contexts` wired or dropped; prerequisite for post-MVP item 8 | 3h | F2 misjudgement 8 (log), F2 Minor (dead fields) |
 | H47 | backend | **Telegram hygiene.** Exit non-zero on the 409 conflict from a second instance, `failure_text` without gateway internals, a separate dev token documented | 1h | F2 Important (two instances), F2 Minor (failure text) |
 
+#### Wave H5 — data quality: what the first four receipts got wrong (operator report 2026-09-24)
+
+Ordered by how far each is from the kitchen: H56 needs no code and fixes most of the catalog
+today; H51 stops the matcher memorising its own mistakes; the rest follow. Findings under
+"Operator friction log — matching, categories and shelf lives after four receipts".
+
+| ID | Side | Increment | Est. | Closes |
+| --- | --- | --- | --- | --- |
+| H56 | operator | **Run the estimate.** Products → *Estimate the guesses*, dry run, then apply. On the homelab 54 of 65 products still carry their category's placeholder and 60 have no opened shelf life; the route exists since Q11 and has never been applied | 10 min | Q15 |
+| H51 | backend | **A model guess never becomes a key.** ✅ A kept selection is still learned as a `model` synonym (operator ruling 2026-09-24: learn, do not silence), but tier 4 resolves a `model` row `verified = False` (the "auto" chip); the generic name is the cook's word only when the cook changed the product or typed the name; a `cook` or `canonical` claim re-points a `model` row (the cook's correction, or creating the product by that name, moves the key); "New product: <name>" looks the name up without model synonyms; the four reported pairs as confirm-then-resolve tests. No migration | 2h | Q13 |
+| H52 | both | **The product is re-configurable** (operator ask 2026-09-24: category, shelf life, frozen life, matching names). The editor gains a category picker (`ChoiceGroup` over `useCategories`, PATCH already accepts it); **frozen life per product, falling back to the category** (nullable `product_master.frozen_shelf_life_days` + migration, `_start_frozen_clock` prefers it, field in schema, type and sheet); `GET /products/{id}/names` listing learned names and printed receipt names with their source, `DELETE` for either, listed in the sheet with a remove control, canonical rows not removable. The cleanup path for keys already written | 5h | Q13, issue 3 |
+| H53 | backend | **A shortlist that contains the answer.** The same-category fill in `TrigramRetriever` ranks by trigram over the whole category instead of taking the first five names alphabetically (a fruits line sees Apple, Banana, Grape, Kiwi, Lime and never Melon); an exact word hit on a canonical name is always offered; the selection prompt carries a null example; the reported pairs pinned as a fixture, deterministic parts unit-tested, the model part behind `requires_vllm` | 3h | Q14 |
+| H54 | pipeline | **A Finnish glossary for extraction.** A short list of terms the model misreads (rypäle = grape, not raisin; tikkuperunat = french fries, not potato; mehu = juice; riisipiirakka = Karelian pasty; valmisruoka / ateria = ready meal) in `_INSTRUCTIONS`, measured on the 49-line fixture before and after: two prompt edits have silently killed the shelf-life estimates (Q7, Q8), so the fixture run is the merge gate | 2h | Q14 |
+| H55 | backend | **A `ready_meals` category** (issue 2). Seed row (fridge, 4 days, frozen 90), `CATEGORY_STORAGE`, `PLAUSIBLE_DAYS`, the OFF mapping, `test_seed_categories`. Seed-only per DEC-9; `kyokki-migrate` reseeds on every deploy, so it ships itself and the extraction prompt offers it at once. The one existing ready meal (fish soup, filed under frozen) is moved by hand | 1h | issue 2 |
+| H57 | backend | **Placeholders that are not wrong.** Seed defaults revisited per category (today carrot and potato inherit 5 days, tea 30, tortilla 5, egg 7); a migration updates category rows still at the old value and leaves edited ones alone; products already created keep theirs, which is what H56 is for | 1h | Q15 |
+| H58 | frontend | **A shelf-life audit view.** Products sorted by provenance, values at the edge of their category band flagged, so a wrong estimate is caught on the iPad rather than in a spreadsheet | 2h | Q15 |
+
 Report keys: Processing = `pipeline-receipt-processing.md`, Confirm = `pipeline-receipt-confirm.md`,
 F1 = `pipeline-foundations.md`, F2 = `pipeline-foundations-2.md`, F3 = `pipeline-foundations-3.md`.
 
@@ -1480,6 +1497,69 @@ while somebody consumed 250 dl sent the old quantity too - putting the helping b
 - [ ] **Still live-vs-snapshot elsewhere:** the receipt review rows. They are rebuilt from the
   receipt on every refetch, but nothing there is editable while a request is in flight, so no
   cook has lost work to it yet.
+
+#### Operator friction log — matching, categories and shelf lives after four receipts (2026-09-24)
+
+Reported from the iPad after the redeploy of #84, with the homelab catalog at 65 products and
+four confirmed receipts. Three issues; the code says why each happens.
+
+**1. Category and product matching.** Reported pairs: ketchup → taco sauce, melon → mango,
+päärynämehu → orange juice, taco shells → taco sauce, plus Finnish terms read wrongly. All four
+pairs come out of the selection step in `product_resolution.py`, and two defects make them stick.
+
+- **Q13 — a model guess becomes a permanent key.** On confirm, `learn_names` records the line's
+  generic name as a `product_name` row for whatever product was kept, including a product the
+  model *selected* and the cook did not notice. Once "ketchup" is a name for Taco sauce, tier 4
+  resolves every later ketchup line to Taco sauce as `verified = True`: no model call, no
+  "auto" chip, and the first claim wins for ever. Nothing in the API or the editor shows a
+  learned name, and only a merge removes one. H14 stopped the *alias* being marked verified for
+  a guess; the *name* path kept the hole.
+- **Q14 — the shortlist is blind.** When trigram finds nothing, `TrigramRetriever` fills the
+  five slots with the category's products ordered by name, so a fruits line is offered Apple,
+  Banana, Grape, Kiwi, Lime and never Melon or Mango; trigram also rates "taco shells" close
+  to "taco sauce". The selection prompt asks a small local model to pick or say null with no
+  example of null. Extraction adds its own share: TUMMA RYPÄLE became Raisin, TIKKUPERUNAT
+  became Potato, MONIVITAMIINI (a juice) became Multivitamin. Alias learning heals those per
+  printed name once the cook corrects them, but only if the cook notices.
+
+**2. No category for ready meals.** The one on the homelab ("Ready meal: fish soup") sits in
+`frozen`. Categories are seed-only (DEC-9), the migrate job reseeds on every deploy, the
+frontend hardcodes no category ids, and the extraction prompt lists categories from the
+database, so a new row is a small change in four backend places.
+
+**3. Shelf lives.** Not untagged: unrun.
+
+- **Q15 — placeholders nobody ever replaced.** 54 of 65 products carry `shelf_life_source =
+  category` and 60 have no opened shelf life. The *Estimate the guesses* action on the products
+  page (Q11) is a dry run plus apply that touches only placeholders, inside per-category
+  plausibility bands, and re-dates stock (Q12). It has not been applied on the homelab. The
+  placeholders themselves are poor for common cases: carrot and potato at 5 days, tea at 30,
+  tortilla at 5, egg at 7. Provenance is shown on the products page as "estimated" / guess.
+  "Inconsistent formats" could not be reproduced from the API (whole days, three source values);
+  a screenshot would pin it down.
+
+Increments: wave H5 above (H51-H58). Order: H56 (operator, no code), H51, H52, H55, H53, H54,
+H57, H58.
+
+**Operator rulings, 2026-09-24 (planning H51):** a kept selection is *learned*, as the
+model's word, rather than not learned - it pre-fills as "auto" and the cook's next correction
+moves it; the product itself must stay re-configurable by the cook (category, shelf life,
+frozen life, matching names), which is H52 as widened above; frozen life lives per product
+with the category as fallback.
+
+##### Q13 as built (H51)
+- [x] `known_names` returns the row's source; tier 4 is `verified = source != "model"`.
+- [x] `learn_names` calls the generic name the cook's only when the cook changed the product
+  or typed the name; keeping an alias, a name hit or a selection learns it as `model`.
+- [x] `learn_product_name` re-points a `model` row to a `cook` or `canonical` claim (and
+  upgrades a product's own `model` row to `cook` in place); `cook` and `canonical` claims
+  still win first.
+- [x] `product_for_name(trust_model=False)` for a typed name with no product id, so "New
+  product: Ketchup" creates Ketchup instead of resolving to what a model guessed for the word.
+- [x] No frontend change: `ProvenanceChip` keys on `verified`, so a model synonym already
+  reads "auto".
+- [ ] Quick add still resolves a typed name through a model synonym; H52 gives the cook the
+  remove control.
 
 ---
 

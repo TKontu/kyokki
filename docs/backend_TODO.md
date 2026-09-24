@@ -15,6 +15,7 @@ removed in MVP-F2.
 > | H2 | H21-H24, H26-H28 | `Mapped[]` models and a real type gate, delete semantics per FK, one status machine with row locks, closed vocabularies, an honest model boundary, a structural heuristic parser, client-owned dates |
 > | H3 | H31, H32, H34, H35 | shared secret header and WebSocket origin (DEC-5), lock file and audits, bounded work per receipt, retention and backup (DEC-8) |
 > | H4 | H41, H42, H46, H47 | scanner quarantine or repair (DEC-7), concurrency tests, a readable consumption log, Telegram hygiene |
+> | H5 | H51-H55, H57 | data quality (operator report 2026-09-24): no learning from an unverified selection, learned names listed and removable, a shortlist ranked over the whole category, a Finnish glossary measured on the fixture, a `ready_meals` category, seed shelf lives that are not wrong |
 
 ---
 

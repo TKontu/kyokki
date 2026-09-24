@@ -6,6 +6,8 @@ operations on it - look a name up, and learn a new one.
 """
 
 from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +19,19 @@ from app.models.product_name import ProductName
 logger = get_logger(__name__)
 
 
+@dataclass(frozen=True)
+class KnownName:
+    """A product a name means, and whose word that was (H51).
+
+    `source` is the `product_name` row's: `canonical` (the product's own name, or the
+    fallback for a product with no row), `cook`, or `model`. Resolution needs it because
+    a synonym the model taught pre-fills a row but is not the cook's word.
+    """
+
+    product: ProductMaster
+    source: str
+
+
 def normalize_product_name(name: str | None) -> str:
     """The lookup key: casefolded, whitespace collapsed.
 
@@ -26,28 +41,31 @@ def normalize_product_name(name: str | None) -> str:
     return " ".join((name or "").split()).casefold()
 
 
-async def product_for_name(db: AsyncSession, name: str | None) -> ProductMaster | None:
+async def product_for_name(
+    db: AsyncSession, name: str | None, *, trust_model: bool = True
+) -> ProductMaster | None:
     """The product this name means, or None. An exact key, never a score.
 
     Falls back to the canonical name itself for rows written without a `product_name`
     row - the backfill migration covers everything that existed, but the fallback keeps
     resolution correct for anything that slips past `learn_product_name` later.
+
+    `trust_model=False` ignores synonyms the model taught (H51): a cook who types
+    "Ketchup" as a new product has just refused the product a model once guessed for
+    that word, and must not be handed it again.
     """
     key = normalize_product_name(name)
     if not key:
         return None
 
-    by_key = (
-        (
-            await db.execute(
-                select(ProductMaster)
-                .join(ProductName, ProductName.product_master_id == ProductMaster.id)
-                .where(ProductName.name == key)
-            )
-        )
-        .scalars()
-        .first()
+    query = (
+        select(ProductMaster)
+        .join(ProductName, ProductName.product_master_id == ProductMaster.id)
+        .where(ProductName.name == key)
     )
+    if not trust_model:
+        query = query.where(ProductName.source != "model")
+    by_key = (await db.execute(query)).scalars().first()
     if by_key is not None:
         return by_key
 
@@ -65,10 +83,8 @@ async def product_for_name(db: AsyncSession, name: str | None) -> ProductMaster 
     )
 
 
-async def known_names(
-    db: AsyncSession, names: Iterable[str]
-) -> dict[str, ProductMaster]:
-    """Resolve many names at once, keyed by their normalised form.
+async def known_names(db: AsyncSession, names: Iterable[str]) -> dict[str, KnownName]:
+    """Resolve many names at once, keyed by their normalised form, with their source.
 
     One query for a whole receipt instead of one per line - the matcher this replaces
     loaded every product and every alias in the database for each receipt.
@@ -83,16 +99,16 @@ async def known_names(
     if not keys:
         return {}
 
-    found: dict[str, ProductMaster] = {}
+    found: dict[str, KnownName] = {}
     rows = (
         await db.execute(
-            select(ProductName.name, ProductMaster)
+            select(ProductName.name, ProductName.source, ProductMaster)
             .join(ProductMaster, ProductName.product_master_id == ProductMaster.id)
             .where(ProductName.name.in_(keys))
         )
     ).all()
-    for key, product in rows:
-        found[str(key)] = product
+    for key, source, product in rows:
+        found[str(key)] = KnownName(product=product, source=str(source))
 
     missing = keys - set(found)
     if missing:
@@ -107,7 +123,7 @@ async def known_names(
             )
         ).all()
         for key, product in canonical:
-            found.setdefault(str(key), product)
+            found.setdefault(str(key), KnownName(product=product, source="canonical"))
 
     return found
 
@@ -118,11 +134,18 @@ async def learn_product_name(
     name: str | None,
     source: str = "model",
 ) -> bool:
-    """Record that ``name`` means ``product``. Returns True when a row was added.
+    """Record that ``name`` means ``product``. Returns True when a row was added or
+    re-pointed.
 
-    A name already claimed by another product is left alone: the first claim wins, and
-    the cook resolves a genuine clash with a merge (spec §3.7). Re-learning a name the
-    product already has is a no-op, so confirm can call this unconditionally.
+    Among the cook's and canonical rows the first claim wins, and the cook resolves a
+    genuine clash with a merge (spec §3.7). A row the *model* taught is different (H51,
+    Q13): it was a guess the cook merely did not contradict, so a cook's word or a
+    product's own name for the same key displaces it - otherwise "ketchup", once guessed
+    for Taco sauce, stayed Taco sauce for ever, whatever the cook did afterwards.
+
+    Re-learning a name the product already has is a no-op, so confirm can call this
+    unconditionally; the one exception upgrades a model row to the cook's word in place,
+    which adds nothing and returns False (merge counts on that).
     """
     key = normalize_product_name(name)
     if not key:
@@ -134,15 +157,34 @@ async def learn_product_name(
         .first()
     )
     if existing is not None:
-        if existing.product_master_id != product.id:
+        row: Any = existing  # Column-typed model: assign plain values
+        if existing.product_master_id == product.id:
+            if str(existing.source) == "model" and source == "cook":
+                row.source = source
+                await db.flush()
+            return False
+        if str(existing.source) == "model" and source != "model":
             logger.info(
-                "Name already means another product; leaving it alone",
+                "Name re-pointed from a model guess",
                 extra={
                     "product_name": key,
-                    "claimed_by": str(existing.product_master_id),
-                    "offered": str(product.id),
+                    "was": str(existing.product_master_id),
+                    "now": str(product.id),
+                    "source": source,
                 },
             )
+            row.product_master_id = product.id
+            row.source = source
+            await db.flush()
+            return True
+        logger.info(
+            "Name already means another product; leaving it alone",
+            extra={
+                "product_name": key,
+                "claimed_by": str(existing.product_master_id),
+                "offered": str(product.id),
+            },
+        )
         return False
 
     db.add(ProductName(product_master_id=product.id, name=key, source=source))
