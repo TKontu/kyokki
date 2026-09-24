@@ -847,7 +847,7 @@ today; H51 stops the matcher memorising its own mistakes; the rest follow. Findi
 | --- | --- | --- | --- | --- |
 | H56 | operator | **Run the estimate.** Products → *Estimate the guesses*, dry run, then apply. On the homelab 54 of 65 products still carry their category's placeholder and 60 have no opened shelf life; the route exists since Q11 and has never been applied | 10 min | Q15 |
 | H51 | backend | **A model guess never becomes a key.** ✅ A kept selection is still learned as a `model` synonym (operator ruling 2026-09-24: learn, do not silence), but tier 4 resolves a `model` row `verified = False` (the "auto" chip); the generic name is the cook's word only when the cook changed the product or typed the name; a `cook` or `canonical` claim re-points a `model` row (the cook's correction, or creating the product by that name, moves the key); "New product: <name>" looks the name up without model synonyms; the four reported pairs as confirm-then-resolve tests. No migration | 2h | Q13 |
-| H52 | both | **The product is re-configurable** (operator ask 2026-09-24: category, shelf life, frozen life, matching names). The editor gains a category picker (`ChoiceGroup` over `useCategories`, PATCH already accepts it); **frozen life per product, falling back to the category** (nullable `product_master.frozen_shelf_life_days` + migration, `_start_frozen_clock` prefers it, field in schema, type and sheet); `GET /products/{id}/names` listing learned names and printed receipt names with their source, `DELETE` for either, listed in the sheet with a remove control, canonical rows not removable. The cleanup path for keys already written | 5h | Q13, issue 3 |
+| H52 | both | **The product is re-configurable.** ✅ (operator ask 2026-09-24: category, shelf life, frozen life, matching names). The editor gains a category picker (`ChoiceGroup` over `useCategories`, PATCH already accepts it); **frozen life per product, falling back to the category** (nullable `product_master.frozen_shelf_life_days` + migration, `_start_frozen_clock` prefers it, field in schema, type and sheet); `GET /products/{id}/names` listing learned names and printed receipt names with their source, `DELETE` for either, listed in the sheet with a remove control, canonical rows not removable. The cleanup path for keys already written | 5h | Q13, issue 3 |
 | H53 | backend | **A shortlist that contains the answer.** The same-category fill in `TrigramRetriever` ranks by trigram over the whole category instead of taking the first five names alphabetically (a fruits line sees Apple, Banana, Grape, Kiwi, Lime and never Melon); an exact word hit on a canonical name is always offered; the selection prompt carries a null example; the reported pairs pinned as a fixture, deterministic parts unit-tested, the model part behind `requires_vllm` | 3h | Q14 |
 | H54 | pipeline | **A Finnish glossary for extraction.** A short list of terms the model misreads (rypäle = grape, not raisin; tikkuperunat = french fries, not potato; mehu = juice; riisipiirakka = Karelian pasty; valmisruoka / ateria = ready meal) in `_INSTRUCTIONS`, measured on the 49-line fixture before and after: two prompt edits have silently killed the shelf-life estimates (Q7, Q8), so the fixture run is the merge gate | 2h | Q14 |
 | H55 | backend | **A `ready_meals` category** (issue 2). Seed row (fridge, 4 days, frozen 90), `CATEGORY_STORAGE`, `PLAUSIBLE_DAYS`, the OFF mapping, `test_seed_categories`. Seed-only per DEC-9; `kyokki-migrate` reseeds on every deploy, so it ships itself and the extraction prompt offers it at once. The one existing ready meal (fish soup, filed under frozen) is moved by hand | 1h | issue 2 |
@@ -1582,8 +1582,29 @@ with the category as fallback.
   product: Ketchup" creates Ketchup instead of resolving to what a model guessed for the word.
 - [x] No frontend change: `ProvenanceChip` keys on `verified`, so a model synonym already
   reads "auto".
-- [ ] Quick add still resolves a typed name through a model synonym; H52 gives the cook the
-  remove control.
+- [x] Quick add still resolves a typed name through a model synonym; H52 gives the cook the
+  remove control (the synonym is listed as "auto" in the product editor and removable there).
+
+##### H52 as built — the product is re-configurable
+- [x] **Category** in the product editor (`ChoiceGroup` over `useCategories`). A category
+  change carries `storage_type` with it (for stock added later; what is in the kitchen stays
+  where it is) and, when the shelf life is still a `category` placeholder, the new category's
+  default, re-dating `calculated` stock as a shelf-life correction does (Q12). A shelf life
+  the cook typed or the model estimated is about the food and stays.
+- [x] **Frozen life per product**, nullable `product_master.frozen_shelf_life_days`
+  (migration `c2d9e4a17b35`). `_start_frozen_clock` takes the product's figure, then the
+  category's, then leaves the date alone; the editor shows the category's as the placeholder
+  and a blank field hands it back. A product can freeze where its category has no figure.
+- [x] **Matching names**: `GET /api/products/{id}/names` (learned names and printed receipt
+  names with their source), `DELETE …/names/{name_id}` (409 for the canonical row),
+  `DELETE …/aliases/{alias_id}`; listed in the editor with "yours" / "auto" chips and a
+  two-tap remove. `NameSource` joins the H24 vocabulary check.
+- [x] **Rename keeps `product_name` true.** Found while building this: a rename used to leave
+  the old canonical row canonical (so unremovable) and give the new name no row. Now the old
+  row becomes `cook` and the new name is learned as canonical; renaming back restores it.
+- [x] Product PATCH and both DELETEs broadcast `product_update` (nothing listens yet).
+- [ ] **Stock already in the freezer is not re-dated** when the frozen life changes: nothing
+  records when an item went in. A `frozen_date` on the item would allow it.
 
 #### Operator friction log — the stock screen should look like a fridge (2026-09-24)
 

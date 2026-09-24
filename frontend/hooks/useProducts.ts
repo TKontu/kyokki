@@ -13,6 +13,7 @@ export const productKeys = {
   lists: () => [...productKeys.all, 'list'] as const,
   list: (params?: ProductListParams) => [...productKeys.lists(), params] as const,
   detail: (id: string) => [...productKeys.all, 'detail', id] as const,
+  names: (id: string) => [...productKeys.all, 'names', id] as const,
 }
 
 /** One product, for the editor: a stock row only carries the product's name. */
@@ -99,6 +100,36 @@ export function useEstimateCatalog() {
       if (!result.applied) return
       queryClient.invalidateQueries({ queryKey: productKeys.all })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
+    },
+  })
+}
+
+/** The names that resolve to a product, for the editor's list (H52). */
+export function useProductNames(id: string | null) {
+  return useQuery({
+    queryKey: productKeys.names(id ?? ''),
+    queryFn: () => productsAPI.names(id as string),
+    enabled: Boolean(id),
+    staleTime: 30_000,
+  })
+}
+
+/**
+ * Mutation: forget a learned name or a printed receipt name (H52).
+ *
+ * The cleanup for keys a model guess wrote before H51: once "ketchup" stops meaning Taco
+ * sauce, the next ketchup line goes back through selection.
+ */
+export function useForgetName(productId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ kind, id }: { kind: 'name' | 'printed'; id: string }) =>
+      kind === 'name'
+        ? productsAPI.forgetName(productId, id)
+        : productsAPI.forgetPrintedName(productId, id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: productKeys.names(productId) })
     },
   })
 }

@@ -44,6 +44,7 @@ function product(overrides: Partial<ProductMaster> = {}): ProductMaster {
     default_shelf_life_days: 5,
     shelf_life_source: 'category',
     opened_shelf_life_days: null,
+    frozen_shelf_life_days: null,
     avg_piece_grams: null,
     pack_grams: null,
     unit_type: 'weight',
@@ -68,6 +69,9 @@ function renderPage(products: ProductMaster[], estimate?: CatalogEstimateRespons
   server.use(
     http.get(`${API_URL}/products`, () => HttpResponse.json(products)),
     http.get(`${API_URL}/categories`, () => HttpResponse.json(CATEGORIES)),
+    http.get(`${API_URL}/products/:id/names`, () =>
+      HttpResponse.json({ names: [], printed: [] })
+    ),
     http.post(`${API_URL}/products/estimate`, ({ request }) => {
       calls.push(new URL(request.url).searchParams.get('apply') ?? 'false')
       return HttpResponse.json(

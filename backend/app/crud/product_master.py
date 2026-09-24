@@ -9,6 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.category import Category
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
@@ -17,6 +18,7 @@ from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
 from app.schemas.product_master import ProductMasterCreate, ProductMasterUpdate
 from app.services.product_names import learn_product_name, normalize_product_name
+from app.services.storage import storage_type_for_category
 from app.services.units import unit_type_for
 
 
@@ -129,6 +131,9 @@ async def update_product(
     if not db_product:
         return None
 
+    old_name = str(db_product.canonical_name)
+    old_category = str(db_product.category)
+
     # Update only provided fields
     update_data = product_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -140,9 +145,86 @@ async def update_product(
     if "default_shelf_life_days" in update_data:
         db_product.shelf_life_source = "cook"
 
+    if update_data.get("category") not in (None, old_category):
+        await _follow_category(db, db_product, update_data)
+
+    if normalize_product_name(str(db_product.canonical_name)) != (
+        normalize_product_name(old_name)
+    ):
+        await _rename_keys(db, db_product, old_name)
+
     await db.commit()
     await db.refresh(db_product)
     return db_product
+
+
+async def _follow_category(
+    db: AsyncSession, product: ProductMaster, update_data: dict[str, Any]
+) -> None:
+    """A product moved to another category takes what only ever came from the old one (H52).
+
+    Storage decides where new stock goes, so it always follows; what is in the kitchen
+    already stays where the cook put it. A placeholder shelf life (`category`) meant
+    "what the old category says" and takes the new one's; a number the cook typed or the
+    model estimated was about the food, not the category, and stays.
+    """
+    row: Any = product
+    if "storage_type" not in update_data:
+        row.storage_type = storage_type_for_category(str(product.category))
+    if (
+        "default_shelf_life_days" not in update_data
+        and str(product.shelf_life_source) == "category"
+    ):
+        category = await db.get(Category, product.category)
+        if category is not None:
+            row.default_shelf_life_days = category.default_shelf_life_days
+
+
+async def _rename_keys(db: AsyncSession, product: ProductMaster, old_name: str) -> None:
+    """Keep `product_name` true to a rename (H52).
+
+    The old canonical row becomes the cook's word - the name still finds the product, as
+    a merged-away name does, and the cook can now remove it - and the new name is
+    learned as canonical. If another product already holds the new name as a cook's or
+    canonical key, the first claim wins and the canonical-name fallback in
+    `product_for_name` still finds this one by its own name.
+    """
+    old_row = (
+        (
+            await db.execute(
+                select(ProductName).where(
+                    ProductName.product_master_id == product.id,
+                    ProductName.name == normalize_product_name(old_name),
+                    ProductName.source == "canonical",
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if old_row is not None:
+        row: Any = old_row
+        row.source = "cook"
+        await db.flush()
+    if await learn_product_name(db, product, str(product.canonical_name), "canonical"):
+        return
+    # Renamed back to a word it already answered to: that row is its name again.
+    own: Any = (
+        (
+            await db.execute(
+                select(ProductName).where(
+                    ProductName.product_master_id == product.id,
+                    ProductName.name
+                    == normalize_product_name(str(product.canonical_name)),
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if own is not None and str(own.source) != "canonical":
+        own.source = "canonical"
+        await db.flush()
 
 
 async def references_to_product(db: AsyncSession, product_id: UUID) -> dict[str, int]:

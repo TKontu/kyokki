@@ -24,6 +24,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from app.models.product_master import ShelfLifeSource
+from app.models.product_name import NameSource
 from app.schemas.consumption_log import ConsumptionAction
 from app.schemas.inventory_item import ExpirySource, InventoryStatus, StorageLocation
 from app.schemas.receipt import ReceiptStatus
@@ -36,6 +37,7 @@ PAIRS: list[tuple[type[StrEnum], str, str]] = [
     (StorageLocation, "inventory.ts", "InventoryLocation"),
     (ExpirySource, "inventory.ts", "ExpirySource"),
     (ShelfLifeSource, "product.ts", "ShelfLifeSource"),
+    (NameSource, "product.ts", "NameSource"),
     (ReceiptStatus, "receipt.ts", "ReceiptStatus"),
     (ConsumptionAction, "consumption.ts", "ConsumptionAction"),
 ]

@@ -69,6 +69,9 @@ class ProductMaster(Base):
         String, nullable=False, default="category", server_default="category"
     )  # category, model, cook
     opened_shelf_life_days = Column(Integer, nullable=True)  # after opening
+    # Days it keeps once frozen (H52). NULL defers to the category's figure; set when
+    # the product keeps differently from its category - bacon is not a 180-day meat.
+    frozen_shelf_life_days = Column(Integer, nullable=True)
 
     # Quantity tracking
     # What one of them weighs, roughly, when the shop sells it by weight but the cook counts

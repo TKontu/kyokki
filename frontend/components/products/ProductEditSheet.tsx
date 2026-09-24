@@ -10,6 +10,10 @@
  * expired on day six, and produce with the wrong piece weight counts wrong for ever.
  *
  * `unit_type` is derived server-side from `default_unit`, so it is never sent.
+ *
+ * H52 adds what the operator asked for on 2026-09-24: the category (a placeholder shelf
+ * life follows it server-side), a frozen life of the product's own with the category's
+ * as the fallback, and the names that make receipt lines land here.
  */
 
 import BottomSheet from '@/components/ui/BottomSheet'
@@ -20,6 +24,8 @@ import {
   fieldInputClass,
   fieldLabelClass,
 } from '@/components/ui/formStyles'
+import { ProductNamesList } from '@/components/products/ProductNamesList'
+import { useCategories } from '@/hooks/useCategories'
 import { useToast } from '@/hooks/useToast'
 import { useUpdateProduct } from '@/hooks/useProducts'
 import { isAPIError } from '@/lib/api/errors'
@@ -56,6 +62,7 @@ export function ProductEditSheet({
 }: ProductEditSheetProps) {
   const toast = useToast()
   const save = useUpdateProduct()
+  const categories = useCategories()
 
   // Each field follows the product until the cook touches it, and says so if what they are
   // editing moves underneath them (H25) - two cooks on two screens is the case this is for.
@@ -65,17 +72,22 @@ export function ProductEditSheet({
   const pieceField = useFieldEdit(blankIfNull(product.avg_piece_grams))
   const packField = useFieldEdit(blankIfNull(product.pack_grams))
   const unitField = useFieldEdit(product.default_unit)
+  const categoryField = useFieldEdit(product.category)
+  const frozenField = useFieldEdit(blankIfNull(product.frozen_shelf_life_days))
   const name = nameField.value
   const shelfLife = shelfLifeField.value
   const openedShelfLife = openedField.value
   const pieceGrams = pieceField.value
   const packGrams = packField.value
   const unit = unitField.value as Unit
+  const category = categoryField.value
+  const frozenShelfLife = frozenField.value
 
   const shelfLifeValue = positiveOrNull(shelfLife)
   const openedValue = positiveOrNull(openedShelfLife)
   const pieceValue = positiveOrNull(pieceGrams)
   const packValue = positiveOrNull(packGrams)
+  const frozenValue = positiveOrNull(frozenShelfLife)
 
   // Shelf life is the one field that may not be blank: every expiry date comes from it.
   const valid =
@@ -83,7 +95,8 @@ export function ProductEditSheet({
     typeof shelfLifeValue === 'number' &&
     openedValue !== undefined &&
     pieceValue !== undefined &&
-    packValue !== undefined
+    packValue !== undefined &&
+    frozenValue !== undefined
 
   // Send only what changed, so two cooks editing different fields do not fight - and only
   // what *this* cook changed, so a field that moved underneath is left where the server has it.
@@ -98,8 +111,16 @@ export function ProductEditSheet({
   if (pieceField.changed) changes.avg_piece_grams = pieceValue ?? null
   if (packField.changed) changes.pack_grams = packValue ?? null
   if (unitField.changed) changes.default_unit = unit
+  if (categoryField.changed && category !== product.category) changes.category = category
+  if (frozenField.changed) changes.frozen_shelf_life_days = frozenValue ?? null
 
   const dirty = Object.keys(changes).length > 0
+
+  const sortedCategories = [...(categories.data ?? [])].sort(
+    (a, b) => a.sort_order - b.sort_order
+  )
+  const categoryFrozen = sortedCategories.find((c) => c.id === category)
+    ?.frozen_shelf_life_days
 
   const submit = () => {
     save.mutate(
@@ -168,7 +189,11 @@ export function ProductEditSheet({
             onChange={(event) => shelfLifeField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
-          <p className={fieldHintClass}>days, sealed</p>
+          <p className={fieldHintClass}>
+            {product.shelf_life_source === 'category'
+              ? 'days, sealed; follows the category'
+              : 'days, sealed'}
+          </p>
           <FieldMoved label="Keeps for" field={shelfLifeField} />
         </div>
 
@@ -188,6 +213,25 @@ export function ProductEditSheet({
           />
           <p className={fieldHintClass}>days, blank if unknown</p>
           <FieldMoved label="Once opened" field={openedField} />
+        </div>
+
+        <div className="w-32">
+          <label htmlFor="product-frozen-shelf-life" className={fieldLabelClass}>
+            Once frozen
+          </label>
+          <input
+            id="product-frozen-shelf-life"
+            type="number"
+            inputMode="numeric"
+            min="1"
+            aria-label="Once frozen"
+            placeholder={categoryFrozen == null ? '' : String(categoryFrozen)}
+            value={frozenShelfLife}
+            onChange={(event) => frozenField.set(event.target.value)}
+            className={`${fieldInputClass} mt-1`}
+          />
+          <p className={fieldHintClass}>days, blank for the category&apos;s</p>
+          <FieldMoved label="Once frozen" field={frozenField} />
         </div>
 
         <div className="w-32">
@@ -237,6 +281,25 @@ export function ProductEditSheet({
           onChange={unitField.set}
         />
       </div>
+
+      {sortedCategories.length > 0 && (
+        <div className="mt-4">
+          <ChoiceGroup
+            label="Category"
+            name="product-category"
+            className="grid-cols-2 sm:grid-cols-3"
+            value={category}
+            options={sortedCategories.map((c) => ({
+              value: c.id,
+              label: `${c.icon ?? ''} ${c.display_name}`.trim(),
+            }))}
+            onChange={categoryField.set}
+          />
+          <FieldMoved label="Category" field={categoryField} />
+        </div>
+      )}
+
+      <ProductNamesList productId={product.id} />
     </BottomSheet>
   )
 }

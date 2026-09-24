@@ -232,12 +232,17 @@ def _start_frozen_clock(item: InventoryItem, update_data: dict[str, Any]) -> Non
     shelf-life correction re-dates `calculated` stock (Q12's other half), and thawing the
     clock again every time the catalog learned something would undo this immediately.
 
-    A category with no frozen figure does nothing at all - there is no useful answer for a
-    frozen bottle of squash, and inventing one is worse than leaving the date alone.
+    The product's own figure wins over its category's (H52): bacon is meat but does not
+    keep 180 days frozen. With neither, nothing happens at all - there is no useful
+    answer for a frozen bottle of squash, and inventing one is worse than leaving the
+    date alone.
     """
     product = item.product_master
-    category = product.category_rel if product is not None else None
-    frozen_days = category.frozen_shelf_life_days if category is not None else None
+    if product is None:
+        return
+    frozen_days = product.frozen_shelf_life_days
+    if frozen_days is None and product.category_rel is not None:
+        frozen_days = product.category_rel.frozen_shelf_life_days
     if frozen_days is None:
         return
     update_data["expiry_date"] = date.today() + timedelta(days=int(frozen_days))

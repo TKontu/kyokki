@@ -10,6 +10,7 @@ export interface Category {
   display_name: string // Human-readable name
   icon: string | null // Emoji icon
   default_shelf_life_days: number // > 0
+  frozen_shelf_life_days: number | null // Days once frozen; null: no useful figure (Q12)
   sort_order: number // Display order (default: 0)
   default_storage: StorageType // Where its products are kept by default (response only)
 }

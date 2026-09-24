@@ -15,8 +15,12 @@ from app.models.category import Category
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
 from app.services.product_names import (
+    CanonicalName,
+    UnknownName,
+    forget_product_name,
     known_names,
     learn_product_name,
+    names_for_product,
     normalize_product_name,
     product_for_name,
 )
@@ -353,3 +357,59 @@ class TestLearning:
         await db_session.commit()
 
         assert (await db_session.execute(select(ProductName))).scalars().all() == []
+
+
+class TestForgetting:
+    """H52: the cook takes back a name the table learned."""
+
+    async def test_its_own_name_is_listed_first(
+        self, db_session: AsyncSession, categories: None
+    ) -> None:
+        product = await _product(db_session, "Taco sauce")
+        await learn_product_name(db_session, product, "ketchup", "model")
+        await learn_product_name(db_session, product, "abc salsa", "cook")
+
+        names = await names_for_product(db_session, product.id)
+
+        assert [(row.name, row.source) for row in names] == [
+            ("taco sauce", "canonical"),
+            ("abc salsa", "cook"),
+            ("ketchup", "model"),
+        ]
+
+    async def test_a_forgotten_name_resolves_to_nothing(
+        self, db_session: AsyncSession, categories: None
+    ) -> None:
+        product = await _product(db_session, "Taco sauce")
+        await learn_product_name(db_session, product, "ketchup", "model")
+        await db_session.commit()
+        row = await _row(db_session, "ketchup")
+
+        await forget_product_name(db_session, product.id, row.id)
+
+        assert await product_for_name(db_session, "ketchup") is None
+
+    async def test_the_canonical_name_stays(
+        self, db_session: AsyncSession, categories: None
+    ) -> None:
+        product = await _product(db_session, "Taco sauce")
+        row = await _row(db_session, "taco sauce")
+
+        with pytest.raises(CanonicalName):
+            await forget_product_name(db_session, product.id, row.id)
+
+        assert await _count(db_session, "taco sauce") == 1
+
+    async def test_another_products_name_is_unknown_here(
+        self, db_session: AsyncSession, categories: None
+    ) -> None:
+        product = await _product(db_session, "Taco sauce")
+        other = await _product(db_session, "Ketchup")
+        await learn_product_name(db_session, other, "tomato ketchup", "cook")
+        await db_session.commit()
+        row = await _row(db_session, "tomato ketchup")
+
+        with pytest.raises(UnknownName):
+            await forget_product_name(db_session, product.id, row.id)
+
+        assert await _count(db_session, "tomato ketchup") == 1
