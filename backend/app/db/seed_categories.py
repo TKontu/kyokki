@@ -75,6 +75,16 @@ SEED_CATEGORIES = [
         "sort_order": 70,
     },
     {
+        # H55: soups, casseroles, a supermarket lasagne. Filed by what they are rather
+        # than what is in them - the fish soup on the homelab had ended up under frozen.
+        "id": "ready_meals",
+        "display_name": "Ready Meals",
+        "icon": "🍲",
+        "default_shelf_life_days": 4,
+        "frozen_shelf_life_days": 90,
+        "sort_order": 75,
+    },
+    {
         "id": "frozen",
         "display_name": "Frozen Foods",
         "icon": "🧊",

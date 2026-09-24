@@ -22,6 +22,7 @@ class TestStorageTypeForCategory:
             ("cheese", "refrigerator"),
             ("produce", "refrigerator"),
             ("fruits", "refrigerator"),
+            ("ready_meals", "refrigerator"),
         ],
     )
     def test_seeded_categories(self, category, expected):

@@ -120,3 +120,35 @@ class TestSeedCategories:
 
         result = await committed_db_session.execute(select(Category))
         assert len(result.scalars().all()) == len(SEED_CATEGORIES)
+
+
+class TestReadyMeals:
+    """H55: a ready meal had nowhere to go - the one on the homelab sat under frozen."""
+
+    async def test_it_is_seeded_as_a_fridge_category(
+        self, db_session: AsyncSession
+    ) -> None:
+        await seed_categories(db_session)
+        await db_session.commit()
+
+        category = await db_session.get(Category, "ready_meals")
+
+        assert category is not None
+        assert category.display_name == "Ready Meals"
+        assert category.default_shelf_life_days == 4
+        assert category.frozen_shelf_life_days == 90
+
+    async def test_a_database_seeded_before_it_gains_it(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The migrate job reseeds on every deploy; the new row must land on the homelab."""
+        older = [c for c in SEED_CATEGORIES if c["id"] != "ready_meals"]
+        from sqlalchemy.dialects.postgresql import insert
+
+        await db_session.execute(insert(Category).values(older))
+        await db_session.commit()
+
+        await seed_categories(db_session)
+        await db_session.commit()
+
+        assert await db_session.get(Category, "ready_meals") is not None

@@ -52,6 +52,7 @@ PLAUSIBLE_DAYS: dict[str, tuple[int, int]] = {
     "produce": (2, 120),
     "fruits": (2, 120),
     "bread": (2, 800),
+    "ready_meals": (1, 21),
     "frozen": (30, 730),
     "pantry": (7, 1825),
     "beverages": (7, 1825),

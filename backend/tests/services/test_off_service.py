@@ -157,6 +157,20 @@ class TestMapOffCategoryToSystem:
         assert map_off_category_to_system("Chicken breast") == "meat"
         assert map_off_category_to_system("Fresh meat") == "meat"
 
+    def test_maps_ready_meals(self):
+        """H55: prepared dishes and soups are ready meals, not whatever they contain."""
+        assert map_off_category_to_system("Meals") == "ready_meals"
+        assert map_off_category_to_system("Prepared meals") == "ready_meals"
+        assert map_off_category_to_system("Soups") == "ready_meals"
+        assert map_off_category_to_system("Meals with chicken") == "ready_meals"
+
+    def test_a_grain_called_meal_is_not_a_meal(self):
+        assert map_off_category_to_system("Oatmeal") == "pantry"
+        assert map_off_category_to_system("Cornmeal") == "pantry"
+
+    def test_a_frozen_ready_meal_is_still_frozen(self):
+        assert map_off_category_to_system("Frozen ready meals") == "frozen"
+
     def test_maps_produce_categories(self):
         """Should map produce-related OFF categories to 'produce'."""
         assert map_off_category_to_system("Fruits") == "produce"
