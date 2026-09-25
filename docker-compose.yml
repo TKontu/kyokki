@@ -29,6 +29,8 @@ services:
     environment:
       # Containers default to UTC; the cook reads Helsinki dates.
       TZ: ${TZ:-Europe/Helsinki}
+      # AG1 access tokens (name:scope:sha256hex, comma-separated); empty leaves /api open
+      KYOKKI_API_TOKENS: ${KYOKKI_API_TOKENS:-}
     networks:
       - kyokki_net
     depends_on:

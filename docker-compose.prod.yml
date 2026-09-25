@@ -76,6 +76,9 @@ services:
     volumes: *backend-volumes
     environment:
       <<: *backend-env
+      # AG1: name:scope:sha256hex entries; empty leaves /api open. Only the API reads it,
+      # so a typo here cannot stop the worker or the bot. See docs/DEPLOY.md.
+      KYOKKI_API_TOKENS: ${KYOKKI_API_TOKENS:-}
     networks:
       - kyokki_net
     depends_on:
@@ -144,6 +147,11 @@ services:
     image: ${KYOKKI_FRONTEND_IMAGE:-ghcr.io/tkontu/kyokki-frontend:latest}
     ports:
       - "${FRONTEND_PORT:-17301}:3000"
+    environment:
+      # AG1: the secret the Next server sends as its Bearer token on every proxied /api
+      # request. Read at runtime (not a build arg), so the prebuilt image needs no rebuild.
+      # Its entry must be in KYOKKI_API_TOKENS. Empty: requests go through unchanged.
+      KYOKKI_PROXY_TOKEN: ${KYOKKI_PROXY_TOKEN:-}
     networks:
       - kyokki_net
     depends_on:
