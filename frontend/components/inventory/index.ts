@@ -9,11 +9,11 @@ export type { ExpiryBadgeProps } from './ExpiryBadge'
 export { QuantityBar } from './QuantityBar'
 export type { QuantityBarProps } from './QuantityBar'
 
-export { InventoryItemCard } from './InventoryItemCard'
-export type { InventoryItemCardProps } from './InventoryItemCard'
+export { IngredientTile } from './IngredientTile'
+export type { IngredientTileProps } from './IngredientTile'
 
-export { InventoryList } from './InventoryList'
-export type { InventoryListProps } from './InventoryList'
+export { FridgeView } from './FridgeView'
+export type { FridgeViewProps } from './FridgeView'
 
 export { ClearExpiredSheet } from './ClearExpiredSheet'
 export type { ClearExpiredSheetProps } from './ClearExpiredSheet'

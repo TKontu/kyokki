@@ -45,7 +45,7 @@ afterEach(() => {
 })
 afterAll(() => server.close())
 
-it('adds a new product from the home page and shows it in the list', async () => {
+it('adds a new product from the home page and shows it in the fridge', async () => {
   let stock: InventoryItem[] = []
   server.use(
     http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
@@ -96,5 +96,6 @@ it('adds a new product from the home page and shows it in the list', async () =>
 
   expect(await screen.findByText('Added 500 g · Peas')).toBeInTheDocument()
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-  expect(await screen.findByText('Peas')).toBeInTheDocument()
+  // Fresh stock is a dot in its area - here the freezer - not a line of text (V3)
+  expect(await screen.findByRole('img', { name: 'Peas keeps' })).toBeInTheDocument()
 })

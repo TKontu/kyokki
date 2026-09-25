@@ -1,25 +1,25 @@
 /**
- * End-to-end edit flow on the home page against msw-mocked endpoints (MVP-S4):
- * … -> Edit item -> move to the freezer -> Save -> list regroups; then Mark as gone -> the item
- * disappears, and the header's Undo brings it back.
+ * End-to-end edit flow against msw-mocked endpoints (MVP-S4), from an area's grid (V4), which
+ * is where a fresh item's tile lives: … -> Edit item -> move to the freezer -> Save -> the tile
+ * leaves the area; Mark as gone -> the tile disappears, and the header's Undo brings it back.
  */
 
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
-import Home from '../page'
+import AreaPage from '../area/[id]/page'
 import type { InventoryItem } from '@/types/inventory'
 
 const PEAS: InventoryItem = {
   id: 'item-peas',
   product_master_id: 'prod-peas',
   product_name: 'Peas',
-  category: 'frozen',
-  category_name: 'Frozen Foods',
-  category_icon: '🧊',
+  category: 'produce',
+  category_name: 'Produce',
+  category_icon: '🫛',
   receipt_id: null,
   initial_quantity: 500,
   current_quantity: 500,
@@ -42,50 +42,68 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
-/** Edit lives behind the card's "…" since consuming became one tap (2026-09-22). */
+/** Edit lives behind the tile's "…": a tap on the tile itself uses the item up. */
 function openEdit(name: string) {
   fireEvent.click(screen.getByRole('button', { name: `More for ${name}` }))
   fireEvent.click(screen.getByRole('button', { name: 'Edit item' }))
 }
 
-function sectionOf(heading: RegExp) {
-  return screen.getByRole('heading', { name: heading }).closest('section') as HTMLElement
-}
+const peasTile = () => screen.queryByRole('button', { name: 'Peas, keeps' })
 
-it('moves an item to the freezer, then marks it as gone', async () => {
-  let stock: InventoryItem[] = [PEAS]
-  server.use(
-    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
-    http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
-    http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null)),
-    http.patch(`${API_URL}/inventory/item-peas`, async ({ request }) => {
-      const body = (await request.json()) as Partial<InventoryItem>
-      const updated = { ...stock[0], ...body }
-      stock = body.status === 'discarded' ? [] : [updated]
-      return HttpResponse.json(updated)
-    })
-  )
+function renderVeggies() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <Home />
+        <AreaPage params={{ id: 'veggies' }} />
       </ToastProvider>
     </QueryClientProvider>
   )
+  return queryClient
+}
 
-  await waitFor(() => expect(within(sectionOf(/fridge/i)).getByText('Peas')).toBeInTheDocument())
+it('moves an item to the freezer, and it leaves the area', async () => {
+  let stock: InventoryItem[] = [PEAS]
+  const patches: Partial<InventoryItem>[] = []
+  server.use(
+    http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
+    http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null)),
+    http.patch(`${API_URL}/inventory/item-peas`, async ({ request }) => {
+      const body = (await request.json()) as Partial<InventoryItem>
+      patches.push(body)
+      stock = [{ ...stock[0], ...body }]
+      return HttpResponse.json(stock[0])
+    })
+  )
+  renderVeggies()
+
+  await waitFor(() => expect(peasTile()).toBeInTheDocument())
   openEdit('Peas')
   fireEvent.click(screen.getByText('Freezer'))
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
   expect(await screen.findByText('Saved · Peas')).toBeInTheDocument()
-  await waitFor(() =>
-    expect(within(sectionOf(/freezer/i)).getByText('Peas')).toBeInTheDocument()
-  )
+  expect(patches).toEqual([{ location: 'freezer' }])
+  // In the freezer it is the freezer's, whatever it is
+  await waitFor(() => expect(peasTile()).not.toBeInTheDocument())
+})
 
+it('marks an item as gone', async () => {
+  let stock: InventoryItem[] = [PEAS]
+  server.use(
+    http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
+    http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null)),
+    http.patch(`${API_URL}/inventory/item-peas`, async ({ request }) => {
+      const body = (await request.json()) as Partial<InventoryItem>
+      stock = []
+      return HttpResponse.json({ ...PEAS, ...body })
+    })
+  )
+  renderVeggies()
+
+  await waitFor(() => expect(peasTile()).toBeInTheDocument())
   openEdit('Peas')
   fireEvent.click(screen.getByRole('button', { name: 'Mark as gone' }))
 
@@ -94,7 +112,6 @@ it('moves an item to the freezer, then marks it as gone', async () => {
     expect(screen.queryByRole('button', { name: 'More for Peas' })).not.toBeInTheDocument()
   )
 })
-
 
 it('brings a gone item back with the header Undo, not a toast that times out', async () => {
   // Undo used to live on the toast for eight seconds. The header's Undo is always there, says
@@ -116,7 +133,6 @@ it('brings a gone item back with the header Undo, not a toast that times out', a
   let undoable: typeof GONE | null = null
   const undone: unknown[] = []
   server.use(
-    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
     http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
     http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(undoable)),
     http.patch(`${API_URL}/inventory/item-peas`, async ({ request }) => {
@@ -132,68 +148,46 @@ it('brings a gone item back with the header Undo, not a toast that times out', a
       return HttpResponse.json({ undone: 1 })
     })
   )
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  render(
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <Home />
-      </ToastProvider>
-    </QueryClientProvider>
-  )
+  renderVeggies()
 
-  await waitFor(() => expect(screen.getByText('Peas')).toBeInTheDocument())
+  await waitFor(() => expect(peasTile()).toBeInTheDocument())
   openEdit('Peas')
   fireEvent.click(screen.getByRole('button', { name: 'Mark as gone' }))
 
   expect(await screen.findByText('Marked as gone · Peas')).toBeInTheDocument()
-  await waitFor(() => expect(screen.queryByText('Peas')).not.toBeInTheDocument())
+  await waitFor(() => expect(peasTile()).not.toBeInTheDocument())
   // The toast only says what happened; the way back is in the header
   expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
 
   fireEvent.click(await screen.findByRole('button', { name: 'Undo Thrown away · Peas' }))
 
-  await waitFor(() => expect(screen.getByText('Peas')).toBeInTheDocument())
+  await waitFor(() => expect(peasTile()).toBeInTheDocument())
   expect(undone).toEqual([{ batch_id: 'batch-peas' }])
 })
 
 it('saves only what the cook changed when the item moves under the open sheet', async () => {
-  // The H25 bug, end to end: consuming from the card while the edit sheet was open, then
-  // saving an expiry, used to send the old quantity too - putting the helping back as a
-  // correction, which the history then recorded as one.
+  // The H25 bug, end to end: a consume elsewhere while the edit sheet was open, then saving an
+  // expiry, used to send the old quantity too - putting the helping back as a correction,
+  // which the history then recorded as one.
   let stock: InventoryItem[] = [PEAS]
   const patches: Partial<InventoryItem>[] = []
   server.use(
-    http.get(`${API_URL}/receipts`, () => HttpResponse.json([])),
     http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
     http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null)),
-    http.post(`${API_URL}/inventory/item-peas/consume`, async () => {
-      stock = [{ ...PEAS, current_quantity: 375, status: 'partial' }]
-      return HttpResponse.json(stock[0])
-    }),
     http.patch(`${API_URL}/inventory/item-peas`, async ({ request }) => {
       const body = (await request.json()) as Partial<InventoryItem>
       patches.push(body)
       return HttpResponse.json({ ...stock[0], ...body })
     })
   )
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  render(
-    <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <Home />
-      </ToastProvider>
-    </QueryClientProvider>
-  )
-  await waitFor(() => expect(screen.getByText('Peas')).toBeInTheDocument())
+  const queryClient = renderVeggies()
+  await waitFor(() => expect(peasTile()).toBeInTheDocument())
 
   openEdit('Peas')
   fireEvent.change(screen.getByLabelText('Expiry'), { target: { value: '2099-04-01' } })
-  // Somebody eats a quarter of the peas while the sheet sits open
-  fireEvent.click(screen.getByRole('button', { name: 'Consume 125 g of Peas' }))
+  // Somebody eats a quarter of the peas on another screen while this sheet sits open
+  stock = [{ ...PEAS, current_quantity: 375, status: 'partial' }]
+  await act(() => queryClient.invalidateQueries({ queryKey: ['inventory'] }))
   await waitFor(() => expect(screen.getByLabelText('Quantity (g)')).toHaveValue(375))
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 

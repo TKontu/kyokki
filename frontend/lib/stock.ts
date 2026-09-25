@@ -1,23 +1,10 @@
 /**
- * Stock view rules: what is hidden, what is pinned as urgent, how items are grouped and sorted.
+ * Stock rules: what is hidden, how items are sorted, and the location choices forms offer.
  * Pure functions over inventory items so optimistic cache updates re-render consistently.
+ * How the stock screen groups them is `lib/fridge.ts` (V3).
  */
 
-import { calculateDaysUntilExpiry } from '@/lib/dates'
 import type { InventoryItem, InventoryLocation } from '@/types/inventory'
-
-/** Items expiring within this many days are pinned on top. Already-expired ones have their
- *  own section: they used to share this one with no lower bound, so a thing that went off in
- *  June sat above the milk that goes off tomorrow, for as long as it stayed in the list. */
-export const EXPIRING_SOON_DAYS = 3
-
-const LOCATION_GROUPS: { key: string; label: string }[] = [
-  { key: 'main_fridge', label: 'Fridge' },
-  { key: 'freezer', label: 'Freezer' },
-  { key: 'pantry', label: 'Pantry' },
-]
-
-const OTHER_GROUP = { key: 'other', label: 'Other' }
 
 /** Location choices for forms, labelled as the stock groups are. */
 export const LOCATION_OPTIONS: { value: InventoryLocation; label: string }[] = [
@@ -40,19 +27,6 @@ export function locationOptions(current?: string): { value: string; label: strin
   return [...LOCATION_OPTIONS, { value: current, label: current }]
 }
 
-export interface StockGroup {
-  key: string
-  label: string
-  items: InventoryItem[]
-}
-
-export interface StockView {
-  /** Already past its date. Oldest first, like everything else here. */
-  expired: InventoryItem[]
-  expiringSoon: InventoryItem[]
-  groups: StockGroup[]
-}
-
 /** Empty or discarded: gone from the kitchen. */
 export function isInactive(item: InventoryItem): boolean {
   return item.status === 'empty' || item.status === 'discarded'
@@ -67,38 +41,4 @@ export function compareStock(a: InventoryItem, b: InventoryItem): number {
   if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1
   if (a.id !== b.id) return a.id < b.id ? -1 : 1
   return 0
-}
-
-export function buildStockView(
-  items: InventoryItem[],
-  { includeInactive = false }: { includeInactive?: boolean } = {}
-): StockView {
-  const visible = [...items]
-    .filter((item) => includeInactive || !isInactive(item))
-    .sort(compareStock)
-
-  const expired: InventoryItem[] = []
-  const expiringSoon: InventoryItem[] = []
-  const byLocation = new Map<string, InventoryItem[]>()
-
-  for (const item of visible) {
-    const days = calculateDaysUntilExpiry(item.expiry_date)
-    if (days < 0) {
-      expired.push(item)
-      continue
-    }
-    if (days <= EXPIRING_SOON_DAYS) {
-      expiringSoon.push(item)
-      continue
-    }
-    const known = LOCATION_GROUPS.some((group) => group.key === item.location)
-    const key = known ? item.location : OTHER_GROUP.key
-    byLocation.set(key, [...(byLocation.get(key) ?? []), item])
-  }
-
-  const groups = [...LOCATION_GROUPS, OTHER_GROUP]
-    .map(({ key, label }) => ({ key, label, items: byLocation.get(key) ?? [] }))
-    .filter((group) => group.items.length > 0)
-
-  return { expired, expiringSoon, groups }
 }
