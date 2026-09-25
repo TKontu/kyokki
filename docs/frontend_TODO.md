@@ -26,7 +26,7 @@
 > **2026-09-24 — wave V (the fridge view) in `docs/TODO.md`** supersedes, in the UI,
 > Increment 1.4 QuantityBar and the MVP-C2 ConsumptionSheet fractions (amounts leave the UI,
 > a tile tap toggles consumed), and turns the MVP-S2 location groups into category areas with
-> a drill-down grid of staleness-coloured tiles. In progress: see "Wave V as built".
+> a drill-down grid of staleness-coloured tiles. Done 2026-09-25 (#92-#94): see "Wave V as built".
 
 **Stack:** Next.js 14, TypeScript, Tailwind, PWA, Zustand, React Query
 **Approach:** 47 small increments with full test coverage from day 1
