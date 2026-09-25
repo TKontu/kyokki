@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.seed_categories import SEED_CATEGORIES
 from app.services.catalog_estimates import (
     Estimate,
     EstimateRequest,
@@ -34,6 +35,12 @@ async def categories(db_session: AsyncSession) -> None:
     await seed_categories(db_session)
     await db_session.commit()
 
+
+# The produce placeholder these products are created with; read from the seed so a revised
+# placeholder (H57) does not read as a behaviour change.
+PRODUCE_DAYS = next(
+    c["default_shelf_life_days"] for c in SEED_CATEGORIES if c["id"] == "produce"
+)
 
 MINCE = EstimateRequest(id="p-mince", name="Ground beef", category="meat")
 PASTA = EstimateRequest(id="p-pasta", name="Pasta", category="pantry")
@@ -148,7 +155,7 @@ class TestRefreshCatalogShelfLives:
         self, db_session: AsyncSession, categories
     ) -> None:
         product = await self._product(db_session, "Ground beef")
-        assert product.default_shelf_life_days == 5
+        assert product.default_shelf_life_days == PRODUCE_DAYS
 
         with self._says(
             Estimate(id=str(product.id), shelf_life_days=2, opened_shelf_life_days=None)
@@ -156,8 +163,10 @@ class TestRefreshCatalogShelfLives:
             result = await refresh_catalog_shelf_lives(db_session, apply=False)
 
         assert result.applied is False
-        assert [(c.current_days, c.proposed_days) for c in result.changes] == [(5, 2)]
-        assert product.default_shelf_life_days == 5  # untouched
+        assert [(c.current_days, c.proposed_days) for c in result.changes] == [
+            (PRODUCE_DAYS, 2)
+        ]
+        assert product.default_shelf_life_days == PRODUCE_DAYS  # untouched
 
     async def test_applying_writes_the_number_and_its_provenance(
         self, db_session: AsyncSession, categories
@@ -213,7 +222,11 @@ class TestRefreshCatalogShelfLives:
         product = await self._product(db_session, "Lettuce")
 
         with self._says(
-            Estimate(id=str(product.id), shelf_life_days=5, opened_shelf_life_days=None)
+            Estimate(
+                id=str(product.id),
+                shelf_life_days=PRODUCE_DAYS,
+                opened_shelf_life_days=None,
+            )
         ):
             result = await refresh_catalog_shelf_lives(db_session, apply=True)
 
@@ -257,3 +270,12 @@ class TestPlausibleBands:
         low, high = PLAUSIBLE_DAYS["ready_meals"]
         assert low >= 1
         assert high <= 30
+
+    def test_every_placeholder_is_itself_plausible(self) -> None:
+        """H57: a seed default outside its own band would be a number the estimate rejects."""
+        from app.db.seed_categories import SEED_CATEGORIES
+        from app.services.catalog_estimates import PLAUSIBLE_DAYS
+
+        for category in SEED_CATEGORIES:
+            low, high = PLAUSIBLE_DAYS[category["id"]]
+            assert low <= category["default_shelf_life_days"] <= high, category["id"]
