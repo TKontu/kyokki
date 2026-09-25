@@ -61,10 +61,10 @@ def parse_token_entries(entries: Sequence[str]) -> list[ApiToken]:
     seen: set[str] = set()
     for position, raw in enumerate(entries, start=1):
         fields = [part.strip() for part in raw.split(":")]
-        # With no separator at all the value may be a pasted secret: name it by position.
-        label = (
-            f"'{fields[0]}'" if len(fields) > 1 and fields[0] else f"entry {position}"
-        )
+        # With no separator at all the value may be a pasted secret, and with the fields
+        # out of order the first one may be the hash: name either by position.
+        named = len(fields) > 1 and fields[0] and not _HASH_RE.match(fields[0])
+        label = f"'{fields[0]}'" if named else f"entry {position}"
         if len(fields) != 3:
             raise ApiTokenConfigError(
                 f"KYOKKI_API_TOKENS {label}: expected name:scope:sha256hex"

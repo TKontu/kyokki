@@ -39,7 +39,7 @@ def _probe_app() -> FastAPI:
     """A minimal app wired like main.py, so write success needs no database."""
     router = APIRouter()
 
-    @router.get("/probe")
+    @router.api_route("/probe", methods=["GET", "HEAD"])
     async def probe_get(request: Request) -> dict:
         return {"client": request.state.api_client}
 
@@ -127,8 +127,10 @@ class TestTokensConfigured:
 
     async def test_read_token_can_head(self, probe: AsyncClient) -> None:
         response = await probe.head("/api/probe", headers=bearer(READ_SECRET))
-        assert response.status_code != 401
-        assert response.status_code != 403
+        assert response.status_code == 200
+
+    async def test_head_without_a_token_is_401(self, probe: AsyncClient) -> None:
+        assert (await probe.head("/api/probe")).status_code == 401
 
     @pytest.mark.parametrize("method", ["POST", "DELETE"])
     async def test_read_token_cannot_write(

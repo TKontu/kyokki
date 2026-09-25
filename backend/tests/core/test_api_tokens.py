@@ -45,6 +45,8 @@ class TestParse:
             ("ipad:write:abc123", "'ipad'"),
             (f"ipad:write:{'g' * 64}", "'ipad'"),
             (f":write:{HASH_A}", "entry 1"),
+            (f"{HASH_A}:write:ipad", "entry 1"),
+            (f"{HASH_A.upper()}:write", "entry 1"),
         ],
         ids=[
             "too-few-fields",
@@ -53,6 +55,8 @@ class TestParse:
             "short-hash",
             "non-hex-hash",
             "empty-name",
+            "fields-reversed",
+            "hash-first-too-few-fields",
         ],
     )
     def test_malformed_entry_names_it_without_the_hash(
