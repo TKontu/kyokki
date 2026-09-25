@@ -207,6 +207,52 @@ export function useConsumeInventoryItem() {
 }
 
 /**
+ * Mutation: bring a used-up item back (V4) - a grey tile tapped in an area's grid.
+ *
+ * A PATCH that puts the whole amount back: the backend reads it as a correction (H23), which
+ * reopens the item, clears `consumed_at`, logs it and leaves it undoable. `restore` would not
+ * do: it only brings back what was thrown away, and an empty item restores as empty.
+ */
+export function useUnconsumeInventoryItem() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    meta: { label: 'Bring back' },
+    mutationFn: (item: InventoryItem) =>
+      inventoryAPI.update(item.id, { current_quantity: item.initial_quantity }),
+    retry: false,
+    onMutate: async (item) => {
+      await queryClient.cancelQueries({ queryKey: inventoryKeys.lists() })
+      const previousLists = queryClient.getQueriesData<InventoryItem[]>({
+        queryKey: inventoryKeys.lists(),
+      })
+      queryClient.setQueriesData<InventoryItem[]>({ queryKey: inventoryKeys.lists() }, (list) =>
+        list?.map((cached) =>
+          cached.id === item.id
+            ? {
+                ...cached,
+                current_quantity: cached.initial_quantity,
+                status: 'opened',
+                consumed_at: null,
+              }
+            : cached
+        )
+      )
+      return { previousLists }
+    },
+    onError: (_err, _item, context) => {
+      context?.previousLists.forEach(([queryKey, list]) => {
+        queryClient.setQueryData(queryKey, list)
+      })
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
+      queryClient.invalidateQueries({ queryKey: consumptionLogKeys.all })
+    },
+  })
+}
+
+/**
  * Mutation: Delete inventory item
  */
 export function useDeleteInventoryItem() {

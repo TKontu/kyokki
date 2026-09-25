@@ -1,5 +1,6 @@
 """API endpoints for Inventory CRUD operations."""
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID
@@ -47,6 +48,10 @@ async def list_inventory(
     include_inactive: bool = Query(
         False, description="Include empty and discarded items when no status is given"
     ),
+    consumed_since: datetime | None = Query(
+        None,
+        description="Also include items used up at or after this moment (an area's grey tiles)",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> list[InventoryItemResponse]:
     """Get inventory items with optional filters; empty and discarded are hidden."""
@@ -56,6 +61,7 @@ async def list_inventory(
         status=status,
         expiring_days=expiring_days,
         include_inactive=include_inactive,
+        consumed_since=consumed_since,
     )
     return items
 

@@ -104,6 +104,7 @@ export interface InventoryListParams {
   status?: InventoryItemStatus
   expiring_days?: number
   include_inactive?: boolean // backend hides empty/discarded unless true
+  consumed_since?: string // ISO datetime: also items used up since then (an area's grey tiles, V4)
   context?: string // meal context filter
   category?: string // category filter
 }

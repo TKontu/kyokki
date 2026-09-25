@@ -87,3 +87,16 @@ export function buildFridgeView(items: InventoryItem[]): FridgeView {
     areas: AREAS.map((area) => ({ area, items: byArea.get(area.id) ?? [] })),
   }
 }
+
+/**
+ * An area's grid (V4): what is here, stalest first, then what was used up - latest first - as
+ * grey tiles a tap brings back. Nothing thrown away: that is the Gone screen's.
+ */
+export function areaTiles(items: InventoryItem[], areaId: AreaId): InventoryItem[] {
+  const inArea = items.filter((item) => areaOf(item) === areaId)
+  const here = inArea.filter((item) => !isInactive(item)).sort(compareStock)
+  const usedUp = inArea
+    .filter((item) => item.status === 'empty')
+    .sort((a, b) => (b.consumed_at ?? '').localeCompare(a.consumed_at ?? ''))
+  return [...here, ...usedUp]
+}

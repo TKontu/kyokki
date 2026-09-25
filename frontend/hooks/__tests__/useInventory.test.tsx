@@ -14,6 +14,7 @@ import {
   useUpdateInventoryItem,
   useConsumeInventoryItem,
   useDeleteInventoryItem,
+  useUnconsumeInventoryItem,
 } from '../useInventory'
 import type { InventoryItem, InventoryItemCreate } from '@/types/inventory'
 
@@ -389,5 +390,75 @@ describe('useInventory Hooks', () => {
 
       await waitFor(() => expect(result.current.isSuccess).toBe(true))
     })
+  })
+})
+
+describe('useUnconsumeInventoryItem (V4: a grey tile tapped back)', () => {
+  const USED_UP: InventoryItem = {
+    ...mockInventoryItem,
+    current_quantity: 0,
+    status: 'empty',
+    consumed_at: '2026-09-25T08:00:00Z',
+  }
+
+  function setup() {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    queryClient.setQueryData(inventoryKeys.list({ consumed_since: 'x' }), [USED_UP])
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+    const cached = () =>
+      queryClient.getQueryData<InventoryItem[]>(inventoryKeys.list({ consumed_since: 'x' }))?.[0]
+    return { wrapper, cached }
+  }
+
+  beforeEach(() => (global.fetch as jest.Mock).mockReset())
+
+  it('puts the whole amount back, as a correction', async () => {
+    const { wrapper } = setup()
+    ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...USED_UP, current_quantity: 1000, status: 'opened', consumed_at: null }),
+    })
+
+    const { result } = renderHook(() => useUnconsumeInventoryItem(), { wrapper })
+    act(() => result.current.mutate(USED_UP))
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0]
+    expect(url).toBe(`${API_URL}/inventory/${USED_UP.id}`)
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body)).toEqual({ current_quantity: 1000 })
+  })
+
+  it('shows it back at once, before the server answers', async () => {
+    const { wrapper, cached } = setup()
+    ;(global.fetch as jest.Mock).mockReturnValueOnce(new Promise(() => {}))
+
+    const { result } = renderHook(() => useUnconsumeInventoryItem(), { wrapper })
+    act(() => result.current.mutate(USED_UP))
+
+    await waitFor(() => expect(cached()?.status).toBe('opened'))
+    expect(cached()?.current_quantity).toBe(1000)
+    expect(cached()?.consumed_at).toBeNull()
+  })
+
+  it('leaves it used up when the server says no', async () => {
+    const { wrapper, cached } = setup()
+    ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      statusText: 'Conflict',
+      json: async () => ({ detail: 'Test Milk 1L has been thrown away' }),
+    })
+
+    const { result } = renderHook(() => useUnconsumeInventoryItem(), { wrapper })
+    act(() => result.current.mutate(USED_UP))
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(cached()?.status).toBe('empty')
   })
 })
