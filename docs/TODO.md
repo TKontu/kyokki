@@ -858,7 +858,8 @@ today; H51 stops the matcher memorising its own mistakes; the rest follow. Findi
 
 Frontend only, and independent of the backend H5 items, so it can run beside them; its order
 against H52/H53 is the operator's call. Order V1 → V2 and V3 in parallel → V4. Findings and
-rulings under "Operator friction log — the stock screen should look like a fridge". Not started.
+rulings under "Operator friction log — the stock screen should look like a fridge". **Done
+2026-09-25** (#92, #93, #94); see "Wave V as built". Not yet looked at on the iPad.
 
 | ID | Side | Increment | Est. | Depends on |
 | --- | --- | --- | --- | --- |
@@ -1695,9 +1696,10 @@ Four asks from the operator, condensed:
 Increments: wave V above (V1-V4). Amends MVP acceptance items 1 and 2 (note under the list).
 
 ##### Wave V as built
-Three PRs, merged in order. The split moved from the plan: the area grid had to come with the
+Three PRs, merged in order on 2026-09-25 (#92, #93, #94). The split moved from the plan: the
+area grid had to come with the
 fridge view, or a fresh item (a dot, not a tile) would have had no way to its sheet.
-- [x] **PR 1 - tiles, the fridge, the area grid (V1, V3, V4's grid).** `lib/staleness.ts`
+- [x] **PR 1 (#92) - tiles, the fridge, the area grid (V1, V3, V4's grid).** `lib/staleness.ts`
   (stale ≤ 1 day incl. expired, soon 2-3, week 4-7, later 8+, consumed = `empty`; each tier a
   colour and a word), `IngredientTile` (emoji, name, colour, no numbers; a heavier border when
   stale, struck through when used up; "…" for the sheet), `lib/fridge.ts` (`AREAS`, `areaOf`
@@ -1707,7 +1709,7 @@ fridge view, or a fresh item (a dot, not a tile) would have had no way to its sh
   tiles, stalest first). A tile tap uses the item up (the old card's ¼ step goes with the
   cards); "…" opens the sheet. `useStockActions` shares both. `InventoryList`,
   `InventoryItemCard` and `buildStockView` are gone. The demo page's two `ExpiryBadge`s stay.
-- [x] **PR 2 - amounts out of the UI (V2).** No quantity, unit or fraction anywhere on the iPad:
+- [x] **PR 2 (#93) - amounts out of the UI (V2).** No quantity, unit or fraction anywhere on the iPad:
   the item sheet is "Used up" plus "Edit item"; the edit sheet has no quantity; quick add sends
   the product's usual amount and unit (one, and no unit, for a new product); Gone counts items
   ("8 items") and its rows say only "Thrown away" / "Finished"; the Undo label says "Used some"
@@ -1715,7 +1717,7 @@ fridge view, or a fresh item (a dot, not a tile) would have had no way to its sh
   as nothing goes in as one rather than blocking confirm. `QuantityBar`, the fraction and count
   ladders, `cardActions` and `formatQuantity` are gone; `applyConsume` stays, still checked
   against `contracts/status-transitions.json`. Backend and types unchanged.
-- [x] **PR 3 - recently used-up tiles (V4's rest).** `GET /inventory?consumed_since=` adds items
+- [x] **PR 3 (#94) - recently used-up tiles (V4's rest).** `GET /inventory?consumed_since=` adds items
   used up (`empty`, never `discarded`) at or after that moment to the active list. The area grid
   asks for the last 24 hours (to the hour, so the query key holds still): a tap greys a tile
   instead of removing it, and a tap on a grey tile brings the item back -
@@ -1723,6 +1725,11 @@ fridge view, or a fresh item (a dot, not a tile) would have had no way to its sh
   undoable correction; `restore` would leave an empty item empty), optimistic with rollback.
   Grey tiles sit after the rest, latest first, and have no "…". The fridge (`/`) is unchanged:
   used-up items leave it at once, and the header's Undo is the way back there.
+- [ ] **Look at it on the iPad.** Nothing in wave V was seen in a browser: the tests assert no
+  numbers on screen and every tap, not how the fridge fits a landscape iPad. Log what jars
+  under a new friction log, as the earlier waves did.
+- Still deferred from the ask: meal sections, a recipes view, ingredient images beyond the
+  category emoji (post-MVP 14-16).
 
 ---
 
