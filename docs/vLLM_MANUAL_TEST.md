@@ -779,3 +779,116 @@ extraction files are untouched — so this is the model, not the code.
 That is the third time this month the two-run rule has earned itself, and it sharpens the rule:
 **a single run cannot distinguish a regression from muse-glimmer having an off day, in either
 direction.** A one-run measurement showing 18 would have looked exactly like a prompt regression.
+
+## Finnish glossary (H54) and the live selection run (H53), 2026-09-25
+
+Q14 reported three Finnish words read wrongly: TUMMA RYPÄLE became *Raisin*, TIKKUPERUNAT
+*Potato*, and a MONIVITAMIINI juice *Multivitamin*. H54 adds a glossary to `_INSTRUCTIONS`.
+Measured on the production prompt path for the first time: `scripts/measure_extraction.py` calls
+the real `extract_from_text` with the 13 seeded categories and an **empty catalog**, no database.
+`c2.muse-glimmer` at `http://192.168.0.94:9292/v1`, reasoning `low`, temperature 0.1:
+
+```
+cd backend && LLM_BASE_URL=http://192.168.0.94:9292/v1 LLM_MODEL=c2.muse-glimmer \
+  .venv/bin/python -m scripts.measure_extraction --runs 2 \
+  --fixture tests/fixtures/receipts/s_kaupat_order.txt \
+  --fixture tests/fixtures/receipts/glossary_terms.txt
+```
+
+`glossary_terms.txt` is a synthetic 9-line receipt for the words the S-kaupat fixture lacks
+(RIISIPIIRAKKA, KARJALANPIIRAKKA, VALMISRUOKA, ATERIA, TÄYSMEHU, APPELSIINIMEHU) plus RUSINA, a
+real raisin, as the control. It has no header comment: the skip rules would pass one to the model.
+
+### The 49-line fixture, before and after
+
+| prompt | chars | model s | lines | generic | category | sl | os | pw |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| before (main) | 4431 | 74.6 | 49 | 49 | 40 | 39 | 18 | 7 |
+| before (main), 2nd | 4431 | 62.2 | 49 | 49 | 40 | 39 | 19 | 7 |
+| attempt 1: block after the household rule | 4810 | 64.3 | 49 | 49 | 41 | 40 | 18 | 6 |
+| attempt 1, 2nd | 4810 | 71.1 | 49 | 49 | 41 | **6** | **3** | 7 |
+| attempt 2: one arrow-style rule after the g examples | 4790 | 67.0 | 49 | 49 | 41 | 40 | 18 | 6 |
+| attempt 2, 2nd | 4790 | 65.7 | 49 | 49 | 41 | **6** | **4** | 5 |
+| **attempt 3 (kept)**: rule last + "for every food line" | 4839 | 73.0 | 49 | 49 | 41 | 41 | 23 | 10 |
+| attempt 3, 2nd | 4839 | 71.4 | 49 | 49 | 41 | 41 | 24 | 9 |
+| attempt 3, 3rd | 4839 | 66.8 | 49 | 49 | 41 | 41 | 25 | 10 |
+| attempt 3, 4th | 4839 | 65.0 | 49 | 49 | 41 | 41 | 20 | 7 |
+
+(`category` counts food categories; the household lines come back with a null `c`, before and
+after alike.) Three more runs of attempt 2's wording, to see the failure: 40, 40, then **10**
+shelf lives. The collapsed run answered `sl` only where the prompt carries the number itself -
+milk 10, hard cheese 30, carrot 21, banana 7, apple 14, flour 720 - and null for bacon, chicken,
+grapes, eggs and the rest: the Q7 failure again, with a list of term -> answer lines teaching the
+model that the examples *are* the table. Attempt 3 moves the glossary to the end of the rules and
+tells the sl rule that its examples are not the list (*"Estimate it for every food line, not only
+these"*); 4 runs of 4 kept 41 shelf lives. The Q11 control above shows the unchanged prompt can
+also have an off run (18), so 3 collapses in 7 is a lean, not a proof - but 4 clean of 4 after the
+fix, with sl and os both **above** the baseline, is what the gate asks for.
+
+### The watch list
+
+| printed | before (both runs) | after, attempt 3 (all runs) |
+| --- | --- | --- |
+| TIKKUPERUNAT | Potato (produce) | **French fries (frozen)** |
+| TUMMA RYPÄLE 500G | Raisin (pantry) | **Grape (fruits)** |
+| NAMIVITA MONIVITAMIINI | Multivitamin (null) | Vitamin supplement (null) - not a juice |
+| MONIVITAMIINI APPELSIINI | Multivitamin (null) | **Multivitamin juice (beverages)** |
+| RIISIPIIRAKKA 10KPL | Rice pie (ready_meals) | **Karelian pasty (bread)** |
+| KARJALANPIIRAKKA | Pie (bread) | **Karelian pasty (bread)** |
+| VALMISRUOKA LIHAPULLAT | Meatballs (ready_meals) | Meatballs / Meatball (ready_meals) |
+| ATERIA KANAKASTIKE | Chicken sauce / stew (ready_meals) | Chicken stew / meal (ready_meals) |
+| TÄYSMEHU OMENA 1L | Apple juice (beverages) | Apple juice (beverages) |
+| APPELSIINIMEHU | Orange juice (beverages) | Orange juice (beverages) |
+| RUSINA 250G | Raisins / Raisin (pantry) | Raisin (pantry) - the control holds |
+
+The glossary fixture itself: 9 of 9 lines, generic names, categories and shelf lives in every run,
+before and after (prompt 2973 -> 3381 chars, 23-25 s). Attempt 1 wrote `MEHU, TÄYSMEHU = juice`
+and the model then flattened TÄYSMEHU OMENA to plain *Juice* in one run; the kept wording uses
+`TÄYSMEHU OMENA -> "Apple juice"` so the fruit survives. The prompt grows by 408 characters
+on every receipt (359 for the glossary, the rest for the sl clause):
+
+```
+- Finnish words often misread: TUMMA RYPÄLE -> "Grape" (RUSINA is "Raisin"); TIKKUPERUNAT
+  -> "French fries"; TÄYSMEHU OMENA -> "Apple juice" (MEHU is juice); RIISIPIIRAKKA ->
+  "Karelian pasty"; MONIVITAMIINI APPELSIINI -> "Multivitamin juice", but MONIVITAMIINI
+  with no flavour is a vitamin supplement, household; VALMISRUOKA, ATERIA -> c = ready_meals.
+```
+
+**Merge gate: holds** on every attempt-3 run. TIKKUPERUNAT, TUMMA RYPÄLE, both MONIVITAMIINI
+lines, riisipiirakka, the ready meals and RUSINA read as specified; on the 49-line fixture lines
+(49), generic names (49) and categories (41 against 40) are not below baseline, and sl (41
+against 39) and os (20-25 against 18-19) are above it. The supplement still gets a null `c`
+rather than `household`, as the household products do - not a juice, which is what the gate asks.
+
+### The H53 live selection run
+
+`tests/services/test_live_selection.py` puts the Q14 reported pairs to the real model through
+`product_selection.select_products`, for the first time:
+
+```
+cd backend && LLM_BASE_URL=http://192.168.0.94:9292/v1 LLM_MODEL=c2.muse-glimmer \
+  POSTGRES_DB=kyokki_a3 .venv/bin/python -m pytest tests/services/test_live_selection.py -m requires_vllm -v
+```
+
+| case | expected | before, run 1 | before, run 2 | after, run 1 | after, run 2 |
+| --- | --- | --- | --- | --- | --- |
+| ketchup-known | Ketchup | pass | pass | pass | pass |
+| ketchup-new | null | pass | pass | pass | pass |
+| melon | Melon | **null** | **null** | pass | pass |
+| pear-juice | null | pass | pass | pass | pass |
+| taco-shells-known | Taco shells | pass | pass | pass | pass |
+| taco-shells-new | null | pass | pass | pass | pass |
+| | | 5 of 6, 22.6 s | 5 of 6, 19.9 s | 6 of 6, 18.2 s | 6 of 6, 19.8 s |
+
+The null cases H53's prompt was written for all hold. The one failure went the other way:
+HUNAJAMELONI / *Honeydew* against a catalog *Melon* came back null in both runs, because
+*"Different variety ... are DIFFERENT products"* reads as any variety. Two lines were added
+after the Cherry tomato / Pineapple examples, with examples that are not the reported pairs
+(`test_its_examples_are_not_the_reported_pairs` still holds):
+
+```
+But a kind of a food that a cook buys and uses the same way IS the same thing:
+"Granny Smith" is "Apple", "Clementine" is "Mandarin".
+```
+
+Melon then passed in both runs and none of the null cases moved.

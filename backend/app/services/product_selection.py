@@ -28,6 +28,8 @@ Same thing means a home cook would put them on one shopping-list line.
 Different variety, plant milk vs dairy milk, or a different cut are DIFFERENT products:
 - "Oat milk" is not "Milk". "Sour cream" is not "Cream". "Peanut butter" is not "Butter".
 - "Cherry tomato" is not "Tomato". "Pineapple" is not "Apple".
+But a kind of a food that a cook buys and uses the same way IS the same thing:
+"Granny Smith" is "Apple", "Clementine" is "Mandarin".
 Sharing a word does not make two products the same: "Tortilla chips" is not "Tortilla",
 "Lemonade" is not "Lemon", "Chocolate milk" is not "Chocolate".
 The candidates are only the nearest names in the catalog, not a list that contains the

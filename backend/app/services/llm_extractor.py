@@ -73,8 +73,8 @@ Rules:
   110; tomato -> 100. Use null when counting pieces makes no sense: milk, mince, flour,
   washing-up liquid.
 - sl = how many days this keeps unopened in its normal place, as a round estimate. Examples:
-  banana -> 7; carrot -> 21; milk -> 10; hard cheese -> 30; dried pasta -> 720. Use null if
-  you truly cannot say.
+  banana -> 7; carrot -> 21; milk -> 10; hard cheese -> 30; dried pasta -> 720. Estimate it
+  for every food line, not only these; use null if you truly cannot say.
 - os = how many days it keeps after the pack is opened. Examples: milk -> 5; yoghurt -> 5;
   juice -> 5; hard cheese -> 14; ketchup -> 180. Use null for loose fruit and vegetables and
   anything else that is not opened.
@@ -82,6 +82,10 @@ Rules:
   Use null when absent.
 - Skip store header, totals, discounts (NORM., ALENNUS), fees, deposits, payment and VAT
   lines as products.
+- Finnish words often misread: TUMMA RYPÄLE -> "Grape" (RUSINA is "Raisin"); TIKKUPERUNAT
+  -> "French fries"; TÄYSMEHU OMENA -> "Apple juice" (MEHU is juice); RIISIPIIRAKKA ->
+  "Karelian pasty"; MONIVITAMIINI APPELSIINI -> "Multivitamin juice", but MONIVITAMIINI
+  with no flavour is a vitamin supplement, household; VALMISRUOKA, ATERIA -> c = ready_meals.
 
 Return only compact JSON: {{"s": chain, "d": date, "p": [{{"n": name, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null, "pw": grams per piece or null, "sl": shelf life days or null, "os": opened shelf life days or null}}]}}."""
 

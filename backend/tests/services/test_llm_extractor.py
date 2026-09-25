@@ -235,6 +235,34 @@ class TestInstructions:
         assert "Cleaning cloth" in text
         assert "Laundry vinegar" in text
 
+    def test_carry_a_finnish_glossary(self):
+        """H54: TUMMA RYPÄLE came back as Raisin, TIKKUPERUNAT as Potato (Q14).
+
+        Measured before and after on the 49-line fixture (docs/vLLM_MANUAL_TEST.md).
+        """
+        text = build_instructions(CATEGORIES)
+        glossary = text.lower()
+        assert "rypäle" in glossary and "grape" in glossary
+        assert "rusina" in glossary and "raisin" in glossary
+        assert "tikkuperunat" in glossary and "french fries" in glossary
+        assert "täysmehu" in glossary and "juice" in glossary
+        assert "riisipiirakka" in glossary and "karelian pasty" in glossary
+        assert "valmisruoka" in glossary and "ateria" in glossary
+        assert "ready_meals" in text
+
+    def test_the_glossary_keeps_a_multivitamin_supplement_out_of_juice(self):
+        """NAMIVITA MONIVITAMIINI is a supplement; MONIVITAMIINI APPELSIINI is a juice."""
+        text = build_instructions(CATEGORIES)
+        assert "MONIVITAMIINI" in text
+        assert "APPELSIINI" in text
+
+    def test_ask_for_a_shelf_life_on_every_food_line(self):
+        """With the glossary added, 3 of 7 runs answered sl only for the prompt's own
+        examples (6-10 of 49 instead of 39-41). Saying the examples are not the list
+        brought it back to 41 of 49 on 4 runs of 4 (H54, docs/vLLM_MANUAL_TEST.md)."""
+        text = build_instructions(CATEGORIES)
+        assert "for every food line, not only these" in text
+
     def test_list_known_products_to_reuse_their_names(self):
         text = build_instructions(CATEGORIES, ["Milk", "Ground beef", "milk"])
         assert "Known products: Ground beef, Milk." in text

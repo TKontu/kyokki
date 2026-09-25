@@ -43,6 +43,12 @@ class TestPrompt:
     def test_a_shared_word_is_not_a_match(self) -> None:
         assert "Sharing a word" in INSTRUCTIONS
 
+    def test_a_kind_used_the_same_way_is_a_match(self) -> None:
+        """H53 live run: HUNAJAMELONI / Honeydew answered null against Melon in both
+        runs - "different variety" read as any variety (docs/vLLM_MANUAL_TEST.md)."""
+        assert "the same way IS the same thing" in INSTRUCTIONS
+        assert '"Granny Smith" is "Apple"' in INSTRUCTIONS
+
     def test_its_examples_are_not_the_reported_pairs(self) -> None:
         """Otherwise the live test would grade the prompt on its own worked examples."""
         for word in ("Ketchup", "Taco", "Melon", "Pear"):
