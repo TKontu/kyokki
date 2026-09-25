@@ -851,7 +851,7 @@ today; H51 stops the matcher memorising its own mistakes; the rest follow. Findi
 | H53 | backend | **A shortlist that contains the answer.** ✅ The same-category fill in `TrigramRetriever` ranks by trigram over the whole category instead of taking the first five names alphabetically (a fruits line sees Apple, Banana, Grape, Kiwi, Lime and never Melon); an exact word hit on a canonical name is always offered; the selection prompt carries a null example; the reported pairs pinned as a fixture, deterministic parts unit-tested, the model part behind `requires_vllm` | 3h | Q14 |
 | H54 | pipeline | **A Finnish glossary for extraction.** A short list of terms the model misreads (rypäle = grape, not raisin; tikkuperunat = french fries, not potato; mehu = juice; riisipiirakka = Karelian pasty; valmisruoka / ateria = ready meal) in `_INSTRUCTIONS`, measured on the 49-line fixture before and after: two prompt edits have silently killed the shelf-life estimates (Q7, Q8), so the fixture run is the merge gate | 2h | Q14 |
 | H55 | backend | **A `ready_meals` category** (issue 2). ✅ Seed row (fridge, 4 days, frozen 90), `CATEGORY_STORAGE`, `PLAUSIBLE_DAYS`, the OFF mapping, `test_seed_categories`. Seed-only per DEC-9; `kyokki-migrate` reseeds on every deploy, so it ships itself and the extraction prompt offers it at once. The one existing ready meal (fish soup, filed under frozen) is moved by hand | 1h | issue 2 |
-| H57 | backend | **Placeholders that are not wrong.** Seed defaults revisited per category (today carrot and potato inherit 5 days, tea 30, tortilla 5, egg 7); a migration updates category rows still at the old value and leaves edited ones alone; products already created keep theirs, which is what H56 is for | 1h | Q15 |
+| H57 | backend | **Placeholders that are not wrong.** ✅ Seed defaults revisited per category (today carrot and potato inherit 5 days, tea 30, tortilla 5, egg 7); a migration updates category rows still at the old value and leaves edited ones alone; products already created keep theirs, which is what H56 is for | 1h | Q15 |
 | H58 | frontend | **A shelf-life audit view.** Products sorted by provenance, values at the edge of their category band flagged, so a wrong estimate is caught on the iPad rather than in a spreadsheet | 2h | Q15 |
 
 #### Wave V — the fridge view (operator ask 2026-09-24)
@@ -1570,6 +1570,18 @@ model's word, rather than not learned - it pre-fills as "auto" and the cook's ne
 moves it; the product itself must stay re-configurable by the cook (category, shelf life,
 frozen life, matching names), which is H52 as widened above; frozen life lives per product
 with the category as fallback.
+
+##### H57 as built — placeholders that are not wrong
+- [x] Operator ruling 2026-09-25: err slightly short for perishables, stop being absurd for
+  the rest. Seed placeholders: produce 5 → 7, dairy 7 → 10, beverages 30 → 180, snacks
+  60 → 90; everything else unchanged (bread stays 5 - tortilla is an outlier the estimate
+  fixes per product).
+- [x] Data migration `e8b4f1c62a90` moves a deployed category only while it still holds the
+  old seed value; a number the operator set is left alone, and the downgrade puts back only
+  what it moved. Products keep their own numbers: replacing a product's placeholder is H56.
+- [x] Invariants: the migration's table and the seed agree, and every seed default lies in
+  its own category's estimate band.
+- Tests that pinned produce's old `5` as "the category's figure" now read it from the seed.
 
 ##### H53 as built — a shortlist that contains the answer
 - [x] `TrigramRetriever` ranks the whole catalog on one score: a whole word in common, then

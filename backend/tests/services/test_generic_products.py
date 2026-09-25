@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.seed_categories import seed_categories
+from app.db.seed_categories import SEED_CATEGORIES, seed_categories
 from app.models.product_master import ProductMaster
 from app.services.generic_products import (
     InvalidProductRequest,
@@ -18,6 +18,13 @@ from app.services.generic_products import (
 )
 
 PURCHASED = date(2026, 9, 14)
+
+
+# The produce placeholder, read from the seed so a revised placeholder (H57) does not read
+# as a behaviour change.
+PRODUCE_DAYS = next(
+    c["default_shelf_life_days"] for c in SEED_CATEGORIES if c["id"] == "produce"
+)
 
 
 @pytest.fixture
@@ -178,7 +185,7 @@ class TestProductLearnsItsOwnShape:
 
         assert product.avg_piece_grams is None
         assert (
-            product.default_shelf_life_days == 5
+            product.default_shelf_life_days == PRODUCE_DAYS
         )  # the produce category's blanket figure
         assert product.default_unit == "g"
 
@@ -404,7 +411,7 @@ class TestShelfLifeLearnsOverAPlaceholder:
             name="Ground beef", category="produce", unit="g", quantity=400
         )
 
-        assert product.default_shelf_life_days == 5  # the category's blanket figure
+        assert product.default_shelf_life_days == PRODUCE_DAYS  # the category's figure
         assert product.shelf_life_source == "category"
 
     async def test_a_new_product_with_an_estimate_is_marked_as_answered(
@@ -430,7 +437,7 @@ class TestShelfLifeLearnsOverAPlaceholder:
             name="Rye crispbread", category="produce", unit="pcs", quantity=1
         )
         assert (first.default_shelf_life_days, first.shelf_life_source) == (
-            5,
+            PRODUCE_DAYS,
             "category",
         )
 

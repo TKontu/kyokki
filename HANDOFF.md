@@ -1,36 +1,28 @@
 # Handoff
-Generated-UTC: 2026-09-24T19:56:37Z
-Base-SHA: e60b95af689cdbeb0294b113287acfbb56c5c14c
+Generated-UTC: 2026-09-25T09:30:00Z
+Base-SHA: 31dd9012eb78a535a1a873c10f01182283fadb05
 
 ## Round delta
 
-Merged since the last handoff: H52 (#86, re-configurable product, migration `c2d9e4a17b35`) and
-H55 (#87, `ready_meals` category).
+Merged since the last handoff: H53 (#88, a ranked shortlist and a null example in the selection
+prompt).
 
-On `feat/h53-shortlist` (cut from the SHA above): **H53, a shortlist that contains the answer**
-(Q14). Backend only, no migration.
+This round is two PRs, both cut from the SHA above:
+- **H57** (`feat/h57-placeholders`): new category placeholders, chosen by the operator on
+  2026-09-25 (produce 7, dairy 10, beverages 180, snacks 90). Data migration `e8b4f1c62a90`
+  moves only the rows that still hold the old seed value. Backend 1090 passed; ruff, mypy
+  baseline, `alembic check` and the upgrade/downgrade round trip are clean.
+- **H58** (`feat/h58-shelf-life-audit`): the shelf-life audit view on the products page.
+  Frontend only.
 
-- `TrigramRetriever` ranks the whole catalog on one score, in this order:
-  1. a shared whole word;
-  2. `similarity` or `word_similarity`, whichever is higher, checked in both directions;
-  3. the line's category, as a tiebreak.
-
-  It replaces the alphabetical category fill, and products with no name row are included.
-- The selection prompt now says a shared word does not mean the same product and that null is a
-  good answer, with a worked example (not the reported pairs).
-- `tests/fixtures/resolution/reported_pairs.json` covers the four reported pairs. The retriever
-  tests are deterministic. `tests/services/test_live_selection.py` is marked `requires_vllm`.
-
-Verified:
-- Backend: 1082 passed, 1 skipped. ruff clean, mypy baseline none new, vocabularies agree.
-- The melon case, the category ranking and the canonical-name fallback failed on the old
-  retriever. The prompt tests failed on the old prompt.
-- **The live selection test has not run:** the gateway `192.168.0.247:9003` refuses connections
-  from this container.
+H54 is still waiting: its merge gate is a before/after run on the model server, and
+`192.168.0.247:9003` refuses connections from this container. The H53 live selection test is
+also still unrun, for the same reason.
 
 ## Active PRs and conflicts
 
-The H53 PR (this branch). Do not stage `.claude/README.md` or
+The H57 and H58 PRs. They touch different files except `docs/TODO.md`, and there each edits
+its own row and its own as-built block. Do not stage `.claude/README.md` or
 `.claude/templates/profiles/python-fastapi.md`: they were modified before these sessions and are
 unrelated.
 
@@ -57,7 +49,7 @@ unrelated.
 
 ## Next action
 
-Merge the H53 PR. Next is **H54** (a Finnish glossary in the extraction prompt). Its merge gate
-is a before/after run on the 49-line fixture, which needs the gateway. Plan it for a session that
-can reach the homelab, or have the operator run the measurement. H57 (seed shelf lives) and H58
-(shelf-life audit view) need no gateway. Wave V (V1-V4) is planned and not started.
+Merge H57 and H58. Next: **H54** (the Finnish glossary), in a session that can reach the model
+server, together with the H53 live selection test. After deploying: the operator runs H56
+(*Estimate the guesses*) and moves the fish soup to Ready Meals. Wave V (V1-V4) is planned and
+not started.
