@@ -3,9 +3,11 @@ import contextlib
 from contextlib import asynccontextmanager
 
 import redis.asyncio as redis
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .api.auth import require_token
+from .api.endpoints import whoami
 from .api.router import api_router
 from .core.config import settings
 from .core.logging import get_logger, setup_logging
@@ -99,7 +101,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(api_router, prefix="/api")
+# AG1: every /api route, current and future, needs a token once KYOKKI_API_TOKENS
+# is set (the dependency lets everything through while it is empty).
+api_auth = [Depends(require_token)]
+app.include_router(api_router, prefix="/api", dependencies=api_auth)
+app.include_router(whoami.router, prefix="/api", dependencies=api_auth, tags=["auth"])
 
 
 @app.get("/")

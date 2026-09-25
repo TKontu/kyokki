@@ -171,3 +171,58 @@ class TestConnectionManagerBroadcast:
         mock_ws.send_text.assert_called_once()
         call_arg = mock_ws.send_text.call_args[0][0]
         assert json.loads(call_arg) == test_data
+
+
+class TestWebSocketAuth:
+    """AG1: with tokens configured /api/ws needs one, by header or ?token=."""
+
+    SECRET = "ws-test-secret-value"
+
+    @pytest.fixture(autouse=True)
+    def _tokens(self, monkeypatch):
+        from app.core.api_tokens import hash_secret
+        from app.core.config import settings
+
+        monkeypatch.setattr(
+            settings, "KYOKKI_API_TOKENS", [f"ipad:read:{hash_secret(self.SECRET)}"]
+        )
+        manager.active_connections.clear()
+
+    def test_rejected_without_a_token(self):
+        from starlette.websockets import WebSocketDisconnect
+
+        with (
+            TestClient(app) as client,
+            pytest.raises(WebSocketDisconnect) as exc,
+            client.websocket_connect("/api/ws") as websocket,
+        ):
+            websocket.receive_text()
+        assert exc.value.code == 1008
+        assert len(manager.active_connections) == 0
+
+    def test_rejected_with_a_wrong_token(self):
+        from starlette.websockets import WebSocketDisconnect
+
+        with (
+            TestClient(app) as client,
+            pytest.raises(WebSocketDisconnect) as exc,
+            client.websocket_connect("/api/ws?token=wrong") as websocket,
+        ):
+            websocket.receive_text()
+        assert exc.value.code == 1008
+
+    def test_accepts_a_query_token(self):
+        with (
+            TestClient(app) as client,
+            client.websocket_connect(f"/api/ws?token={self.SECRET}"),
+        ):
+            assert len(manager.active_connections) == 1
+
+    def test_accepts_the_authorization_header(self):
+        with (
+            TestClient(app) as client,
+            client.websocket_connect(
+                "/api/ws", headers={"Authorization": f"Bearer {self.SECRET}"}
+            ),
+        ):
+            assert len(manager.active_connections) == 1

@@ -155,3 +155,35 @@ def test_env_file_search_order_prefers_the_backend_copy() -> None:
     an existing workstation keeps working."""
     assert ENV_FILES == (PROJECT_ROOT / ".env", BACKEND_ROOT / ".env")
     assert Settings.model_config["env_file"] == ENV_FILES
+
+
+_HASH = "a" * 64
+
+
+def test_api_tokens_default_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No tokens means the API stays open, exactly as before AG1."""
+    monkeypatch.delenv("KYOKKI_API_TOKENS", raising=False)
+    assert _settings(monkeypatch).KYOKKI_API_TOKENS == []
+    assert _settings(monkeypatch, KYOKKI_API_TOKENS="").KYOKKI_API_TOKENS == []
+
+
+def test_api_tokens_comma_separated(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(
+        monkeypatch,
+        KYOKKI_API_TOKENS=f"ipad:write:{_HASH}, hermes:read:{'b' * 64}",
+    )
+    assert [
+        f"ipad:write:{_HASH}",
+        f"hermes:read:{'b' * 64}",
+    ] == settings.KYOKKI_API_TOKENS
+
+
+def test_malformed_api_token_fails_at_load_without_the_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.api_tokens import ApiTokenConfigError
+
+    with pytest.raises(ApiTokenConfigError) as exc:
+        _settings(monkeypatch, KYOKKI_API_TOKENS=f"hermes:admin:{_HASH}")
+    assert "'hermes'" in str(exc.value)
+    assert _HASH not in str(exc.value)
