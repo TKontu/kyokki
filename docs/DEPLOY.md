@@ -200,6 +200,10 @@ token may do everything. A missing or unknown token is a 401, a read token on a 
 
 The iPad never holds a token: the frontend's Next server adds its own (`KYOKKI_PROXY_TOKEN`)
 to every `/api` request it proxies. So once tokens are on, the iPad needs an entry too.
+That makes port 17301 an open door with the iPad's scope: anyone on the LAN who reaches the
+frontend reads and writes as `ipad`. Tokens guard 17300; keep 17301 to the devices you trust.
+Also, the WebSocket's `?token=` appears in `kyokki-api`'s access log (uvicorn logs the query
+string), so prefer the header wherever the client can set one.
 
 1. Generate one entry per client. Each command prints a `secret:` (give it to the client, it is
    shown once) and an `entry:` (the name, scope and SHA-256 of the secret, for the config):
