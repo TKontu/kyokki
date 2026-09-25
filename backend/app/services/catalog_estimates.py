@@ -33,34 +33,19 @@ from app.crud.product_master import MovedInventoryItem, get_products
 from app.services.expiry_recompute import recompute_expiry_for_product
 from app.services.llm_extractor import LLMExtractionError, extract_json_object
 
+# Re-exported: the bands moved to their own module (H58) and callers still import them here.
+from app.services.shelf_life_bands import (  # noqa: F401
+    DEFAULT_BAND,
+    PLAUSIBLE_DAYS,
+    band_for,
+)
+
 logger = get_logger(__name__)
 
 # How many products go in one request. Names are short, so this is nothing like a
 # receipt read; the cap exists so one large catalog cannot build an unbounded prompt.
 BATCH_SIZE = 25
 
-# What a shelf life may plausibly be, in days, by the kind of thing it is. The model is
-# asked for a number and sometimes answers with a confident wrong one; a band is cheaper
-# than trusting it, and this writes to the whole catalog at once. Anything outside its
-# category's band is dropped rather than clamped - a rejected answer leaves the
-# placeholder in place, which is where it already was.
-PLAUSIBLE_DAYS: dict[str, tuple[int, int]] = {
-    "meat": (1, 60),
-    "fish": (1, 30),
-    "dairy": (2, 120),
-    "cheese": (5, 365),
-    "produce": (2, 120),
-    "fruits": (2, 120),
-    "bread": (2, 800),
-    "ready_meals": (1, 21),
-    "frozen": (30, 730),
-    "pantry": (7, 1825),
-    "beverages": (7, 1825),
-    "condiments": (7, 1825),
-    "snacks": (7, 730),
-}
-# A category nobody listed above still gets a sanity check, just a loose one.
-DEFAULT_BAND = (1, 1825)
 
 INSTRUCTIONS = """For each product, say how long it keeps unopened, and how long once opened.
 
@@ -105,7 +90,7 @@ def build_prompt(products: list[EstimateRequest]) -> str:
 
 
 def _plausible(days: int, category: str) -> bool:
-    low, high = PLAUSIBLE_DAYS.get(category, DEFAULT_BAND)
+    low, high = band_for(category)
     return low <= days <= high
 
 

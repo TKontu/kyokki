@@ -24,6 +24,8 @@ const CATEGORIES: Category[] = [
     frozen_shelf_life_days: null,
     sort_order: 20,
     default_storage: 'refrigerator',
+    shelf_life_min_days: 1,
+    shelf_life_max_days: 60,
   },
   {
     id: 'meat',
@@ -33,6 +35,8 @@ const CATEGORIES: Category[] = [
     frozen_shelf_life_days: null,
     sort_order: 10,
     default_storage: 'refrigerator',
+    shelf_life_min_days: 1,
+    shelf_life_max_days: 60,
   },
   {
     id: 'frozen',
@@ -42,6 +46,8 @@ const CATEGORIES: Category[] = [
     frozen_shelf_life_days: null,
     sort_order: 30,
     default_storage: 'freezer',
+    shelf_life_min_days: 1,
+    shelf_life_max_days: 60,
   },
 ]
 

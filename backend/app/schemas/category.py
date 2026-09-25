@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, computed_field
 
+from app.services.shelf_life_bands import band_for
 from app.services.storage import StorageType, storage_type_for_category
 
 
@@ -45,3 +46,15 @@ class CategoryResponse(CategoryBase):
     def default_storage(self) -> StorageType:
         """Where products of this category are kept by default (MVP-S3)."""
         return storage_type_for_category(self.id)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def shelf_life_min_days(self) -> int:
+        """The shortest shelf life plausible for this category (H58)."""
+        return band_for(self.id)[0]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def shelf_life_max_days(self) -> int:
+        """The longest shelf life plausible for this category (H58)."""
+        return band_for(self.id)[1]
