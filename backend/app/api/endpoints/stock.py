@@ -175,7 +175,7 @@ async def consume_stock(
         for used in result.consumed:
             await broadcast_inventory_update(
                 inventory_item_id=used.item_id,
-                action="updated",
+                action="consumed",
                 current_quantity=Decimal(used.remaining),
                 status=used.status,
                 product_name=result.product_name,

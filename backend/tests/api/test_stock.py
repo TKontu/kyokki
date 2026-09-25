@@ -294,6 +294,8 @@ class TestStockConsume:
             _id(sooner),
             _id(later),
         }
+        # The same action the iPad's single-item consume broadcasts.
+        assert {c.kwargs["action"] for c in broadcast.await_args_list} == {"consumed"}
 
     async def test_litres_against_decilitres(
         self, client: AsyncClient, seeded_db
