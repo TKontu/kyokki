@@ -1,6 +1,22 @@
 # Agent interface — Development TODO
 
-Planned 2026-09-14. **Starts after MVP-P3** (operator ruling). Nothing here enters an MVP wave.
+Planned 2026-09-14. ~~Starts after MVP-P3~~ **Started 2026-09-25** (operator ruling, below).
+
+## Rulings (2026-09-25)
+- **The track starts now**, ahead of MVP-P3. A Hermes Agent is deployed on the LAN
+  (`192.168.0.94`) and should drive Kyokki through the HTTP API and the `kyokki` CLI. No MCP.
+- **The agent writes its own skill.** Once the API and CLI exist, the operator asks Hermes to
+  build the skills that use them. AG4 therefore shrinks to reviewing what the agent wrote; the
+  CLI's `-h` text is what it learns from, so AG3 carries the documentation weight.
+- **DEC-5 is settled as AG1** (named Bearer tokens with scopes). When any token is configured,
+  every `/api` route needs one, reads included. The iPad reaches the API through a server-side
+  token added by the Next.js proxy. The API port stays published for the agent. With no token
+  configured the API stays open as before. This supersedes H31's single shared header.
+- **AG2 does not add `/products/{id}/aliases`.** That path already exists (H52) and means
+  printed receipt names. Teaching a product a name is `POST /products/{id}/names`, completing
+  the existing `GET` and `DELETE` there.
+- **Round 2026-09-25-3** builds AG1 and AG2 in parallel. AG3 follows in the next round, from
+  AG2's merged contract.
 
 ## Goal
 A Hermes Agent or OpenClaw agent runs the kitchen through Kyokki the way a person would:
@@ -120,8 +136,10 @@ All of these are thin endpoints over services, shared with the iPad where the be
   - The iPad's ConsumptionSheet keeps using per-item consume.
 - **`GET /api/products/resolve?name=`** returns `{match | null, candidates[{product, score, source}], suggestion}`.
   It reuses `MatchingService` (alias, exact, generic, fuzzy).
-- **`POST /api/products/{id}/aliases`** takes `{name, store_chain?}` and upserts a verified
-  alias, reusing the R2 alias logic. **`GET`** lists aliases, and **`DELETE`** removes a wrong one.
+- ~~`POST /api/products/{id}/aliases`~~ (ruling 2026-09-25) **`POST /api/products/{id}/names`**
+  takes `{name}` and learns a `cook` name (`learn_product_name`); a name owned by another
+  product is a `conflict`. `GET` and `DELETE` on `names` (and `DELETE` on printed `aliases`)
+  exist since H52.
 - **Product create** goes through `ProductResolver` (case-insensitive reuse, category defaults).
   An exact duplicate returns the existing product with `created: false`.
 - **Idempotency:** an `idempotency_key` table (key, route, request hash, response, 24 h TTL) and a

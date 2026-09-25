@@ -762,13 +762,13 @@ How this fits the priority rule: **H0 is MVP work** (the acceptance week cannot 
 without it), **H1 repairs MVP-R1b/R2 behaviour** (the matcher pre-selects wrong products and
 confirm makes that permanent), and **H2 to H4 come after MVP-P3** unless the acceptance week
 hits one of them, in which case that item moves up. The agent track (`docs/agent_TODO.md`)
-starts after H2, because it needs the status machine, the vocabularies and the access key.
+starts after H2, because it needs the status machine, the vocabularies and the access key. (Amended 2026-09-25: the operator started it early; H23 and H24 are in, and AG1 is the access key.)
 
 #### Decisions the track needs (operator-gated)
 
 | ID | Question | Blocks | Recommended | Status |
 | --- | --- | --- | --- | --- |
-| DEC-5 | Access control for the LAN API: a shared secret header checked on every mutating route and the WebSocket (one env var, sent by the frontend proxy and the CLI), or Traefik forward-auth later, or stay open | H31, AG1 | shared header now; forward-auth when HTTPS lands | open |
+| DEC-5 | Access control for the LAN API: a shared secret header checked on every mutating route and the WebSocket (one env var, sent by the frontend proxy and the CLI), or Traefik forward-auth later, or stay open | H31, AG1 | shared header now; forward-auth when HTTPS lands | **settled 2026-09-25: AG1's named Bearer tokens** (`docs/agent_TODO.md`); every `/api` route needs one once configured, the iPad proxy adds a server-side token, the API port stays published for the agent. H31 folds into AG1 |
 | DEC-6 | Next.js major upgrade (14 is unsupported; 1 critical, 2 high on paths this app has): before or after the acceptance week | H33 | right after P3; React 19 and the caching changes should not land during acceptance | open |
 | DEC-7 | Scanner and Open Food Facts surface (~700 lines, no frontend caller, three known 500s): quarantine behind a flag, or route through `ProductResolver` now | H41 | quarantine until GS1/barcode work starts | open |
 | DEC-8 | Receipt retention: delete the file N days after confirm and keep the structured lines; keep or drop `ocr_raw_text` after confirm | H35 | 90 days, drop the raw text on file deletion | open |
@@ -818,7 +818,7 @@ starts after H2, because it needs the status machine, the vocabularies and the a
 
 | ID | Side | Increment | Est. | Closes |
 | --- | --- | --- | --- | --- |
-| H31 | both | **The LAN is not the boundary** (DEC-5). Shared secret header on every mutating route and the WebSocket handshake, `Origin` checked on the WebSocket, the upload route behind the same header, `API_PORT` no longer published by default (the frontend proxy is the door) | 4h | F3 Important (WebSocket, upload), F3 misjudgement 5, F1 Minor (API_PORT) |
+| H31 | both | **Folded into AG1 (DEC-5, 2026-09-25).** ~~**The LAN is not the boundary** (DEC-5).~~ Shared secret header on every mutating route and the WebSocket handshake, `Origin` checked on the WebSocket, the upload route behind the same header, `API_PORT` no longer published by default (the frontend proxy is the door) | 4h | F3 Important (WebSocket, upload), F3 misjudgement 5, F1 Minor (API_PORT) |
 | H32 | repo | **Reproducible builds.** `uv lock` or `pip-compile` for the backend, exact pins for React and react-query, `pip-audit` and `npm audit --omit=dev` in CI, dev dependencies out of the prod image, `.dockerignore` in both packages, non-root user | 3h | F3 Important (unpinned), F2 Minor (Dockerfiles), F1 Minor (root) |
 | H33 | frontend | **Next.js 15/16** (DEC-6): React 19, async request APIs, caching defaults; the rewrite and the standalone Dockerfile re-verified; audit clean | 8h | F3 Important (Next 14 line) |
 | H34 | backend | **Bounded work per receipt.** Page cap and byte cap before parsing, pdf parsing in a subprocess with a timeout, Redis client with socket and connect timeouts, broadcasts fire-and-forget with a timeout | 4h | F3 Important (large PDF), F1 Minor (Redis), F3 misjudgement 6 |
@@ -872,7 +872,7 @@ Report keys: Processing = `pipeline-receipt-processing.md`, Confirm = `pipeline-
 F1 = `pipeline-foundations.md`, F2 = `pipeline-foundations-2.md`, F3 = `pipeline-foundations-3.md`.
 
 ### Post-MVP frontier (do not start before MVP-P3)
-**First after MVP-P3: agent interface track** (`docs/agent_TODO.md`, AG0–AG7, planned
+**Agent interface track, started early on 2026-09-25** (`docs/agent_TODO.md`, AG0–AG7, planned
 2026-09-14). A Hermes Agent or OpenClaw agent adds and consumes stock, creates generic products
 and aliases, explores and cooks recipes, and builds shopping lists through the HTTP API, a
 `kyokki` CLI with `-h` help and a SKILL.md. No MCP server. Recipes come from Mealie or an
@@ -1596,8 +1596,8 @@ with the category as fallback.
   catalog), HUNAJAMELONI / Honeydew, PÄÄRYNÄMEHU / Pear juice, taco shells (with and without).
   Deterministic: every case's product is shortlisted (melon failed before this). Model:
   `tests/services/test_live_selection.py`, `requires_vllm`.
-- [ ] **The live selection test has not been run**: the gateway (`192.168.0.247:9003`) is not
-  reachable from the dev container. Run `pytest tests/services/test_live_selection.py -m
+- [ ] **The live selection test has not been run**: the gateway (`192.168.0.94:9292`, `c2.muse-glimmer`; the `.247:9003` address was stale) was not
+  reachable from the dev container. Reachable again 2026-09-25; round 2026-09-25-3 lane A3 runs it. Run `pytest tests/services/test_live_selection.py -m
   requires_vllm -v` on the homelab; the null cases (ketchup-new, pear-juice, taco-shells-new)
   are the ones the prompt change is for. H54 measures extraction on the same gateway.
 
@@ -1870,7 +1870,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Friction Q1-Q6: [x] Q2/Q3/Q6 (PR #48)  [x] Q4/Q5 (PR #49)  [x] Q1 (PR #50)  [ ] product editor (now H18)
 - Reviews 2026-09-17: five reports under `docs/reviews/`, hardening track H0-H4 added above, `docs/PRODUCT_RESOLUTION_SPEC.md` written
 - Hardening H0 (before P3): [x] H01 (PR #52)  [x] H02 (PR #52)  [x] H03  [x] H04  [x] H05  [x] H06  [x] H07  [x] H08 — H01/H02 merged; H03-H08 in PRs #53-#56, all opened 2026-09-18
-- Decisions: [ ] DEC-5 access  [ ] DEC-6 Next.js  [ ] DEC-7 scanner  [ ] DEC-8 retention  [ ] DEC-9 categories  [x] DEC-10 freezer expiry (Q12, #74)
+- Decisions: [x] DEC-5 access (AG1 tokens, 2026-09-25)  [ ] DEC-6 Next.js  [ ] DEC-7 scanner  [ ] DEC-8 retention  [ ] DEC-9 categories  [x] DEC-10 freezer expiry (Q12, #74)
 - Wave 6: [ ] P3 acceptance (with H0)
 - Hardening H1 resolution: [x] H11 (PR #57)  [x] H12 (#58)  [x] H13 (#59)  [x] H14 (#60)  [x] H15 (#62)  [x] H16 (#61)  [x] H17 (#63)  [x] H18 (#64) — wave H1 complete
 - Friction Q7-Q10: [x] Q7 (PR #66)  [x] Q8 (#67)  [x] Q9+Q10 (#68) - the first real receipt
@@ -1880,6 +1880,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)  [x] one-tap consume + general undo (operator trial)  [x] the Gone screen (waste visible, kept for metrics)
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
+- Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [ ] AG1 tokens (`feat/ag1-agent-tokens`)  [ ] AG2 agent endpoints (`feat/ag2-agent-stock-endpoints`)  [ ] H54 glossary + H53 live run (`feat/h54-finnish-glossary`). Next: AG3 CLI
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery

@@ -68,3 +68,6 @@ samples/
 # Claude Code local state
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Round planning artefacts (/plan-round); the specs travel inside the executor prompts
+.rounds/
