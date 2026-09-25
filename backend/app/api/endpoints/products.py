@@ -3,10 +3,12 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.endpoints.stock import IdempotencyKeyHeader, claim_request, replayed
+from app.api.errors import AgentError
 from app.api.exceptions import handle_integrity_errors, reference_conflict_detail
 from app.crud import product_master as crud_product
 from app.crud import store_product_alias as crud_alias
@@ -26,6 +28,8 @@ from app.schemas.product_names import (
     ProductNameEntry,
     ProductNamesResponse,
 )
+from app.schemas.stock import ResolveResponse, TeachNameRequest
+from app.services import product_lookup
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
     broadcast_product_update,
@@ -38,6 +42,7 @@ from app.services.off_service import (
     OffProductNotFoundError,
     enrich_product_from_off,
 )
+from app.services.product_lookup import NameTaken, ProductNotFound
 from app.services.product_merge import (
     MergeIntoItself,
     UnknownProduct,
@@ -51,6 +56,8 @@ from app.services.product_names import (
 )
 
 router = APIRouter()
+
+TEACH_ROUTE = "POST /api/products/{product_id}/names"
 
 
 @router.get("", response_model=list[ProductMasterResponse])
@@ -75,6 +82,21 @@ async def lookup_by_barcode(
             detail=f"Product with barcode '{barcode}' not found",
         )
     return product
+
+
+# Declared before `/{product_id}`, which would otherwise take "resolve" for an id and answer 422
+@router.get("/resolve", response_model=ResolveResponse)
+async def resolve_product_name(
+    name: str = Query(..., min_length=1, description="The name to resolve"),
+    db: AsyncSession = Depends(get_db),
+) -> ResolveResponse:
+    """Which product a name means (AG2): an exact hit only, never a guess.
+
+    `match` is set only when the name is a product's canonical or learned name. `candidates`
+    are the products most like it, to choose from; `suggestion` is the normalised name to
+    create when nothing matched.
+    """
+    return await product_lookup.resolve(db, name)
 
 
 @router.get("/{product_id}", response_model=ProductMasterResponse)
@@ -149,6 +171,52 @@ async def list_product_names(
     return ProductNamesResponse(
         names=[_name_entry(row) for row in names],
         printed=[_printed_entry(alias) for alias in aliases],
+    )
+
+
+@router.post(
+    "/{product_id}/names",
+    response_model=ProductNameEntry,
+    status_code=status.HTTP_201_CREATED,
+    responses={200: {"model": ProductNameEntry, "description": "Already its name"}},
+)
+async def teach_name(
+    product_id: UUID,
+    body: TeachNameRequest,
+    request: Request,
+    idempotency_key: str | None = IdempotencyKeyHeader,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Teach a product a name, as the cook's word (AG2). 201 learned, 200 already its name.
+
+    Errors: 404 `not_found` (no such product), 409 `conflict` (the name already means
+    another product - merge them instead - or the Idempotency-Key was reused with another
+    body).
+    """
+    claim = await claim_request(
+        request, idempotency_key, TEACH_ROUTE, product_id=product_id
+    )
+    if (stored := await replayed(db, claim)) is not None:
+        return stored
+    try:
+        async with handle_integrity_errors():
+            taught = await product_lookup.teach_name(
+                db, product_id, body.name, claim=claim
+            )
+    except ProductNotFound as exc:
+        raise AgentError("not_found", str(exc)) from exc
+    except NameTaken as exc:
+        raise AgentError(
+            "conflict",
+            str(exc),
+            product_id=str(exc.owner_id),
+            product_name=exc.owner_name,
+        ) from exc
+
+    if taught.created:
+        await broadcast_product_update(product_id, action="updated")
+    return JSONResponse(
+        content=taught.entry.model_dump(mode="json"), status_code=taught.status_code
     )
 
 
