@@ -1,9 +1,9 @@
 /**
  * End-to-end consume flow on the home page against msw-mocked API endpoints.
  *
- * One tap on the card consumes (operator, 2026-09-22): no sheet, no confirmation, the quantity
- * bar moves at once and the header's Undo names what just happened. "…" still opens the sheet
- * with every amount - optimistic update, toast, rollback on error.
+ * One tap on a tile uses the item up (operator, 2026-09-22 and 2026-09-24 - presence, not
+ * amounts): no sheet, no confirmation, the tile leaves at once and the header's Undo names what
+ * just happened. "…" still opens the sheet - optimistic update, toast, rollback on error.
  */
 
 import React from 'react'
@@ -16,6 +16,12 @@ import { StatusBanner } from '@/components/layout'
 import Home from '../page'
 import type { UndoPreview } from '@/types/consumption'
 import type { InventoryItem } from '@/types/inventory'
+
+function inDays(days: number): string {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return date.toISOString().split('T')[0]
+}
 
 const MILK: InventoryItem = {
   id: 'item-milk',
@@ -30,7 +36,8 @@ const MILK: InventoryItem = {
   unit: 'dl',
   status: 'sealed',
   purchase_date: '2024-01-01',
-  expiry_date: '2099-03-01',
+  // Tomorrow, so it is a tile on the going-stale shelf rather than a dot in its area
+  expiry_date: inDays(1),
   expiry_source: 'calculated',
   opened_date: null,
   batch_number: null,
@@ -61,8 +68,10 @@ function renderHome() {
   )
 }
 
-function remaining(label: string) {
-  return screen.queryByRole('progressbar', { name: label })
+const TILE = 'Oat Milk, going stale'
+
+function tile() {
+  return screen.queryByRole('button', { name: TILE })
 }
 
 /**
@@ -83,48 +92,26 @@ async function openSheetAndTap(label: string) {
   fireEvent.click(within(sheet).getByRole('button', { name: label }))
 }
 
-describe('One tap on the card', () => {
-  it('consumes a quarter at once, with no sheet and no toast', async () => {
-    let stored: InventoryItem = MILK
+describe('One tap on the tile', () => {
+  it('uses the item up at once, with no sheet and no toast', async () => {
+    let stock: InventoryItem[] = [MILK]
     const bodies: unknown[] = []
     api(
-      http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json(stock)),
       http.post(`${API_URL}/inventory/:id/consume`, async ({ request }) => {
         bodies.push(await request.json())
-        stored = { ...MILK, current_quantity: 750, status: 'opened' }
-        return HttpResponse.json(stored)
+        stock = []
+        return HttpResponse.json({ ...MILK, current_quantity: 0, status: 'empty' })
       })
     )
 
     renderHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+    fireEvent.click(await screen.findByRole('button', { name: TILE }))
 
-    await waitFor(() => expect(remaining('750 of 1000 dl remaining')).toBeInTheDocument())
+    await waitFor(() => expect(tile()).not.toBeInTheDocument())
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    await waitFor(() => expect(bodies).toEqual([{ quantity: 250 }]))
+    await waitFor(() => expect(bodies).toEqual([{ quantity: 1000 }]))
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
-  })
-
-  it('consumes again on every tap', async () => {
-    let stored: InventoryItem = MILK
-    const bodies: unknown[] = []
-    api(
-      http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
-      http.post(`${API_URL}/inventory/:id/consume`, async ({ request }) => {
-        const { quantity } = (await request.json()) as { quantity: number }
-        bodies.push(quantity)
-        stored = { ...stored, current_quantity: stored.current_quantity - quantity, status: 'opened' }
-        return HttpResponse.json(stored)
-      })
-    )
-
-    renderHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
-    await waitFor(() => expect(remaining('750 of 1000 dl remaining')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
-
-    await waitFor(() => expect(remaining('500 of 1000 dl remaining')).toBeInTheDocument())
-    await waitFor(() => expect(bodies).toEqual([250, 250]))
   })
 
   it('rolls back and says why when a tap fails', async () => {
@@ -136,17 +123,17 @@ describe('One tap on the card', () => {
     )
 
     renderHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+    fireEvent.click(await screen.findByRole('button', { name: TILE }))
 
     // Both the toast and the banner are alerts now, so name what it should say
     expect(await screen.findByText('Oat Milk has been thrown away')).toBeInTheDocument()
-    await waitFor(() => expect(remaining('1000 of 1000 dl remaining')).toBeInTheDocument())
+    await waitFor(() => expect(tile()).toBeInTheDocument())
   })
 
   it('the header Undo then names the tap, which is the confirmation and the way back', async () => {
     let undoable: UndoPreview | null = null
     api(
-      http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json(undoable ? [] : [MILK])),
       http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(undoable)),
       http.post(`${API_URL}/inventory/:id/consume`, () => {
         undoable = {
@@ -157,26 +144,26 @@ describe('One tap on the card', () => {
               inventory_item_id: 'item-milk',
               product_name: 'Oat Milk',
               unit: 'dl',
-              action: 'use_partial',
-              quantity_consumed: 250,
+              action: 'use_full',
+              quantity_consumed: 1000,
             },
           ],
         }
-        return HttpResponse.json({ ...MILK, current_quantity: 750, status: 'opened' })
+        return HttpResponse.json({ ...MILK, current_quantity: 0, status: 'empty' })
       })
     )
 
     renderHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+    fireEvent.click(await screen.findByRole('button', { name: TILE }))
 
     expect(
-      await screen.findByRole('button', { name: 'Undo −250 dl · Oat Milk' })
+      await screen.findByRole('button', { name: 'Undo Finished · Oat Milk' })
     ).toBeEnabled()
   })
 })
 
 describe('The sheet behind "…"', () => {
-  it('updates the list immediately, sends the amount, and confirms with a toast', async () => {
+  it('sends the amount without waiting, and confirms with a toast', async () => {
     let stored: InventoryItem = MILK
     let releaseConsume: () => void = () => {}
     const consumeReleased = new Promise<void>((resolve) => {
@@ -195,25 +182,22 @@ describe('The sheet behind "…"', () => {
     )
 
     renderHome()
-    expect(await screen.findByRole('progressbar', { name: '1000 of 1000 dl remaining' })).toBeInTheDocument()
-
     await openSheetAndTap('½ · 500 dl')
 
-    // Optimistic: the list shows the new amount while the request is still pending
-    await waitFor(() => expect(remaining('500 of 1000 dl remaining')).toBeInTheDocument())
+    // The sheet closes at once; the tile stays, since half is still there
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     await waitFor(() =>
       expect(consumeBodies).toEqual([{ id: 'item-milk', body: { quantity: 500 } }])
     )
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    expect(tile()).toBeInTheDocument()
 
     releaseConsume()
 
     expect(await screen.findByRole('status')).toHaveTextContent('Consumed 500 dl · Oat Milk')
-    expect(remaining('500 of 1000 dl remaining')).toBeInTheDocument()
   })
 
-  it('removes a used-up item from the list as soon as Done is tapped', async () => {
+  it('removes a used-up item as soon as Done is tapped', async () => {
     let releaseConsume: () => void = () => {}
     const consumeReleased = new Promise<void>((resolve) => {
       releaseConsume = resolve
@@ -227,19 +211,17 @@ describe('The sheet behind "…"', () => {
     )
 
     renderHome()
-    expect(await screen.findByText('Oat Milk')).toBeInTheDocument()
-
     await openSheetAndTap('Done')
 
-    // Optimistically empty, so the stock view hides it before the server answers
-    await waitFor(() => expect(screen.queryByText('Oat Milk')).not.toBeInTheDocument())
+    // Optimistically empty, so the fridge hides it before the server answers
+    await waitFor(() => expect(tile()).not.toBeInTheDocument())
     expect(screen.getByText(/No items found/i)).toBeInTheDocument()
 
     releaseConsume()
     expect(await screen.findByRole('status')).toHaveTextContent('Used up · Oat Milk')
   })
 
-  it('rolls the list back and shows the server error when consuming fails', async () => {
+  it('rolls back and shows the server error when consuming fails', async () => {
     api(
       http.get(`${API_URL}/inventory`, () => HttpResponse.json([MILK])),
       http.post(`${API_URL}/inventory/:id/consume`, () =>
@@ -248,17 +230,12 @@ describe('The sheet behind "…"', () => {
     )
 
     renderHome()
-    expect(await screen.findByRole('progressbar', { name: '1000 of 1000 dl remaining' })).toBeInTheDocument()
-
-    await openSheetAndTap('½ · 500 dl')
+    await openSheetAndTap('Done')
 
     expect(
       await screen.findByText('Cannot consume 500 - only 100 available')
     ).toBeInTheDocument()
-    await waitFor(() =>
-      expect(remaining('1000 of 1000 dl remaining')).toBeInTheDocument()
-    )
-    expect(remaining('500 of 1000 dl remaining')).not.toBeInTheDocument()
+    await waitFor(() => expect(tile()).toBeInTheDocument())
   })
 })
 
@@ -271,12 +248,12 @@ describe('When a tap does not land', () => {
       http.post(`${API_URL}/inventory/:id/consume`, async ({ request }) => {
         attempts.push(await request.json())
         if (!reachable) return HttpResponse.json({ detail: 'Nope' }, { status: 503 })
-        return HttpResponse.json({ ...MILK, current_quantity: 750, status: 'opened' })
+        return HttpResponse.json({ ...MILK, current_quantity: 0, status: 'empty' })
       })
     )
 
     renderHome()
-    fireEvent.click(await screen.findByRole('button', { name: 'Consume 250 dl of Oat Milk' }))
+    fireEvent.click(await screen.findByRole('button', { name: TILE }))
 
     expect(await screen.findByText('Consume failed')).toBeInTheDocument()
 
@@ -284,7 +261,7 @@ describe('When a tap does not land', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry Consume' }))
 
     await waitFor(() => expect(screen.queryByText('Consume failed')).not.toBeInTheDocument())
-    // The same helping, sent again - not a second one
-    expect(attempts).toEqual([{ quantity: 250 }, { quantity: 250 }])
+    // The same request, sent again - not a second one
+    expect(attempts).toEqual([{ quantity: 1000 }, { quantity: 1000 }])
   })
 })
