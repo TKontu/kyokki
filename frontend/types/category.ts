@@ -13,6 +13,10 @@ export interface Category {
   frozen_shelf_life_days: number | null // Days once frozen; null: no useful figure (Q12)
   sort_order: number // Display order (default: 0)
   default_storage: StorageType // Where its products are kept by default (response only)
+  // The plausible shelf-life range for the category, the one the catalog estimate enforces
+  // (response only, H58).
+  shelf_life_min_days: number
+  shelf_life_max_days: number
 }
 
 export interface CategoryCreate {

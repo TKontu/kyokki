@@ -26,6 +26,8 @@ const CATEGORIES: Category[] = [
     frozen_shelf_life_days: 180,
     sort_order: 1,
     default_storage: 'refrigerator',
+    shelf_life_min_days: 1,
+    shelf_life_max_days: 60,
   },
   {
     id: 'fish',
@@ -35,6 +37,8 @@ const CATEGORIES: Category[] = [
     frozen_shelf_life_days: 120,
     sort_order: 2,
     default_storage: 'refrigerator',
+    shelf_life_min_days: 1,
+    shelf_life_max_days: 60,
   },
 ]
 

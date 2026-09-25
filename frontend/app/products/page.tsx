@@ -10,12 +10,17 @@
  *
  * It also shows which shelf lives are guesses. That is the one number here a cook can act
  * on, and "5 days, from the category" reads very differently from "5 days, you set this".
+ *
+ * The audit view (H58, Q15) lists the same products by provenance - guesses, then
+ * estimates, then the cook's numbers - and flags a number at the edge of its category's
+ * plausible range, so a wrong estimate is caught here rather than in a spreadsheet.
  */
 
 import React, { useMemo, useState } from 'react'
 import { ProductEditSheet } from '@/components/products/ProductEditSheet'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
+import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
 import { SkeletonCard } from '@/components/ui/Skeleton'
 import { useToast } from '@/hooks/useToast'
 import { useCategories } from '@/hooks/useCategories'
@@ -25,7 +30,10 @@ import {
   useEstimateCatalog,
   useProductList,
 } from '@/hooks/useProducts'
+import { auditRows, type AuditRow, type Edge } from '@/lib/shelfLifeAudit'
 import type { CatalogEstimateResponse, ProductMaster } from '@/types/product'
+
+type View = 'category' | 'audit'
 
 function shelfLifeNote(product: ProductMaster): { text: string; guess: boolean } {
   const days = `${product.default_shelf_life_days} ${
@@ -89,6 +97,71 @@ function ProductRow({
         </Badge>
       </button>
     </li>
+  )
+}
+
+function edgeNote(edge: Edge, categoryName: string, band: [number, number]): string {
+  const range = `${categoryName} (${band[0]}-${band[1]} days)`
+  if (edge === 'outside') return `outside the usual range for ${range}`
+  return `near the ${edge === 'short' ? 'shortest' : 'longest'} for ${range}`
+}
+
+/** Every product by provenance, the ones worth a second look flagged (H58). */
+function AuditList({
+  rows,
+  categoryName,
+  onOpen,
+}: {
+  rows: AuditRow[]
+  categoryName: (id: string) => string
+  onOpen: (product: ProductMaster) => void
+}) {
+  return (
+    <ul aria-label="Shelf-life audit" className="flex flex-col gap-2">
+      {rows.map(({ product, edge, band }) => {
+        const shelfLife = shelfLifeNote(product)
+        return (
+          <li key={product.id}>
+            <button
+              type="button"
+              onClick={() => onOpen(product)}
+              className={
+                'flex w-full min-h-touch-lg flex-col items-start gap-0.5 rounded-ui border ' +
+                'border-ui-border px-4 py-3 text-left dark:border-ui-dark-border ' +
+                'hover:bg-ui-bg-secondary dark:hover:bg-ui-dark-bg-secondary'
+              }
+            >
+              <span className="flex w-full items-baseline justify-between gap-3">
+                <span
+                  data-name
+                  className="truncate text-base text-ui-text dark:text-ui-dark-text"
+                >
+                  {product.canonical_name}
+                </span>
+                <span className="shrink-0 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
+                  {categoryName(product.category)}
+                </span>
+              </span>
+              <span
+                className={
+                  'text-sm ' +
+                  (shelfLife.guess
+                    ? 'text-yellow-700 dark:text-yellow-400'
+                    : 'text-ui-text-secondary dark:text-ui-dark-text-secondary')
+                }
+              >
+                {shelfLife.text}
+              </span>
+              {edge && band && (
+                <span className="text-sm font-medium text-orange-700 dark:text-orange-400">
+                  {`⚠ ${edgeNote(edge, categoryName(product.category), band)}`}
+                </span>
+              )}
+            </button>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 
@@ -158,6 +231,7 @@ export default function ProductsPage() {
   const [term, setTerm] = useState('')
   const [editing, setEditing] = useState<ProductMaster | null>(null)
   const [proposal, setProposal] = useState<CatalogEstimateResponse | null>(null)
+  const [view, setView] = useState<View>('category')
   const search = useDebouncedValue(term, SEARCH_DEBOUNCE_MS)
   const { data: products, isLoading, isError } = useProductList({ search: search || undefined })
   const { data: categories } = useCategories()
@@ -180,6 +254,11 @@ export default function ProductsPage() {
       categoryName(a).localeCompare(categoryName(b))
     )
   }, [products, categoryName])
+
+  const audit = useMemo(
+    () => auditRows(products ?? [], categories ?? []),
+    [products, categories]
+  )
 
   const guesses = (products ?? []).filter(
     (product: ProductMaster) => product.shelf_life_source === 'category'
@@ -241,6 +320,20 @@ export default function ProductsPage() {
           )}
         </div>
 
+        <div className="mb-4 max-w-md">
+          <ChoiceGroup
+            label="Show"
+            name="products-view"
+            className="grid-cols-2"
+            value={view}
+            options={[
+              { value: 'category', label: 'By category' },
+              { value: 'audit', label: 'Audit shelf lives' },
+            ]}
+            onChange={setView}
+          />
+        </div>
+
         {proposal && (
           <ProposedChanges
             result={proposal}
@@ -264,8 +357,12 @@ export default function ProductsPage() {
           </p>
         )}
 
+        {view === 'audit' && (products?.length ?? 0) > 0 && (
+          <AuditList rows={audit} categoryName={categoryName} onOpen={setEditing} />
+        )}
+
         <div className="flex flex-col gap-6">
-          {grouped.map(([category, items]) => (
+          {view === 'category' && grouped.map(([category, items]) => (
             <section key={category}>
               <h2 className="mb-2 text-sm font-medium text-ui-text-secondary dark:text-ui-dark-text-secondary">
                 {categoryName(category)}

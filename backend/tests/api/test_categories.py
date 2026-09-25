@@ -283,3 +283,39 @@ class TestDeleteCategoryThatIsInUse:
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
         assert (await client.delete("/api/categories/snacks")).status_code == 204
+
+
+class TestShelfLifeBand:
+    """H58: the range a shelf life is plausible in, so the iPad can flag one at the edge.
+
+    The same band the catalog estimate already enforces (Q11); it lived only in the backend.
+    """
+
+    async def test_every_category_carries_its_band(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        categories = {c["id"]: c for c in (await client.get("/api/categories")).json()}
+
+        assert categories["meat"]["shelf_life_min_days"] == 1
+        assert categories["meat"]["shelf_life_max_days"] == 60
+        for category in categories.values():
+            assert category["shelf_life_min_days"] <= category["shelf_life_max_days"]
+
+    async def test_a_category_nobody_banded_gets_the_loose_default(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        await client.post(
+            "/api/categories",
+            json={
+                "id": "baby_food",
+                "display_name": "Baby food",
+                "default_shelf_life_days": 30,
+            },
+        )
+
+        category = (await client.get("/api/categories/baby_food")).json()
+
+        assert (category["shelf_life_min_days"], category["shelf_life_max_days"]) == (
+            1,
+            1825,
+        )

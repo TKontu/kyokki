@@ -73,6 +73,8 @@ describe('TypeScript Types', () => {
         frozen_shelf_life_days: null,
         sort_order: 0,
         default_storage: 'refrigerator',
+        shelf_life_min_days: 1,
+        shelf_life_max_days: 60,
       }
       expect(category.id).toBeDefined()
     })

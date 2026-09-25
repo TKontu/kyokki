@@ -24,6 +24,8 @@ const CATEGORIES = [
     default_shelf_life_days: 5,
     sort_order: 10,
     default_storage: 'refrigerator',
+    shelf_life_min_days: 1,
+    shelf_life_max_days: 60,
   },
   {
     id: 'pantry',
@@ -32,6 +34,8 @@ const CATEGORIES = [
     default_shelf_life_days: 365,
     sort_order: 20,
     default_storage: 'pantry',
+    shelf_life_min_days: 1,
+    shelf_life_max_days: 60,
   },
 ]
 
@@ -250,5 +254,70 @@ describe('ProductsPage', () => {
     renderPage([])
 
     expect(await screen.findByText(/created when you confirm a receipt/)).toBeInTheDocument()
+  })
+})
+
+describe('the shelf-life audit (H58)', () => {
+  const catalog = () => [
+    product({ id: 'p-cook', canonical_name: 'Bacon', default_shelf_life_days: 90, shelf_life_source: 'cook' }),
+    product({ id: 'p-model', canonical_name: 'Chicken', default_shelf_life_days: 58, shelf_life_source: 'model' }),
+    product({ id: 'p-guess', canonical_name: 'Pork', default_shelf_life_days: 5, shelf_life_source: 'category' }),
+    product({ id: 'p-fine', canonical_name: 'Turkey', default_shelf_life_days: 30, shelf_life_source: 'model' }),
+  ]
+
+  const openAudit = async () => {
+    fireEvent.click(await screen.findByRole('radio', { name: 'Audit shelf lives' }))
+    return screen.getByRole('list', { name: 'Shelf-life audit' })
+  }
+
+  it('lists guesses first, then estimates, then what the cook set', async () => {
+    renderPage(catalog())
+
+    const list = await openAudit()
+
+    const names = within(list)
+      .getAllByRole('button')
+      .map((row) => row.querySelector('[data-name]')?.textContent)
+    expect(names).toEqual(['Pork', 'Chicken', 'Turkey', 'Bacon'])
+  })
+
+  it('flags an estimate at the edge of its category', async () => {
+    renderPage(catalog())
+
+    const list = await openAudit()
+
+    const chicken = within(list).getByRole('button', { name: /Chicken/ })
+    expect(chicken).toHaveTextContent('near the longest for Meat & Poultry (1-60 days)')
+    const turkey = within(list).getByRole('button', { name: /Turkey/ })
+    expect(turkey).not.toHaveTextContent('near the')
+  })
+
+  it('flags a number outside the plausible range', async () => {
+    renderPage(catalog())
+
+    const list = await openAudit()
+
+    expect(within(list).getByRole('button', { name: /Bacon/ })).toHaveTextContent(
+      'outside the usual range'
+    )
+  })
+
+  it('opens the editor from the audit', async () => {
+    renderPage(catalog())
+
+    const list = await openAudit()
+    fireEvent.click(within(list).getByRole('button', { name: /Chicken/ }))
+
+    expect(await screen.findByLabelText('Keeps for')).toHaveValue(58)
+  })
+
+  it('goes back to the catalog by category', async () => {
+    renderPage(catalog())
+    await openAudit()
+
+    fireEvent.click(screen.getByRole('radio', { name: 'By category' }))
+
+    expect(screen.getByRole('heading', { name: 'Meat & Poultry' })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Shelf-life audit' })).not.toBeInTheDocument()
   })
 })
