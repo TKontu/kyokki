@@ -2,7 +2,7 @@
 
 /**
  * UndoButton (operator, 2026-09-22)
- * Always in the header, always saying what it would reverse: "Undo −1 pcs · Apples". Pressing
+ * Always in the header, always saying what it would reverse: "Undo Finished · Apples". Pressing
  * it again steps further back. It replaces the Undo that used to live on a few toasts, which
  * vanished after eight seconds on a display nobody was necessarily watching.
  */

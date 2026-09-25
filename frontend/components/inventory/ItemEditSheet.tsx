@@ -2,20 +2,16 @@
 
 /**
  * ItemEditSheet Component
- * "Edit" on a stock card: correct quantity, expiry and location, mark as gone, or delete.
- * Quantity changes are corrections, not consumption (MVP-S4 ruling); Consume records use.
+ * "Edit" behind a tile's "…": correct expiry and location, mark as gone, or delete. No amount:
+ * the UI tracks presence, not quantities (V2, operator ask 2026-09-24); "Used up" is on the
+ * item sheet and a tile tap.
  */
 
 import React, { useState } from 'react'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Button from '@/components/ui/Button'
 import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
-import {
-  fieldErrorClass,
-  fieldHintClass,
-  fieldInputClass,
-  fieldLabelClass,
-} from '@/components/ui/formStyles'
+import { fieldInputClass, fieldLabelClass } from '@/components/ui/formStyles'
 import { ProductEditSheet } from '@/components/products/ProductEditSheet'
 import { FieldMoved } from '@/components/ui/FieldMoved'
 import { useDeleteInventoryItem, useUpdateInventoryItem } from '@/hooks/useInventory'
@@ -23,7 +19,6 @@ import { useFieldEdit } from '@/hooks/useFieldEdit'
 import { useProduct } from '@/hooks/useProducts'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
-import { formatQuantity } from '@/lib/consumption'
 import { isInactive, locationOptions } from '@/lib/stock'
 import type { InventoryItem, InventoryItemUpdate } from '@/types/inventory'
 
@@ -43,11 +38,9 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const update = useUpdateInventoryItem()
   const remove = useDeleteInventoryItem()
 
-  const quantityField = useFieldEdit(String(item.current_quantity))
   const expiryField = useFieldEdit(item.expiry_date.split('T')[0])
   // A plain string: the item may already sit in a location this build does not know (H04)
   const locationField = useFieldEdit(item.location)
-  const quantity = quantityField.value
   const expiry = expiryField.value
   const location = locationField.value
   const [confirmingDelete, setConfirmingDelete] = useState(false)
@@ -55,16 +48,13 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const product = useProduct(editingProduct ? item.product_master_id : null)
 
   const name = item.product_name
-  const amount = Number(quantity)
-  const quantityValid = quantity.trim() !== '' && Number.isFinite(amount) && amount >= 0
 
   // Only what the cook touched and actually changed: what moved underneath is not theirs
   const changes: InventoryItemUpdate = {}
-  if (quantityValid && quantityField.changed) changes.current_quantity = amount
   if (expiry && expiryField.changed) changes.expiry_date = expiry
   if (locationField.changed) changes.location = location
   const busy = update.isPending || remove.isPending
-  const canSave = quantityValid && Object.keys(changes).length > 0 && !busy
+  const canSave = Object.keys(changes).length > 0 && !busy
 
   const patch = (data: InventoryItemUpdate, success: string) => {
     update.mutate(
@@ -183,32 +173,6 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           <Button variant="ghost" size="sm" onClick={() => setEditingProduct(true)}>
             {`Edit ${name}…`}
           </Button>
-        </div>
-
-        <div>
-          <label htmlFor="item-edit-quantity" className={fieldLabelClass}>
-            {`Quantity (${item.unit})`}
-          </label>
-          <input
-            id="item-edit-quantity"
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="any"
-            value={quantity}
-            onChange={(event) => quantityField.set(event.target.value)}
-            className={`${fieldInputClass} mt-1`}
-          />
-          <FieldMoved label="Quantity" field={quantityField} />
-          {quantityValid ? (
-            <p className={fieldHintClass}>
-              {`0 marks it used up. More than ${formatQuantity(item.initial_quantity)} ${item.unit} raises the full amount.`}
-            </p>
-          ) : (
-            <p role="alert" className={fieldErrorClass}>
-              Enter 0 or more
-            </p>
-          )}
         </div>
 
         <div>

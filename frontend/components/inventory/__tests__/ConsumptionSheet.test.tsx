@@ -1,3 +1,9 @@
+/**
+ * The item sheet behind a tile's "…" (V2, presence not amounts): the name, "Used up", and the
+ * way to the edit sheet. No amounts, no fractions - a tile tap already uses an item up, and
+ * the header's Undo takes a mis-tap back.
+ */
+
 import React from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { ConsumptionSheet } from '../ConsumptionSheet'
@@ -34,15 +40,6 @@ const MILK: InventoryItem = {
   avg_piece_grams: null,
 }
 
-const EGGS: InventoryItem = {
-  ...MILK,
-  id: 'item-eggs',
-  product_name: 'Eggs',
-  unit: 'pcs',
-  initial_quantity: 10,
-  current_quantity: 6,
-}
-
 type MutateOptions = { onSuccess?: () => void; onError?: (error: unknown) => void }
 
 let mutate: jest.Mock
@@ -52,13 +49,13 @@ beforeEach(() => {
   mockUseConsume.mockReturnValue({ mutate, isPending: false })
 })
 
-function renderSheet(item: InventoryItem | null, onClose = jest.fn()) {
-  render(
+function renderSheet(item: InventoryItem | null, onClose = jest.fn(), onEdit?: () => void) {
+  const { container } = render(
     <ToastProvider>
-      <ConsumptionSheet item={item} open={item !== null} onClose={onClose} />
+      <ConsumptionSheet item={item} open={item !== null} onClose={onClose} onEdit={onEdit} />
     </ToastProvider>
   )
-  return onClose
+  return { onClose, container }
 }
 
 function lastMutateOptions(): MutateOptions {
@@ -72,111 +69,69 @@ describe('ConsumptionSheet', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
 
-    it('shows the product name and what is left', () => {
+    it('names the item and shows no amounts', () => {
       renderSheet(MILK)
-      expect(screen.getByRole('dialog', { name: 'Oat Milk' })).toBeInTheDocument()
-      expect(screen.getByText('750 / 1000 dl left')).toBeInTheDocument()
+
+      const sheet = screen.getByRole('dialog', { name: 'Oat Milk' })
+      expect(sheet.textContent).not.toMatch(/\d/)
+      expect(screen.queryByRole('button', { name: /½|¼|¾/ })).not.toBeInTheDocument()
     })
 
-    it('offers fractions labelled with the amount for measured items', () => {
+    it('gives Used up its own full-width button', () => {
       renderSheet(MILK)
-      // ¾ of 1000 is 750, which is everything left, so it is offered as Done instead
-      for (const label of ['¼ · 250 dl', '½ · 500 dl', 'Done']) {
-        expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
-      }
+      expect(screen.getByRole('button', { name: 'Used up' })).toHaveAttribute('data-primary')
     })
 
-    it('leads with eating one for pieces', () => {
-      renderSheet(EGGS)
-      for (const label of ['1', '2', '3', 'All 6']) {
-        expect(screen.getByRole('button', { name: label })).toBeInTheDocument()
-      }
-      expect(screen.queryByRole('button', { name: /·/ })).not.toBeInTheDocument()
-    })
+    it('offers the edit sheet', () => {
+      const onEdit = jest.fn()
+      renderSheet(MILK, jest.fn(), onEdit)
 
-    it('gives the common act its own full-width button', () => {
-      renderSheet(EGGS)
-      expect(screen.getByRole('button', { name: '1' }).className).toContain('w-full')
-    })
+      fireEvent.click(screen.getByRole('button', { name: 'Edit item' }))
 
-    it('uses 56pt consumption buttons', () => {
-      renderSheet(MILK)
-      expect(
-        screen.getByRole('button', { name: '½ · 500 dl' }).className
-      ).toContain('min-h-touch-lg')
+      expect(onEdit).toHaveBeenCalledTimes(1)
     })
   })
 
-  describe('Consuming', () => {
-    it('consumes half of the initial quantity and closes', () => {
-      const onClose = renderSheet(MILK)
+  describe('Using it up', () => {
+    it('uses up everything that is left and closes', () => {
+      const { onClose } = renderSheet(MILK)
 
-      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Used up' }))
 
       expect(mutate).toHaveBeenCalledWith(
-        { id: 'item-milk', data: { quantity: 500 } },
+        { id: 'item-milk', data: { quantity: 750 } },
         expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) })
       )
       expect(onClose).toHaveBeenCalledTimes(1)
     })
-
-    it('consumes everything that is left on Done', () => {
-      renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: 'Done' }))
-      expect(mutate.mock.calls[0][0]).toEqual({ id: 'item-milk', data: { quantity: 750 } })
-    })
-
-    it('consumes whole pieces', () => {
-      renderSheet(EGGS)
-      fireEvent.click(screen.getByRole('button', { name: '2' }))
-      expect(mutate.mock.calls[0][0]).toEqual({ id: 'item-eggs', data: { quantity: 2 } })
-    })
   })
 
   describe('Feedback', () => {
-    it('confirms a fraction with a success toast', () => {
+    it('confirms with a toast', () => {
       renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
-
-      act(() => lastMutateOptions().onSuccess?.())
-
-      expect(screen.getByRole('status')).toHaveTextContent('Consumed 500 dl · Oat Milk')
-    })
-
-    it('confirms Done as used up', () => {
-      renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: 'Done' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Used up' }))
 
       act(() => lastMutateOptions().onSuccess?.())
 
       expect(screen.getByRole('status')).toHaveTextContent('Used up · Oat Milk')
     })
 
-    it('confirms pieces with the count', () => {
-      renderSheet(EGGS)
-      fireEvent.click(screen.getByRole('button', { name: '2' }))
-
-      act(() => lastMutateOptions().onSuccess?.())
-
-      expect(screen.getByRole('status')).toHaveTextContent('Consumed 2 pcs · Eggs')
-    })
-
     it('shows the API error message', () => {
       renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Used up' }))
 
       act(() =>
         lastMutateOptions().onError?.(
-          new APIError(400, 'UNKNOWN_ERROR', 'Cannot consume 500 - only 100 available')
+          new APIError(409, 'UNKNOWN_ERROR', 'Oat Milk has been thrown away')
         )
       )
 
-      expect(screen.getByRole('alert')).toHaveTextContent('Cannot consume 500 - only 100 available')
+      expect(screen.getByRole('alert')).toHaveTextContent('Oat Milk has been thrown away')
     })
 
     it('hides server and network error text behind a readable message', () => {
       renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Used up' }))
 
       act(() =>
         lastMutateOptions().onError?.(
@@ -190,7 +145,7 @@ describe('ConsumptionSheet', () => {
 
     it('falls back to a generic error message', () => {
       renderSheet(MILK)
-      fireEvent.click(screen.getByRole('button', { name: '½ · 500 dl' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Used up' }))
 
       act(() => lastMutateOptions().onError?.(new Error('')))
 

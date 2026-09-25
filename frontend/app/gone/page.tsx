@@ -19,7 +19,6 @@ import { useConsumptionLog, useConsumptionSummary } from '@/hooks/useConsumption
 import { useUpdateInventoryItem } from '@/hooks/useInventory'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
-import { formatQuantity } from '@/lib/consumption'
 import { GONE_ACTIONS, groupByDay, sinceFor, summaryLine, WINDOWS } from '@/lib/gone'
 import type { ConsumptionLogEntry } from '@/types/consumption'
 
@@ -37,9 +36,7 @@ function Row({ row, onRestore }: { row: ConsumptionLogEntry; onRestore: () => vo
           {row.product_name}
         </p>
         <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-          {`${thrownAway ? 'Thrown away' : 'Finished'} · ${formatQuantity(
-            row.quantity_consumed
-          )} ${row.unit}`}
+          {thrownAway ? 'Thrown away' : 'Finished'}
         </p>
       </div>
       {/* Only what is still in the bin can come back. Something finished is simply eaten, and

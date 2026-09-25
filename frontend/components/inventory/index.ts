@@ -6,9 +6,6 @@
 export { ExpiryBadge } from './ExpiryBadge'
 export type { ExpiryBadgeProps } from './ExpiryBadge'
 
-export { QuantityBar } from './QuantityBar'
-export type { QuantityBarProps } from './QuantityBar'
-
 export { IngredientTile } from './IngredientTile'
 export type { IngredientTileProps } from './IngredientTile'
 

@@ -35,7 +35,9 @@ function initialRow(item: ExtractedItem): ReviewRow {
     productName: undefined,
     name,
     category,
-    quantity: String(item.quantity),
+    // Not shown (V2, presence not amounts) and so not fixable here: a line read as nothing
+    // still goes in as one, rather than blocking the whole receipt on a number nobody sees
+    quantity: String(Number(item.quantity) > 0 ? item.quantity : 1),
     unit: item.unit,
   }
 }
@@ -260,8 +262,6 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
     )
   }
 
-  const quantitiesValid = included.every(({ row }) => Number(row.quantity) > 0)
-
   return (
     <div>
       <header className="border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
@@ -357,7 +357,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
         </div>
         <Button
           size="lg"
-          disabled={!quantitiesValid || confirm.isPending}
+          disabled={confirm.isPending}
           loading={confirm.isPending}
           onClick={submit}
         >

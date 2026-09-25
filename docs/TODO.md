@@ -863,7 +863,7 @@ rulings under "Operator friction log — the stock screen should look like a fri
 | ID | Side | Increment | Est. | Depends on |
 | --- | --- | --- | --- | --- |
 | V1 | frontend | **Staleness tiers and the tile.** ✅ `lib/staleness.ts` `stalenessOf(item, today)` on top of `calculateDaysUntilExpiry`: `stale` (expired or ≤ 1 day, red), `soon` (2-3 days, orange), `week` (4-7 days, green), `later` (8+, blue), `consumed` (status `empty`, grey). `IngredientTile`: rounded box, category emoji (`category_icon`), name, colour, no numbers; the tier also named in `aria-label` and carried by a shape or pattern cue, so colour is never the only signal. The demo-only `ExpiryBadge` in `components/ui/Badge.tsx` (its own thresholds) removed. Tests on every tier boundary | 3h | — |
-| V2 | frontend | **Presence, not amounts** (UI only). A tile tap toggles consumed: on is the existing consume of everything left (status `empty`), off is a PATCH `current_quantity = initial_quantity` (a `correct` event, logged and undoable; `restore` would leave an empty item empty). Out of the UI: `QuantityBar`, the ¼ ½ ¾ / −1 buttons and the "left" line in `ConsumptionSheet` (which shrinks to Edit, Gone, Delete), the quantity field in `ItemEditSheet`, the quantity and unit inputs in `QuickAddSheet` (sends the product's `default_quantity`/`default_unit`, else 1 pcs), amounts on the Gone rows and in `summaryLine`, the undo label, and the receipt review's quantity and unit columns. `lib/consumption.ts` keeps `applyConsume` for the optimistic update and loses the fraction ladder; `contracts/status-transitions.json` unchanged. No backend change | 5h | V1 |
+| V2 | frontend | **Presence, not amounts** (UI only). ✅ A tile tap toggles consumed: on is the existing consume of everything left (status `empty`), off is a PATCH `current_quantity = initial_quantity` (a `correct` event, logged and undoable; `restore` would leave an empty item empty). Out of the UI: `QuantityBar`, the ¼ ½ ¾ / −1 buttons and the "left" line in `ConsumptionSheet` (which shrinks to Edit, Gone, Delete), the quantity field in `ItemEditSheet`, the quantity and unit inputs in `QuickAddSheet` (sends the product's `default_quantity`/`default_unit`, else 1 pcs), amounts on the Gone rows and in `summaryLine`, the undo label, and the receipt review's quantity and unit columns. `lib/consumption.ts` keeps `applyConsume` for the optimistic update and loses the fraction ladder; `contracts/status-transitions.json` unchanged. No backend change | 5h | V1 |
 | V3 | frontend | **The fridge main view.** ✅ `/` becomes fridge-shaped: a **Going stale** shelf across the top (tiers `stale` and `soon`), then areas. `lib/fridge.ts` owns one `AREAS` map: Meat & fish (meat, fish), Veggies (produce), Fruits (fruits), Dairy (dairy, cheese), Bread, Drinks (beverages), Pantry (pantry, condiments, snacks), Ready meals (ready_meals, added by H55), Freezer (`location = freezer`, overrides the category), Other (unknown category). An area shows its tiles' colours as a strip of dots, not a count. Replaces the location grouping of `InventoryList` / `buildStockView` (`lib/stock.ts`). Landscape iPad first | 6h | V1 |
 | V4 | frontend | **Area drill-down grid.** (grid ✅; recently used-up tiles pending) An area tap opens `/area/[id]` (a route, so the back gesture works): a grid of `IngredientTile`s, stale first, no numbers. Tap toggles consumed (V2); "…" or a long press opens the edit sheet. Items consumed in the last 24 h stay as grey tiles at the end, so a mis-tap can be taken back: `include_inactive` plus a client filter on `consumed_at`, and a `consumed_since` query param as a backend follow-up if the payload grows | 4h | V2, V3 |
 
@@ -1707,7 +1707,14 @@ fridge view, or a fresh item (a dot, not a tile) would have had no way to its sh
   tiles, stalest first). A tile tap uses the item up (the old card's ¼ step goes with the
   cards); "…" opens the sheet. `useStockActions` shares both. `InventoryList`,
   `InventoryItemCard` and `buildStockView` are gone. The demo page's two `ExpiryBadge`s stay.
-- [ ] PR 2 - amounts out of the UI (V2).
+- [x] **PR 2 - amounts out of the UI (V2).** No quantity, unit or fraction anywhere on the iPad:
+  the item sheet is "Used up" plus "Edit item"; the edit sheet has no quantity; quick add sends
+  the product's usual amount and unit (one, and no unit, for a new product); Gone counts items
+  ("8 items") and its rows say only "Thrown away" / "Finished"; the Undo label says "Used some"
+  for a partial use; the receipt review has no quantity, unit or conversion note, and a line read
+  as nothing goes in as one rather than blocking confirm. `QuantityBar`, the fraction and count
+  ladders, `cardActions` and `formatQuantity` are gone; `applyConsume` stays, still checked
+  against `contracts/status-transitions.json`. Backend and types unchanged.
 - [ ] PR 3 - recently used-up tiles in the grid, tap to bring back, `consumed_since` (V4 rest).
 
 ---

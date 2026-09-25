@@ -23,8 +23,9 @@ const preview = (...steps: UndoStep[]): UndoPreview => ({
 
 describe('describeUndo', () => {
   it.each([
-    [step(), '−1 pcs · Apples'],
-    [step({ unit: 'dl', quantity_consumed: 2.5, product_name: 'Milk' }), '−2.5 dl · Milk'],
+    // Presence, not amounts (V2): a partial use says so, not how much
+    [step(), 'Used some · Apples'],
+    [step({ unit: 'dl', quantity_consumed: 2.5, product_name: 'Milk' }), 'Used some · Milk'],
     [step({ action: 'use_full' }), 'Finished · Apples'],
     [step({ action: 'discard' }), 'Thrown away · Apples'],
     [step({ action: 'restore' }), 'Put back · Apples'],

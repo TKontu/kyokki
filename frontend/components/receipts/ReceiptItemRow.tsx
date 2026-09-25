@@ -10,7 +10,6 @@ import React, { useState } from 'react'
 import { ProductSearch } from '@/components/products/ProductSearch'
 import { ProvenanceChip } from '@/components/receipts/ProvenanceChip'
 import Button from '@/components/ui/Button'
-import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
 import {
   fieldErrorClass,
   fieldInputClass,
@@ -43,7 +42,6 @@ export interface ReceiptItemRowProps {
   onChange: (changes: Partial<ReviewRow>) => void
 }
 
-const UNITS: ReceiptUnit[] = ['pcs', 'g', 'dl']
 
 /** The product this row will actually use: the cook's choice, else what was read. */
 export function chosenProductId(item: ExtractedItem, row: ReviewRow): string | null {
@@ -56,20 +54,6 @@ export function canInclude(item: ExtractedItem, row: ReviewRow): boolean {
   return row.name.trim() !== '' && row.category !== ''
 }
 
-/**
- * The shop weighed it and we are counting it (Q2), or the shop counted packs and we are
- * weighing them (Q8). Showing both keeps the conversion honest, and the quantity and unit
- * below are already editable if the guess is wrong.
- */
-function describeConversion(item: ExtractedItem): string | null {
-  if (item.printed_quantity == null || item.printed_unit == null) return null
-  const printed =
-    item.printed_unit === 'g' && item.printed_quantity >= 1000
-      ? `${(item.printed_quantity / 1000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')} kg`
-      : `${item.printed_quantity} ${item.printed_unit}`
-  return `${printed} → ${item.quantity} ${item.unit}`
-}
-
 export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemRowProps) {
   const [changing, setChanging] = useState(false)
   const [searchTerm, setSearchTerm] = useState(row.name)
@@ -77,7 +61,6 @@ export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemR
   const matched = Boolean(productId)
   const ready = canInclude(item, row)
   const rowId = `row-${item.index}`
-  const conversion = describeConversion(item)
   const productName =
     row.productName !== undefined ? row.productName : item.product_name
   // The cook's own choice is their word, whatever the read proposed.
@@ -181,40 +164,11 @@ export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemR
           )}
           <p className="mt-1 text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
             {item.name}
-            {conversion && <span>{` · ${conversion}`}</span>}
           </p>
         </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-end gap-3">
-        <div className="w-24">
-          <label htmlFor={`${rowId}-quantity`} className={fieldLabelClass}>
-            Quantity
-          </label>
-          <input
-            id={`${rowId}-quantity`}
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="any"
-            aria-label="Quantity"
-            value={row.quantity}
-            onChange={(event) => onChange({ quantity: event.target.value })}
-            className={`${fieldInputClass} mt-1`}
-          />
-        </div>
-
-        <div className="w-44">
-          <ChoiceGroup
-            label="Unit"
-            name={`${rowId}-unit`}
-            className="grid-cols-3"
-            value={row.unit}
-            options={UNITS.map((unit) => ({ value: unit, label: unit }))}
-            onChange={(unit) => onChange({ unit })}
-          />
-        </div>
-
         {!matched && (
           <div className="min-w-48 flex-1">
             <label htmlFor={`${rowId}-category`} className={fieldLabelClass}>
