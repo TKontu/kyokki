@@ -72,8 +72,12 @@ describe('groupByDay', () => {
 })
 
 describe('summaryLine', () => {
-  it('keeps units apart, because grams and pieces do not add up', () => {
-    expect(summaryLine({ events: 8, totals: { g: 1400, pcs: 6 } })).toBe('8 · 1400 g, 6 pcs')
+  it('counts items, not amounts (V2, presence not amounts)', () => {
+    expect(summaryLine({ events: 8, totals: { g: 1400, pcs: 6 } })).toBe('8 items')
+  })
+
+  it('says one item as one item', () => {
+    expect(summaryLine({ events: 1, totals: { dl: 10 } })).toBe('1 item')
   })
 
   it('says nothing happened rather than showing a zero', () => {

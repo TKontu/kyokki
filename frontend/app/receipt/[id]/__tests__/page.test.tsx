@@ -189,8 +189,9 @@ describe('ReceiptReviewPage', () => {
     expect(screen.getByText(finnishDaysAgo(3), { exact: false })).toBeInTheDocument()
     expect(screen.getByLabelText('Product name')).toHaveValue('Generic 0')
     expect(screen.getByText('PRINTED 0')).toBeInTheDocument()
-    expect(screen.getByLabelText('Quantity')).toHaveValue(1)
-    expect(screen.getByRole('radio', { name: 'pcs' })).toBeChecked()
+    // Presence, not amounts (V2): the row names the thing; the amount goes along unseen
+    expect(screen.queryByLabelText('Quantity')).not.toBeInTheDocument()
+    expect(screen.queryByRole('radiogroup', { name: 'Unit' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('Category')).toHaveValue('dairy')
     expect(addButton()).toBeEnabled()
   })
@@ -254,21 +255,19 @@ describe('ReceiptReviewPage', () => {
     expect((confirms[0] as { items: { index: number }[] }).items.map((i) => i.index)).toEqual([0])
   })
 
-  it('sends edited name, quantity and unit', async () => {
+  it('sends the edited name with the amount the receipt read', async () => {
     const confirms = mockApi(receipt())
     renderPage()
 
     await screen.findByLabelText('Product name')
     fireEvent.change(screen.getByLabelText('Product name'), { target: { value: 'Oat drink' } })
-    fireEvent.change(screen.getByLabelText('Quantity'), { target: { value: '10' } })
-    fireEvent.click(screen.getByText('dl'))
     fireEvent.click(addButton())
 
     await waitFor(() => expect(confirms).toHaveLength(1))
     expect((confirms[0] as { items: unknown[] }).items[0]).toMatchObject({
       name: 'Oat drink',
-      quantity: 10,
-      unit: 'dl',
+      quantity: 1,
+      unit: 'pcs',
     })
   })
 
@@ -387,7 +386,7 @@ describe('ReceiptReviewPage', () => {
     mockApi(receipt({ purchase_date: isoDaysAgo(3) }))
     renderPage()
 
-    await screen.findByLabelText('Quantity')
+    await screen.findByLabelText('Product name')
     expect(screen.queryByText(/counted from then/i)).not.toBeInTheDocument()
   })
 
@@ -395,13 +394,14 @@ describe('ReceiptReviewPage', () => {
     mockApi(receipt({ purchase_date: null }))
     renderPage()
 
-    await screen.findByLabelText('Quantity')
+    await screen.findByLabelText('Product name')
     expect(screen.queryByText(/counted from then/i)).not.toBeInTheDocument()
   })
 
-  it('shows what the receipt weighed when it was counted into pieces', async () => {
-    // Q2: the shop sold 1.072 kg of apples; the cook eats them one at a time
-    mockApi(
+  it('keeps a weighed line counted into pieces, without showing either', async () => {
+    // Q2: the shop sold 1.072 kg of apples; the cook eats them one at a time. The backend still
+    // counts them; the screen no longer says so (V2, presence not amounts)
+    const confirms = mockApi(
       receipt({}, [
         item(0, {
           name: 'KG OMENA GOLDEN',
@@ -416,14 +416,32 @@ describe('ReceiptReviewPage', () => {
     )
     renderPage()
 
-    expect(await screen.findByText(/1\.072 kg → 9 pcs/)).toBeInTheDocument()
-    expect(screen.getByLabelText('Quantity')).toHaveValue(9)
-    expect(screen.getByRole('radio', { name: 'pcs' })).toBeChecked()
+    await screen.findByLabelText('Product name')
+    expect(screen.queryByText(/→/)).not.toBeInTheDocument()
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items[0]).toMatchObject({
+      quantity: 9,
+      unit: 'pcs',
+    })
   })
 
-  it('shows what the receipt counted when it was weighed into grams', async () => {
-    // Q8, the mirror: the shop sold 1 pack of mince; the cook wants the 400 g
-    mockApi(
+  it('adds a line read as nothing as one, since there is no amount to fix on screen', async () => {
+    const confirms = mockApi(receipt({}, [item(0, { quantity: 0, unit: 'pcs' })]))
+    renderPage()
+
+    await screen.findByLabelText('Product name')
+    expect(addButton()).toBeEnabled()
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items[0]).toMatchObject({ quantity: 1 })
+  })
+
+  it('keeps a counted line weighed into grams, without showing either', async () => {
+    // Q8, the mirror: the shop sold 1 pack of mince; the backend keeps the 400 g
+    const confirms = mockApi(
       receipt({}, [
         item(0, {
           name: 'SIKA-NAUTAJAUHELIHA 23%',
@@ -438,17 +456,15 @@ describe('ReceiptReviewPage', () => {
     )
     renderPage()
 
-    expect(await screen.findByText(/1 pcs → 400 g/)).toBeInTheDocument()
-    expect(screen.getByLabelText('Quantity')).toHaveValue(400)
-    expect(screen.getByRole('radio', { name: 'g' })).toBeChecked()
-  })
-
-  it('says nothing about a conversion that did not happen', async () => {
-    mockApi(receipt({}, [item(0, { quantity: 400, unit: 'g' })]))
-    renderPage()
-
-    await screen.findByLabelText('Quantity')
+    await screen.findByLabelText('Product name')
     expect(screen.queryByText(/→/)).not.toBeInTheDocument()
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items[0]).toMatchObject({
+      quantity: 400,
+      unit: 'g',
+    })
   })
 
   it('folds household lines away instead of listing them', async () => {

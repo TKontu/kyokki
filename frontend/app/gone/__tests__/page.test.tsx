@@ -87,7 +87,7 @@ function renderGone() {
 }
 
 describe('The Gone screen', () => {
-  it('lists what left the kitchen, grouped by day, with the amount', async () => {
+  it('lists what left the kitchen, grouped by day, with no amounts', async () => {
     api([MEAT, MILK])
 
     renderGone()
@@ -96,7 +96,7 @@ describe('The Gone screen', () => {
       'section'
     ) as HTMLElement
     expect(within(today).getByText('Minced Meat')).toBeInTheDocument()
-    expect(within(today).getByText(/250 g/)).toBeInTheDocument()
+    expect(within(today).queryByText(/250 g/)).not.toBeInTheDocument()
     const yesterday = screen.getByRole('heading', { name: 'Yesterday' }).closest(
       'section'
     ) as HTMLElement
@@ -108,8 +108,8 @@ describe('The Gone screen', () => {
 
     renderGone()
 
-    expect(await screen.findByText('8 · 1400 g, 6 pcs')).toBeInTheDocument()
-    expect(screen.getByText('34 · 120 dl')).toBeInTheDocument()
+    expect(await screen.findByText('8 items')).toBeInTheDocument()
+    expect(screen.getByText('34 items')).toBeInTheDocument()
   })
 
   it('asks for the last 30 days of what is gone', async () => {

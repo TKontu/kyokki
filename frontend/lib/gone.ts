@@ -5,7 +5,6 @@
  * for good - metrics will be built on it - so the screen, not the data, is what has a window.
  */
 
-import { formatQuantity } from '@/lib/consumption'
 import type { ActionSummary, ConsumptionAction, ConsumptionLogEntry } from '@/types/consumption'
 
 /**
@@ -68,11 +67,11 @@ export function groupByDay(
   return groups
 }
 
-/** "8 · 1400 g, 6 pcs" - how many times, and how much of each unit. */
+/**
+ * "8 items" - how many things, not how much of each (V2, presence not amounts). The history
+ * still records the amounts; the screen stopped reading them out.
+ */
 export function summaryLine(summary: ActionSummary | undefined): string {
   if (!summary || summary.events === 0) return 'none'
-  const totals = Object.entries(summary.totals)
-    .map(([unit, amount]) => `${formatQuantity(amount)} ${unit}`)
-    .join(', ')
-  return totals ? `${summary.events} · ${totals}` : String(summary.events)
+  return `${summary.events} ${summary.events === 1 ? 'item' : 'items'}`
 }

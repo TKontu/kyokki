@@ -179,18 +179,20 @@ describe('QuickAddSheet', () => {
     search('mil')
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
 
-    expect(screen.getByLabelText('Quantity')).toHaveValue(10)
-    expect(screen.getByRole('radio', { name: 'dl' })).toBeChecked()
+    // Presence, not amounts (V2): nothing to count here
+    expect(screen.queryByLabelText('Quantity')).not.toBeInTheDocument()
+    expect(screen.queryByRole('radiogroup', { name: 'Unit' })).not.toBeInTheDocument()
     expect(screen.getByRole('radio', { name: 'Fridge' })).toBeChecked()
     expect(screen.getByLabelText('Expiry')).toHaveValue(addDaysISO(10))
 
     fireEvent.click(addButton())
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
+    // The backend still keeps an amount: the product's usual one, in its own unit
     expect(bodies).toEqual([
       { product_id: 'prod-milk', quantity: 10, unit: 'dl', location: 'main_fridge' },
     ])
-    expect(await screen.findByText('Added 10 dl · Milk')).toBeInTheDocument()
+    expect(await screen.findByText('Added · Milk')).toBeInTheDocument()
   })
 
   it('creates a new product in a chosen category', async () => {
@@ -214,21 +216,15 @@ describe('QuickAddSheet', () => {
     expect(screen.getByRole('radio', { name: 'Freezer' })).toBeChecked()
     expect(screen.getByLabelText('Expiry')).toHaveValue(addDaysISO(180))
 
-    type('Quantity', '500')
-    fireEvent.click(screen.getByRole('radio', { name: 'g' }))
     fireEvent.click(addButton())
 
     await waitFor(() => expect(bodies).toHaveLength(1))
     // No location: the cook never chose one, and the server derives the same shelf from the
     // category. What it must not do is take a guess made from the category to a product that
     // turns out to exist (H25).
-    expect(bodies[0]).toEqual({
-      name: 'Peas',
-      category: 'frozen',
-      quantity: 500,
-      unit: 'g',
-    })
-    expect(await screen.findByText('Added 500 g · Peas')).toBeInTheDocument()
+    // One piece: a new product has no usual amount, and the server picks its unit
+    expect(bodies[0]).toEqual({ name: 'Peas', category: 'frozen', quantity: 1 })
+    expect(await screen.findByText('Added · Peas')).toBeInTheDocument()
   })
 
   it('lists categories in their sort order', async () => {
@@ -257,18 +253,16 @@ describe('QuickAddSheet', () => {
     expect(screen.queryByRole('button', { name: /create new/i })).not.toBeInTheDocument()
   })
 
-  it.each(['0', '', '-2'])('rejects quantity %p', async (value) => {
-    const bodies = mockApi()
+  it('sends one of a product that has no usual amount', async () => {
+    const bodies = mockApi({ products: [{ ...MILK, default_quantity: null }] })
     renderSheet()
 
     search('milk')
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
-    type('Quantity', value)
-
-    expect(screen.getByText('Enter a quantity above 0')).toBeInTheDocument()
-    expect(addButton()).toBeDisabled()
     fireEvent.click(addButton())
-    expect(bodies).toHaveLength(0)
+
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ product_id: 'prod-milk', quantity: 1, unit: 'dl' })
   })
 
   it('sends the expiry date only when it was changed', async () => {
@@ -293,14 +287,14 @@ describe('QuickAddSheet', () => {
 
     search('milk')
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
-    type('Quantity', '3')
+    type('Expiry', '2026-12-24')
     fireEvent.click(addButton())
 
     expect(
       await screen.findByText("Category required for new product 'Milk'")
     ).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Quantity')).toHaveValue(3)
+    expect(screen.getByLabelText('Expiry')).toHaveValue('2026-12-24')
   })
 
   it('shows a friendly message when the server fails', async () => {
@@ -368,11 +362,10 @@ describe('what the sheet does not claim to know (H25)', () => {
     search('Oat drink')
     fireEvent.click(await screen.findByRole('button', { name: 'Create new: Oat drink' }))
     fireEvent.click(await screen.findByRole('radio', { name: /dairy/i }))
-    type('Quantity', '2')
     fireEvent.click(addButton())
 
     await waitFor(() => expect(bodies).toHaveLength(1))
-    expect(bodies[0]).toEqual({ name: 'Oat drink', category: 'dairy', quantity: 2 })
+    expect(bodies[0]).toEqual({ name: 'Oat drink', category: 'dairy', quantity: 1 })
   })
 
   it('still sends the unit of a product the cook picked', async () => {

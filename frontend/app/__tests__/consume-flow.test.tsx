@@ -3,7 +3,7 @@
  *
  * One tap on a tile uses the item up (operator, 2026-09-22 and 2026-09-24 - presence, not
  * amounts): no sheet, no confirmation, the tile leaves at once and the header's Undo names what
- * just happened. "…" still opens the sheet - optimistic update, toast, rollback on error.
+ * just happened. "…" opens the item sheet, whose "Used up" does the same with a toast.
  */
 
 import React from 'react'
@@ -163,41 +163,7 @@ describe('One tap on the tile', () => {
 })
 
 describe('The sheet behind "…"', () => {
-  it('sends the amount without waiting, and confirms with a toast', async () => {
-    let stored: InventoryItem = MILK
-    let releaseConsume: () => void = () => {}
-    const consumeReleased = new Promise<void>((resolve) => {
-      releaseConsume = resolve
-    })
-    const consumeBodies: unknown[] = []
-
-    api(
-      http.get(`${API_URL}/inventory`, () => HttpResponse.json([stored])),
-      http.post(`${API_URL}/inventory/:id/consume`, async ({ request, params }) => {
-        consumeBodies.push({ id: params.id, body: await request.json() })
-        await consumeReleased
-        stored = { ...MILK, current_quantity: 500, status: 'partial', opened_date: '2024-02-01' }
-        return HttpResponse.json(stored)
-      })
-    )
-
-    renderHome()
-    await openSheetAndTap('½ · 500 dl')
-
-    // The sheet closes at once; the tile stays, since half is still there
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    await waitFor(() =>
-      expect(consumeBodies).toEqual([{ id: 'item-milk', body: { quantity: 500 } }])
-    )
-    expect(screen.queryByRole('status')).not.toBeInTheDocument()
-    expect(tile()).toBeInTheDocument()
-
-    releaseConsume()
-
-    expect(await screen.findByRole('status')).toHaveTextContent('Consumed 500 dl · Oat Milk')
-  })
-
-  it('removes a used-up item as soon as Done is tapped', async () => {
+  it('removes a used-up item as soon as Used up is tapped', async () => {
     let releaseConsume: () => void = () => {}
     const consumeReleased = new Promise<void>((resolve) => {
       releaseConsume = resolve
@@ -211,7 +177,7 @@ describe('The sheet behind "…"', () => {
     )
 
     renderHome()
-    await openSheetAndTap('Done')
+    await openSheetAndTap('Used up')
 
     // Optimistically empty, so the fridge hides it before the server answers
     await waitFor(() => expect(tile()).not.toBeInTheDocument())
@@ -230,7 +196,7 @@ describe('The sheet behind "…"', () => {
     )
 
     renderHome()
-    await openSheetAndTap('Done')
+    await openSheetAndTap('Used up')
 
     expect(
       await screen.findByText('Cannot consume 500 - only 100 available')

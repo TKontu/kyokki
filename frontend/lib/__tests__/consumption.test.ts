@@ -1,11 +1,4 @@
-import {
-  applyConsume,
-  cardActions,
-  consumptionOptions,
-  formatQuantity,
-  isCountable,
-  roundQuantity,
-} from '../consumption'
+import { applyConsume, roundQuantity } from '../consumption'
 import type { InventoryItem } from '@/types/inventory'
 import contract from '../../../contracts/status-transitions.json'
 
@@ -37,118 +30,11 @@ function makeItem(overrides: Partial<InventoryItem> = {}): InventoryItem {
   }
 }
 
-function byKey(item: InventoryItem) {
-  return Object.fromEntries(consumptionOptions(item).map((o) => [o.key, o]))
-}
-
 describe('consumption', () => {
-  describe('roundQuantity and formatQuantity', () => {
+  describe('roundQuantity', () => {
     it('rounds to two decimals like the Numeric(10, 2) column', () => {
       expect(roundQuantity(83.255)).toBe(83.26)
       expect(roundQuantity(0.1 + 0.2)).toBe(0.3)
-    })
-
-    it('formats whole numbers without decimals and trims trailing zeros', () => {
-      expect(formatQuantity(250)).toBe('250')
-      expect(formatQuantity(83.25)).toBe('83.25')
-      expect(formatQuantity(1.5)).toBe('1.5')
-    })
-  })
-
-  describe('isCountable', () => {
-    it('treats only pcs as countable', () => {
-      expect(isCountable('pcs')).toBe(true)
-      expect(isCountable('unit')).toBe(false) // legacy unit; migrated to pcs in MVP-U1
-      expect(isCountable('dl')).toBe(false)
-      expect(isCountable('g')).toBe(false)
-    })
-  })
-
-  describe('proportional options', () => {
-    it('labels each fraction with the amount it actually takes', () => {
-      expect(consumptionOptions(makeItem()).map((o) => o.label)).toEqual([
-        '¼ · 250 dl',
-        '½ · 500 dl',
-        '¾ · 750 dl',
-        'Done',
-      ])
-    })
-
-    it('computes a quarter of 1000 dl as 250 dl', () => {
-      expect(byKey(makeItem()).quarter.amount).toBe(250)
-      expect(byKey(makeItem()).half.amount).toBe(500)
-      expect(byKey(makeItem()).threeQuarters.amount).toBe(750)
-    })
-
-    it('drops fractions that would finish the item', () => {
-      // At 100 dl left of 1000, a quarter, a half and three quarters are all "everything"
-      const options = consumptionOptions(makeItem({ current_quantity: 100 }))
-      expect(options.map((o) => o.label)).toEqual(['Done'])
-      expect(options[0].amount).toBe(100)
-    })
-
-    it('uses the whole remaining quantity for done', () => {
-      expect(byKey(makeItem({ current_quantity: 420 })).done.amount).toBe(420)
-    })
-
-    it('rounds fractional amounts', () => {
-      expect(byKey(makeItem({ initial_quantity: 333, current_quantity: 333 })).quarter.amount).toBe(
-        83.25
-      )
-    })
-
-    it('marks nothing primary when there are fractions to choose between', () => {
-      expect(consumptionOptions(makeItem()).some((o) => o.primary)).toBe(false)
-    })
-  })
-
-  describe('countable options', () => {
-    it('leads with eating one, then smaller counts, then all of them', () => {
-      const item = makeItem({ unit: 'pcs', initial_quantity: 13, current_quantity: 13 })
-      const options = consumptionOptions(item)
-
-      expect(options.map((o) => o.label)).toEqual(['1', '2', '3', 'All 13'])
-      expect(options.map((o) => o.amount)).toEqual([1, 2, 3, 13])
-      expect(options.every((o) => !o.disabled)).toBe(true)
-    })
-
-    it('makes eating one the primary act', () => {
-      const options = byKey(makeItem({ unit: 'pcs', initial_quantity: 13, current_quantity: 13 }))
-      expect(options['count-1'].primary).toBe(true)
-      expect(options['count-2'].primary).toBe(false)
-      expect(options.done.primary).toBe(false)
-    })
-
-    it('never offers a count that would finish the item', () => {
-      // 3 of 3 is not "three", it is "all of them"
-      const options = consumptionOptions(
-        makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 3 })
-      )
-
-      expect(options.map((o) => o.label)).toEqual(['1', '2', 'All 3'])
-      expect(options.every((o) => !o.disabled)).toBe(true)
-    })
-
-    it('offers only finishing it when one is left', () => {
-      const options = consumptionOptions(
-        makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 1 })
-      )
-
-      expect(options.map((o) => o.label)).toEqual(['All 1'])
-      expect(options[0].primary).toBe(true)
-      expect(options[0].amount).toBe(1)
-    })
-  })
-
-  describe('inactive items', () => {
-    it.each(['empty', 'discarded'] as const)('disables every option for %s items', (status) => {
-      const options = consumptionOptions(makeItem({ status, current_quantity: 0 }))
-      expect(options.every((o) => o.disabled)).toBe(true)
-    })
-
-    it('disables every option when nothing is left', () => {
-      const options = consumptionOptions(makeItem({ status: 'opened', current_quantity: 0 }))
-      expect(options.every((o) => o.disabled)).toBe(true)
     })
   })
 
@@ -235,45 +121,6 @@ describe('consumption', () => {
       )
     })
   })
-  })
-})
-
-describe('cardActions: what one tap on the card does', () => {
-  it('takes one piece of something counted, and offers the rest as "All"', () => {
-    const { step, finish } = cardActions(
-      makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 4 })
-    )
-
-    expect(step).toMatchObject({ amount: 1, label: '−1' })
-    expect(finish).toMatchObject({ amount: 4, label: 'All 4' })
-  })
-
-  it('takes a quarter of the pack of something measured, labelled with the amount', () => {
-    const { step, finish } = cardActions(
-      makeItem({ unit: 'dl', initial_quantity: 10, current_quantity: 7.5 })
-    )
-
-    expect(step).toMatchObject({ amount: 2.5, label: '−¼ · 2.5 dl' })
-    expect(finish).toMatchObject({ amount: 7.5, label: 'Done' })
-  })
-
-  it('makes finishing the big button when a step would take all of it anyway', () => {
-    const counted = cardActions(makeItem({ unit: 'pcs', initial_quantity: 6, current_quantity: 1 }))
-    const measured = cardActions(
-      makeItem({ unit: 'dl', initial_quantity: 10, current_quantity: 2 })
-    )
-
-    expect(counted.step).toMatchObject({ key: 'done', amount: 1, label: 'All 1' })
-    expect(counted.finish).toBeUndefined()
-    expect(measured.step).toMatchObject({ key: 'done', amount: 2 })
-    expect(measured.finish).toBeUndefined()
-  })
-
-  it('offers nothing to consume on something already gone', () => {
-    const { step, finish } = cardActions(makeItem({ status: 'empty', current_quantity: 0 }))
-
-    expect(step).toBeUndefined()
-    expect(finish).toBeUndefined()
   })
 })
 

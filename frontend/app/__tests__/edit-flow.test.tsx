@@ -166,9 +166,9 @@ it('brings a gone item back with the header Undo, not a toast that times out', a
 })
 
 it('saves only what the cook changed when the item moves under the open sheet', async () => {
-  // The H25 bug, end to end: a consume elsewhere while the edit sheet was open, then saving an
-  // expiry, used to send the old quantity too - putting the helping back as a correction,
-  // which the history then recorded as one.
+  // The H25 bug, end to end: a change elsewhere while the edit sheet was open, then saving an
+  // expiry, used to send the old value of what changed too - it once put a consumed helping
+  // back as a correction, which the history then recorded as one.
   let stock: InventoryItem[] = [PEAS]
   const patches: Partial<InventoryItem>[] = []
   server.use(
@@ -185,10 +185,10 @@ it('saves only what the cook changed when the item moves under the open sheet', 
 
   openEdit('Peas')
   fireEvent.change(screen.getByLabelText('Expiry'), { target: { value: '2099-04-01' } })
-  // Somebody eats a quarter of the peas on another screen while this sheet sits open
-  stock = [{ ...PEAS, current_quantity: 375, status: 'partial' }]
+  // Somebody moves the peas to the pantry on another screen while this sheet sits open
+  stock = [{ ...PEAS, location: 'pantry' }]
   await act(() => queryClient.invalidateQueries({ queryKey: ['inventory'] }))
-  await waitFor(() => expect(screen.getByLabelText('Quantity (g)')).toHaveValue(375))
+  await waitFor(() => expect(screen.getByRole('radio', { name: 'Pantry' })).toBeChecked())
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
   await waitFor(() => expect(patches).toHaveLength(1))

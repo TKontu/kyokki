@@ -65,7 +65,7 @@ describe('UndoButton', () => {
     renderButton()
 
     expect(
-      await screen.findByRole('button', { name: 'Undo −1 pcs · Apples' })
+      await screen.findByRole('button', { name: 'Undo Used some · Apples' })
     ).toBeEnabled()
   })
 
@@ -82,7 +82,7 @@ describe('UndoButton', () => {
     )
     renderButton()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Undo −1 pcs · Apples' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo Used some · Apples' }))
 
     expect(
       await screen.findByRole('button', { name: 'Undo Thrown away · Milk' })
@@ -104,7 +104,7 @@ describe('UndoButton', () => {
     )
     renderButton()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Undo −1 pcs · Apples' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Undo Used some · Apples' }))
 
     expect(
       await screen.findByText('Something newer has happened since; nothing was undone')

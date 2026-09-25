@@ -91,7 +91,8 @@ describe('ItemEditSheet', () => {
     renderSheet()
 
     expect(screen.getByRole('heading', { name: 'Oat drink' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Quantity (dl)')).toHaveValue(6)
+    // Presence, not amounts (V2): there is no quantity to correct
+    expect(screen.queryByLabelText(/Quantity/)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Expiry')).toHaveValue('2026-09-30')
     expect(screen.getByRole('radio', { name: 'Fridge' })).toBeChecked()
     expect(save()).toBeDisabled()
@@ -109,47 +110,16 @@ describe('ItemEditSheet', () => {
     expect(await screen.findByText('Saved · Oat drink')).toBeInTheDocument()
   })
 
-  it('saves quantity and expiry together', async () => {
+  it('saves expiry and location together', async () => {
     const calls = mockApi()
     renderSheet()
 
-    change('Quantity (dl)', '12')
     change('Expiry', '2026-10-15')
+    fireEvent.click(screen.getByText('Pantry'))
     fireEvent.click(save())
 
     await waitFor(() => expect(calls).toHaveLength(1))
-    expect(calls[0].body).toEqual({ current_quantity: 12, expiry_date: '2026-10-15' })
-  })
-
-  it('explains what 0 and larger amounts do', () => {
-    mockApi()
-    renderSheet()
-
-    expect(
-      screen.getByText('0 marks it used up. More than 10 dl raises the full amount.')
-    ).toBeInTheDocument()
-  })
-
-  it('allows 0', async () => {
-    const calls = mockApi()
-    renderSheet()
-
-    change('Quantity (dl)', '0')
-    fireEvent.click(save())
-
-    await waitFor(() => expect(calls).toHaveLength(1))
-    expect(calls[0].body).toEqual({ current_quantity: 0 })
-  })
-
-  it.each(['-1', ''])('rejects quantity %p', (value) => {
-    const calls = mockApi()
-    renderSheet()
-
-    change('Quantity (dl)', value)
-
-    expect(screen.getByText('Enter 0 or more')).toBeInTheDocument()
-    expect(save()).toBeDisabled()
-    expect(calls).toHaveLength(0)
+    expect(calls[0].body).toEqual({ expiry_date: '2026-10-15', location: 'pantry' })
   })
 
   it('marks the item as gone', async () => {
@@ -191,7 +161,7 @@ describe('ItemEditSheet', () => {
     const calls = mockApi()
     renderSheet()
 
-    change('Quantity (dl)', '4')
+    change('Expiry', '2026-10-04')
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     expect(
@@ -201,7 +171,7 @@ describe('ItemEditSheet', () => {
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect(screen.getByLabelText('Quantity (dl)')).toHaveValue(4)
+    expect(screen.getByLabelText('Expiry')).toHaveValue('2026-10-04')
     expect(calls).toHaveLength(0)
   })
 
@@ -245,12 +215,12 @@ describe('ItemEditSheet', () => {
     })
     const onClose = renderSheet()
 
-    change('Quantity (dl)', '3')
+    change('Expiry', '2026-10-03')
     fireEvent.click(save())
 
     expect(await screen.findByText('Inventory item not found')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
-    expect(screen.getByLabelText('Quantity (dl)')).toHaveValue(3)
+    expect(screen.getByLabelText('Expiry')).toHaveValue('2026-10-03')
   })
 
   it('shows a friendly message when the server fails', async () => {
@@ -272,9 +242,9 @@ describe('while the item moves underneath the sheet (H25)', () => {
     mockApi()
     renderSheet()
 
-    moved({ current_quantity: 2 })
+    moved({ expiry_date: '2026-10-02' })
 
-    expect(screen.getByLabelText('Quantity (dl)')).toHaveValue(2)
+    expect(screen.getByLabelText('Expiry')).toHaveValue('2026-10-02')
     expect(save()).toBeDisabled()
   })
 
@@ -282,19 +252,19 @@ describe('while the item moves underneath the sheet (H25)', () => {
     mockApi()
     renderSheet()
 
-    moved({ current_quantity: 2, location: 'freezer' })
+    moved({ expiry_date: '2026-10-02', location: 'freezer' })
 
     expect(save()).toBeDisabled()
   })
 
   it('sends only the field the cook touched, not the one that moved', async () => {
-    // The bug: editing the expiry while another device consumed also sent the old quantity,
-    // resurrecting the helping as a correction.
+    // The bug: editing the expiry while another device changed the item also sent the old
+    // value of what changed - it used to resurrect a consumed helping as a correction.
     const calls = mockApi()
     renderSheet()
 
     change('Expiry', '2026-10-15')
-    moved({ current_quantity: 2 })
+    moved({ location: 'freezer' })
     fireEvent.click(save())
 
     await waitFor(() => expect(calls).toHaveLength(1))
@@ -305,35 +275,35 @@ describe('while the item moves underneath the sheet (H25)', () => {
     mockApi()
     renderSheet()
 
-    change('Quantity (dl)', '4')
-    moved({ current_quantity: 2 })
+    fireEvent.click(screen.getByText('Pantry'))
+    moved({ location: 'freezer' })
 
-    expect(screen.getByRole('status')).toHaveTextContent('Quantity changed to 2 while this was open')
+    expect(screen.getByRole('status')).toHaveTextContent('Location changed to freezer while this was open')
   })
 
   it('keeps the cook\'s value when they say so, and still saves only that', async () => {
     const calls = mockApi()
     renderSheet()
-    change('Quantity (dl)', '4')
-    moved({ current_quantity: 2 })
+    change('Expiry', '2026-10-15')
+    moved({ expiry_date: '2026-10-02' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Keep mine' }))
     fireEvent.click(save())
 
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
     await waitFor(() => expect(calls).toHaveLength(1))
-    expect(calls[0].body).toEqual({ current_quantity: 4 })
+    expect(calls[0].body).toEqual({ expiry_date: '2026-10-15' })
   })
 
   it('takes the new value when they say so, and then has nothing to save', () => {
     mockApi()
     renderSheet()
-    change('Quantity (dl)', '4')
-    moved({ current_quantity: 2 })
+    change('Expiry', '2026-10-15')
+    moved({ expiry_date: '2026-10-02' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use 2' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use 2026-10-02' }))
 
-    expect(screen.getByLabelText('Quantity (dl)')).toHaveValue(2)
+    expect(screen.getByLabelText('Expiry')).toHaveValue('2026-10-02')
     expect(save()).toBeDisabled()
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
