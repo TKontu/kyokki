@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import Select, select
+from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -108,6 +108,7 @@ async def get_inventory_items(
     status: str | None = None,
     expiring_days: int | None = None,
     include_inactive: bool = False,
+    consumed_since: datetime | None = None,
 ) -> list[InventoryItem]:
     """Get all inventory items with optional filters.
 
@@ -118,6 +119,8 @@ async def get_inventory_items(
             An explicit status is always honoured, including inactive ones.
         expiring_days: Optional filter for items expiring within N days.
         include_inactive: Include empty and discarded items when no status is given.
+        consumed_since: Also include items used up (``empty``) at or after this moment -
+            the grey tiles an area's grid offers back (V4). Never discarded ones.
 
     Returns:
         List of inventory items matching the filters.
@@ -129,6 +132,16 @@ async def get_inventory_items(
 
     if status:
         query = query.where(InventoryItem.status == status)
+    elif consumed_since is not None and not include_inactive:
+        query = query.where(
+            or_(
+                InventoryItem.status.notin_(INACTIVE_STATUSES),
+                and_(
+                    InventoryItem.status == "empty",
+                    InventoryItem.consumed_at >= consumed_since,
+                ),
+            )
+        )
     elif not include_inactive:
         query = query.where(InventoryItem.status.notin_(INACTIVE_STATUSES))
 

@@ -2,7 +2,7 @@
  * The fridge's areas (V3): which area an item lives in, and what the going-stale shelf holds.
  */
 
-import { AREAS, areaOf, buildFridgeView } from '../fridge'
+import { AREAS, areaOf, areaTiles, buildFridgeView } from '../fridge'
 import type { InventoryItem } from '@/types/inventory'
 
 const TODAY = new Date('2026-09-25T12:00:00')
@@ -140,5 +140,34 @@ describe('buildFridgeView', () => {
       'first',
       'later',
     ])
+  })
+})
+
+describe('areaTiles (V4)', () => {
+  it('lists what is here stalest first, then what was used up, latest first', () => {
+    const tiles = areaTiles(
+      [
+        item({ id: 'later', expiry_date: inDays(9) }),
+        item({ id: 'used-early', status: 'empty', consumed_at: '2026-09-25T07:00:00Z' }),
+        item({ id: 'first', expiry_date: inDays(2) }),
+        item({ id: 'used-late', status: 'empty', consumed_at: '2026-09-25T11:00:00Z' }),
+      ],
+      'dairy'
+    )
+
+    expect(tiles.map((i) => i.id)).toEqual(['first', 'later', 'used-late', 'used-early'])
+  })
+
+  it('keeps only the area asked for', () => {
+    const tiles = areaTiles(
+      [item({ id: 'milk' }), item({ id: 'steak', category: 'meat' })],
+      'meat'
+    )
+
+    expect(tiles.map((i) => i.id)).toEqual(['steak'])
+  })
+
+  it('never offers back what was thrown away', () => {
+    expect(areaTiles([item({ status: 'discarded' })], 'dairy')).toEqual([])
   })
 })

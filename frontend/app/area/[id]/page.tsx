@@ -5,23 +5,34 @@
  *
  * The fridge (`/`) shows an area as coloured dots; tapping it lands here, on its own route so
  * the iPad's back gesture returns to the fridge. Tiles are stalest first and carry no numbers.
- * A tap uses the item up, "…" opens its sheet - the same actions as the fridge's shelf.
+ * A tap uses the item up and leaves a grey tile for a day, so a mis-tap can be taken back with
+ * another; "…" opens its sheet.
  */
 
 import Link from 'next/link'
+import { useState } from 'react'
 import { IngredientTile, UndoButton } from '@/components/inventory'
-import { useInventoryList } from '@/hooks/useInventory'
 import { useStockActions } from '@/hooks/useStockActions'
-import { AREAS, buildFridgeView } from '@/lib/fridge'
+import { AREAS, areaTiles } from '@/lib/fridge'
 
 const BACK =
   'inline-flex min-h-touch items-center gap-1 text-sm font-medium text-ui-text-secondary ' +
   'hover:text-ui-text dark:text-ui-dark-text-secondary dark:hover:text-ui-dark-text'
 
+/** How long a used-up item stays on offer as a grey tile. */
+const RECENT_MS = 24 * 60 * 60 * 1000
+
+/** A day back from now, to the hour, so the list's query key holds still between renders. */
+function aDayAgo(): string {
+  const hour = 60 * 60 * 1000
+  return new Date(Math.floor((Date.now() - RECENT_MS) / hour) * hour).toISOString()
+}
+
 export default function AreaPage({ params }: { params: { id: string } }) {
   const area = AREAS.find((candidate) => candidate.id === params.id)
-  const { isLoading, isError, error } = useInventoryList()
-  const { items, finishItem, openMore, sheets } = useStockActions()
+  const [since] = useState(aDayAgo)
+  const { list, items, toggleItem, openMore, sheets } = useStockActions({ consumed_since: since })
+  const { isLoading, isError, error } = list
 
   if (!area) {
     return (
@@ -34,8 +45,7 @@ export default function AreaPage({ params }: { params: { id: string } }) {
     )
   }
 
-  const tiles =
-    buildFridgeView(items ?? []).areas.find((entry) => entry.area.id === area.id)?.items ?? []
+  const tiles = areaTiles(items ?? [], area.id)
 
   return (
     <div>
@@ -70,7 +80,12 @@ export default function AreaPage({ params }: { params: { id: string } }) {
           >
             {tiles.map((item) => (
               <li key={item.id}>
-                <IngredientTile item={item} onSelect={finishItem} onMore={openMore} />
+                <IngredientTile
+                  item={item}
+                  onSelect={toggleItem}
+                  // A grey tile is only for bringing back: its sheet would offer nothing to do
+                  onMore={item.status === 'empty' ? undefined : openMore}
+                />
               </li>
             ))}
           </ul>

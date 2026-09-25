@@ -1795,3 +1795,73 @@ class TestBulkDiscardAndRestore:
         response = await client.post("/api/inventory/discard", json={"ids": []})
 
         assert response.status_code == 422
+
+
+class TestRecentlyUsedUp:
+    """V4: an area's grid keeps what was used up in the last day as grey tiles, so a mis-tap can
+    be taken back. `consumed_since` adds those to the active list without the whole history
+    that `include_inactive` would bring."""
+
+    async def _used_up(
+        self, client: AsyncClient, db: AsyncSession, product_id: str, hours_ago: float
+    ) -> dict:
+        from datetime import UTC, datetime
+
+        from app.models.inventory_item import InventoryItem
+
+        item = await _create_item(client, product_id)
+        consumed = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 1000}
+        )
+        assert consumed.status_code == 200, consumed.text
+        row = await db.get(InventoryItem, UUID(item["id"]))
+        row.consumed_at = datetime.now(UTC) - timedelta(hours=hours_ago)  # type: ignore[union-attr]
+        await db.commit()
+        return item
+
+    async def test_something_used_up_an_hour_ago_comes_back(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        here = await _create_item(client, test_product["id"])
+        used = await self._used_up(client, seeded_db, test_product["id"], hours_ago=1)
+        since = (date.today() - timedelta(days=1)).isoformat() + "T00:00:00Z"
+
+        response = await client.get("/api/inventory", params={"consumed_since": since})
+
+        assert response.status_code == 200
+        assert {i["id"] for i in response.json()} == {here["id"], used["id"]}
+
+    async def test_something_used_up_days_ago_does_not(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        from datetime import UTC, datetime
+
+        await self._used_up(client, seeded_db, test_product["id"], hours_ago=48)
+        since = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+
+        response = await client.get("/api/inventory", params={"consumed_since": since})
+
+        assert response.json() == []
+
+    async def test_something_thrown_away_never_does(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        """Gone is its own screen; the grid only offers back what was eaten."""
+        from datetime import UTC, datetime
+
+        await _create_item(client, test_product["id"], status="discarded")
+        since = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+
+        response = await client.get("/api/inventory", params={"consumed_since": since})
+
+        assert response.json() == []
+
+    async def test_without_it_the_list_is_unchanged(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        here = await _create_item(client, test_product["id"])
+        await self._used_up(client, seeded_db, test_product["id"], hours_ago=1)
+
+        response = await client.get("/api/inventory")
+
+        assert [i["id"] for i in response.json()] == [here["id"]]

@@ -1,6 +1,7 @@
 /**
  * An area's grid (V4): the tiles of one part of the fridge, stalest first, no numbers. A tap
- * uses an item up; "…" opens its sheet.
+ * uses an item up and leaves it as a grey tile for a day; tapping that brings it back. "…"
+ * opens its sheet.
  */
 
 import React from 'react'
@@ -95,7 +96,25 @@ describe('an area', () => {
     expect(container.querySelector('main')?.textContent).not.toMatch(/\d/)
   })
 
-  it('uses an item up with one tap', async () => {
+  it('asks for what was used up in the last day as well', async () => {
+    const asked: (string | null)[] = []
+    renderArea(
+      'meat',
+      () => [STEAK],
+      http.get(`${API_URL}/inventory`, ({ request }) => {
+        asked.push(new URL(request.url).searchParams.get('consumed_since'))
+        return HttpResponse.json([STEAK])
+      })
+    )
+
+    await screen.findByRole('button', { name: 'Steak, keeps' })
+    const since = new Date(asked[0] as string).getTime()
+    const hoursAgo = (Date.now() - since) / 3_600_000
+    expect(hoursAgo).toBeGreaterThanOrEqual(24)
+    expect(hoursAgo).toBeLessThan(25)
+  })
+
+  it('uses an item up with one tap, and leaves it as a grey tile', async () => {
     let stock = [STEAK]
     const bodies: unknown[] = []
     renderArea(
@@ -103,17 +122,53 @@ describe('an area', () => {
       () => stock,
       http.post(`${API_URL}/inventory/item-steak/consume`, async ({ request }) => {
         bodies.push(await request.json())
-        stock = []
-        return HttpResponse.json({ ...STEAK, current_quantity: 0, status: 'empty' })
+        stock = [{ ...STEAK, current_quantity: 0, status: 'empty', consumed_at: new Date().toISOString() }]
+        return HttpResponse.json(stock[0])
       })
     )
 
     fireEvent.click(await screen.findByRole('button', { name: 'Steak, keeps' }))
 
     await waitFor(() => expect(bodies).toEqual([{ quantity: 400 }]))
-    await waitFor(() =>
-      expect(screen.queryByRole('button', { name: 'Steak, keeps' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Steak, used up' })).toBeInTheDocument()
+  })
+
+  it('puts a used-up item last', async () => {
+    const usedSteak = { ...STEAK, status: 'empty', current_quantity: 0, consumed_at: new Date().toISOString() }
+    renderArea('meat', () => [usedSteak as InventoryItem, MINCE])
+
+    await screen.findByRole('button', { name: 'Steak, used up' })
+    // Only for bringing back: no sheet behind it
+    expect(screen.queryByRole('button', { name: 'More for Steak' })).not.toBeInTheDocument()
+    const names = within(grid())
+      .getAllByRole('button', { name: /, / })
+      .map((button) => button.getAttribute('aria-label'))
+    expect(names).toEqual(['Minced Meat, going stale', 'Steak, used up'])
+  })
+
+  it('brings a used-up item back with a tap on its grey tile', async () => {
+    const usedSteak = {
+      ...STEAK,
+      status: 'empty',
+      current_quantity: 0,
+      consumed_at: new Date().toISOString(),
+    } as InventoryItem
+    let stock = [usedSteak]
+    const patches: unknown[] = []
+    renderArea(
+      'meat',
+      () => stock,
+      http.patch(`${API_URL}/inventory/item-steak`, async ({ request }) => {
+        patches.push(await request.json())
+        stock = [{ ...STEAK, status: 'opened' }]
+        return HttpResponse.json(stock[0])
+      })
     )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Steak, used up' }))
+
+    await waitFor(() => expect(patches).toEqual([{ current_quantity: 400 }]))
+    expect(await screen.findByRole('button', { name: 'Steak, keeps' })).toBeInTheDocument()
   })
 
   it('opens an item\'s sheet from its "…"', async () => {
