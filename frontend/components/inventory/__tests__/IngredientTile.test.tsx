@@ -91,4 +91,62 @@ describe('IngredientTile', () => {
 
     expect(container).toHaveTextContent('Oat Milk')
   })
+
+  describe('the drawn icon (Q18)', () => {
+    it('shows the product its own drawing instead of the category emoji', () => {
+      const { container } = render(
+        <IngredientTile item={{ ...MILK, product_icon_version: 1790000000 }} />
+      )
+
+      const img = container.querySelector('img')
+      expect(img).not.toBeNull()
+      expect(img?.getAttribute('src')).toMatch(/\/products\/p1\/icon\.svg\?v=1790000000$/)
+      expect(img).toHaveAttribute('alt', '')
+      expect(img).toHaveAttribute('aria-hidden', 'true')
+      expect(container).not.toHaveTextContent('🥛')
+    })
+
+    it('keeps the emoji when there is no drawing', () => {
+      const { container } = render(
+        <IngredientTile item={{ ...MILK, product_icon_version: null }} />
+      )
+
+      expect(container.querySelector('img')).toBeNull()
+      expect(container).toHaveTextContent('🥛')
+    })
+
+    it('falls back to the emoji when the drawing does not load', () => {
+      const { container } = render(
+        <IngredientTile item={{ ...MILK, product_icon_version: 1790000000 }} />
+      )
+
+      fireEvent.error(container.querySelector('img') as HTMLImageElement)
+
+      expect(container.querySelector('img')).toBeNull()
+      expect(container).toHaveTextContent('🥛')
+    })
+
+    it('tries again when a new version arrives', () => {
+      const { container, rerender } = render(
+        <IngredientTile item={{ ...MILK, product_icon_version: 1 }} />
+      )
+      fireEvent.error(container.querySelector('img') as HTMLImageElement)
+
+      rerender(<IngredientTile item={{ ...MILK, product_icon_version: 2 }} />)
+
+      expect(container.querySelector('img')?.getAttribute('src')).toMatch(/\?v=2$/)
+    })
+
+    it('keeps its accessible name and no numbers in its text', () => {
+      const { container } = render(
+        <IngredientTile
+          item={{ ...MILK, product_icon_version: 1790000000 }}
+          onSelect={jest.fn()}
+        />
+      )
+
+      expect(screen.getByRole('button', { name: 'Oat Milk, going stale' })).toBeInTheDocument()
+      expect(container.textContent).not.toMatch(/\d/)
+    })
+  })
 })
