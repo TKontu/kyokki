@@ -559,7 +559,6 @@ async def consume_inventory_item(
         return None
 
     row: Any = db_item
-    previous = snapshot(db_item)
     amount = _amount_in_item_units(quantity, unit, str(row.unit))
     if amount <= 0:
         # Rounding is what makes this reachable: a third of 0.01 dl is not a helping, and
@@ -570,6 +569,27 @@ async def consume_inventory_item(
             f"Cannot consume {quantity} - only {row.current_quantity} available"
         )
 
+    apply_consumption(db, db_item, amount)
+
+    await db.commit()
+    return await _reload(db, db_item.id)
+
+
+def apply_consumption(
+    db: AsyncSession, db_item: InventoryItem, amount: Decimal
+) -> None:
+    """Take ``amount`` (already in the item's unit) off a locked item; does not commit.
+
+    The per-item half of a consume: the status it moves to, the opened clock, `consumed_at`
+    and the consumption log row, staged in the caller's transaction. The caller has locked
+    the row and checked that ``amount`` is positive and no more than is there. Its product
+    must be loaded, because opening a pack reads the product's opened shelf life.
+
+    Raises:
+        ItemFrozen: The item has been thrown away.
+    """
+    row: Any = db_item
+    previous = snapshot(db_item)
     new_quantity = quantise(row.current_quantity - amount)
     # Raises ItemFrozen for a discarded item, which is the point: it is not in the kitchen.
     new_status = next_status(
@@ -598,8 +618,30 @@ async def consume_inventory_item(
         previous=previous,
     )
 
-    await db.commit()
-    return await _reload(db, db_item.id)
+
+async def lock_active_items_for_product(
+    db: AsyncSession, product_id: UUID, *, location: str | None = None
+) -> list[InventoryItem]:
+    """A product's items still in the kitchen, first to go first, locked for the transaction.
+
+    The same order `get_inventory_items` lists them in - expiry, then `created_at`, then id -
+    so a consume by name eats what the screen shows first. The product is loaded with each.
+    """
+    query = (
+        _with_product(select(InventoryItem))
+        .where(InventoryItem.product_master_id == product_id)
+        .where(InventoryItem.status.notin_(INACTIVE_STATUSES))
+    )
+    if location:
+        query = query.where(InventoryItem.location == location)
+    query = (
+        query.order_by(
+            InventoryItem.expiry_date, InventoryItem.created_at, InventoryItem.id
+        )
+        .with_for_update(of=InventoryItem)
+        .execution_options(populate_existing=True)
+    )
+    return list((await db.execute(query)).scalars().all())
 
 
 async def lock_inventory_items(
