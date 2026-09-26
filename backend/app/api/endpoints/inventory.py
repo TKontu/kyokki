@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any, cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import handle_integrity_errors
@@ -31,6 +31,7 @@ from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest
 from app.services.item_status import ItemEvent, ItemFrozen
 from app.services.quick_add import quick_add
+from app.services.shelf_life_on_create import schedule_estimates
 
 router = APIRouter()
 
@@ -169,9 +170,13 @@ async def create_inventory_item(
     status_code=status.HTTP_201_CREATED,
 )
 async def quick_add_inventory_item(
-    request: QuickAddRequest, db: AsyncSession = Depends(get_db)
+    request: QuickAddRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
 ) -> InventoryItemResponse:
     """Add stock by hand for an existing or new generic product in one call.
+
+    A new product is estimated in the background once this has answered (Q19).
 
     Raises:
         HTTPException 400: Unknown product, or a new product without a valid category.
@@ -190,6 +195,8 @@ async def quick_add_inventory_item(
         status=str(item.status),
         product_name=item.product_name,
     )
+    if result.product_created:
+        schedule_estimates(background_tasks, [cast(UUID, item.product_master_id)])
     return InventoryItemResponse.model_validate(item)
 
 

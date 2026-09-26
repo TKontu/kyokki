@@ -991,3 +991,58 @@ null, so the loosening towards "a named kind is the same" is not measured in tha
 Pairs such as *Lactose-free milk* vs *Milk* (the prompt's own worked example, so it cannot be the
 test), *Red onion* vs *Onion* or *Sweet potato* vs *Potato* would do it; adding one to
 `reported_pairs.json` is the operator's call.
+
+
+## Shelf lives that match the kitchen (Q19, 2026-09-26)
+
+The fridge view on the iPad showed most of a fresh shop going stale two days after it was
+bought. The estimator's examples were part of why: `minced beef -> d 2` and `banana -> d 7`
+taught the model a fridge nobody has. The operator ruled on 2026-09-26 with reference numbers
+counted from the day of purchase - packed minced beef 5, meat from the butcher's counter 3,
+fish 3, banana 5, and tomatoes and oranges far longer than 5 - and those became the prompt's
+examples in `catalog_estimates.INSTRUCTIONS`, with a line saying the numbers are for the usual
+Finnish supermarket version, stored in its usual place, counted from the day of purchase. The
+examples that did not conflict (sliced ham, salami, hard cheese, milk, crispbread, pasta,
+onion) stayed. No plausibility band changed: every anchor already sat inside its category's.
+
+Measured with `python -m scripts.measure_estimates` on the 31-product fixture
+`tests/fixtures/shelf_life/estimate_products.json` (every anchor plus common Finnish staples),
+`c2.muse-glimmer`, run sequentially: twice on `main`'s prompt from a scratch worktree at
+`e71acff`, twice on the Q19 prompt. Gate: tomato ≥ 10, orange ≥ 14, banana 4-6, packed minced
+beef 4-6, fish 2-4, butcher's-counter meat 2-4, and nothing dropped as out of band.
+
+| product | gate | main, run 1 | main, run 2 | Q19, run 1 | Q19, run 2 |
+| --- | --- | --- | --- | --- | --- |
+| Minced beef (packed) | 4-6 | **2** fail | **2** fail | 5 | 5 |
+| Beef steak from the butcher's counter | 2-4 | 3 | 3 | 3 | 3 |
+| Salmon fillet | 2-4 | 2 | 2 | 3 | 3 |
+| Banana | 4-6 | **7** fail | **7** fail | 5 | 5 |
+| Tomato | ≥ 10 | 10 | 10 | 14 | 14 |
+| Orange | ≥ 14 | 21 | 30 | 21 | 21 |
+| dropped out of band / missing | 0 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
+| answered, seconds | | 31 of 31, 62.5 s | 31 of 31, 72.4 s | 31 of 31, 72.6 s | 31 of 31, 72.9 s |
+
+**The gate holds on both after-runs, at the first wording; no iteration was needed.** `main`
+failed it on mince and banana in both runs - exactly the two examples the old prompt carried.
+
+The rest of the fixture, for what else moved (Q19 runs):
+
+```
+Chicken fillet strips   3, 3   -> 5, 5      Apple         30, 30  -> 21, 21
+Potato                 60, 60  -> 30, 30    Lemon         21, 30  -> 21, 21
+Butter                 90, 90  -> 60, 60    Broccoli      10, 10  -> 7, 7
+Karelian pie            5, 3   -> 7, 7      Rye bread      7, 7   -> 7, 10
+Oat drink              90, 10  -> 10, 14    Orange juice  90, 180 -> 180, 30
+Onion                  30, 90  -> 30, 30    Sour cream    21, 30  -> 21, 21
+Yoghurt                21, 21  -> 21, 14
+```
+
+Unchanged in all four runs: Milk 7, Carrot 30, Cucumber 10, Lettuce 7, Eggs 28, Cheese 60,
+Sliced ham 10, Sausage 30, Bell pepper 14, Grapes 14, Strawberries 5, Rice 720.
+
+**The honest part.** The gated answers equal the examples, so this measures that the model
+follows its anchors rather than that it knows mince - but following the anchors is the
+behaviour the ruling asked for, and `main` did not have it. The anchors also pulled neighbours:
+chicken fillet strips went from 3 to 5, the same as packed mince, which is plausible for a
+sealed supermarket pack. Beverages still wander between runs (orange juice 180 then 30, oat
+drink 10 then 14), as Q11 recorded; the dry run shows those before anything is saved.

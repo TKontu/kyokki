@@ -64,6 +64,8 @@ class ConfirmResult:
     inventory_items: list[tuple[InventoryItem, ProductMaster]] = field(
         default_factory=list
     )
+    # The products this confirm created, for the caller to have estimated (Q19)
+    created_product_ids: list[UUID] = field(default_factory=list)
 
 
 class _Confirmation:
@@ -138,6 +140,7 @@ class _Confirmation:
             raise InvalidConfirmItem(f"Item {position}: {exc}") from exc
         if created:
             self.result.products_created += 1
+            self.result.created_product_ids.append(cast(UUID, product.id))
         return product
 
     @staticmethod
@@ -368,6 +371,15 @@ async def confirm_receipt(
             current_quantity=cast(Decimal, inventory_item.current_quantity),
             status="sealed",
             product_name=str(product.canonical_name),
+        )
+    # Stock already in the kitchen that moved because this receipt replaced its product's
+    # placeholder shelf life (Q19)
+    for moved in confirmation.resolver.moved:
+        await broadcast_inventory_update(
+            inventory_item_id=moved.id,
+            action="updated",
+            current_quantity=moved.current_quantity,
+            status=moved.status,
         )
     await broadcast_receipt_status(
         receipt_id=cast(UUID, receipt.id),

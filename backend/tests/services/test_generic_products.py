@@ -516,6 +516,70 @@ class TestShelfLifeLearnsOverAPlaceholder:
         assert again.shelf_life_source == "model"
 
 
+class TestAnUpgradeMovesTheFood:
+    """Q19: `_fill_gaps` replacing a placeholder used to leave the stock dated by it.
+
+    The shelf life changed and the items it dated kept the old expiry - the known gap
+    `recompute_expiry_for_products` was written for and nothing called.
+    """
+
+    async def _stocked_placeholder(self, db: AsyncSession):
+        product, _ = await ProductResolver(db).resolve(
+            name="Rye crispbread", category="produce", unit="pcs", quantity=1
+        )
+        item = build_inventory_item(product, quantity=1, purchase_date=PURCHASED)
+        db.add(item)
+        await db.commit()
+        assert item.expiry_date == PURCHASED + timedelta(days=PRODUCE_DAYS)
+        return product, item
+
+    async def test_the_items_it_dated_move_with_the_new_number(
+        self, db_session: AsyncSession, categories
+    ):
+        product, item = await self._stocked_placeholder(db_session)
+        resolver = ProductResolver(db_session)
+
+        await resolver.resolve(
+            name="rye crispbread",
+            category="produce",
+            unit="pcs",
+            quantity=1,
+            shelf_life_days=720,
+        )
+
+        assert item.expiry_date == PURCHASED + timedelta(days=720)
+        # ...and the caller learns what moved, so it can broadcast it after its commit
+        assert [moved.id for moved in resolver.moved] == [item.id]
+
+    async def test_by_id_too(self, db_session: AsyncSession, categories):
+        product, item = await self._stocked_placeholder(db_session)
+        resolver = ProductResolver(db_session)
+
+        await resolver.resolve(
+            product_id=product.id, unit="pcs", quantity=1, shelf_life_days=720
+        )
+
+        assert item.expiry_date == PURCHASED + timedelta(days=720)
+        assert [moved.id for moved in resolver.moved] == [item.id]
+
+    async def test_no_upgrade_moves_nothing(self, db_session: AsyncSession, categories):
+        product, item = await self._stocked_placeholder(db_session)
+        product.shelf_life_source = "cook"
+        await db_session.commit()
+        resolver = ProductResolver(db_session)
+
+        await resolver.resolve(
+            name="rye crispbread",
+            category="produce",
+            unit="pcs",
+            quantity=1,
+            shelf_life_days=720,
+        )
+
+        assert item.expiry_date == PURCHASED + timedelta(days=PRODUCE_DAYS)
+        assert resolver.moved == []
+
+
 class TestOpenedShelfLifeOnProducts:
     """Q5: the product remembers how long it keeps once opened."""
 

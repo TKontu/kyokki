@@ -1,6 +1,6 @@
 """API endpoints for Product CRUD operations."""
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -119,7 +119,11 @@ async def get_product(
 async def create_product(
     product: ProductMasterCreate, db: AsyncSession = Depends(get_db)
 ) -> ProductMasterResponse:
-    """Create a new product."""
+    """Create a new product.
+
+    Its shelf life is one somebody typed, so it is stored as the cook's (Q19) and no
+    estimate is scheduled: no estimate path may replace it.
+    """
     async with handle_integrity_errors():
         return await crud_product.create_product(db, product)
 
@@ -320,14 +324,23 @@ async def estimate_catalog_shelf_lives(
         False,
         description="Write the changes. Omit for a dry run, which is the default.",
     ),
+    scope: Literal["guesses", "all"] = Query(
+        "guesses",
+        description=(
+            "`guesses`: only category placeholders. `all`: every product whose shelf "
+            "life the cook did not set, earlier model answers included."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> CatalogEstimateResponse:
-    """Re-estimate the shelf lives nobody ever chose (Q11).
+    """Re-estimate the shelf lives nobody ever chose (Q11), or all but the cook's (Q19).
 
     `default_shelf_life_days` is NOT NULL, so creating a product had to invent a
-    number and took its category's blanket figure. Those placeholders are the only
-    candidates here: a shelf life the cook set is never sent to the model, and one
-    the model already estimated is left alone.
+    number and took its category's blanket figure. With `scope=guesses` (the default)
+    those placeholders are the only candidates, and one the model already estimated is
+    left alone. `scope=all` re-asks about the model's answers too - "Re-estimate all
+    (keeps yours)" on the products page, for after the estimator was recalibrated. A
+    shelf life the cook set is never sent to the model in either scope.
 
     A dry run by default, because this walks the whole catalog in one go. Call it
     again with `apply=true` once the proposed numbers have been looked at.
@@ -338,7 +351,7 @@ async def estimate_catalog_shelf_lives(
           Nothing is written in that case, including by a partly-finished batch.
     """
     try:
-        result = await refresh_catalog_shelf_lives(db, apply=apply)
+        result = await refresh_catalog_shelf_lives(db, apply=apply, scope=scope)
     except LLMExtractionError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

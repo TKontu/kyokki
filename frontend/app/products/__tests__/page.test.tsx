@@ -257,6 +257,88 @@ describe('ProductsPage', () => {
   })
 })
 
+describe('re-estimating the whole catalog (Q19)', () => {
+  // After the estimator was recalibrated, the model's earlier answers are as stale as the
+  // placeholders. "Keeps yours": a number the cook set is never sent.
+  const PROPOSAL: CatalogEstimateResponse = {
+    considered: 2,
+    answered: 2,
+    applied: false,
+    items_redated: 0,
+    changes: [
+      {
+        id: 'p-banana',
+        canonical_name: 'Banana',
+        category: 'fruits',
+        current_days: 7,
+        proposed_days: 5,
+        current_opened: null,
+        proposed_opened: null,
+      },
+    ],
+  }
+
+  function recordRuns(response: CatalogEstimateResponse) {
+    const runs: string[] = []
+    server.use(
+      http.post(`${API_URL}/products/estimate`, ({ request }) => {
+        const params = new URL(request.url).searchParams
+        runs.push(`${params.get('scope')}:${params.get('apply')}`)
+        const apply = params.get('apply') === 'true'
+        return HttpResponse.json({ ...response, applied: apply })
+      })
+    )
+    return runs
+  }
+
+  it('dry-runs every estimate but the cook\'s, then applies the same scope', async () => {
+    renderPage([
+      product({ id: 'p-banana', canonical_name: 'Banana', shelf_life_source: 'model' }),
+      product({ id: 'p-bacon', canonical_name: 'Bacon', shelf_life_source: 'cook' }),
+    ])
+    const runs = recordRuns(PROPOSAL)
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Re-estimate all (keeps yours)' })
+    )
+
+    const proposal = await screen.findByRole('region', { name: /Proposed shelf lives/ })
+    expect(within(proposal).getByText(/7 → 5 days/)).toBeInTheDocument()
+    expect(runs).toEqual(['all:false'])
+
+    fireEvent.click(within(proposal).getByRole('button', { name: /Save 1/ }))
+
+    await waitFor(() => expect(runs).toEqual(['all:false', 'all:true']))
+  })
+
+  it('the guesses button still asks about guesses only', async () => {
+    renderPage([product()])
+    const runs = recordRuns(PROPOSAL)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Estimate the guesses/ }))
+
+    await waitFor(() => expect(runs).toEqual(['guesses:false']))
+  })
+
+  it('is offered when there are estimates but no guesses', async () => {
+    renderPage([product({ shelf_life_source: 'model' })])
+
+    expect(
+      await screen.findByRole('button', { name: 'Re-estimate all (keeps yours)' })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Estimate the guesses/ })).not.toBeInTheDocument()
+  })
+
+  it('is not offered when every number is the cook\'s', async () => {
+    renderPage([product({ shelf_life_source: 'cook' })])
+
+    await screen.findByText('Ground beef')
+    expect(
+      screen.queryByRole('button', { name: 'Re-estimate all (keeps yours)' })
+    ).not.toBeInTheDocument()
+  })
+})
+
 describe('the shelf-life audit (H58)', () => {
   const catalog = () => [
     product({ id: 'p-cook', canonical_name: 'Bacon', default_shelf_life_days: 90, shelf_life_source: 'cook' }),

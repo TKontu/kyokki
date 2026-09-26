@@ -6,6 +6,7 @@ from uuid import UUID
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -31,6 +32,9 @@ from app.services.receipt_ingest import (
     ReceiptTooLarge,
     UnsupportedReceiptType,
     ingest_receipt_file,
+)
+from app.services.shelf_life_on_create import (
+    schedule_estimates,
 )
 
 router = APIRouter()
@@ -221,11 +225,13 @@ async def process_receipt(
 async def confirm_receipt(
     receipt_id: UUID,
     confirm_request: ReceiptConfirmRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> ReceiptConfirmResponse:
     """Confirm reviewed receipt items: create inventory, generic products and store aliases.
 
-    Items not sent are skipped. The whole confirm is one transaction.
+    Items not sent are skipped. The whole confirm is one transaction. The products it
+    created are estimated in the background, in one request, once this has answered (Q19).
 
     Raises:
         HTTPException 404: Receipt not found.
@@ -247,6 +253,7 @@ async def confirm_receipt(
     except receipt_confirm.InvalidConfirmItem as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    schedule_estimates(background_tasks, result.created_product_ids)
     return ReceiptConfirmResponse(
         success=True,
         items_created=result.items_created,

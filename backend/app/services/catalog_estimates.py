@@ -20,6 +20,7 @@ re-running the 49-line fixture unchanged.
 
 import json
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
@@ -30,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.crud.product_master import MovedInventoryItem, get_products
+from app.models.product_master import ProductMaster
 from app.services.expiry_recompute import recompute_expiry_for_product
 from app.services.llm_extractor import LLMExtractionError, extract_json_object
 
@@ -245,25 +247,42 @@ class CatalogRefresh:
     moved: list[MovedInventoryItem] = field(default_factory=list)
 
 
-async def refresh_catalog_shelf_lives(
-    db: AsyncSession, *, apply: bool = False
-) -> CatalogRefresh:
-    """Re-estimate the shelf lives nobody ever chose, and optionally keep them.
+# Which products a refresh considers. `guesses` is the Q11 behaviour; `all` is Q19's
+# "Re-estimate all (keeps yours)", for when the prompt itself has been recalibrated.
+SCOPES = ("guesses", "all")
 
-    Only products whose `shelf_life_source` is `category` are candidates: those carry
-    the blanket figure creation had to invent, which is a placeholder rather than an
-    answer (Q11). A product the model estimated is left alone, and one the cook set is
-    never even sent - their names are the only thing the model is told, so a correction
-    cannot be argued with by a batch job.
 
-    `apply` defaults to False everywhere it is reachable. This walks the whole catalog
-    at once, and a write that size should be something somebody looked at first.
+def may_estimate(product: ProductMaster) -> bool:
+    """The one rule for what an estimate may replace: anything the cook did not choose.
+
+    A placeholder (`category`) and an earlier model answer (`model`, from a receipt's `sl`
+    or an earlier estimate) are both the system's own work. A `cook` number is a
+    correction and is never even sent: the product's name is all the model is told, so a
+    correction cannot be argued with by a batch job (Q11).
     """
-    candidates = [
-        product
-        for product in await get_products(db)
-        if str(product.shelf_life_source) == "category"
-    ]
+    return str(product.shelf_life_source) != "cook"
+
+
+async def estimate_products(
+    db: AsyncSession, products: Sequence[ProductMaster], *, apply: bool
+) -> CatalogRefresh:
+    """Estimate these products' shelf lives, and optionally keep the answers.
+
+    Every estimate path goes through here - the catalog refresh in either scope and the
+    estimate a new product gets after it is created (Q19) - so what may change is decided
+    once: never a `cook` number (`may_estimate`), and an opened shelf life only when it is
+    missing.
+
+    On apply, every product the model answered for is marked `model`, including one whose
+    number the model agreed with: the answer is what the provenance records, and a
+    placeholder that was confirmed should not be asked about again. The stock dated by a
+    changed number is recomputed in the same transaction, which this commits.
+
+    Raises:
+        LLMExtractionError: the gateway could not be reached, or answered unusably.
+            Nothing is written in that case.
+    """
+    candidates = [product for product in products if may_estimate(product)]
     if not candidates:
         return CatalogRefresh(considered=0, answered=0, changes=[], applied=False)
 
@@ -315,10 +334,11 @@ async def refresh_catalog_shelf_lives(
 
     moved: list[MovedInventoryItem] = []
     if apply:
+        for estimate in estimates:
+            by_id[estimate.id].shelf_life_source = "model"
         for change in changes:
             product = by_id[str(change.id)]
             product.default_shelf_life_days = change.proposed_days
-            product.shelf_life_source = "model"
             product.opened_shelf_life_days = change.proposed_opened
             # The stock dated by the old figure moves with it, in the same transaction so a
             # refresh is still all-or-nothing (Q12).
@@ -326,7 +346,7 @@ async def refresh_catalog_shelf_lives(
         await db.commit()
 
     logger.info(
-        "Catalog shelf lives refreshed",
+        "Catalog shelf lives estimated for products",
         extra={
             "considered": len(candidates),
             "answered": len(estimates),
@@ -342,3 +362,29 @@ async def refresh_catalog_shelf_lives(
         applied=apply,
         moved=moved,
     )
+
+
+async def refresh_catalog_shelf_lives(
+    db: AsyncSession, *, apply: bool = False, scope: str = "guesses"
+) -> CatalogRefresh:
+    """Re-estimate the catalog's shelf lives, and optionally keep them.
+
+    `scope="guesses"` (the default) considers only products whose `shelf_life_source` is
+    `category`: those carry the blanket figure creation had to invent, which is a
+    placeholder rather than an answer (Q11). `scope="all"` considers every product the
+    cook has not set, model answers included - for after the estimator itself has been
+    recalibrated (Q19). A number the cook set is never sent in either scope.
+
+    `apply` defaults to False everywhere it is reachable. This walks the whole catalog
+    at once, and a write that size should be something somebody looked at first.
+
+    Raises:
+        ValueError: an unknown scope.
+        LLMExtractionError: see `estimate_products`.
+    """
+    if scope not in SCOPES:
+        raise ValueError(f"Unknown scope '{scope}', expected one of {SCOPES}")
+    products = await get_products(db)
+    if scope == "guesses":
+        products = [p for p in products if str(p.shelf_life_source) == "category"]
+    return await estimate_products(db, products, apply=apply)

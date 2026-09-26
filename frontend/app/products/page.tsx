@@ -14,6 +14,10 @@
  * The audit view (H58, Q15) lists the same products by provenance - guesses, then
  * estimates, then the cook's numbers - and flags a number at the edge of its category's
  * plausible range, so a wrong estimate is caught here rather than in a spreadsheet.
+ *
+ * "Re-estimate all (keeps yours)" (Q19) asks again about every number the cook did not
+ * set, earlier estimates included - for after the estimator itself was recalibrated.
+ * Same flow as the guesses: a dry run first, then the cook saves what it proposed.
  */
 
 import React, { useMemo, useState } from 'react'
@@ -30,6 +34,7 @@ import {
   useEstimateCatalog,
   useProductList,
 } from '@/hooks/useProducts'
+import type { EstimateScope } from '@/lib/api/products'
 import { auditRows, type AuditRow, type Edge } from '@/lib/shelfLifeAudit'
 import type { CatalogEstimateResponse, ProductMaster } from '@/types/product'
 
@@ -168,11 +173,13 @@ function AuditList({
 /** What a dry run proposed, before any of it is written. */
 function ProposedChanges({
   result,
+  scope,
   applying,
   onApply,
   onDismiss,
 }: {
   result: CatalogEstimateResponse
+  scope: EstimateScope
   applying: boolean
   onApply: () => void
   onDismiss: () => void
@@ -186,7 +193,9 @@ function ProposedChanges({
         className="mb-4 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary"
       >
         {result.considered === 0
-          ? 'Nothing to estimate: no product is still using its category default.'
+          ? scope === 'all'
+            ? 'Nothing to estimate: every shelf life is one you set.'
+            : 'Nothing to estimate: no product is still using its category default.'
           : `Asked about ${result.considered}; the model agreed with what is already stored.`}
       </p>
     )
@@ -231,6 +240,7 @@ export default function ProductsPage() {
   const [term, setTerm] = useState('')
   const [editing, setEditing] = useState<ProductMaster | null>(null)
   const [proposal, setProposal] = useState<CatalogEstimateResponse | null>(null)
+  const [scope, setScope] = useState<EstimateScope>('guesses')
   const [view, setView] = useState<View>('category')
   const search = useDebouncedValue(term, SEARCH_DEBOUNCE_MS)
   const { data: products, isLoading, isError } = useProductList({ search: search || undefined })
@@ -264,9 +274,18 @@ export default function ProductsPage() {
     (product: ProductMaster) => product.shelf_life_source === 'category'
   ).length
 
-  const run = (apply: boolean) =>
-    estimate.mutate(apply, {
+  // Everything an estimate may replace: the guesses and the model's own answers (Q19)
+  const estimable = (products ?? []).filter(
+    (product: ProductMaster) => product.shelf_life_source !== 'cook'
+  ).length
+
+  const dryRunning = (which: EstimateScope) =>
+    estimate.isPending && estimate.variables?.scope === which && !estimate.variables.apply
+
+  const run = (apply: boolean, which: EstimateScope) =>
+    estimate.mutate({ apply, scope: which }, {
       onSuccess: (result) => {
+        setScope(which)
         setProposal(result.applied ? null : result)
         if (result.applied) {
           // Say what happened to the food, not just to the catalog (Q12): a corrected
@@ -312,10 +331,19 @@ export default function ProductsPage() {
           {guesses > 0 && (
             <Button
               variant="secondary"
-              loading={estimate.isPending && !estimate.variables}
-              onClick={() => run(false)}
+              loading={dryRunning('guesses')}
+              onClick={() => run(false, 'guesses')}
             >
               Estimate the guesses
+            </Button>
+          )}
+          {estimable > 0 && (
+            <Button
+              variant="secondary"
+              loading={dryRunning('all')}
+              onClick={() => run(false, 'all')}
+            >
+              Re-estimate all (keeps yours)
             </Button>
           )}
         </div>
@@ -337,8 +365,9 @@ export default function ProductsPage() {
         {proposal && (
           <ProposedChanges
             result={proposal}
-            applying={estimate.isPending && Boolean(estimate.variables)}
-            onApply={() => run(true)}
+            scope={scope}
+            applying={estimate.isPending && Boolean(estimate.variables?.apply)}
+            onApply={() => run(true, scope)}
             onDismiss={() => setProposal(null)}
           />
         )}

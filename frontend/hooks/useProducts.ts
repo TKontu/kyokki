@@ -5,7 +5,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
-import productsAPI from '@/lib/api/products'
+import productsAPI, { type EstimateScope } from '@/lib/api/products'
 import type { ProductListParams, ProductMasterUpdate } from '@/types/product'
 
 export const productKeys = {
@@ -83,8 +83,15 @@ export function useUpdateProduct() {
   })
 }
 
+/** One catalog estimate run: a dry run or an apply, over guesses or everything (Q19). */
+export interface EstimateRun {
+  apply: boolean
+  scope: EstimateScope
+}
+
 /**
- * Ask the model about the catalog's guessed shelf lives (Q11).
+ * Ask the model about the catalog's shelf lives (Q11): the guesses, or with
+ * `scope: 'all'` everything the cook has not set (Q19).
  *
  * A dry run proposes and changes nothing, so only an applied run invalidates. The
  * model call takes the better part of a minute for a whole catalog, and retrying it
@@ -94,7 +101,7 @@ export function useEstimateCatalog() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (apply: boolean) => productsAPI.estimate(apply),
+    mutationFn: ({ apply, scope }: EstimateRun) => productsAPI.estimate(apply, scope),
     retry: false,
     onSuccess: (result) => {
       if (!result.applied) return

@@ -29,15 +29,23 @@ export async function update(
 }
 
 /**
- * Ask the model what the catalog's guessed shelf lives should be (Q11).
- *
- * Only products whose shelf life is still a category placeholder are candidates; a
- * number the cook set is never sent. `apply` defaults to false, so the first call
- * proposes and a second one writes.
+ * Which products a catalog estimate asks about (Q19). `guesses`: only category
+ * placeholders (Q11). `all`: every product whose shelf life the cook did not set.
  */
-export async function estimate(apply = false): Promise<CatalogEstimateResponse> {
+export type EstimateScope = 'guesses' | 'all'
+
+/**
+ * Ask the model what the catalog's shelf lives should be (Q11, Q19).
+ *
+ * A number the cook set is never sent, in either scope. `apply` defaults to false, so
+ * the first call proposes and a second one writes.
+ */
+export async function estimate(
+  apply = false,
+  scope: EstimateScope = 'guesses'
+): Promise<CatalogEstimateResponse> {
   return apiClient.post<CatalogEstimateResponse>(
-    `/products/estimate?apply=${apply}`,
+    `/products/estimate?apply=${apply}&scope=${scope}`,
     {}
   )
 }

@@ -23,6 +23,7 @@ from app.services.catalog_estimates import (
     EstimateRequest,
     band_for,
     build_prompt,
+    estimate_products,
     parse_estimates,
     refresh_catalog_shelf_lives,
 )
@@ -313,6 +314,163 @@ class TestRefreshCatalogShelfLives:
         result = await refresh_catalog_shelf_lives(db_session, apply=True)
 
         assert (result.considered, result.answered, result.changes) == (0, 0, [])
+
+
+class TestEstimateProducts:
+    """Q19: one function estimates and applies any list of products, with one rule.
+
+    The catalog refresh, re-estimating everything and the estimate a new product gets all go
+    through it, so what may change is decided in one place: never a `cook` number, and an
+    opened shelf life only when it is missing.
+    """
+
+    async def _product(self, db_session: AsyncSession, name: str, **kwargs):
+        product, _ = await ProductResolver(db_session).resolve(
+            name=name, category="produce", unit="pcs", quantity=1, **kwargs
+        )
+        return product
+
+    def _says(self, days: int, opened: int | None = None):
+        async def answer(products):
+            return [
+                Estimate(id=p.id, shelf_life_days=days, opened_shelf_life_days=opened)
+                for p in products
+            ]
+
+        return patch(
+            "app.services.catalog_estimates.estimate_shelf_lives",
+            new=AsyncMock(side_effect=answer),
+        )
+
+    async def test_it_replaces_a_placeholder_and_a_model_value(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        placeholder = await self._product(db_session, "Tomato")
+        guessed = await self._product(db_session, "Orange", shelf_life_days=7)
+
+        with self._says(21):
+            result = await estimate_products(
+                db_session, [placeholder, guessed], apply=True
+            )
+
+        assert result.considered == 2
+        assert (
+            placeholder.default_shelf_life_days,
+            guessed.default_shelf_life_days,
+        ) == (
+            21,
+            21,
+        )
+        assert {placeholder.shelf_life_source, guessed.shelf_life_source} == {"model"}
+
+    async def test_a_cook_number_is_never_sent(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        cooks = await self._product(db_session, "Tomato")
+        cooks.default_shelf_life_days = 4
+        cooks.shelf_life_source = "cook"
+        other = await self._product(db_session, "Carrot")
+
+        with self._says(21) as estimator:
+            result = await estimate_products(db_session, [cooks, other], apply=True)
+
+        (asked,) = estimator.await_args.args
+        assert [r.id for r in asked] == [str(other.id)]
+        assert result.considered == 1
+        assert (cooks.default_shelf_life_days, cooks.shelf_life_source) == (4, "cook")
+
+    async def test_an_answer_that_agrees_still_marks_it_answered(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        """Otherwise a placeholder the model agreed with would be asked about for ever."""
+        product = await self._product(db_session, "Lettuce")
+
+        with self._says(PRODUCE_DAYS):
+            result = await estimate_products(db_session, [product], apply=True)
+
+        assert result.changes == []
+        assert product.shelf_life_source == "model"
+
+    async def test_a_dry_run_marks_nothing(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        product = await self._product(db_session, "Lettuce")
+
+        with self._says(PRODUCE_DAYS):
+            await estimate_products(db_session, [product], apply=False)
+
+        assert product.shelf_life_source == "category"
+
+
+class TestRefreshScope:
+    """Q19: `scope="all"` re-estimates every product the cook has not set."""
+
+    async def _catalog(self, db_session: AsyncSession):
+        placeholder, _ = await ProductResolver(db_session).resolve(
+            name="Tomato", category="produce", unit="pcs", quantity=1
+        )
+        guessed, _ = await ProductResolver(db_session).resolve(
+            name="Orange", category="produce", unit="pcs", quantity=1, shelf_life_days=7
+        )
+        cooks, _ = await ProductResolver(db_session).resolve(
+            name="Banana", category="produce", unit="pcs", quantity=1
+        )
+        cooks.default_shelf_life_days = 5
+        cooks.shelf_life_source = "cook"
+        await db_session.flush()
+        return placeholder, guessed, cooks
+
+    async def _asked(self, db_session: AsyncSession, **kwargs) -> list[str]:
+        asked: list[str] = []
+
+        async def capture(products):
+            asked.extend(p.name for p in products)
+            return []
+
+        with patch("app.services.catalog_estimates.estimate_shelf_lives", new=capture):
+            await refresh_catalog_shelf_lives(db_session, **kwargs)
+        return sorted(asked)
+
+    async def test_guesses_is_the_default_and_asks_only_about_placeholders(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        await self._catalog(db_session)
+
+        assert await self._asked(db_session) == ["Tomato"]
+        assert await self._asked(db_session, scope="guesses") == ["Tomato"]
+
+    async def test_all_asks_about_everything_but_the_cooks(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        await self._catalog(db_session)
+
+        assert await self._asked(db_session, scope="all") == ["Orange", "Tomato"]
+
+    async def test_all_is_still_a_dry_run_by_default(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        placeholder, guessed, _ = await self._catalog(db_session)
+
+        with patch(
+            "app.services.catalog_estimates.estimate_shelf_lives",
+            new_callable=AsyncMock,
+            return_value=[
+                Estimate(
+                    id=str(guessed.id), shelf_life_days=21, opened_shelf_life_days=None
+                )
+            ],
+        ):
+            result = await refresh_catalog_shelf_lives(db_session, scope="all")
+
+        assert result.applied is False
+        assert [c.proposed_days for c in result.changes] == [21]
+        assert guessed.default_shelf_life_days == 7
+
+    async def test_an_unknown_scope_is_refused(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        with pytest.raises(ValueError):
+            await refresh_catalog_shelf_lives(db_session, scope="everything")
 
 
 class TestPlausibleBands:
