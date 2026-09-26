@@ -2,7 +2,7 @@
 
 import httpx
 import pytest
-from conftest import PRODUCT_ID, TOKEN, FakeApi, Runner
+from conftest import ITEM_ID, PRODUCT_ID, TOKEN, FakeApi, Runner
 from help_pages import HELP_PAGES
 
 COMMANDS = [
@@ -14,6 +14,15 @@ COMMANDS = [
     ["product", "resolve", "milk"],
     ["product", "name", "add", PRODUCT_ID, "maito"],
     ["category", "list"],
+    ["shopping", "list", "--all"],
+    ["shopping", "add", "Milk", "1", "l", "--priority", "urgent"],
+    ["shopping", "done", ITEM_ID],
+    ["shopping", "done", ITEM_ID, "--undo"],
+    ["shopping", "remove", ITEM_ID],
+    ["shopping", "generate"],
+    ["shopping", "generate", "--dry-run"],
+    ["shopping", "export"],
+    ["shopping", "export", "--format", "markdown"],
 ]
 
 ANSWERS = [
@@ -33,6 +42,25 @@ def ok(request: httpx.Request) -> httpx.Response:
         )
     if request.url.path.startswith("/api/stock/"):
         return httpx.Response(200, json={"item": {}, "product_created": False})
+    if request.url.path == "/api/shopping/export":
+        # An export that echoes the token back is still masked.
+        return httpx.Response(
+            200, text=f"- {TOKEN} 1 pcs\n", headers={"Content-Type": "text/plain"}
+        )
+    if request.url.path == "/api/shopping/generate":
+        empty: list[object] = []
+        return httpx.Response(
+            200,
+            json={
+                "added": empty,
+                "updated": empty,
+                "unchanged": empty,
+                "skipped": empty,
+                "dry_run": False,
+            },
+        )
+    if request.method == "DELETE":
+        return httpx.Response(204)
     return httpx.Response(200, json=[] if request.method == "GET" else {})
 
 
@@ -63,7 +91,7 @@ def test_no_token_in_output(
     _, response = answer
     if response == "down":
         api.down = True
-    for method in ("GET", "POST"):
+    for method in ("GET", "POST", "DELETE"):
         for path in (
             "/api/health/live",
             "/api/whoami",
@@ -73,6 +101,11 @@ def test_no_token_in_output(
             "/api/products/resolve",
             f"/api/products/{PRODUCT_ID}/names",
             "/api/categories",
+            "/api/shopping/",
+            "/api/shopping/generate",
+            "/api/shopping/export",
+            f"/api/shopping/{ITEM_ID}",
+            f"/api/shopping/{ITEM_ID}/purchase",
         ):
             if isinstance(response, httpx.Response) and path != "/api/health/live":
                 api.routes[(method, path)] = response
@@ -97,6 +130,8 @@ def test_no_token_in_help(run: Runner, argv: list[str]) -> None:
         ["stock", "add", "--token", TOKEN],
         ["stock", "list", "--location", TOKEN],
         ["product", "name", "add", TOKEN, "x"],
+        ["shopping", "done", TOKEN],
+        ["shopping", "add", "Milk", "1", "--priority", TOKEN],
         [f"--token={TOKEN}", "stock", "add", "Milk", TOKEN],
     ],
 )

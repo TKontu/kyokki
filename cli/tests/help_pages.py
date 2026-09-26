@@ -25,6 +25,13 @@ HELP_PAGES: dict[str, list[str]] = {
     "product-name-add": ["product", "name", "add", "-h"],
     "category": ["category", "-h"],
     "category-list": ["category", "list", "-h"],
+    "shopping": ["shopping", "-h"],
+    "shopping-list": ["shopping", "list", "-h"],
+    "shopping-add": ["shopping", "add", "-h"],
+    "shopping-done": ["shopping", "done", "-h"],
+    "shopping-remove": ["shopping", "remove", "-h"],
+    "shopping-generate": ["shopping", "generate", "-h"],
+    "shopping-export": ["shopping", "export", "-h"],
 }
 
 

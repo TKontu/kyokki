@@ -22,6 +22,7 @@ commands:
     stock        list, add and consume stock
     product      resolve and teach product names
     category     the category ids for --category
+    shopping     read, add to, tick off and generate the shopping list
 
 examples:
   kyokki doctor

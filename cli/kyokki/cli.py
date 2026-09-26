@@ -16,6 +16,8 @@ from kyokki import api, commands, idempotency, output
 from kyokki.api import USAGE, Api, CliError
 
 LOCATIONS = ["main_fridge", "freezer", "pantry"]
+PRIORITIES = ["urgent", "normal", "low"]
+EXPORT_FORMATS = ["text", "markdown"]
 UNITS_HELP = (
     "dl, tsp, tbsp, g, pcs (l, ml, kg and the like are converted by the server)"
 )
@@ -82,6 +84,15 @@ def product_id(text: str) -> str:
     if not commands.looks_like_uuid(text):
         raise argparse.ArgumentTypeError(
             f"not a product id (a UUID): {text!r}; find it with kyokki product resolve"
+        )
+    return text
+
+
+def item_id(text: str) -> str:
+    if not commands.looks_like_uuid(text):
+        raise argparse.ArgumentTypeError(
+            f"not a shopping item id (a UUID): {text!r}; find it with kyokki "
+            "shopping list"
         )
     return text
 
@@ -447,7 +458,184 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_connection_options(categories, top=False)
 
+    add_shopping_commands(top)
+
     return parser
+
+
+def add_shopping_commands(top: "argparse._SubParsersAction[Parser]") -> None:
+    shopping = group(
+        top,
+        "shopping",
+        summary="read, add to, tick off and generate the shopping list",
+        description="The shopping list: open items, adding and ticking them off, filling\n"
+        "it from low stock, and exporting it as text.",
+        examples=[
+            "kyokki shopping list",
+            "kyokki shopping add milk 1 l --priority urgent",
+            "kyokki shopping generate --dry-run",
+        ],
+    )
+
+    listing = leaf(
+        shopping,
+        "list",
+        summary="the open items, urgent first",
+        description="The open (not yet bought) items, urgent first. --all adds the ones\n"
+        "already bought. The ID column is what done and remove take.",
+        examples=[
+            "kyokki shopping list",
+            "kyokki shopping list --priority urgent",
+            "kyokki shopping list --all --json",
+        ],
+        handler=commands.shopping_list,
+    )
+    listing.add_argument(
+        "--all", action="store_true", help="include items already bought"
+    )
+    listing.add_argument(
+        "--priority", choices=PRIORITIES, help="only items of this priority"
+    )
+    add_connection_options(listing, top=False)
+
+    add = leaf(
+        shopping,
+        "add",
+        summary="put an item on the list",
+        description="Put NAME on the shopping list. AMOUNT and UNIT go together; without\n"
+        "them the item is 1 pcs. NAME is free text; --product-id links it to a\n"
+        "product so generate and the kitchen display know what it is.",
+        examples=[
+            "kyokki shopping add milk 1 l --priority urgent",
+            "kyokki shopping add 'dish soap'",
+            "kyokki shopping add eggs 12 pcs "
+            "--product-id 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01",
+        ],
+        handler=commands.shopping_add,
+    )
+    add.add_argument("name", metavar="NAME", help="what to buy, as it should read")
+    add.add_argument(
+        "amount",
+        nargs="?",
+        type=positive_number,
+        metavar="AMOUNT",
+        help="how much, in UNIT (a number above 0); default: 1 pcs",
+    )
+    add.add_argument(
+        "unit", nargs="?", metavar="UNIT", help=f"{UNITS_HELP}; needs AMOUNT"
+    )
+    add.add_argument(
+        "--priority",
+        choices=PRIORITIES,
+        help="how badly it is needed; default: normal",
+    )
+    add.add_argument(
+        "--product-id",
+        type=product_id,
+        metavar="UUID",
+        help="the product it is (a UUID), from product resolve",
+    )
+    add_idempotency_option(add)
+    add_connection_options(add, top=False)
+
+    done = leaf(
+        shopping,
+        "done",
+        summary="tick an item off as bought (or back on with --undo)",
+        description="Mark item ID as bought, or with --undo as not bought again. Exit 3\n"
+        "when no item has the id.",
+        examples=[
+            "kyokki shopping done 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+            "kyokki shopping done 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f --undo",
+        ],
+        handler=commands.shopping_done,
+    )
+    done.add_argument(
+        "item_id",
+        type=item_id,
+        metavar="ID",
+        help="the item's id (a UUID), from shopping list",
+    )
+    done.add_argument(
+        "--undo", action="store_true", help="mark it not bought: back on the list"
+    )
+    add_idempotency_option(done)
+    add_connection_options(done, top=False)
+
+    remove = leaf(
+        shopping,
+        "remove",
+        summary="delete an item from the list",
+        description="Delete item ID from the shopping list, bought or not. Exit 3 when\n"
+        "no item has the id.",
+        examples=[
+            "kyokki shopping remove 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+            "kyokki shopping remove 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f --json",
+        ],
+        handler=commands.shopping_remove,
+    )
+    remove.add_argument(
+        "item_id",
+        type=item_id,
+        metavar="ID",
+        help="the item's id (a UUID), from shopping list",
+    )
+    add_idempotency_option(remove)
+    add_connection_options(remove, top=False)
+
+    generate = leaf(
+        shopping,
+        "generate",
+        summary="put what the kitchen is short of on the list",
+        description="Fill the list from the kitchen. low-stock: every product with a\n"
+        "minimum stock that has less than it needs its reorder amount (or the\n"
+        "shortfall), in the product's own unit. An open item for the product is\n"
+        "raised to the need rather than joined by a second one. The answer\n"
+        "groups the products into added, updated, unchanged and skipped (with\n"
+        "the reason).",
+        examples=[
+            "kyokki shopping generate --dry-run",
+            "kyokki shopping generate",
+            "kyokki shopping generate --from low-stock --json",
+        ],
+        handler=commands.shopping_generate,
+    )
+    generate.add_argument(
+        "--from",
+        dest="source",
+        choices=list(commands.GENERATE_SOURCES),
+        default="low-stock",
+        help="what to generate from; default: low-stock",
+    )
+    generate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would change; change nothing (no Idempotency-Key)",
+    )
+    add_idempotency_option(generate)
+    add_connection_options(generate, top=False)
+
+    export = leaf(
+        shopping,
+        "export",
+        summary="the open list as plain text or a Markdown checklist",
+        description="Print the open list, urgent first and then by name, exactly as the\n"
+        "server renders it: text is '- name amount unit' per line, markdown a\n"
+        "'- [ ] name (amount unit)' checklist. With --json: {\"format\": ...,\n"
+        '"text": ...}.',
+        examples=[
+            "kyokki shopping export",
+            "kyokki shopping export --format markdown > list.md",
+        ],
+        handler=commands.shopping_export,
+    )
+    export.add_argument(
+        "--format",
+        choices=EXPORT_FORMATS,
+        default="text",
+        help="text or markdown; default: text",
+    )
+    add_connection_options(export, top=False)
 
 
 # --- running ------------------------------------------------------------------
@@ -556,6 +744,8 @@ def run(argv: list[str], transport: httpx.BaseTransport | None) -> int:
         if hasattr(args, "idempotency_key") and isinstance(document, dict):
             document = {**document, "replayed": outcome.replayed}
         output.print_json(document)
+    elif outcome.raw:
+        sys.stdout.write(outcome.human())
     else:
         print(outcome.human())
     return api.OK

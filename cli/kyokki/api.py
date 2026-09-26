@@ -2,7 +2,7 @@
 
 import sys
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -147,6 +147,9 @@ def error_from(response: httpx.Response) -> CliError:
 
 STRING_DETAIL_EXIT = {400: USAGE, 409: CONFLICT}
 
+# What ``expect="text"`` accepts: the export's bodies, never an HTML login page.
+TEXT_MEDIA_TYPES = ("text/plain", "text/markdown")
+
 
 def bad_response(method: str, path: str, status: int, what: str) -> CliError:
     return CliError(
@@ -198,10 +201,13 @@ class Api:
         params: dict[str, Any] | None = None,
         body: Any = None,
         idempotency_key: str | None = None,
-        expect: type[list[Any]] | type[dict[str, Any]] | None = None,
+        expect: type[list[Any]] | type[dict[str, Any]] | Literal["text"] | None = None,
     ) -> Answer:
-        """One request. ``expect`` is the JSON type a success must carry."""
+        """One request. ``expect`` is the JSON type a success must carry, or
+        ``"text"`` for a text/plain or text/markdown body, returned as a string."""
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else {}
+        if expect == "text":
+            headers["Accept"] = ", ".join(TEXT_MEDIA_TYPES)
         query = {k: v for k, v in (params or {}).items() if v is not None}
         if self._verbose:
             key = f" (Idempotency-Key {idempotency_key})" if idempotency_key else ""
@@ -217,6 +223,18 @@ class Api:
             print(f"< {response.status_code} {response.reason_phrase}", file=sys.stderr)
         if response.is_error:
             raise error_from(response)
+        replayed = response.headers.get("Idempotent-Replayed", "").lower() == "true"
+        if expect == "text":
+            media_type = response.headers.get("Content-Type", "").split(";")[0]
+            if media_type.strip().lower() not in TEXT_MEDIA_TYPES:
+                raise bad_response(
+                    method,
+                    path,
+                    response.status_code,
+                    f"{media_type.strip() or 'no Content-Type'} where text was "
+                    "expected",
+                )
+            return Answer(response.status_code, response.text, replayed)
         try:
             parsed = response.json() if response.content else None
         except ValueError:
@@ -230,7 +248,6 @@ class Api:
                 response.status_code,
                 f"JSON that is not {'a list' if expect is list else 'an object'}",
             )
-        replayed = response.headers.get("Idempotent-Replayed", "").lower() == "true"
         return Answer(response.status_code, parsed, replayed)
 
     def _transport_error(

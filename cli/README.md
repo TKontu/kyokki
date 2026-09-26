@@ -30,10 +30,31 @@ character is refused with exit 2 before anything is sent, without repeating it.
 | `kyokki product resolve NAME` | What a name means: a match, candidates, or a suggestion |
 | `kyokki product name add PRODUCT_ID NAME` | Teach a product another name |
 | `kyokki category list` | Category ids for `--category` |
+| `kyokki shopping list [--all] [--priority P]` | Open shopping items, urgent first (`--all` adds the bought ones) |
+| `kyokki shopping add NAME [AMOUNT UNIT] [--priority P] [--product-id UUID]` | Put an item on the list; without AMOUNT UNIT it is 1 pcs |
+| `kyokki shopping done ID [--undo]` | Tick an item off as bought, or put it back with `--undo` |
+| `kyokki shopping remove ID` | Delete an item from the list |
+| `kyokki shopping generate [--from low-stock] [--dry-run]` | Put what the kitchen is short of on the list |
+| `kyokki shopping export [--format text\|markdown]` | The open list as plain text or a Markdown checklist |
 
-A NAME that looks like a UUID is sent as a product id. Units are `dl`, `tsp`, `tbsp`,
-`g` and `pcs`; the server converts `l`, `kg` and the like on write. Locations are
-`main_fridge`, `freezer` and `pantry`. Every command has `-h` with examples.
+A NAME that looks like a UUID is sent as a product id (`stock` commands). Units are `dl`,
+`tsp`, `tbsp`, `g` and `pcs`; the server converts `l`, `kg` and the like on write.
+Locations are `main_fridge`, `freezer` and `pantry`; priorities `urgent`, `normal` and
+`low`. Every command has `-h` with examples.
+
+The shopping commands call `/api/shopping/`:
+
+| Command | Request | Exit codes beyond 0, 1, 2 and 7 |
+| ------- | ------- | ------------------------------- |
+| `shopping list` | `GET /api/shopping/?include_purchased=true&priority=P` | |
+| `shopping add` | `POST /api/shopping/` `{name, quantity, unit, priority?, product_master_id?}` | 6 (reused key) |
+| `shopping done` | `POST /api/shopping/{ID}/purchase?purchased=true\|false` | 3 (no such item), 6 |
+| `shopping remove` | `DELETE /api/shopping/{ID}` | 3 (no such item), 6 |
+| `shopping generate` | `POST /api/shopping/generate` `{sources: ["low_stock"], dry_run}` | 6; any 400 or 422 is 2 |
+| `shopping export` | `GET /api/shopping/export?format=text\|markdown` | |
+
+AMOUNT without UNIT (or the reverse) is a usage error, exit 2. `done` and `remove` report
+a 404 as `not_found` (exit 3), whether the server's detail is a plain string or coded.
 
 ## Output
 
@@ -44,9 +65,18 @@ When a name is ambiguous the candidates are printed in both modes.
 
 Where the CLI adds to or builds the document itself:
 
-- `stock add`, `stock consume` and `product name add` add `"replayed": true|false`:
-  true when the server replayed the answer to an earlier request with the same
-  Idempotency-Key instead of applying the change again.
+- `stock add`, `stock consume`, `product name add`, `shopping add`, `shopping done`,
+  `shopping remove` and `shopping generate` add `"replayed": true|false`: true when the
+  server replayed the answer to an earlier request with the same Idempotency-Key
+  instead of applying the change again.
+- `shopping remove` answers 204 with no body; `--json` prints `{"id": ..., "removed":
+  true, "replayed": ...}`.
+- `shopping export` prints the server's text/plain or text/markdown body unchanged on a
+  terminal, and `{"format": ..., "text": ...}` with `--json`. A success that is not
+  text/plain or text/markdown (an HTML login page, JSON) is `bad_response`.
+- `shopping generate` prints the backend's `{added, updated, unchanged, skipped,
+  dry_run}` object; on a terminal it groups the products under those headings, with
+  the reason for each skipped one.
 - `doctor --json` prints `{"url": ..., "reachable": true, "name": ..., "scopes": [...],
   "auth_enabled": ...}`, from `/api/health/live` and `/api/whoami`.
 - A usage error (bad arguments, no URL, a malformed URL or token) prints
@@ -70,7 +100,10 @@ Mutations send an `Idempotency-Key`: by default the SHA-256 of the command line 
 `--url` and `--token` and their values, and the output-only `--json` and `--verbose`) and
 the current UTC minute, so re-running the same command within the minute, with or
 without those flags, does not add or consume twice. `--idempotency-key KEY` sets one
-explicitly. A dry run sends none.
+explicitly. A dry run sends none. The mutations are `stock add`, `stock consume`,
+`product name add`, `shopping add`, `shopping done`, `shopping remove` and `shopping
+generate`; `shopping done ID` and `shopping done ID --undo` are different command lines,
+so they get different keys.
 
 When a change was sent but no answer came back (a read timeout), the CLI exits 1 with
 `unknown_outcome`, prints the key it used and the command to retry with

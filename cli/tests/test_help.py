@@ -61,3 +61,31 @@ def test_help_describes_units_and_locations(name: str) -> None:
         assert "dl, tsp, tbsp, g, pcs" in text
     if name != "product-name-add":
         assert "main_fridge" in text
+
+
+def test_shopping_add_help_describes_units_and_priorities() -> None:
+    text = " ".join(render(HELP_PAGES["shopping-add"]).split())
+    assert "dl, tsp, tbsp, g, pcs" in text
+    assert "urgent" in text and "normal" in text and "low" in text
+    assert "default: 1 pcs" in text
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "shopping-add",
+        "shopping-done",
+        "shopping-remove",
+        "shopping-generate",
+    ],
+)
+def test_shopping_mutation_help_offers_the_idempotency_key(name: str) -> None:
+    assert "--idempotency-key" in render(HELP_PAGES[name])
+
+
+def test_readme_lists_every_shopping_command() -> None:
+    from pathlib import Path
+
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    for command in ("list", "add", "done", "remove", "generate", "export"):
+        assert f"`kyokki shopping {command}" in readme

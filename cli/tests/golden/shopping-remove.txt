@@ -1,0 +1,40 @@
+usage: kyokki shopping remove [-h] [--idempotency-key KEY] [--url URL]
+                              [--token TOKEN] [--json] [--verbose]
+                              ID
+
+Delete item ID from the shopping list, bought or not. Exit 3 when
+no item has the id.
+
+positional arguments:
+  ID                    the item's id (a UUID), from shopping list
+
+options:
+  -h, --help            show this help message and exit
+  --idempotency-key KEY
+                        retry key (at most 255 characters); default: SHA-256
+                        of this command line and the UTC minute, so a retry
+                        within the minute is safe
+
+connection and output:
+  --url URL             Kyokki base URL, e.g. http://kyokki.lan:17300
+                        (default: $KYOKKI_URL)
+  --token TOKEN         API token, sent as a Bearer header and never printed
+                        (default: $KYOKKI_TOKEN)
+  --json                print JSON: the API's answer, or an error's detail
+                        object (the default when stdout is not a terminal)
+  --verbose             log each request and its status to stderr
+
+examples:
+  kyokki shopping remove 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f
+  kyokki shopping remove 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f --json
+
+exit codes:
+  0 ok
+  1 error: cannot reach the server, a 5xx, an answer that is not the expected
+    JSON, or a change sent that got no answer (it may have been applied)
+  2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
+  3 not found: nothing matches the name, or no product has the id
+  4 ambiguous name: the candidates are printed on stdout
+  5 insufficient stock
+  6 conflict: the name belongs to another product, or a reused Idempotency-Key
+  7 auth: missing or unknown token (401), or a read token on a write (403)
