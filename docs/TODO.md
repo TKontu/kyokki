@@ -1886,6 +1886,64 @@ then **Q18** product icons (a model field, the mapping, an override on the produ
 **Q19** per-product shelf life at creation, and a decision on relative tiers. Post-MVP 16 folds
 into Q18.
 
+#### Operator friction log — the Cielo fridge on the iPad (2026-09-26)
+
+From the first look at round 2026-09-26-3 (#111-#113) on the iPad, after deploying it. The
+diagnosis under each item was checked at source on `9fa81a7`; the directions are proposals,
+not rulings.
+
+- **Q20 — the "Kyokki" label on top is unnecessary.** `/` has its own header row
+  (`app/page.tsx`, an `<h1>Kyokki</h1>`) under the `AppShell` bar. Direction: drop the heading
+  (keep it for screen readers only). The same row holds Undo and "+ Add": either keep the row
+  with just those two, or move them into the `AppShell` bar and give the whole row to the fridge.
+- **Q21 — every item still shows its category's emoji.** This is Q18, still waiting for the
+  icon-route ruling (`docs/spikes/Q18_product_icons.md`). No new item; the ruling is the blocker.
+- **Q22 — grey struck-through tiles on an area page are unexplained.** They are items **used up
+  in the last 24 hours** (`app/area/[id]/page.tsx`, `RECENT_MS`; `lib/staleness.ts` tier
+  `consumed`), kept on offer so a mistaken "used up" can be taken back. Tapping one restores
+  it: the tile takes its staleness colour again (red for the potato), and the header's Undo then
+  offers to reverse that restore, labelled `Correction · Potato` (`lib/undo.ts`, action
+  `correct`). None of this is said on screen. Direction, to choose from: (a) label the group
+  ("Used today, tap to put back") and rename the undo verb ("Put back · Potato" /
+  "Used up again · Potato"); (b) drop the grey tiles and rely on the header's Undo and the Gone
+  screen.
+- **Q23 — bread is drawn inside the fridge.** `lib/fridge.ts` maps the `bread` category to a
+  fridge area. Direction: a bread basket on the larder beside the fridge (#113 put the larder there;
+  its top already holds the "Other" basket, so the two share or stack), so bread leaves the
+  fridge body.
+- **Q24 — nearly everything still looks close to stale.** Examples from the operator, with the
+  printed dates: tortillas (November, and January for another pack), spread (Christmas),
+  cottage cheese (two weeks), cream (six weeks), cucumber (about nine days). The model's
+  per-product estimate cannot know a packaged item's printed date, and packaged shelf life
+  varies by months between packs. First check whether the post-Q19 "Re-estimate all (keeps
+  yours)" apply was run. Then, for good (**needs a ruling**):
+  1. **The printed date wins, and entering it is cheap.** After a receipt is confirmed, a
+     "check dates" step lists the packaged items with a proposed date, and one tap sets
+     +1 week / +2 weeks / +1 month / +3 months or a date. The same quick picker is on every
+     item's sheet. The item's `expiry_source` becomes `manual`.
+  2. **A correction teaches the product.** When the cook sets an item's date, the product's
+     shelf life moves towards what was chosen (`shelf_life_source = 'cook'`, which estimates
+     never overwrite), so the next pack is right without asking.
+  3. **Honest uncertainty.** An estimated date on a packaged good shows as estimated (no red)
+     until the cook confirms it, so the stale shelf only holds dates somebody vouched for or
+     fresh food whose estimate is reliable.
+  Recommendation: all three, in the order 2, 1, 3; 2 alone fixes repeat purchases.
+- **Q25 — a product's category cannot be corrected from the item.** "Fish soup" is a
+  ready meal that keeps in the fridge until the 30th, not frozen food. The category lives on the
+  product and is editable only on `/products`; `ItemEditSheet` shows `category_name` read-only.
+  Direction: "Change category" (and "This is a different product") on the item's sheet; a
+  category change re-dates the product's open items the way a shelf-life change does.
+- **Q26 — where an item came from is not visible.** The item has `receipt_id`, but not the
+  receipt line it came from, so "fish soup" cannot be traced back to Prisma's "KOKKIKARTANO
+  KERMAINEN LOHIKEITTO". The raw lines are in `receipt.ocr_structured`. Direction: store the line
+  index (or the printed name) on the item at confirm, and show "From Prisma, 26.9.: KOKKIKARTANO
+  KERMAINEN LOHIKEITTO" on the item's sheet, linking to the receipt. Needs a migration.
+
+**Operator actions and rulings needed:**
+- [ ] Say whether "Re-estimate all (keeps yours)" was applied after Q19 deployed (Q24).
+- [ ] Rule on Q24's direction (1, 2, 3, or a subset) and Q22's (a) or (b).
+- [ ] The Q18 icon route (also Q21).
+
 ---
 
 ## Phase 1: MVP
