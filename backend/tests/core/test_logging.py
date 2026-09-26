@@ -1,4 +1,4 @@
-"""Logging must carry structured extras and must never carry an API token.
+"""Logging must carry structured extras, and no ``token=`` secret in a message or its args.
 
 Before MVP-R4 it whitelisted four fields, so ``extra={"seconds": ...}`` was silently dropped
 and nothing in the pipeline could be timed from the logs. Since AG1 the WebSocket accepts
@@ -80,7 +80,8 @@ class TestJSONFormatter:
         assert isinstance(entry["receipt"], str)
 
 
-# --- The WebSocket ``?token=`` must never reach a log line (AG1 follow-up) ---
+# --- The WebSocket ``?token=`` must not reach a log line through the message or its args.
+# Extras (``extra=``) and tracebacks are not scanned; nothing logs a token that way. ---
 
 
 SECRET = "s3cr3t-Value_123"
@@ -180,6 +181,21 @@ class TestTokenRedactingFilter:
         line = _filtered(_uvicorn_record("/x?csrftoken=abc"))
 
         assert line == "/x?csrftoken=abc"
+
+    def test_token_placeholder_in_the_template_is_formatted_then_redacted(self) -> None:
+        # Redacting "?token=%s" alone leaves an argument with no placeholder: formatting
+        # fails and logging's error handler prints the raw arguments, secret included.
+        line = _filtered(_uvicorn_record("GET %s?token=%s", "/api/ws", SECRET))
+
+        assert SECRET not in line
+        assert line == "GET /api/ws?token=***"
+
+    def test_percent_encoded_parameter_name_is_redacted(self) -> None:
+        # Starlette decodes the name, so "tok%65n" authenticates exactly like "token".
+        line = _filtered(_uvicorn_record("%s", f"/api/ws?tok%65n={SECRET}"))
+
+        assert SECRET not in line
+        assert line == "/api/ws?tok%65n=***"
 
 
 @pytest.fixture

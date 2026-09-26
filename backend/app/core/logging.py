@@ -56,7 +56,11 @@ class JSONFormatter(logging.Formatter):
 # A ``token=`` query parameter carries an API secret: the WebSocket takes ``?token=`` because
 # browsers cannot set its headers, and uvicorn logs every handshake and request with the full
 # query string. The name must follow ``?`` or ``&``; the value ends at ``&``, whitespace or ``"``.
-_TOKEN_PARAM = re.compile(r'([?&]token=)[^&\s"]*', re.IGNORECASE)
+# Each letter may be percent-encoded ("tok%65n"): Starlette decodes the name, so that spelling
+# authenticates too.
+_TOKEN_PARAM = re.compile(
+    r'([?&](?:t|%74)(?:o|%6f)(?:k|%6b)(?:e|%65)(?:n|%6e)=)[^&\s"]*', re.IGNORECASE
+)
 
 
 def _redact(value: object) -> object:
@@ -71,6 +75,22 @@ class TokenRedactingFilter(logging.Filter):
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
+        if (
+            record.args
+            and isinstance(record.msg, str)
+            and _TOKEN_PARAM.search(record.msg)
+        ):
+            # The token sits in the template ("?token=%s"). Redacting the template alone
+            # leaves an argument with no placeholder, formatting fails, and logging's error
+            # handler prints the raw arguments - the secret - to stderr. Format first.
+            try:
+                message = record.getMessage()
+            except (TypeError, ValueError, KeyError):
+                # A template that cannot be formatted anyway: keep it, drop the arguments.
+                message = record.msg
+            record.msg = _redact(message)
+            record.args = None
+            return True
         record.msg = _redact(record.msg)
         if isinstance(record.args, tuple):
             record.args = tuple(_redact(arg) for arg in record.args)
@@ -79,8 +99,9 @@ class TokenRedactingFilter(logging.Filter):
         return True
 
 
-# uvicorn installs its own handlers on these before the app's lifespan runs, and
-# ``uvicorn.access`` does not propagate, so its handlers need the filter too.
+# uvicorn may install its own handlers on these (its default log config, or a server started
+# without ``setup_logging``); any handler found on them gets the filter too. After
+# ``setup_logging`` the ``uvicorn`` logger's handlers are the console and file ones above.
 _UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
 
 
