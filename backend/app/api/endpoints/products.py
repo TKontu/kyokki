@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -183,7 +183,6 @@ async def list_product_names(
 async def teach_name(
     product_id: UUID,
     body: TeachNameRequest,
-    request: Request,
     idempotency_key: str | None = IdempotencyKeyHeader,
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -193,9 +192,7 @@ async def teach_name(
     another product - merge them instead - or the Idempotency-Key was reused with another
     body).
     """
-    claim = await claim_request(
-        request, idempotency_key, TEACH_ROUTE, product_id=product_id
-    )
+    claim = claim_request(body, idempotency_key, TEACH_ROUTE, product_id=product_id)
     if (stored := await replayed(db, claim)) is not None:
         return stored
     try:

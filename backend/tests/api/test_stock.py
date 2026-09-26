@@ -1,5 +1,6 @@
 """AG2: the agent-facing stock routes - /api/stock, /api/stock/add, /api/stock/consume."""
 
+import asyncio
 from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
@@ -8,14 +9,16 @@ from uuid import uuid4
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, inspect, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.errors import AgentError
 from app.models.consumption_log import ConsumptionLog
+from app.models.idempotency_key import IdempotencyKey
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
 from app.models.store_product_alias import StoreProductAlias
+from app.services import stock as stock_service
 
 TODAY = date.today()
 
@@ -26,6 +29,32 @@ def broadcast():
         "app.api.endpoints.stock.broadcast_inventory_update", new_callable=AsyncMock
     ) as mock:
         yield mock
+
+
+@pytest.fixture
+async def own_sessions(db_engine, committed_db_session: AsyncSession):
+    """Every request gets a session of its own on its own connection, committing for real.
+
+    The savepoint ``db_session`` runs every request on one connection, so it cannot show
+    two requests racing each other. ``committed_db_session`` truncates afterwards.
+    """
+    from app.db.seed_categories import seed_categories
+    from app.db.session import get_db
+    from app.main import app
+
+    await seed_categories(committed_db_session)
+    await committed_db_session.commit()
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def override_get_db():
+        async with factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        yield committed_db_session
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 def _id(obj):
@@ -240,6 +269,24 @@ class TestStockAdd:
         assert response.json()["detail"]["code"] == "conflict"
         assert await _count(seeded_db, InventoryItem) == 1
 
+    async def test_an_equal_body_spelled_differently_replays(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        headers = {"Idempotency-Key": "add-3"}
+        body = {"name": "Peas", "category": "frozen", "quantity": 500, "unit": "g"}
+        first = await client.post("/api/stock/add", json=body, headers=headers)
+
+        # 500.0 for 500, and a default sent explicitly: the same request
+        second = await client.post(
+            "/api/stock/add",
+            json={**body, "quantity": 500.0, "location": None},
+            headers=headers,
+        )
+
+        assert (first.status_code, second.status_code) == (201, 201)
+        assert second.json() == first.json()
+        assert await _count(seeded_db, InventoryItem) == 1
+
     async def test_no_key_means_two_items(self, client: AsyncClient, seeded_db) -> None:
         body = {"name": "Peas", "category": "frozen", "quantity": 500, "unit": "g"}
 
@@ -247,6 +294,34 @@ class TestStockAdd:
         await client.post("/api/stock/add", json=body)
 
         assert await _count(seeded_db, InventoryItem) == 2
+
+
+class TestStockAddRace:
+    async def test_two_concurrent_adds_with_one_key_make_one_item(
+        self, client: AsyncClient, own_sessions: AsyncSession, broadcast
+    ) -> None:
+        """A client that times out and retries while its first request still runs."""
+        real_quick_add = stock_service.quick_add
+
+        async def slow_quick_add(db, request):
+            result = await real_quick_add(db, request)
+            # Quick add has committed; its answer is not remembered yet.
+            await asyncio.sleep(0.3)
+            return result
+
+        body = {"name": "Peas", "category": "frozen", "quantity": 500, "unit": "g"}
+        headers = {"Idempotency-Key": "add-race"}
+        with patch("app.services.stock.quick_add", new=slow_quick_add):
+            first, second = await asyncio.gather(
+                client.post("/api/stock/add", json=body, headers=headers),
+                client.post("/api/stock/add", json=body, headers=headers),
+            )
+
+        assert (first.status_code, second.status_code) == (201, 201)
+        assert second.json() == first.json()
+        assert await _count(own_sessions, InventoryItem) == 1
+        assert await _count(own_sessions, IdempotencyKey) == 1
+        assert broadcast.await_count == 1
 
 
 URL = "/api/stock/consume"
@@ -456,6 +531,31 @@ class TestStockConsume:
 
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "conflict"
+        assert await _quantity(seeded_db, item) == Decimal("8")
+
+    async def test_an_equal_body_spelled_differently_replays(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        milk = await _product(seeded_db, "Milk")
+        item = await _item(seeded_db, milk, "10")
+        headers = {"Idempotency-Key": "consume-4"}
+        first = await client.post(
+            URL, json={"product": "milk", "amount": 2, "unit": "dl"}, headers=headers
+        )
+
+        second = await client.post(
+            URL,
+            json={
+                "product": "milk",
+                "amount": 2.0,
+                "unit": "dl",
+                "allow_partial": False,
+            },
+            headers=headers,
+        )
+
+        assert (first.status_code, second.status_code) == (200, 200)
+        assert second.json() == first.json()
         assert await _quantity(seeded_db, item) == Decimal("8")
 
     async def test_a_dry_run_is_not_remembered(

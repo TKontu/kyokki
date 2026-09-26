@@ -27,7 +27,8 @@ class IdempotencyKey(Base):  # type: ignore[misc]  # Base is untyped until H21
     # The route template, e.g. "POST /api/stock/consume": the same key on two routes is two
     # different requests.
     route = Column(String, nullable=False)
-    # sha256 hex of the canonical JSON body, to tell a retry from a reused key.
+    # sha256 hex of the canonical JSON of {path, body} (the validated body, every field),
+    # to tell a retry from a reused key.
     request_hash = Column(String, nullable=False)
     status_code = Column(Integer, nullable=False)
     response = Column(JSONB, nullable=False)

@@ -141,8 +141,9 @@ async def add_stock(
     """Quick add, answered with whether the product was new.
 
     Quick add commits inside, so a remembered response is stored in a second transaction
-    straight after it. A crash between the two leaves the item without its key, and a retry
-    would add a second one.
+    straight after it. The caller holds the key across both (``idempotency.held``), so a
+    retry racing this request waits and then replays. Only a crash between the two
+    commits leaves the item without its key, and a retry after that adds a second one.
 
     Raises:
         InvalidProductRequest: unknown product, or a new product without a valid category.

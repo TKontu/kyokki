@@ -7,8 +7,9 @@ the mutations take an optional ``Idempotency-Key`` and replay their first respon
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import AgentError
@@ -45,14 +46,20 @@ IdempotencyKeyHeader = Header(
 )
 
 
-async def claim_request(
-    request: Request, key: str | None, route: str, **path: Any
+def claim_request(
+    body: BaseModel, key: str | None, route: str, **path: Any
 ) -> IdempotencyClaim | None:
-    """The idempotency claim of this request: its key over its route and JSON body."""
+    """The idempotency claim of this request: its key over its route, path and body.
+
+    The body is hashed as validated, every field included, so a retry that spells the
+    same request differently (``2.0`` for ``2``, a default sent explicitly) replays.
+    """
     if not key:
         return None
-    body = await request.json()
-    payload = {"path": {k: str(v) for k, v in path.items()}, "body": body}
+    payload = {
+        "path": {k: str(v) for k, v in path.items()},
+        "body": body.model_dump(mode="json", exclude_unset=False),
+    }
     return idempotency.claim_for(key, route, payload)
 
 
@@ -108,23 +115,26 @@ async def list_stock(
 )
 async def add_stock(
     body: QuickAddRequest,
-    request: Request,
     idempotency_key: str | None = IdempotencyKeyHeader,
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """Quick add for agents: the created item and whether its product was new.
 
+    With an Idempotency-Key, a retry that arrives while the first request still runs
+    waits for it and replays its answer: the key is held until that answer is stored.
+
     Errors: 400 `invalid` (unknown product id, a new product without a valid category),
     409 `conflict` (Idempotency-Key reused with another body).
     """
-    claim = await claim_request(request, idempotency_key, ADD_ROUTE)
-    if (stored := await replayed(db, claim)) is not None:
-        return stored
-    try:
-        async with handle_integrity_errors():
-            result = await stock_service.add_stock(db, body, claim=claim)
-    except InvalidProductRequest as exc:
-        raise AgentError("invalid", str(exc)) from exc
+    claim = claim_request(body, idempotency_key, ADD_ROUTE)
+    async with idempotency.held(db, claim):
+        if (stored := await replayed(db, claim)) is not None:
+            return stored
+        try:
+            async with handle_integrity_errors():
+                result = await stock_service.add_stock(db, body, claim=claim)
+        except InvalidProductRequest as exc:
+            raise AgentError("invalid", str(exc)) from exc
 
     item = result.item
     await broadcast_inventory_update(
@@ -140,7 +150,6 @@ async def add_stock(
 @router.post("/consume", response_model=StockConsumeResponse)
 async def consume_stock(
     body: StockConsumeRequest,
-    request: Request,
     idempotency_key: str | None = IdempotencyKeyHeader,
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -153,9 +162,7 @@ async def consume_stock(
     A dry run is never remembered against a key.
     """
     claim = (
-        None
-        if body.dry_run
-        else await claim_request(request, idempotency_key, CONSUME_ROUTE)
+        None if body.dry_run else claim_request(body, idempotency_key, CONSUME_ROUTE)
     )
     if (stored := await replayed(db, claim)) is not None:
         return stored
