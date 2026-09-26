@@ -99,10 +99,14 @@ async def create_product(
     Returns:
         Created product.
 
+    The shelf life is required here, so it is always a number somebody typed: the cook's
+    (Q19). It used to be stored as a `category` placeholder, which invited every estimate
+    to replace it.
+
     Raises:
         IntegrityError: If foreign key constraint fails (invalid category).
     """
-    db_product = ProductMaster(**product.model_dump())
+    db_product = ProductMaster(**product.model_dump(), shelf_life_source="cook")
     db.add(db_product)
     await db.flush()
     # A product nobody can look up by name is invisible to resolution (H11).

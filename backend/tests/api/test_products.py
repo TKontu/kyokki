@@ -9,7 +9,21 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.inventory_item import InventoryItem
+from app.models.product_master import ProductMaster
 from app.models.store_product_alias import StoreProductAlias
+
+
+async def _placeholder(db: AsyncSession, fields: dict) -> dict:
+    """A product whose shelf life is still its category's placeholder.
+
+    `POST /products` used to store exactly this, mislabelled; since Q19 a shelf life typed
+    there is the cook's. A placeholder is what quick add and receipt confirm create, so
+    it is made the way they make it: stored with `shelf_life_source = "category"`.
+    """
+    product = ProductMaster(**fields, shelf_life_source="category")
+    db.add(product)
+    await db.commit()
+    return {"id": str(product.id), "shelf_life_source": str(product.shelf_life_source)}
 
 
 class TestListProducts:
@@ -794,7 +808,7 @@ class TestShelfLifeProvenanceThroughTheAPI:
     async def test_editing_something_else_leaves_the_provenance_alone(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
-        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        product = await _placeholder(seeded_db, self.PRODUCT)
 
         response = await client.patch(
             f"/api/products/{product['id']}", json={"avg_piece_grams": 125}
@@ -802,17 +816,20 @@ class TestShelfLifeProvenanceThroughTheAPI:
 
         assert response.json()["shelf_life_source"] == "category"
 
-    async def test_the_caller_cannot_claim_to_be_the_cook(
+    async def test_the_caller_cannot_claim_a_provenance(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
-        """Provenance is derived from what the writer did, never asserted in the payload."""
+        """Provenance is derived from what the writer did, never asserted in the payload.
+
+        Creating a product here means typing its shelf life, so it is the cook's (Q19).
+        """
         product = (
             await client.post(
-                "/api/products", json={**self.PRODUCT, "shelf_life_source": "cook"}
+                "/api/products", json={**self.PRODUCT, "shelf_life_source": "category"}
             )
         ).json()
 
-        assert product["shelf_life_source"] == "category"
+        assert product["shelf_life_source"] == "cook"
 
     async def test_it_is_readable_on_every_product(
         self, client: AsyncClient, seeded_db: AsyncSession
@@ -854,7 +871,7 @@ class TestEstimateCatalogEndpoint:
     async def test_a_dry_run_is_the_default_and_writes_nothing(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
-        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        product = await _placeholder(seeded_db, self.PRODUCT)
 
         with self._says(product["id"], 2):
             response = await client.post("/api/products/estimate")
@@ -872,7 +889,7 @@ class TestEstimateCatalogEndpoint:
     async def test_applying_writes_and_says_so(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
-        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        product = await _placeholder(seeded_db, self.PRODUCT)
 
         with self._says(product["id"], 2):
             response = await client.post("/api/products/estimate?apply=true")
@@ -889,7 +906,7 @@ class TestEstimateCatalogEndpoint:
         """H05's rule: no 500 on a reachable route. Nothing is written either."""
         from app.services.llm_extractor import LLMExtractionError
 
-        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        product = await _placeholder(seeded_db, self.PRODUCT)
 
         with patch(
             "app.services.catalog_estimates.estimate_shelf_lives",
@@ -913,6 +930,115 @@ class TestEstimateCatalogEndpoint:
         response = await client.post("/api/products/estimate")
 
         assert response.json()["considered"] == 0
+
+
+class TestEstimateScope:
+    """Q19: `scope=all` re-estimates every product the cook has not set.
+
+    For after the estimator's prompt was recalibrated: the model's earlier answers were
+    made against the old examples, and they are the system's own work, not the cook's.
+    """
+
+    PRODUCT = {
+        "canonical_name": "Tomato",
+        "category": "produce",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 7,
+        "unit_type": "count",
+        "default_unit": "pcs",
+    }
+
+    async def _catalog(self, db: AsyncSession) -> dict[str, str]:
+        placeholder = await _placeholder(db, self.PRODUCT)
+        guessed = ProductMaster(
+            **{**self.PRODUCT, "canonical_name": "Orange"}, shelf_life_source="model"
+        )
+        cooks = ProductMaster(
+            **{**self.PRODUCT, "canonical_name": "Banana"}, shelf_life_source="cook"
+        )
+        db.add_all([guessed, cooks])
+        await db.commit()
+        return {
+            "Tomato": placeholder["id"],
+            "Orange": str(guessed.id),
+            "Banana": str(cooks.id),
+        }
+
+    def _asking(self, asked: list[str], days: int = 21):
+        from app.services.catalog_estimates import Estimate
+
+        async def answer(products):
+            asked.extend(p.name for p in products)
+            return [
+                Estimate(id=p.id, shelf_life_days=days, opened_shelf_life_days=None)
+                for p in products
+            ]
+
+        return patch(
+            "app.services.catalog_estimates.estimate_shelf_lives",
+            new=AsyncMock(side_effect=answer),
+        )
+
+    async def test_guesses_is_the_default(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        await self._catalog(seeded_db)
+        asked: list[str] = []
+
+        with self._asking(asked):
+            response = await client.post("/api/products/estimate")
+
+        assert response.status_code == 200
+        assert asked == ["Tomato"]
+
+    async def test_all_is_a_dry_run_over_everything_but_the_cooks(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        ids = await self._catalog(seeded_db)
+        asked: list[str] = []
+
+        with self._asking(asked):
+            response = await client.post("/api/products/estimate?scope=all")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert sorted(asked) == ["Orange", "Tomato"]  # the cook's Banana is never sent
+        assert body["applied"] is False
+        assert body["considered"] == 2
+        assert sorted(c["canonical_name"] for c in body["changes"]) == [
+            "Orange",
+            "Tomato",
+        ]
+        orange = (await client.get(f"/api/products/{ids['Orange']}")).json()
+        assert orange["default_shelf_life_days"] == 7
+
+    async def test_all_applied_keeps_the_cooks_number(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        ids = await self._catalog(seeded_db)
+
+        with self._asking([]):
+            response = await client.post("/api/products/estimate?scope=all&apply=true")
+
+        assert response.json()["applied"] is True
+        for name in ("Tomato", "Orange"):
+            updated = (await client.get(f"/api/products/{ids[name]}")).json()
+            assert (
+                updated["default_shelf_life_days"],
+                updated["shelf_life_source"],
+            ) == (21, "model")
+        banana = (await client.get(f"/api/products/{ids['Banana']}")).json()
+        assert (banana["default_shelf_life_days"], banana["shelf_life_source"]) == (
+            7,
+            "cook",
+        )
+
+    async def test_an_unknown_scope_is_a_422(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        response = await client.post("/api/products/estimate?scope=everything")
+
+        assert response.status_code == 422
 
 
 class TestCorrectionReachesTheFood:
@@ -998,7 +1124,7 @@ class TestCorrectionReachesTheFood:
         """The whole point: this is the button HANDOFF.md tells the cook to press."""
         from app.services.catalog_estimates import Estimate
 
-        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        product = await _placeholder(seeded_db, self.PRODUCT)
         item = await self._stock(client, product["id"])
 
         with patch(
@@ -1022,7 +1148,7 @@ class TestCorrectionReachesTheFood:
     ) -> None:
         from app.services.catalog_estimates import Estimate
 
-        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        product = await _placeholder(seeded_db, self.PRODUCT)
         item = await self._stock(client, product["id"])
 
         with patch(
@@ -1121,7 +1247,7 @@ class TestCategoryChange:
     async def test_a_placeholder_follows_the_new_category(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
-        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        product = await _placeholder(seeded_db, self.PRODUCT)
         assert product["shelf_life_source"] == "category"
 
         moved = (
@@ -1137,7 +1263,7 @@ class TestCategoryChange:
     async def test_the_stock_it_dated_moves_too(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
-        product = (await client.post("/api/products", json=self.PRODUCT)).json()
+        product = await _placeholder(seeded_db, self.PRODUCT)
         item = await self._stock(client, product["id"])
 
         await client.patch(f"/api/products/{product['id']}", json={"category": "fish"})

@@ -13,10 +13,14 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.category import get_category
+from app.crud.product_master import MovedInventoryItem
 from app.models.category import Category
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
-from app.services.expiry_recompute import sealed_expiry
+from app.services.expiry_recompute import (
+    recompute_expiry_for_products,
+    sealed_expiry,
+)
 from app.services.product_names import (
     learn_product_name,
     normalize_product_name,
@@ -41,6 +45,9 @@ class ProductResolver:
         self.db = db
         self._by_name: dict[str, ProductMaster] = {}
         self._categories: dict[str, Category | None] = {}
+        # Stock whose expiry moved because a placeholder was replaced (Q19), for the
+        # caller to broadcast once its transaction has committed.
+        self.moved: list[MovedInventoryItem] = []
 
     async def _category(self, category_id: str) -> Category | None:
         if category_id not in self._categories:
@@ -78,6 +85,32 @@ class ProductResolver:
             product.pack_grams = Decimal(str(pack_grams))
         return product
 
+    async def _learn(
+        self,
+        product: ProductMaster,
+        *,
+        piece_grams: float | None = None,
+        opened_shelf_life_days: int | None = None,
+        pack_grams: float | None = None,
+        shelf_life_days: int | None = None,
+    ) -> ProductMaster:
+        """`_fill_gaps`, and the stock it dated moves when the shelf life was replaced.
+
+        Replacing a placeholder used to leave the items it dated at the old expiry (Q19):
+        the product said 720 days while the crispbread in the cupboard still said 10.
+        """
+        before = int(product.default_shelf_life_days)
+        self._fill_gaps(
+            product,
+            piece_grams=piece_grams,
+            opened_shelf_life_days=opened_shelf_life_days,
+            pack_grams=pack_grams,
+            shelf_life_days=shelf_life_days,
+        )
+        if int(product.default_shelf_life_days) != before:
+            self.moved.extend(await recompute_expiry_for_products(self.db, [product]))
+        return product
+
     async def resolve(
         self,
         *,
@@ -108,7 +141,7 @@ class ProductResolver:
             if product is None:
                 raise InvalidProductRequest(f"product '{product_id}' not found")
             return (
-                self._fill_gaps(
+                await self._learn(
                     product,
                     piece_grams=piece_grams,
                     opened_shelf_life_days=opened_shelf_life_days,
@@ -124,7 +157,7 @@ class ProductResolver:
         key = normalize_product_name(tidy)
         if key in self._by_name:
             return (
-                self._fill_gaps(
+                await self._learn(
                     self._by_name[key],
                     piece_grams=piece_grams,
                     opened_shelf_life_days=opened_shelf_life_days,
@@ -140,7 +173,7 @@ class ProductResolver:
         if existing is not None:
             self._by_name[key] = existing
             return (
-                self._fill_gaps(
+                await self._learn(
                     existing,
                     piece_grams=piece_grams,
                     opened_shelf_life_days=opened_shelf_life_days,

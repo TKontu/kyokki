@@ -21,7 +21,10 @@ from app.models.category import Category
 # `default_shelf_life_days` is a placeholder: a product gets its own number from the cook or
 # the catalog estimate (Q11). It errs short for perishables - an early warning wastes less
 # than a late one - but not absurdly (H57, Q15: tea and juice used to expire in a month).
-# Changing one here reaches new databases only; `e8b4f1c62a90` shows how to move deployed ones.
+# Produce and fruits went from 7 to 10 in Q19 (operator ruling 2026-09-26: tomatoes and
+# oranges keep far longer; meat 5 is packed meat, fish 3 is right as it is).
+# Changing one here reaches new databases only; `e8b4f1c62a90` and `9c91d21d50ed` show how to
+# move deployed ones.
 SEED_CATEGORIES = [
     {
         "id": "meat",
@@ -59,7 +62,7 @@ SEED_CATEGORIES = [
         "id": "produce",
         "display_name": "Fresh Produce",
         "icon": "🥬",
-        "default_shelf_life_days": 7,
+        "default_shelf_life_days": 10,
         "frozen_shelf_life_days": 240,
         "sort_order": 50,
     },
@@ -67,7 +70,7 @@ SEED_CATEGORIES = [
         "id": "fruits",
         "display_name": "Fruits",
         "icon": "🍎",
-        "default_shelf_life_days": 7,
+        "default_shelf_life_days": 10,
         "frozen_shelf_life_days": 240,
         "sort_order": 60,
     },

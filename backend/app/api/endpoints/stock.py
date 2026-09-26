@@ -7,7 +7,7 @@ the mutations take an optional ``Idempotency-Key`` and replay their first respon
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,6 +28,7 @@ from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest
 from app.services.idempotency import IdempotencyClaim, IdempotencyConflict
 from app.services.product_lookup import AmbiguousProduct, ProductNotFound
+from app.services.shelf_life_on_create import schedule_estimates
 
 router = APIRouter()
 
@@ -115,6 +116,7 @@ async def list_stock(
 )
 async def add_stock(
     body: QuickAddRequest,
+    background_tasks: BackgroundTasks,
     idempotency_key: str | None = IdempotencyKeyHeader,
     db: AsyncSession = Depends(get_db),
 ) -> Any:
@@ -122,6 +124,8 @@ async def add_stock(
 
     With an Idempotency-Key, a retry that arrives while the first request still runs
     waits for it and replays its answer: the key is held until that answer is stored.
+    A new product is estimated in the background once this has answered (Q19); a replay
+    schedules nothing, because the first request already did.
 
     Errors: 400 `invalid` (unknown product id, a new product without a valid category),
     409 `conflict` (Idempotency-Key reused with another body).
@@ -144,6 +148,8 @@ async def add_stock(
         status=str(item.status),
         product_name=item.product_name,
     )
+    if result.product_created:
+        schedule_estimates(background_tasks, [item.product_master_id])
     return result
 
 
