@@ -20,11 +20,28 @@ export const PAD = 6
 /** The label row above the dots, with the gap below it. */
 export const HEADER = 30
 
+/** How many dots fit side by side in a region drawn in `box`. */
+function dotColumns({ w }: Box): number {
+  return Math.max(0, Math.floor((w - PAD * 2 + DOT_GAP) / DOT_PITCH))
+}
+
 /** How many dots fit in a region drawn in `box`. */
-export function dotCapacity({ w, h }: Box): number {
-  const columns = Math.floor((w - PAD * 2 + DOT_GAP) / DOT_PITCH)
-  const rows = Math.floor((h - PAD * 2 - HEADER + DOT_GAP) / DOT_PITCH)
-  return Math.max(0, columns) * Math.max(0, rows)
+export function dotCapacity(box: Box): number {
+  const rows = Math.floor((box.h - PAD * 2 - HEADER + DOT_GAP) / DOT_PITCH)
+  return dotColumns(box) * Math.max(0, rows)
+}
+
+/**
+ * Where the dot in slot `index` sits, from the region's top left, in drawing units: rows left
+ * to right below the label. Dots are placed here rather than flowed, so where a dot - or the
+ * "more" marker - is drawn is exactly what this says, and a test can hold it to the box.
+ */
+export function dotSlot(index: number, box: Box): { left: number; top: number } {
+  const columns = Math.max(1, dotColumns(box))
+  return {
+    left: PAD + (index % columns) * DOT_PITCH,
+    top: PAD + HEADER + Math.floor(index / columns) * DOT_PITCH,
+  }
 }
 
 /** What a region shows of `list`: all of it, or what fits beside a "more" marker. */

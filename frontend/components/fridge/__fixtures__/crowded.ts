@@ -6,11 +6,19 @@
 import type { InventoryItem } from '@/types/inventory'
 import { CIELO_BOX } from '../CieloFridge'
 import { dotCapacity } from '../capacity'
-import { many, stale } from './stock'
+import { inDays, item, many, stale } from './stock'
 
 export function crowdedItems(): InventoryItem[] {
   const over = (id: keyof typeof CIELO_BOX) => dotCapacity(CIELO_BOX[id]) + 5
   return [
+    // A long one-word Finnish name, to show it keeps inside its tile (review F1)
+    item({
+      id: 'stale-long-name',
+      product_name: 'Laktoositonkermaviili',
+      category: 'dairy',
+      category_icon: '🥛',
+      expiry_date: inDays(0),
+    }),
     ...stale(14),
     ...many(over('meat'), { category: 'meat', category_icon: '🥩' }),
     ...many(over('veggies'), { category: 'produce', category_icon: '🥬' }),

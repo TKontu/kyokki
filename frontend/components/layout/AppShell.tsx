@@ -2,9 +2,9 @@
 
 /**
  * AppShell (MVP-P1)
- * The one persistent piece of navigation. A narrow rail down the left in landscape, which is
- * where the iPad has room to spare; a bar across the top on a phone, where it does not.
- * Pages keep their own header and their own actions.
+ * The one persistent piece of navigation. A bar across the top below `lg` (1024 px) - which is
+ * how the iPad, mounted upright at 810×1080 (Q17), sees it - and a narrow rail down the left
+ * on anything wider. Pages keep their own header and their own actions.
  */
 
 import Link from 'next/link'

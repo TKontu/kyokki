@@ -31,6 +31,14 @@ export interface CieloFridgeProps {
   onClearExpired?: (items: InventoryItem[]) => void
 }
 
+/**
+ * The box the fridge gets on the upright iPad (810×1080 CSS px), measured in Chromium: the
+ * width less the page's padding, the height left under the app bar, the page header and the
+ * going-stale strip. It is near-square - the screen is portrait, the space under the strip is
+ * not - so the drawing is drawn to it rather than as a tall frame, which would leave bands.
+ */
+export const PORTRAIT_BOX = { w: 778, h: 763 }
+
 /** The drawing's units: about a CSS pixel each on the portrait iPad. */
 export const CIELO_WIDTH = 780
 export const CIELO_HEIGHT = 760

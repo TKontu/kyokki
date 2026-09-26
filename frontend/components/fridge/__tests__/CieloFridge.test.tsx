@@ -8,8 +8,8 @@ import React from 'react'
 import { render, screen, within } from '@testing-library/react'
 import { AREAS } from '@/lib/fridge'
 import { fixtureItems } from '@/components/fridge-mocks/fixtures'
-import { CIELO_BOX, CIELO_HEIGHT, CIELO_WIDTH, CieloFridge } from '../CieloFridge'
-import { dotCapacity } from '../capacity'
+import { CIELO_BOX, CIELO_HEIGHT, CIELO_WIDTH, CieloFridge, PORTRAIT_BOX } from '../CieloFridge'
+import { DOT, dotCapacity } from '../capacity'
 import { crowdedItems } from '../__fixtures__/crowded'
 import { TODAY, item, many } from '../__fixtures__/stock'
 
@@ -24,8 +24,10 @@ function area(name: string) {
 }
 
 describe('CieloFridge', () => {
-  it('is drawn for a portrait screen', () => {
-    expect(CIELO_HEIGHT).toBeGreaterThanOrEqual(CIELO_WIDTH * 0.9)
+  it('is drawn for the box the upright iPad leaves under the strip, not for a tall frame', () => {
+    // At 810×1080 portrait the fridge gets about 778×763 px under the bar, the header and the
+    // strip: near-square. Drawn to that box it fills it; a taller drawing would leave bands.
+    expect(CIELO_WIDTH / CIELO_HEIGHT).toBeCloseTo(PORTRAIT_BOX.w / PORTRAIT_BOX.h, 1)
   })
 
   it('lays every area inside the drawing, none over another', () => {
@@ -92,6 +94,49 @@ describe('CieloFridge', () => {
       expect(within(area(each.label)).getByTestId('more-dots')).toBeInTheDocument()
     }
     expect(screen.getByRole('button', { name: 'All going stale' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['Freezer', 'freezer'],
+    ['Pantry', 'pantry'],
+  ] as const)('draws the %s "+" marker inside its box on a crowded fridge (review F8)', (label, id) => {
+    render(<CieloFridge items={crowdedItems()} />)
+
+    const box = CIELO_BOX[id]
+    // Every dot is placed, not flowed: its offset in the region is a share of the canvas's
+    // width (`cqw`), which turns back into drawing units. jsdom folds the calc to `calc(Ncqw)`.
+    const units = (value: string) => {
+      const folded = value.match(/^calc\(([\d.]+)cqw\)$/)
+      const written = value.match(/^calc\(([\d.]+) \* 100cqw \/ (\d+)\)$/)
+      if (folded) return Math.round((Number(folded[1]) * CIELO_WIDTH) / 100)
+      expect(written?.[2]).toBe(String(CIELO_WIDTH))
+      return Number(written?.[1])
+    }
+    const marker = within(area(label)).getByTestId('more-dots')
+    const left = units(marker.style.left)
+    const top = units(marker.style.top)
+    expect(units(marker.style.width)).toBe(DOT)
+    expect(units(marker.style.height)).toBe(DOT)
+    expect(left).toBeGreaterThanOrEqual(0)
+    expect(top).toBeGreaterThanOrEqual(0)
+    expect(left + DOT).toBeLessThanOrEqual(box.w)
+    expect(top + DOT).toBeLessThanOrEqual(box.h)
+    // ...and the marker is the last slot: no dot sits after it
+    const dots = within(area(label)).getByRole('img')
+    for (const dot of Array.from(dots.children) as HTMLElement[]) {
+      if (dot === marker) continue
+      const after =
+        units(dot.style.top) > top ||
+        (units(dot.style.top) === top && units(dot.style.left) > left)
+      expect(after).toBe(false)
+    }
+  })
+
+  it('says an area is empty, without a number (review F5)', () => {
+    render(<CieloFridge items={[item()]} />)
+
+    expect(within(area('Veggies')).getByText('Empty')).toBeInTheDocument()
+    expect(within(area('Dairy')).queryByText('Empty')).not.toBeInTheDocument()
   })
 
   it('shows no numbers on the sample stock', () => {

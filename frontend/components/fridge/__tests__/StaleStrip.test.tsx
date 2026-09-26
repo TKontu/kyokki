@@ -4,7 +4,7 @@
  */
 
 import React from 'react'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { STALE_STRIP_MAX, StaleStrip } from '../StaleStrip'
 import { TODAY, item, inDays, stale } from '../__fixtures__/stock'
 
@@ -75,6 +75,43 @@ describe('StaleStrip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear expired' }))
 
     expect(onClearExpired).toHaveBeenCalledWith([old])
+  })
+
+  it('does not reopen the list by itself once everything in it was used up (review F2)', () => {
+    const props = { expired: [], onConsume: jest.fn(), onMore: jest.fn() }
+    const { rerender } = render(<StaleStrip items={stale(12)} {...props} />)
+    fireEvent.click(screen.getByRole('button', { name: 'All going stale' }))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    // Every item used up from the sheet: the strip goes away...
+    act(() => rerender(<StaleStrip items={[]} {...props} />))
+    // ...and when something goes stale again, only the strip comes back
+    act(() => rerender(<StaleStrip items={stale(12)} {...props} />))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Going stale' })).toBeInTheDocument()
+  })
+
+  it('keeps a long Finnish name inside its tile (review F1)', () => {
+    const long = item({ id: 'long', product_name: 'Laktoositonkermaviili', expiry_date: inDays(1) })
+    render(<StaleStrip items={[long]} expired={[]} onConsume={jest.fn()} />)
+
+    const cell = within(shelf()).getByRole('button', { name: /Laktoositonkermaviili/ }).closest('li')
+    // Hyphenation needs the language; the cell clips, and a name may break anywhere
+    expect(cell).toHaveAttribute('lang', 'fi')
+    expect(cell?.className).toMatch(/\boverflow-hidden\b/)
+    expect(cell?.className).toMatch(/\bmin-w-0\b/)
+    expect(cell?.className).toMatch(/\[overflow-wrap:anywhere\]/)
+    expect(cell?.className).toMatch(/hyphens-auto/)
+  })
+
+  it('gives each tile\'s "…" a full touch-size target (review F6)', () => {
+    render(<StaleStrip items={stale(3)} expired={[]} onConsume={jest.fn()} onMore={jest.fn()} />)
+
+    const cell = within(shelf()).getByRole('button', { name: 'More for Stale Alpha' }).closest('li')
+    // Sized from the strip: IngredientTile's own button is smaller than the touch minimum
+    expect(cell?.className).toContain("[&_[aria-label^='More_for']]:h-touch")
+    expect(cell?.className).toContain("[&_[aria-label^='More_for']]:w-touch")
   })
 
   it('is not there when nothing is going stale', () => {

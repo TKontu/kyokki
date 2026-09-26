@@ -1,7 +1,8 @@
 'use client'
 
 /**
- * Fridge design mocks (Q17-M): the operator picks the fridge that replaces FridgeView on `/`.
+ * Fridge design mocks (Q17-M), kept for comparison: the operator chose Cielo, and `/` now
+ * draws it redrawn for the upright iPad (Q17-B).
  *
  * Every design on live stock, with sample stock for an empty homelab, and - last, "Upright" -
  * the fridge `/` now draws (Q17-B: Cielo redrawn for portrait), to compare against the mocks

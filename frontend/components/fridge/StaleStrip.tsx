@@ -7,15 +7,30 @@
  * sheet. The strip is one row that never scrolls sideways: when there are more tiles than
  * fit, the last place goes to a "More" tile that opens every going-stale item in a sheet. No
  * numbers - the tile says "More", not how many.
+ *
+ * The tiles are `IngredientTile`s, fitted to the strip from outside (review of #113): a long
+ * one-word Finnish name breaks and hyphenates inside its cell instead of spilling over its
+ * neighbours, and the tile's "…" gets a full touch-size target in the corner.
  */
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { IngredientTile } from '@/components/inventory/IngredientTile'
 import BottomSheet from '@/components/ui/BottomSheet'
 import type { InventoryItem } from '@/types/inventory'
 
-/** Tiles in the strip's one row, the "More" tile included, at 810 px wide. */
-export const STALE_STRIP_MAX = 7
+/** Tiles in the strip's one row, the "More" tile included: about 120 px each at 810 px wide. */
+export const STALE_STRIP_MAX = 6
+
+/**
+ * A tile's cell. It clips; the name inside may break anywhere and hyphenates as Finnish (the
+ * `lang` goes on the cell), so its min-content width no longer pushes past the cell. The
+ * tile's own "…" is 32 px, under the touch minimum: here it becomes a 44 px corner target.
+ */
+const CELL =
+  'min-w-0 overflow-hidden rounded-2xl ' +
+  '[&_span]:max-w-full [&_span]:hyphens-auto [&_span]:[overflow-wrap:anywhere] ' +
+  "[&_[aria-label^='More_for']]:right-0 [&_[aria-label^='More_for']]:top-0 " +
+  "[&_[aria-label^='More_for']]:h-touch [&_[aria-label^='More_for']]:w-touch"
 
 export interface StaleStripProps {
   /** Going stale, stalest first. */
@@ -29,7 +44,12 @@ export interface StaleStripProps {
 
 export function StaleStrip({ items, expired, onConsume, onMore, onClearExpired }: StaleStripProps) {
   const [showAll, setShowAll] = useState(false)
-  if (items.length === 0) return null
+  // Everything in the list used up: close it, or the next item going stale would open it
+  const empty = items.length === 0
+  useEffect(() => {
+    if (empty) setShowAll(false)
+  }, [empty])
+  if (empty) return null
 
   const overflow = items.length > STALE_STRIP_MAX
   const shown = overflow ? items.slice(0, STALE_STRIP_MAX - 1) : items
@@ -58,9 +78,9 @@ export function StaleStrip({ items, expired, onConsume, onMore, onClearExpired }
           </button>
         )}
       </h2>
-      <ul className="grid grid-cols-7 gap-2">
+      <ul className="grid grid-cols-6 gap-2">
         {shown.map((item) => (
-          <li key={item.id} className="min-w-0">
+          <li key={item.id} lang="fi" className={CELL}>
             <IngredientTile item={item} onSelect={onConsume} onMore={onMore} />
           </li>
         ))}
@@ -89,7 +109,7 @@ export function StaleStrip({ items, expired, onConsume, onMore, onClearExpired }
       <BottomSheet open={showAll} onClose={() => setShowAll(false)} title="Going stale">
         <ul className="grid grid-cols-4 gap-2 sm:grid-cols-5">
           {items.map((item) => (
-            <li key={item.id} className="min-w-0">
+            <li key={item.id} lang="fi" className={CELL}>
               <IngredientTile item={item} onSelect={onConsume} onMore={moreFromList} />
             </li>
           ))}

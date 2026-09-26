@@ -7,7 +7,8 @@
  * the area's grid, a few emoji of what is inside and one image of dots - one per item, in its
  * staleness colour. Everything here is sized in the drawing's units (`cqw` of the canvas), so it
  * scales with the drawing and `dotCapacity` knows how many dots fit. An area holding more than
- * that shows a "+" marker in the last slot instead of cutting its dots off. No numbers.
+ * that shows a "+" marker in the last slot instead of cutting its dots off; an empty one says
+ * "Empty". No numbers.
  */
 
 import Link from 'next/link'
@@ -15,7 +16,7 @@ import type { CSSProperties } from 'react'
 import type { Area } from '@/lib/fridge'
 import { STALENESS, stalenessOf } from '@/lib/staleness'
 import type { InventoryItem } from '@/types/inventory'
-import { DOT, DOT_GAP, HEADER, PAD, dotCapacity, fitDots } from './capacity'
+import { DOT, DOT_GAP, HEADER, PAD, dotCapacity, dotSlot, fitDots } from './capacity'
 import type { Box } from './drawing'
 
 export interface AreaSpotProps {
@@ -63,7 +64,10 @@ export function AreaSpot({
   }
   const contents = contentsOf(items, maxEmoji)
   const { shown, more } = fitDots(items, dotCapacity(box))
-  const dot: CSSProperties = { width: u(DOT), height: u(DOT) }
+  const at = (index: number): CSSProperties => {
+    const { left, top } = dotSlot(index, box)
+    return { left: u(left), top: u(top), width: u(DOT), height: u(DOT) }
+  }
 
   return (
     <section aria-label={area.label} className="absolute" style={place}>
@@ -99,31 +103,38 @@ export function AreaSpot({
             </span>
           )}
         </span>
-        {items.length > 0 && (
+        {items.length === 0 ? (
+          <span
+            className="italic text-slate-500 dark:text-slate-400"
+            style={{ fontSize: u(12), paddingLeft: u(4) }}
+          >
+            Empty
+          </span>
+        ) : (
+          // Each dot is placed in its slot (`dotSlot`), not flowed, so what fits is exact
           <span
             role="img"
             aria-label={items
               .map((item) => `${item.product_name} ${STALENESS[stalenessOf(item)].label}`)
               .join(', ')}
-            className="flex flex-wrap content-start"
-            style={{ gap: u(DOT_GAP) }}
+            className="pointer-events-none absolute inset-0"
           >
-            {shown.map((item) => (
+            {shown.map((item, index) => (
               <span
                 key={item.id}
-                style={dot}
-                className={`rounded-full shadow-sm ring-2 ring-white/90 dark:ring-black/50 ${STALENESS[stalenessOf(item)].dot}`}
+                style={at(index)}
+                className={`absolute rounded-full shadow-sm ring-2 ring-white/90 dark:ring-black/50 ${STALENESS[stalenessOf(item)].dot}`}
               />
             ))}
             {more && (
               <span
                 data-testid="more-dots"
                 title="More inside"
-                style={{ ...dot, fontSize: u(13) }}
+                style={{ ...at(shown.length), fontSize: u(13) }}
                 className={
-                  'flex items-center justify-center rounded-full bg-white font-bold leading-none ' +
-                  'text-slate-800 shadow-sm ring-2 ring-slate-500 dark:bg-slate-900 ' +
-                  'dark:text-slate-100 dark:ring-slate-300'
+                  'absolute flex items-center justify-center rounded-full bg-white font-bold ' +
+                  'leading-none text-slate-800 shadow-sm ring-2 ring-slate-500 ' +
+                  'dark:bg-slate-900 dark:text-slate-100 dark:ring-slate-300'
                 }
               >
                 +
