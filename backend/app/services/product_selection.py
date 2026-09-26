@@ -25,9 +25,12 @@ logger = get_logger(__name__)
 INSTRUCTIONS = """For each line, pick the catalog product that is the same thing, or null if none is.
 
 Same thing means a home cook would put them on one shopping-list line.
-Different variety, plant milk vs dairy milk, or a different cut are DIFFERENT products:
+What a cook buys and uses differently is a DIFFERENT product - plant milk vs dairy
+milk, a different cut, a smaller or processed form:
 - "Oat milk" is not "Milk". "Sour cream" is not "Cream". "Peanut butter" is not "Butter".
 - "Cherry tomato" is not "Tomato". "Pineapple" is not "Apple".
+A named kind of the same food, bought and used the same way, is the SAME product:
+"Granny Smith" is "Apple", "Clementine" is "Mandarin".
 Sharing a word does not make two products the same: "Tortilla chips" is not "Tortilla",
 "Lemonade" is not "Lemon", "Chocolate milk" is not "Chocolate".
 The candidates are only the nearest names in the catalog, not a list that contains the

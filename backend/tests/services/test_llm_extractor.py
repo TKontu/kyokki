@@ -235,6 +235,41 @@ class TestInstructions:
         assert "Cleaning cloth" in text
         assert "Laundry vinegar" in text
 
+    def test_carry_a_finnish_glossary(self):
+        """H54: TUMMA RYPÄLE came back as Raisin, TIKKUPERUNAT as Potato (Q14).
+
+        Measured before and after on the 49-line fixture (docs/vLLM_MANUAL_TEST.md).
+        Each mapping is pinned as written, not as words found anywhere in the prompt:
+        "juice" and "grape" would be there without the glossary.
+        """
+        glossary = " ".join(build_instructions(CATEGORIES).split())
+        assert 'TUMMA RYPÄLE -> "Grape"' in glossary
+        assert 'RUSINA is "Raisin"' in glossary
+        assert 'TIKKUPERUNAT -> "French fries"' in glossary
+        assert 'RIISIPIIRAKKA -> "Karelian pasty"' in glossary
+        assert "VALMISRUOKA, ATERIA -> c = ready_meals" in glossary
+
+    def test_the_glossary_maps_mehu_to_a_juice_of_its_fruit(self):
+        """Attempt 1's bare "MEHU = juice" flattened TÄYSMEHU OMENA to plain Juice."""
+        glossary = " ".join(build_instructions(CATEGORIES).split())
+        assert 'TÄYSMEHU OMENA -> "Apple juice" (MEHU is juice)' in glossary
+
+    def test_the_glossary_keeps_a_multivitamin_supplement_out_of_juice(self):
+        """NAMIVITA MONIVITAMIINI is a supplement; MONIVITAMIINI APPELSIINI is a juice."""
+        glossary = " ".join(build_instructions(CATEGORIES).split())
+        assert 'MONIVITAMIINI APPELSIINI -> "Multivitamin juice"' in glossary
+        assert (
+            "MONIVITAMIINI with no flavour is a vitamin supplement, household"
+            in glossary
+        )
+
+    def test_ask_for_a_shelf_life_on_every_food_line(self):
+        """With the glossary added, 3 of 7 runs answered sl only for the prompt's own
+        examples (6-10 of 49 instead of 39-41). Saying the examples are not the list
+        brought it back to 41 of 49 on 4 runs of 4 (H54, docs/vLLM_MANUAL_TEST.md)."""
+        text = build_instructions(CATEGORIES)
+        assert "for every food line, not only these" in text
+
     def test_list_known_products_to_reuse_their_names(self):
         text = build_instructions(CATEGORIES, ["Milk", "Ground beef", "milk"])
         assert "Known products: Ground beef, Milk." in text
