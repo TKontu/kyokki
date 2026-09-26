@@ -842,7 +842,19 @@ fix, with sl and os both **above** the baseline, is what the gate asks for.
 | RUSINA 250G | Raisins / Raisin (pantry) | Raisin (pantry) - the control holds |
 
 The glossary fixture itself: 9 of 9 lines, generic names, categories and shelf lives in every run,
-before and after (prompt 2973 -> 3381 chars, 23-25 s). Attempt 1 wrote `MEHU, TÄYSMEHU = juice`
+before and after (prompt 2973 -> 3381 chars, 23-25 s):
+
+| prompt | chars | model s | lines | generic | category | sl | os | pw |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| before (main) | 2973 | 23.8 | 9 | 9 | 9 | 9 | 9 | 0 |
+| before (main), 2nd | 2973 | 24.1 | 9 | 9 | 9 | 9 | 9 | 0 |
+| attempt 1 | 3352 | 24.0 | 9 | 9 | 9 | 9 | 9 | 2 |
+| attempt 1, 2nd | 3352 | 22.9 | 9 | 9 | 9 | 9 | 8 | 0 |
+| attempt 2 | 3332 | 25.7 | 9 | 9 | 9 | 9 | 8 | 0 |
+| attempt 2, 2nd | 3332 | 23.7 | 9 | 9 | 9 | 9 | 8 | 0 |
+| **attempt 3 (kept)** | 3381 | 24.9 | 9 | 9 | 9 | 9 | 9 | 2 |
+| attempt 3, 2nd | 3381 | 24.4 | 9 | 9 | 9 | 9 | 9 | 0 |
+ Attempt 1 wrote `MEHU, TÄYSMEHU = juice`
 and the model then flattened TÄYSMEHU OMENA to plain *Juice* in one run; the kept wording uses
 `TÄYSMEHU OMENA -> "Apple juice"` so the fruit survives. The prompt grows by 408 characters
 on every receipt (359 for the glossary, the rest for the sl clause):
@@ -856,9 +868,67 @@ on every receipt (359 for the glossary, the rest for the sl clause):
 
 **Merge gate: holds** on every attempt-3 run. TIKKUPERUNAT, TUMMA RYPÄLE, both MONIVITAMIINI
 lines, riisipiirakka, the ready meals and RUSINA read as specified; on the 49-line fixture lines
-(49), generic names (49) and categories (41 against 40) are not below baseline, and sl (41
-against 39) and os (20-25 against 18-19) are above it. The supplement still gets a null `c`
+(49), generic names (49) and categories (41 against 40) are not below baseline, and sl (41) and
+os (20-25) clear the gate's floor of 2 below the baseline minimum (37 and 16); both are in fact
+above the baseline (39, 18-19). The supplement still gets a null `c`
 rather than `household`, as the household products do - not a juice, which is what the gate asks.
+
+### With the catalog on: the production prompt (2026-09-26)
+
+The runs above offered an **empty catalog**, but production runs `EXTRACTION_OFFERS_CATALOG=True`
+(H17), and Q7 is the precedent for the catalog block silencing `sl`. So the gate was run again
+on the production prompt path: `--catalog 20` offers a fixed 20-name warm catalog (in the script:
+Milk, Lactose-free milk, Oat drink, Feta cheese, Cheddar, Bacon, Chicken fillet strips, Ground
+beef, Eggs, Butter, Tomato, Cucumber, Carrot, Onion, Banana, Apple, Potato, Rye bread, Orange
+juice, Chips - the Q7/H17 names were not recorded, so this is a new list, with Potato in it on
+purpose). Main's prompt was measured from a scratch checkout of `b2c10ad` with the same script
+copied in. Same model, gateway and settings:
+
+```
+cd backend && LLM_BASE_URL=http://192.168.0.94:9292/v1 LLM_MODEL=c2.muse-glimmer \
+  .venv/bin/python -m scripts.measure_extraction --catalog 20 --runs 2 \
+  --fixture tests/fixtures/receipts/s_kaupat_order.txt \
+  --fixture tests/fixtures/receipts/glossary_terms.txt
+```
+
+| fixture | prompt | chars | model s | lines | generic | category | sl | os | pw |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 49-line | before (main) | 4717 | 95.8 | 49 | 49 | 40 | 40 | 22 | 6 |
+| 49-line | before (main), 2nd | 4717 | 71.5 | 49 | 49 | 40 | 39 | 18 | 7 |
+| 49-line | **after (glossary)** | 5125 | 68.6 | 49 | 49 | 41 | 41 | 19 | 6 |
+| 49-line | after (glossary), 2nd | 5125 | 68.6 | 49 | 49 | 41 | 41 | 20 | 9 |
+| glossary | before (main) | 3259 | 17.6 | 9 | 9 | 9 | **1** | **1** | 0 |
+| glossary | before (main), 2nd | 3259 | 17.3 | 9 | 9 | 9 | **3** | **3** | 0 |
+| glossary | after (glossary) | 3667 | 23.4 | 9 | 9 | 9 | 9 | 9 | 0 |
+| glossary | after (glossary), 2nd | 3667 | 24.7 | 9 | 9 | 9 | 9 | 8 | 0 |
+
+| printed | before, catalog on (run 1 / run 2) | after, catalog on (both runs) |
+| --- | --- | --- |
+| TIKKUPERUNAT | Potato (produce) / Potato (frozen) | **French fries (frozen)** |
+| TUMMA RYPÄLE 500G | Raisin (pantry) / Grape (fruits) | **Grape (fruits)** |
+| NAMIVITA MONIVITAMIINI | Multivitamin (null) | Vitamin supplement (null) - not a juice |
+| MONIVITAMIINI APPELSIINI | Multivitamin / Vitamin (null) | **Multivitamin juice (beverages)** |
+| RIISIPIIRAKKA 10KPL | Rice pie (ready_meals) | **Karelian pasty (bread)** |
+| KARJALANPIIRAKKA | Pie / Karelian pie (ready_meals) | **Karelian pasty (bread)** |
+| VALMISRUOKA LIHAPULLAT | Meatballs (ready_meals) | Meatballs (ready_meals) |
+| ATERIA KANAKASTIKE | Chicken sauce / stew (ready_meals) | Chicken stew / meal (ready_meals) |
+| TÄYSMEHU OMENA 1L | Apple juice (beverages) | Apple juice (beverages) |
+| APPELSIINIMEHU | Orange juice (beverages) | Orange juice (beverages) |
+| RUSINA 250G | Raisins (pantry) | Raisin (pantry) |
+
+**Merge gate with the catalog on: holds** on both after-runs. On the 49-line fixture lines (49),
+generic names (49) and categories (41 against 40) are not below baseline; sl (41, 41) is above
+the baseline minimum of 39 and os (19, 20) above its minimum of 18, so neither is near the
+floor of 37 and 16. Every watch-list mapping reads as specified. The catalog block costs 286
+characters here (4431 -> 4717 on main, 4839 -> 5125 with the glossary), and main's first run
+was a slow outlier (95.8 s).
+
+One thing the empty-catalog runs could not show: **on main, the catalog silenced the short
+receipt's shelf lives** - 1 and 3 of 9 with the catalog, against 9 of 9 without it. That is the
+Q7 failure on a 9-line receipt, on the prompt production runs today. The glossary prompt's sl
+clause (*"Estimate it for every food line, not only these"*) brings it back to 9 of 9 in both
+runs, so H54 fixes that as a side effect. It is two runs on one synthetic receipt; a real short
+receipt read with a warm catalog is the check worth making.
 
 ### The H53 live selection run
 
@@ -892,3 +962,32 @@ But a kind of a food that a cook buys and uses the same way IS the same thing:
 ```
 
 Melon then passed in both runs and none of the null cases moved.
+
+**The rule was then made one rule (2026-09-26).** Review of PR #99 pointed out that the added
+lines contradicted the sentence directly above them (*"Different variety ... are DIFFERENT
+products"*). The distinction is now stated once, as what a cook buys and uses differently:
+
+```
+What a cook buys and uses differently is a DIFFERENT product - plant milk vs dairy
+milk, a different cut, a smaller or processed form:
+- "Oat milk" is not "Milk". "Sour cream" is not "Cream". "Peanut butter" is not "Butter".
+- "Cherry tomato" is not "Tomato". "Pineapple" is not "Apple".
+A named kind of the same food, bought and used the same way, is the SAME product:
+"Granny Smith" is "Apple", "Clementine" is "Mandarin".
+```
+
+| case | expected | reworded, run 1 | reworded, run 2 | reworded, run 3 |
+| --- | --- | --- | --- | --- |
+| ketchup-known | Ketchup | pass | pass | pass |
+| ketchup-new | null | pass | pass | pass |
+| melon | Melon | pass | pass | pass |
+| pear-juice | null | pass | pass | pass |
+| taco-shells-known | Taco shells | pass | pass | pass |
+| taco-shells-new | null | pass | pass | pass |
+| | | 6 of 6, 18.3 s | 6 of 6, 17.1 s | 6 of 6, 18.6 s |
+
+First wording, no iteration needed. **Untested:** no reported pair is a variety that should stay
+null, so the loosening towards "a named kind is the same" is not measured in that direction.
+Pairs such as *Lactose-free milk* vs *Milk* (the prompt's own worked example, so it cannot be the
+test), *Red onion* vs *Onion* or *Sweet potato* vs *Potato* would do it; adding one to
+`reported_pairs.json` is the operator's call.
