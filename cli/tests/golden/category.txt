@@ -15,9 +15,10 @@ examples:
 
 exit codes:
   0 ok
-  1 error: unreachable, server error (5xx) or an unexpected answer
+  1 error: cannot reach the server, a 5xx, an answer that is not the expected
+    JSON, or a change sent that got no answer (it may have been applied)
   2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
-  3 not found
+  3 not found: nothing matches the name, or no product has the id
   4 ambiguous name: the candidates are printed on stdout
   5 insufficient stock
   6 conflict: the name belongs to another product, or a reused Idempotency-Key

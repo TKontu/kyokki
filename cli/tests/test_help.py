@@ -21,6 +21,37 @@ def test_help_has_examples_and_exit_codes(name: str) -> None:
         assert f"\n  {code} " in text
 
 
+def test_readme_exit_table_matches_help() -> None:
+    from pathlib import Path
+
+    from kyokki.cli import EXIT_CODES
+
+    meanings: dict[str, str] = {}
+    last = ""
+    for line in EXIT_CODES.splitlines()[1:]:
+        if line.startswith("    "):
+            meanings[last] += " " + line.strip()
+        else:
+            last, _, text = line.strip().partition(" ")
+            meanings[last] = text
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    for code, text in meanings.items():
+        assert f"| {code} | {text} |" in readme
+
+
+def test_consume_help_says_no_candidates_is_not_found() -> None:
+    text = " ".join(render(HELP_PAGES["stock-consume"]).split())
+    assert "the candidates are printed and the exit code is 4" in text
+    assert "matches nothing, the exit code is 3" in text
+
+
+@pytest.mark.parametrize("name", HELP_PAGES.keys())
+def test_help_documents_invalid_and_uses_the_lan_port(name: str) -> None:
+    text = render(HELP_PAGES[name])
+    assert "400 invalid" in text
+    assert ":8000" not in text
+
+
 @pytest.mark.parametrize(
     "name", ["stock-list", "stock-add", "stock-consume", "product-name-add"]
 )

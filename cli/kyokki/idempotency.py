@@ -2,7 +2,8 @@
 
 A shell retry of a mutation within the minute replays the first answer instead of adding
 or consuming twice. ``--url`` and ``--token`` are left out, so pointing the same command
-at the server another way (or with a rotated token) is still the same request.
+at the server another way (or with a rotated token) is still the same request; so are
+the output-only flags ``--json`` and ``--verbose``, so a retry that adds one replays.
 """
 
 import hashlib
@@ -10,6 +11,7 @@ import json
 from datetime import UTC, datetime
 
 SECRET_OPTIONS = ("--url", "--token")
+OUTPUT_FLAGS = ("--json", "--verbose")
 
 
 def utc_now() -> datetime:
@@ -17,7 +19,8 @@ def utc_now() -> datetime:
 
 
 def without_connection_options(argv: list[str]) -> list[str]:
-    """``argv`` less ``--url``/``--token`` and their values, in either spelling."""
+    """``argv`` less ``--url``/``--token`` (and their values, in either spelling) and
+    the output-only flags."""
     kept: list[str] = []
     skip_next = False
     for arg in argv:
@@ -26,6 +29,8 @@ def without_connection_options(argv: list[str]) -> list[str]:
             continue
         if arg in SECRET_OPTIONS:
             skip_next = True
+            continue
+        if arg in OUTPUT_FLAGS:
             continue
         if any(arg.startswith(f"{option}=") for option in SECRET_OPTIONS):
             continue

@@ -3,7 +3,9 @@
 import argparse
 import math
 import os
+import shlex
 import sys
+import typing
 from collections.abc import Callable
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -22,9 +24,10 @@ MAX_KEY_LENGTH = 255
 EXIT_CODES = """\
 exit codes:
   0 ok
-  1 error: unreachable, server error (5xx) or an unexpected answer
+  1 error: cannot reach the server, a 5xx, an answer that is not the expected
+    JSON, or a change sent that got no answer (it may have been applied)
   2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
-  3 not found
+  3 not found: nothing matches the name, or no product has the id
   4 ambiguous name: the candidates are printed on stdout
   5 insufficient stock
   6 conflict: the name belongs to another product, or a reused Idempotency-Key
@@ -96,6 +99,19 @@ def idempotency_key(text: str) -> str:
 Formatter = argparse.RawDescriptionHelpFormatter
 
 
+class UsageError(Exception):
+    """argparse rejected the command line; argparse has printed usage to stderr."""
+
+
+class Parser(argparse.ArgumentParser):
+    """argparse, but a usage error raises instead of exiting, so --json can report it."""
+
+    def error(self, message: str) -> typing.NoReturn:
+        self.print_usage(sys.stderr)
+        sys.stderr.write(f"{self.prog}: error: {message}\n")
+        raise UsageError(message)
+
+
 def add_connection_options(parser: argparse.ArgumentParser, *, top: bool) -> None:
     """--url, --token, --json, --verbose: at the top, and again after any command.
 
@@ -108,7 +124,7 @@ def add_connection_options(parser: argparse.ArgumentParser, *, top: bool) -> Non
     group.add_argument(
         "--url",
         default=default,
-        help="Kyokki base URL, e.g. http://kyokki.lan:8000 (default: $KYOKKI_URL)",
+        help="Kyokki base URL, e.g. http://kyokki.lan:17300 (default: $KYOKKI_URL)",
     )
     group.add_argument(
         "--token",
@@ -120,7 +136,8 @@ def add_connection_options(parser: argparse.ArgumentParser, *, top: bool) -> Non
         "--json",
         action="store_true",
         default=flag_default,
-        help="print the API's JSON (the default when stdout is not a terminal)",
+        help="print JSON: the API's answer, or an error's detail object (the "
+        "default when stdout is not a terminal)",
     )
     group.add_argument(
         "--verbose",
@@ -141,7 +158,7 @@ def add_idempotency_option(parser: argparse.ArgumentParser) -> None:
 
 
 def leaf(
-    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    subparsers: "argparse._SubParsersAction[Parser]",
     name: str,
     *,
     summary: str,
@@ -162,13 +179,13 @@ def leaf(
 
 
 def group(
-    subparsers: "argparse._SubParsersAction[argparse.ArgumentParser]",
+    subparsers: "argparse._SubParsersAction[Parser]",
     name: str,
     *,
     summary: str,
     description: str,
     examples: list[str],
-) -> "argparse._SubParsersAction[argparse.ArgumentParser]":
+) -> "argparse._SubParsersAction[Parser]":
     parser = subparsers.add_parser(
         name,
         help=summary,
@@ -184,7 +201,7 @@ def group(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = Parser(
         prog="kyokki",
         description="Read and change the Kyokki kitchen inventory over its HTTP API.\n"
         "Built for agents: stable exit codes, and JSON whenever stdout is not a "
@@ -211,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
         "you are, its scopes, and whether the server has auth on.",
         examples=[
             "kyokki doctor",
-            "kyokki doctor --url http://kyokki.lan:8000 --json",
+            "kyokki doctor --url http://kyokki.lan:17300 --json",
         ],
         handler=commands.doctor,
     )
@@ -312,9 +329,10 @@ def build_parser() -> argparse.ArgumentParser:
         "consume",
         summary="use up an amount of a product, first to expire first",
         description="Consume AMOUNT UNIT of a product, taking from the item that expires\n"
-        "first. NAME must match a product name exactly (any case); otherwise\n"
-        "the candidates are printed and the exit code is 4. A NAME that is a\n"
-        "UUID is sent as the product id.",
+        "first. NAME must match a product name exactly (any case). If it only\n"
+        "comes close to some, the candidates are printed and the exit code is 4;\n"
+        "if it matches nothing, the exit code is 3. A NAME that is a UUID is\n"
+        "sent as the product id.",
         examples=[
             "kyokki stock consume milk 2 dl",
             "kyokki stock consume 'minced beef' 0.4 kg --location freezer",
@@ -436,14 +454,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def secrets_in(argv: list[str]) -> list[str]:
-    """Every token this run could know: the environment's and any --token value."""
+    """Every token this run could know: the environment's and any --token value, each
+    as given and without its surrounding whitespace."""
     found = [os.environ.get("KYOKKI_TOKEN", "")]
     for i, arg in enumerate(argv):
         if arg == "--token" and i + 1 < len(argv):
             found.append(argv[i + 1])
         elif arg.startswith("--token="):
             found.append(arg.split("=", 1)[1])
-    return [s for s in found if s]
+    return [v for s in found for v in {s, s.strip()} if v]
 
 
 def report(error: CliError, as_json: bool) -> None:
@@ -469,25 +488,54 @@ def report(error: CliError, as_json: bool) -> None:
     output.note(message)
 
 
+def retry_command(argv: list[str], key: str) -> str:
+    """The command line to rerun with ``key``: less --token (its value is never
+    printed) and any earlier --idempotency-key."""
+    kept: list[str] = []
+    skip_next = False
+    for arg in argv:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg in ("--token", "--idempotency-key"):
+            skip_next = True
+            continue
+        if arg.startswith(("--token=", "--idempotency-key=")):
+            continue
+        kept.append(arg)
+    return shlex.join(["kyokki", *kept, "--idempotency-key", key])
+
+
+def with_retry(error: CliError, argv: list[str]) -> CliError:
+    """An ``unknown_outcome`` gains the exact command that replays the change."""
+    if error.code != "unknown_outcome" or not isinstance(error.detail, dict):
+        return error
+    retry = retry_command(argv, str(error.detail["idempotency_key"]))
+    error.detail["retry"] = retry
+    error.detail["hint"] = f"retry with: {retry}"
+    return error
+
+
 def run(argv: list[str], transport: httpx.BaseTransport | None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
-    except SystemExit as exit_:
+    except UsageError as exc:
+        if output.wants_json("--json" in argv):
+            output.print_json({"code": "usage", "message": str(exc)})
+        return USAGE
+    except SystemExit as exit_:  # -h, and a missing command (argparse prints help)
         return exit_.code if isinstance(exit_.code, int) else USAGE
 
     as_json = output.wants_json(args.json)
-    url = args.url or os.environ.get("KYOKKI_URL")
-    token = args.token or os.environ.get("KYOKKI_TOKEN") or None
-    if not url:
-        output.note(
-            "error: no Kyokki URL. Set KYOKKI_URL or pass --url, "
-            "e.g. --url http://kyokki.lan:8000"
-        )
-        return USAGE
-    if not url.startswith(("http://", "https://")):
-        output.note(f"error: the URL must start with http:// or https://, got {url!r}")
-        return USAGE
+    try:
+        url = api.base_url(args.url or os.environ.get("KYOKKI_URL") or "")
+        token = api.clean_token(args.token or os.environ.get("KYOKKI_TOKEN"))
+    except CliError as error:  # a usage error: text on stderr, and JSON if wanted
+        output.note(f"error: {error}")
+        if as_json:
+            output.print_json(error.detail)
+        return error.exit_code
 
     key = getattr(args, "idempotency_key", None) or idempotency.derive_key(
         argv, idempotency.utc_now()
@@ -496,7 +544,7 @@ def run(argv: list[str], transport: httpx.BaseTransport | None) -> int:
     try:
         outcome = args.handler(commands.Context(client, args, key))
     except CliError as error:
-        report(error, as_json)
+        report(with_retry(error, argv), as_json)
         return error.exit_code
     finally:
         client.close()
@@ -504,7 +552,10 @@ def run(argv: list[str], transport: httpx.BaseTransport | None) -> int:
     if outcome.replayed:
         output.note("note: replayed the answer to an identical earlier request")
     if as_json:
-        output.print_json(outcome.document)
+        document = outcome.document
+        if hasattr(args, "idempotency_key") and isinstance(document, dict):
+            document = {**document, "replayed": outcome.replayed}
+        output.print_json(document)
     else:
         print(outcome.human())
     return api.OK

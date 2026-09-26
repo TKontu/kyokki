@@ -48,6 +48,27 @@ def test_ignores_url_and_token(extra: list[str]) -> None:
     assert idempotency.derive_key(extra + ARGV, T0) == idempotency.derive_key(ARGV, T0)
 
 
+@pytest.mark.parametrize(
+    "extra",
+    [["--json"], ["--verbose"], ["--json", "--verbose"], ["--verbose", "--json"]],
+)
+def test_ignores_output_only_flags(extra: list[str]) -> None:
+    assert idempotency.derive_key(ARGV + extra, T0) == idempotency.derive_key(ARGV, T0)
+    assert idempotency.derive_key(extra + ARGV, T0) == idempotency.derive_key(ARGV, T0)
+
+
+def test_a_retry_that_adds_json_or_verbose_sends_the_same_key(
+    api: FakeApi, run: Runner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api.on("POST", "/api/stock/add", 201, {"item": {}, "product_created": False})
+    monkeypatch.setattr(idempotency, "utc_now", lambda: T0)
+    keys = []
+    for extra in ([], ["--json"], ["--verbose"], ["--json", "--verbose"]):
+        run(*ARGV, *extra)
+        keys.append(api.last.headers["Idempotency-Key"])
+    assert len(set(keys)) == 1
+
+
 def test_naive_times_are_utc() -> None:
     naive = datetime(2026, 9, 26, 10, 15, 30)
     assert idempotency.derive_key(ARGV, naive) == idempotency.derive_key(ARGV, T0)
