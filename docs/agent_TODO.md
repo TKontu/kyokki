@@ -26,15 +26,21 @@ Planned 2026-09-14. ~~Starts after MVP-P3~~ **Started 2026-09-25** (operator rul
   - the AG1 log follow-up.
 
   Next round: `kyokki shopping` commands (from AG6's contract) and AG4.
+- **Round 2026-09-26-6 is merged** (#101 log redaction, #102 AG6, #103 AG3 first slice; the
+  review fixes for #103 landed as #108).
+- **Round 2026-09-26-3:** AG3's `kyokki shopping` commands (A2, `feat/ag3-cli-shopping`) and
+  the AG6/AG2 follow-ups below (A3, `fix/agent-api-followups`). A3 also covers idempotent
+  `POST /shopping/` and `/purchase`, and a 404 `not_found` from `stock/add` for an unknown product.
+  AG4 is still the agent's own job (ruling 2026-09-25).
 
   Review follow-ups (2026-09-26), not fixed in the lane PRs:
-  - [ ] AG6 (#102): two concurrent `POST /shopping/generate` calls without a shared
+  - [ ] AG6 (#102, in round 2026-09-26-3 A3): two concurrent `POST /shopping/generate` calls without a shared
     `Idempotency-Key` both insert, so duplicate open items appear. There is no lock or unique
     constraint.
-  - [ ] AG6 (#102): `sources: list[str]` answers 422 to a bare string or to the
+  - [ ] AG6 (#102, in round 2026-09-26-3 A3): `sources: list[str]` answers 422 to a bare string or to the
     `{"recipe": {...}}` object form, not 400 `invalid`. Settle the source shape before AG5 and
     the `kyokki shopping` commands.
-  - [ ] AG6 (#102): a skipped line in an incompatible unit carries `need`/`on_hand`, contrary
+  - [ ] AG6 (#102, in round 2026-09-26-3 A3): a skipped line in an incompatible unit carries `need`/`on_hand`, contrary
     to the schema docstrings, and has no test. The unit-conversion test uses `l`, which
     production never stores; tsp/tbsp against dl is the reachable case.
   - [ ] AG1 log follow-up (#101): the filter scans message and args only, not `extra=` fields
