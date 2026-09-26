@@ -1946,10 +1946,22 @@ not rulings.
 - **Q22: keep the grey used-today tiles** (good design). Only the wording is open: the undo
   label "Correction" is still unclear.
 - The post-Q19 re-estimate had **not** been run; the operator runs it now (Q24's first check).
+- **Q18: route (b), the model draws each product's icon, on a local model only** (the homelab
+  gateway, as in the spike; no cloud service). If drawing alone is not good enough, a pipeline
+  may be built to make it so. One allowed input is a reference picture found online, turned
+  into a graphic by a local model. Escalation order, cheapest first, each step only if the
+  previous one measurably falls short on the iPad:
+  1. the spike's draw prompt plus the cook's hint, **Redraw** and "use category emoji";
+  2. a local vision model renders and checks each drawing, and asks for a redraw on a miss;
+  3. a reference picture: a local vision model *describes* the found photo, and the LLM draws
+     from that description (keeps the icon ours; no pixels copied). Converting the photo itself
+     (a diffusion img2img plus a tracer) is the last resort, needs a new GPU service, and raises
+     licence questions about the source photo.
+  Storage (the spike's open question) is not yet ruled; recommended: the SVG in the database.
 
 **Operator actions and rulings still needed:**
 - [ ] Run "Re-estimate all (keeps yours)" on `/products`: dry run, read the proposal, apply.
-- [ ] The Q18 icon route (also Q21), and the spike's icon-column design.
+- [ ] Q18 storage: the SVG in the database (recommended) or files on a volume.
 
 ---
 
