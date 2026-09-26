@@ -17,6 +17,28 @@ Planned 2026-09-14. ~~Starts after MVP-P3~~ **Started 2026-09-25** (operator rul
   the existing `GET` and `DELETE` there.
 - **Round 2026-09-25-3** builds AG1 and AG2 in parallel. AG3 follows in the next round, from
   AG2's merged contract.
+- **Round 2026-09-25-3** is merged and deployed (#97 AG1, #98 AG2, 2026-09-26).
+- **Round 2026-09-26-6** (planning 2026-09-26):
+  - AG3's first slice: `doctor`, `stock list|add|consume`, `product resolve`,
+    `product name add` and `category list`, with its own `cli-ci.yml`;
+  - AG6's `low_stock` source plus `GET /api/shopping/export`, with no migration and
+    `source=auto_restock`;
+  - the AG1 log follow-up.
+
+  Next round: `kyokki shopping` commands (from AG6's contract) and AG4.
+
+  Review follow-ups (2026-09-26), not fixed in the lane PRs:
+  - [ ] AG6 (#102): two concurrent `POST /shopping/generate` calls without a shared
+    `Idempotency-Key` both insert, so duplicate open items appear. There is no lock or unique
+    constraint.
+  - [ ] AG6 (#102): `sources: list[str]` answers 422 to a bare string or to the
+    `{"recipe": {...}}` object form, not 400 `invalid`. Settle the source shape before AG5 and
+    the `kyokki shopping` commands.
+  - [ ] AG6 (#102): a skipped line in an incompatible unit carries `need`/`on_hand`, contrary
+    to the schema docstrings, and has no test. The unit-conversion test uses `l`, which
+    production never stores; tsp/tbsp against dl is the reachable case.
+  - [ ] AG1 log follow-up (#101): the filter scans message and args only, not `extra=` fields
+    or tracebacks. Nothing logs a token that way today.
 
 ## Goal
 A Hermes Agent or OpenClaw agent runs the kitchen through Kyokki the way a person would:
@@ -119,6 +141,17 @@ the operator's translation project.
 - `GET /api/whoami` returns the token name and scopes. The CLI uses it for `kyokki doctor`.
 - **Tests:** missing, invalid, read-only token on a write, the proxy path, and no token when auth
   is disabled.
+- **As built (PR #97, review 2026-09-25-3), deviations from the ruling and spec:**
+  - `/api/health` and `/api/health/live` stay open: health sits inside `/api`, and the container
+    healthcheck polls `/live` without a token. Readiness (`/api/health`) being open too awaits an
+    operator ruling.
+  - Port 17301 (the frontend) proxies any LAN caller with the `ipad` write token, so tokens only
+    guard 17300. This follows from the proxy-token route, and DEPLOY.md now says so.
+  - WebSockets need `read`. Uppercase hashes are accepted and lowered. Malformed entries are
+    named by position when there is no name, or when the first field is a hash.
+  - [ ] **Follow-up: the WS `?token=` secret appears in uvicorn's access log**, which breaks
+    "never log a token" above. Redact the query string in a uvicorn log filter
+    (`app/core/logging.py`), or drop `?token=` once a WS client exists that can send a header.
 
 ### AG2 — Stock and product endpoints for agents
 All of these are thin endpoints over services, shared with the iPad where the behaviour matches.
@@ -151,6 +184,19 @@ All of these are thin endpoints over services, shared with the iPad where the be
     writing nothing.
   - An ambiguous name giving candidates.
   - A repeated idempotency key, and the same key with a different body (`409 conflict`).
+- **As built (PR #98, review 2026-09-25-3):** the spec (`A2`) overrode this section. There is
+  no `receipt_id`/`notes` on add, no app-level handler (`AgentError`), and resolve is
+  `TrigramRetriever` with `{product_id, name, score, source}`; product create was not built.
+  Deviations the author recorded:
+  - Consume skips items whose unit does not fit, and returns `invalid` only when none fits.
+  - Teaching a name that is a model guess for another product re-points it (201, the H51 rule),
+    not a `conflict`.
+  - Only successful responses are remembered.
+  - The request hash covers `{path, body}`.
+  - The response carries an `Idempotent-Replayed: true` header.
+  - Add holds a session-level advisory lock on its own connection across `quick_add`'s commit,
+    so a same-key retry waits and then replays. The crash window between that commit and
+    storing the response remains; closing it needs a change to `quick_add.py`.
 
 ### AG3 — `kyokki` CLI
 A Python package in `cli/`, installable with `pipx install ./cli` on the agent host. It uses

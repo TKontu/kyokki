@@ -912,6 +912,7 @@ Ordered by expected value once MVP is live.
     the agent track (AG0/AG5, Mealie or its alternative).
 16. Ingredient images beyond the category emoji: a product image field, from the OFF
     `image_url` in `off_data` or an upload (asked 2026-09-24; V1 starts with the emoji).
+    Superseded by Q18 (per-product icons, 2026-09-26).
 
 #### Operator friction log — the quantity and consumption model is too crude (2026-09-16)
 Renamed F1-F6 -> **Q1-Q6** on 2026-09-17: `MVP-F1` and `MVP-F2` already exist in Wave 1, and
@@ -1725,11 +1726,132 @@ fridge view, or a fresh item (a dot, not a tile) would have had no way to its sh
   undoable correction; `restore` would leave an empty item empty), optimistic with rollback.
   Grey tiles sit after the rest, latest first, and have no "…". The fridge (`/`) is unchanged:
   used-up items leave it at once, and the header's Undo is the way back there.
-- [ ] **Look at it on the iPad.** Nothing in wave V was seen in a browser: the tests assert no
-  numbers on screen and every tap, not how the fridge fits a landscape iPad. Log what jars
-  under a new friction log, as the earlier waves did.
+- [x] **Look at it on the iPad** (2026-09-26, after deploying round 2026-09-25-3). What jarred is
+  below, under "the fridge on the iPad".
 - Still deferred from the ask: meal sections, a recipes view, ingredient images beyond the
   category emoji (post-MVP 14-16).
+
+#### Operator friction log — the fridge on the iPad (2026-09-26)
+
+These three came from the first look at wave V on the iPad, after deploying round
+2026-09-25-3 (#97-#99).
+
+- **Q17 — the fridge does not look like a fridge.** `FridgeView` stacks rectangular area cards
+  on top of each other. The ask is a good-looking fridge (a Smeg-style retro fridge, for
+  example) with real sections. Something like:
+  - a freezer compartment;
+  - glass shelves;
+  - crisper drawers for produce and fruit;
+  - a meat and fish drawer;
+  - door bins for dairy, condiments and drinks;
+  - a separate pantry cupboard beside it.
+
+  **Direction, not ruled:** one hand-drawn SVG illustration as the frame, with each area laid
+  over the part of the fridge it belongs to (`lib/fridge.ts` `AREAS` gets a region in the
+  drawing). Tiles or dots sit inside the region, and a tap still opens `/area/[id]`. It must
+  fit a landscape iPad without scrolling and keep today's taps and the going-stale shelf.
+  Mock up first, and have the operator choose a mock before anything is built.
+- **Q18 — every item looks the same.** A tile shows its category's emoji (`category_icon`,
+  wave V ruling), so every fruit is an apple, every vegetable lettuce and all meat a steak. The
+  ask: a distinct icon per product, ideally vector so it scales.
+  - **Supply.**
+    - Unicode has about 130 food and drink emoji: enough for the common items (🥕 🥔 🧅 🍌
+      🥚 🧀 🥛 🍞), far too few to be unique per product. It has no rye bread, quark or
+      Karelian pasty.
+    - Open SVG sets add more:
+      - OpenMoji (CC BY-SA), which has extra food icons beyond Unicode;
+      - Noto Emoji (Apache 2.0);
+      - Twemoji (CC BY);
+      - Fluent Emoji (MIT);
+      - food sets on Iconify, thousands of icons across sets.
+    - Mixing sets breaks visual consistency. Licences need attribution, and CC BY-SA also needs
+      share-alike.
+  - **The AI stack today** (`192.168.0.94:9292`, checked 2026-09-26) serves LLMs only, with no
+    image model. So "generate, then downsample or trace" needs a diffusion model added first
+    (a FLUX- or SDXL-class model via ComfyUI, for example), then a vectoriser (vtracer or
+    potrace). Two paths need nothing new:
+    - (a) the LLM **picks** an icon from a curated library by name, the way product selection
+      picks a catalog product;
+    - (b) the LLM **writes** a small flat SVG in a fixed style (viewBox, a small palette, no
+      text).
+  - **Direction, not ruled:**
+    - Use one curated base set in one style.
+    - Map each product to an icon: the model picks, and the cook can override on the product
+      screen.
+    - For a product with no good match, generate an SVG in the same style and review it once.
+      (b) is available now; a diffusion model and a tracer are an option if (b) looks poor.
+    - Store the choice on the product. This needs a model field and a migration (post-MVP 16
+      becomes this).
+    - Fall back to the category emoji until a product has its own icon.
+  - **Spike first** (Q18-S): take 20 real homelab products and compare (a) against (b). If a
+    diffusion model is installed, also compare generate plus trace. Pick by what looks right on
+    the iPad.
+- **Q19 — everything shows as going stale, two days after the shop.**
+  - **How it works now.** A tile's tier comes from `expiry_date` (`lib/staleness.ts`, in fixed
+    days: at most 1 day left is stale, 3 or fewer soon, 7 or fewer a week). The expiry is
+    `purchase_date + product.default_shelf_life_days` (`services/expiry_recompute.py`). The
+    per-product shelf life already exists: `shelf_life_source` is `category`, `model`,
+    `estimate` or `cook`.
+  - **Likely causes, to check against the homelab data before any fix:**
+    - (1) **H56 has never been run.** 54 of 65 products carry their category's placeholder
+      (produce 7, fruits 7, meat 5, bread 5, fish 3, ready meals 4). So a two-day-old carrot
+      shows a fixed 5 days left, and meat or bread shows orange.
+    - (2) The tiers are fixed day counts, not a share of the product's own life. A 5-day
+      product is orange from the day it is bought, and a 3-day fish is red a day later.
+    - (3) The receipt's purchase date. Confirm that it is the delivery day and not the order
+      day.
+  - **Ask:** shelf life set per product, not by category.
+  - **Direction, not ruled:**
+    - Run H56 on the homelab first, which needs no code, and re-check.
+    - Then make every receipt-created product get its own estimate at creation, so no product
+      is ever left on a category placeholder. The model's `sl` exists; category is the
+      fallback only when the model gives nothing, and the product screen flags those.
+    - Consider tiers relative to the product's life (e.g. stale in its last 20 %).
+    - Operator call: are fixed-day tiers wrong, or only the placeholder numbers?
+
+**Operator rulings, 2026-09-26 (planning round 2026-09-26-6):**
+- **Q19:**
+  - A tile is red only in its last 1-2 days.
+  - Shelf lives need a big recalibration, per product. Reference points, from the day of
+    purchase:
+    - tomatoes and oranges keep far longer than 5 days;
+    - bananas 5 (close to the minimum);
+    - packed meat 5;
+    - meat from the butcher's counter 3;
+    - fish 3.
+  - The dedicated estimator becomes the shelf-life authority for every new product. Category
+    figures are only a fallback.
+- **Q17:** mocks first (Q17-M). The operator picks a design, and the next round builds it into `/`.
+- **Q18:** a spike first (Q18-S), comparing "the model picks from one open SVG set" with "the
+  model writes the SVG". The product icon field comes after.
+
+Round 2026-09-26-6 builds these:
+- A1: Q19 tiers, the calibrated estimator, an estimate at creation, and "Re-estimate all
+  (keeps yours)";
+- A2: Q17-M;
+- A3: Q18-S.
+
+**Review follow-ups (round 2026-09-26-6 review, 2026-09-26),** not fixed in the lane PRs:
+- [ ] Q17 build: a region's dots are cut off without a sign when they overflow
+  (`components/fridge-mocks/shared.tsx:204`, `overflow-hidden`), and Crema's going-stale strip
+  scrolls sideways at 1180×820. Put both into the build spec for whichever mock is chosen.
+- [ ] Q19 (#105), operator nod: a catalog apply marks every product the model answered as
+  `model`, including ones it agreed with, so a `scope=guesses` apply also moves those out of the
+  guesses (`catalog_estimates.py:338`). Deliberate and tested. There are also two untested
+  paths: the confirm broadcast of `resolver.moved`, and "an idempotent replay schedules no
+  estimate".
+
+**Operator actions before planning:**
+- [ ] Run H56 (*Products → Estimate the guesses*, dry run, then apply) and report whether the
+  fridge still looks all stale.
+- [ ] Say which items look wrong and what their dates are, or give the homelab API address so a
+  read-only `GET /api/inventory` can be checked.
+- [ ] Choose a fridge mock (Q17) and an icon route (Q18) once the mocks and the spike exist.
+
+Increments (to plan): **Q17** fridge illustration (a mock, then the build); **Q18-S** icon spike,
+then **Q18** product icons (a model field, the mapping, an override on the product screen);
+**Q19** per-product shelf life at creation, and a decision on relative tiers. Post-MVP 16 folds
+into Q18.
 
 ---
 
@@ -1880,7 +2002,8 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Daily loop: [x] Undo on Mark as gone (PR #77)  [x] the expired shelf + bulk discard/restore (#78)  [x] one-tap consume + general undo (operator trial)  [x] the Gone screen (waste visible, kept for metrics)
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
-- Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [ ] AG1 tokens (`feat/ag1-agent-tokens`)  [ ] AG2 agent endpoints (`feat/ag2-agent-stock-endpoints`)  [ ] H54 glossary + H53 live run (`feat/h54-finnish-glossary`). Next: AG3 CLI
+- Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)"
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
