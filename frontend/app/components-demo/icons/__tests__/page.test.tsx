@@ -26,6 +26,36 @@ describe('/components-demo/icons (Q18 spike)', () => {
     expect(within(first).getAllByText(/\(b\) drawn/i).length).toBeGreaterThan(0)
   })
 
+  it('keeps the light panel light even when <html> has .dark', () => {
+    // Tailwind's `dark:` variant matches `.dark *`, so any `dark:` class inside the light panel
+    // would turn it dark under the /components-demo toggle or the browser check.
+    const { container } = render(<IconSpikePage />)
+
+    const lightPanels = container.querySelectorAll('[data-panel-theme="light"]')
+    const darkPanels = container.querySelectorAll('[data-panel-theme="dark"]')
+    expect(lightPanels).toHaveLength(results.products.length)
+    expect(darkPanels).toHaveLength(results.products.length)
+    lightPanels.forEach((panel) => {
+      const classes = [panel, ...Array.from(panel.querySelectorAll('*'))]
+        .map((el) => el.getAttribute('class') ?? '')
+        .join(' ')
+      expect(classes).not.toMatch(/(^|\s)dark:/)
+    })
+  })
+
+  it('credits OpenMoji with a link to its licence', () => {
+    render(<IconSpikePage />)
+
+    expect(screen.getByRole('link', { name: 'OpenMoji' })).toHaveAttribute(
+      'href',
+      'https://openmoji.org'
+    )
+    expect(screen.getByRole('link', { name: 'CC BY-SA 4.0' })).toHaveAttribute(
+      'href',
+      'https://creativecommons.org/licenses/by-sa/4.0/'
+    )
+  })
+
   it('renders generated SVGs only as <img src>, never inline', () => {
     const { container } = render(<IconSpikePage />)
 

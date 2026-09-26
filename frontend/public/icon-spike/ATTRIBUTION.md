@@ -18,7 +18,8 @@ project. License: **CC BY-SA 4.0** (full text in `openmoji/LICENSE.txt`,
 - `openmoji/index.json` keeps each icon's emoji, annotation and tags from OpenMoji's
   `data/openmoji.json` (same licence).
 
-Any adaptation of these icons must be shared under CC BY-SA 4.0, with this attribution.
+Any adaptation of these icons must carry this attribution and, under §3(b)(1) of the licence,
+be shared under CC BY-SA 4.0, a later version of it, or a BY-SA Compatible License.
 
 ## Contact sheets (`screenshots/`)
 

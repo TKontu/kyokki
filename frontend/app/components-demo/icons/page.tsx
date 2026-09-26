@@ -40,11 +40,40 @@ const products: SpikeProduct[] = results.products
 
 type Theme = 'light' | 'dark'
 
-const TILE =
-  'flex h-20 w-20 flex-col items-center justify-center rounded-2xl border-2 ' +
-  'border-green-500 bg-green-100 dark:border-green-400 dark:bg-green-950'
+// Each panel takes its colours from its own theme instead of Tailwind's `dark:` variant. That
+// variant also matches `.dark *`, so under `html.dark` (the /components-demo toggle, the browser
+// check) a `dark:` class would turn the light panel dark too.
+const THEME_CLASSES: Record<
+  Theme,
+  { panel: string; tile: string; text: string; textSecondary: string }
+> = {
+  light: {
+    panel: 'bg-ui-bg',
+    tile: 'border-green-500 bg-green-100',
+    text: 'text-ui-text',
+    textSecondary: 'text-ui-text-secondary',
+  },
+  dark: {
+    panel: 'bg-ui-dark-bg',
+    tile: 'border-green-400 bg-green-950',
+    text: 'text-ui-dark-text',
+    textSecondary: 'text-ui-dark-text-secondary',
+  },
+}
 
-function Icon({ src, emoji, size }: { src?: string | null; emoji?: string; size: number }) {
+const TILE = 'flex h-20 w-20 flex-col items-center justify-center rounded-2xl border-2'
+
+function Icon({
+  src,
+  emoji,
+  size,
+  theme,
+}: {
+  src?: string | null
+  emoji?: string
+  size: number
+  theme: Theme
+}) {
   if (src) {
     return (
       // A plain <img>: the SVG must load as an image, never be inlined (see the file comment).
@@ -61,7 +90,7 @@ function Icon({ src, emoji, size }: { src?: string | null; emoji?: string; size:
   }
   return (
     <span
-      className="flex items-center justify-center text-xs text-ui-text-secondary dark:text-ui-dark-text-secondary"
+      className={`flex items-center justify-center text-xs ${THEME_CLASSES[theme].textSecondary}`}
       style={{ width: size, height: size }}
     >
       none
@@ -74,24 +103,27 @@ function Cell({
   caption,
   src,
   emoji,
+  theme,
 }: {
   label: string
   caption: string
   src?: string | null
   emoji?: string
+  theme: Theme
 }) {
+  const colours = THEME_CLASSES[theme]
   return (
     <figure className="flex flex-col items-center gap-2">
-      <figcaption className="text-xs font-semibold uppercase tracking-wide text-ui-text dark:text-ui-dark-text">
+      <figcaption className={`text-xs font-semibold uppercase tracking-wide ${colours.text}`}>
         {label}
       </figcaption>
       <div className="flex items-end gap-3">
-        <div className={TILE}>
-          <Icon src={src} emoji={emoji} size={40} />
+        <div className={`${TILE} ${colours.tile}`}>
+          <Icon src={src} emoji={emoji} size={40} theme={theme} />
         </div>
-        <Icon src={src} emoji={emoji} size={96} />
+        <Icon src={src} emoji={emoji} size={96} theme={theme} />
       </div>
-      <p className="max-w-[12rem] text-center text-xs text-ui-text-secondary dark:text-ui-dark-text-secondary">
+      <p className={`max-w-[12rem] text-center text-xs ${colours.textSecondary}`}>
         {caption}
       </p>
     </figure>
@@ -102,9 +134,16 @@ function Panel({ product, theme }: { product: SpikeProduct; theme: Theme }) {
   const pick = product.pick
   const draw = product.draw
   return (
-    <div className={theme}>
-      <div className="flex flex-wrap justify-around gap-4 rounded-ui-lg bg-ui-bg p-4 dark:bg-ui-dark-bg">
-        <Cell label="Today" caption={`category: ${product.category}`} emoji={product.category_icon} />
+    <div className={theme} data-panel-theme={theme}>
+      <div
+        className={`flex flex-wrap justify-around gap-4 rounded-ui-lg p-4 ${THEME_CLASSES[theme].panel}`}
+      >
+        <Cell
+          label="Today"
+          caption={`category: ${product.category}`}
+          emoji={product.category_icon}
+          theme={theme}
+        />
         <Cell
           label="(a) picked"
           caption={
@@ -113,6 +152,7 @@ function Panel({ product, theme }: { product: SpikeProduct; theme: Theme }) {
               : 'not run'
           }
           src={pick?.file}
+          theme={theme}
         />
         <Cell
           label="(b) drawn"
@@ -125,6 +165,7 @@ function Panel({ product, theme }: { product: SpikeProduct; theme: Theme }) {
               : 'not run'
           }
           src={draw?.file}
+          theme={theme}
         />
       </div>
     </div>
@@ -142,7 +183,18 @@ export default function IconSpikePage() {
           <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
             Today&apos;s category emoji, (a) an OpenMoji icon the model picked and (b) a flat SVG the
             model drew, at tile size and 96 px, light and dark. Findings:
-            docs/spikes/Q18_product_icons.md. OpenMoji icons are CC BY-SA 4.0 (openmoji.org).
+            docs/spikes/Q18_product_icons.md.
+          </p>
+          <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
+            All emojis designed by{' '}
+            <a className="underline" href="https://openmoji.org">
+              OpenMoji
+            </a>{' '}
+            – the open-source emoji and icon project. License:{' '}
+            <a className="underline" href="https://creativecommons.org/licenses/by-sa/4.0/">
+              CC BY-SA 4.0
+            </a>
+            .
           </p>
         </header>
         {products.map((product) => (
