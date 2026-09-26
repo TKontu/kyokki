@@ -7,7 +7,8 @@ Merge every ready PR in the current round. Uses the current round; takes no argu
 
 2. **Confirm readiness per PR** before touching anything: reviewed (`/review-round` ran), CI green,
    and mergeable without conflict. Where the project uses verdicts, the PR's `pr-verdict` comment
-   is part of readiness — read it. Never re-run a review panel here.
+   is part of readiness — read it. Never re-run a review panel here. The CI and mergeability
+   check can go to the `ci-watcher` agent type (Sonnet, read-only); the merge decision stays here.
 
 3. **Merge one at a time**, refreshing the integration branch between merges. Sibling PRs own
    disjoint paths — the round enforced that — so serial merges should not conflict. **If one does,

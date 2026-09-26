@@ -116,6 +116,21 @@ docs/              ARCHITECTURE.md, specs, TODO.md and per-area *_TODO.md
 - [ ] No secrets, credentials, or personal data added
 - [ ] `docs/TODO.md` (or the area `*_TODO.md`) and `HANDOFF.md` updated when the plan changed
 
+## Model routing for subagents
+
+Opus is for work that needs judgement. Routine work goes to cheaper agent types
+(`.claude/agents/`):
+
+| Work | Agent type | Model, effort |
+| --- | --- | --- |
+| Executor lanes (features, fixes with design), planning, review lenses, refuters, anything whose outcome is not already decided | `general-purpose` (no `model` override) | Opus, inherited |
+| A small fix whose change is already stated: lint, format, a docstring or doc line, a pinned test number, regenerated goldens, a one-function bug named with its fix | `quick-fixer` | Sonnet, medium |
+| Waiting for CI, reading a failed job's log, checking mergeability or whether a branch is behind | `ci-watcher` | Sonnet, low |
+| Locating code or answering "where is X" across the tree | `Explore` with `model: "sonnet"` | Sonnet |
+
+If a `quick-fixer` or `ci-watcher` stops because the task turned out to need a decision, hand it
+to Opus rather than re-sending it to the cheap type with more instructions.
+
 ## Work tracking
 
 Planned work lives in `docs/TODO.md` plus per-area `docs/*_TODO.md`; session state lives in
