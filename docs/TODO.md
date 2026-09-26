@@ -1939,10 +1939,17 @@ not rulings.
   index (or the printed name) on the item at confirm, and show "From Prisma, 26.9.: KOKKIKARTANO
   KERMAINEN LOHIKEITTO" on the item's sheet, linking to the receipt. Needs a migration.
 
-**Operator actions and rulings needed:**
-- [ ] Say whether "Re-estimate all (keeps yours)" was applied after Q19 deployed (Q24).
-- [ ] Rule on Q24's direction (1, 2, 3, or a subset) and Q22's (a) or (b).
-- [ ] The Q18 icon route (also Q21).
+**Operator rulings, 2026-09-26 (on Q20-Q26):**
+- **Q24: the system learns from corrected dates.** When the cook corrects an item's date, the
+  product learns from it, so the next time that product arrives its date is much closer to
+  reality. This is direction 2 and the priority; 1 and 3 are not ruled.
+- **Q22: keep the grey used-today tiles** (good design). Only the wording is open: the undo
+  label "Correction" is still unclear.
+- The post-Q19 re-estimate had **not** been run; the operator runs it now (Q24's first check).
+
+**Operator actions and rulings still needed:**
+- [ ] Run "Re-estimate all (keeps yours)" on `/products`: dry run, read the proposal, apply.
+- [ ] The Q18 icon route (also Q21), and the spike's icon-column design.
 
 ---
 
