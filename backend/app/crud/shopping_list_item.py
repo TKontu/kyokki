@@ -1,7 +1,7 @@
 from datetime import UTC
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -146,6 +146,38 @@ class CRUDShoppingListItem(
         )
         result = await db.execute(query)
         return list(result.scalars().unique().all())
+
+    async def get_open(self, db: AsyncSession) -> list[ShoppingListItem]:
+        """Every unpurchased item, urgent first, then normal, then low, then by name."""
+        priority_order = case(
+            (ShoppingListItem.priority == "urgent", 1),
+            (ShoppingListItem.priority == "normal", 2),
+            (ShoppingListItem.priority == "low", 3),
+            else_=4,
+        )
+        query = (
+            select(ShoppingListItem)
+            .where(ShoppingListItem.is_purchased.is_(False))
+            .order_by(
+                priority_order.asc(),
+                func.lower(ShoppingListItem.name).asc(),
+                ShoppingListItem.added_at.asc(),
+            )
+        )
+        result = await db.execute(query)
+        return list(result.scalars().all())
+
+    async def stage(
+        self, db: AsyncSession, *, obj_in: ShoppingListItemCreate
+    ) -> ShoppingListItem:
+        """Add an item to the session and flush it, without committing.
+
+        For work that writes several rows and commits them together (AG6 generate).
+        """
+        db_obj = ShoppingListItem(**obj_in.model_dump())
+        db.add(db_obj)
+        await db.flush()
+        return db_obj
 
 
 shopping_list_item = CRUDShoppingListItem(ShoppingListItem)
