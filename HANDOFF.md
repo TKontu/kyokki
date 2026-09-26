@@ -3,7 +3,7 @@ Generated-UTC: 2026-09-26T16:15:00Z
 Base-SHA: 41478a9d2ff4bbc2442d29f876c224bf6ac652a3
 
 ## Round delta
-- Round 2026-09-26-3 is merged, reconciled and **not deployed**:
+- Round 2026-09-26-3 is merged, reconciled and **deployed** (2026-09-26):
   - #113 Q17-B: the Cielo fridge on `/` for the portrait iPad;
   - #111 AG3: the `kyokki shopping` commands;
   - #112 agent API follow-ups;
@@ -13,7 +13,7 @@ Base-SHA: 41478a9d2ff4bbc2442d29f876c224bf6ac652a3
 - The mypy baseline is refreshed; `endpoints/shopping.py` went from 8 to 6.
 
 ## Active PRs and conflicts
-- The docs PR for this reconcile (`docs/reconcile-2026-09-26-3`) only.
+- None.
 
 ## Non-obvious decisions or blockers
 - **Rulings at review (2026-09-26):**
@@ -37,5 +37,5 @@ Base-SHA: 41478a9d2ff4bbc2442d29f876c224bf6ac652a3
   - #105's catalog apply marking agreed answers as `model`.
 
 ## Next action
-Merge the reconcile docs PR. Deploy per `docs/DEPLOY.md`, look at `/` on the iPad, then rule
+Look at `/` on the iPad and log any friction in `docs/TODO.md`, then rule
 on Q18 so the next round (`/plan-round`) can take Q18 and the portrait pass on the other screens.
