@@ -154,11 +154,11 @@ def slug(name: str) -> str:
 # --- the model ---------------------------------------------------------------------------
 
 
-def gateway_defaults() -> tuple[str, str]:
-    """The gateway URL and model from the app settings; `--url` / `--model` override them."""
+def gateway_url() -> str:
+    """The gateway URL from the app settings; `--url` overrides it."""
     from app.core.config import settings
 
-    return settings.LLM_BASE_URL, settings.LLM_MODEL
+    return settings.LLM_BASE_URL
 
 
 def chat(
@@ -233,12 +233,18 @@ def icon_line(icon: dict[str, Any]) -> str:
 
 def parse_pick(text: str, ids: set[str]) -> tuple[str | None, str, bool]:
     """(icon id or None, reason, whether the answer was valid JSON naming a known id)."""
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return None, "", False
-    try:
-        answer = json.loads(match.group(0))
-    except json.JSONDecodeError:
+    # Take the last JSON object that has an "icon" key: reasoning text before the answer may
+    # contain braces of its own, which a greedy `{.*}` would swallow into invalid JSON.
+    decoder = json.JSONDecoder()
+    answer: dict[str, Any] | None = None
+    for start in (i for i, ch in enumerate(text) if ch == "{"):
+        try:
+            value, _ = decoder.raw_decode(text, start)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and "icon" in value:
+            answer = value
+    if answer is None:
         return None, "", False
     icon = answer.get("icon")
     reason = str(answer.get("reason") or "")
@@ -391,6 +397,10 @@ def run_draw(
                 "bytes": len(clean),
             }
             break
+        if draw["file"] is None:
+            # A failed re-draw must not leave an earlier run's SVG behind: disk has to match
+            # results.json, which now says `file: null`.
+            (GENERATED / f"{slug(product['name'])}.svg").unlink(missing_ok=True)
         draw["attempts"] = tries
         draw["latency_s"] = round(sum(t.get("latency_s", 0) for t in tries), 1)
         entry_for(results, product)["draw"] = draw
@@ -452,7 +462,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--url", help="OpenAI-compatible base URL (default: LLM_BASE_URL)"
     )
-    parser.add_argument("--model", help="model name (default: LLM_MODEL)")
+    parser.add_argument(
+        "--model",
+        help="model name, required for pick and draw (the spike used c2.qwen3.8-27b)",
+    )
     parser.add_argument("--only", action="append", help="run one product (repeatable)")
     parser.add_argument(
         "--attempts", type=int, default=2, help="draw attempts per product"
@@ -463,10 +476,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.route == "vendor":
             run_vendor(client)
             return 0
-        url, model = args.url, args.model
-        if not (url and model):
-            default_url, default_model = gateway_defaults()
-            url, model = url or default_url, model or default_model
+        if not args.model:
+            # No fallback to LLM_MODEL: it names a different gateway slot from the spike's.
+            parser.error("--model is required for --route pick and --route draw")
+        model = args.model
+        url = args.url or gateway_url()
         products = load_products(args.only)
         results = load_results()
         results.setdefault("runs", {})[args.route] = {

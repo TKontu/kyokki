@@ -19,7 +19,9 @@ products on the first attempt. 15 of them are clearly the product and 4 more are
 the name under them, so 19 of 20 are usable. Every icon is distinct from the others and all
 share one style. Route (a) was right for 11 of 20 products (14 of 20 counting fair stand-ins).
 It gave two pairs of products the same icon, and it had nothing at all for minced beef, salmon
-or crisps. On the dark theme its black outlines disappear, and outline-only icons almost vanish.
+or crisps. The salmon miss comes from how I cut the set, not from OpenMoji: my food-only subset
+left out OpenMoji's fish (`1F41F`, see [Results](#results)). On the dark theme its black
+outlines disappear, and outline-only icons almost vanish.
 
 ## Method
 
@@ -30,8 +32,11 @@ or crisps. On the dark theme its black outlines disappear, and outline-only icon
   `frontend/public/icon-spike/results.json`.
 - **Set for (a):** OpenMoji 17.0.0, the default in the spec. I kept its food and drink subset:
   the Unicode `food-drink` group without `dishware`, plus OpenMoji's own food extras (boule
-  bread, pretzel, roasted coffee bean, coloured jars and others). That is **144 icons, 466 KB**,
-  with comments and whitespace removed. The prompt lists each icon as `id: annotation (tags)`.
+  bread, pretzel, roasted coffee bean, coloured jars and others). That is **144 SVGs, 449,912
+  bytes (about 440 KiB)** with comments and whitespace removed, plus a 26 KB `index.json`
+  (496 KB on disk in all). The subset has a known gap: food and drink only, so OpenMoji's
+  animals are not in it, among them the fish `1F41F` that today's fish category uses. The
+  prompt lists each icon as `id: annotation (tags)`.
   The answer is JSON `{"icon": id | null, "reason"}`, and an id outside the set counts as
   invalid. All 20 answers were valid.
 - **Style for (b):** the prompt fixes `viewBox="0 0 48 48"`, an 8-colour palette (`#2B2B2B`
@@ -69,7 +74,7 @@ or crisps. On the dark theme its black outlines disappear, and outline-only icon
 | 11 | Cheddar | 1F9C0 cheese wedge | yes | yes (1st) | yes (wedge) | 77.6 | 6.7 |
 | 12 | Minced beef | null | **no**: 1F969 cut of meat was available | yes (1st) | yes (mince in a tray) | 86.2 | 19.6 |
 | 13 | Chicken fillet strips | 1F357 poultry leg | stand-in | yes (1st) | yes (strips in a tray) | 44.1 | 13.9 |
-| 14 | Salmon | null | none exists (no fish in the food subset) | yes (1st) | yes (striped fillet) | 92.0 | 13.0 |
+| 14 | Salmon | null | none in the subset I vendored; full OpenMoji has 1F41F fish, a likely stand-in (not run) | yes (1st) | yes (striped fillet) | 92.0 | 13.0 |
 | 15 | Rye bread | 1F35E bread | stand-in (a white toast loaf) | yes (1st) | yes (dark scored loaf) | 60.7 | 14.1 |
 | 16 | Karelian pasty | 1F959 stuffed flatbread | **no**: reads as a kebab | yes (1st) | **no**: a wheel, not an oval pasty | 40.4 | 20.0 |
 | 17 | Oat drink | 1F95B glass of milk | stand-in, the same icon as milk | yes (1st) | weak: a generic carton, but not the milk one | 29.5 | 16.2 |
@@ -93,6 +98,12 @@ the 2 px outline; the salmon had none. The drawings are 239 to 547 bytes each, 8
 | Latency on `c2.qwen3.8-27b` | mean 24.6 s, median 19.8 s (6.7–44.6) | mean 94.6 s, median 66.4 s (25.7–273.3) |
 | Total for 20 | 492 s | 1892 s (≈ 32 min) |
 
+Route (a)'s score is for the **144-icon food subset**, not for all of OpenMoji. With the fish
+`1F41F` in the set, salmon would most likely have been a stand-in (a whole fish, not a
+fillet). That would make route (a) **11/20 right, 15/20 counting stand-ins**, with 2 products
+and no icon. I did not re-run the pick to confirm it, and the recommendation below holds on
+either tally.
+
 Most of the latency is reasoning (about 36 tokens/s on this slot). The three runs over 260 s
 (milk, quark, eggs) came in a row, which points to a busy GPU as much as to the product. Both
 routes are far too slow to run inline, and both are fine for a background job.
@@ -102,7 +113,8 @@ routes are far too slow to run inline, and both are fine for a background job.
 - OpenMoji looks very good wherever an icon exists, better than the model's drawings. But
   a set of 144 food icons cannot tell apart the products a Finnish household actually buys.
   Quark, rye bread, Karelian pasty, oat drink, minced meat, fillet strips and crisps have no
-  icon of their own, and neither does fish.
+  icon of their own. Fish is missing only from my subset: OpenMoji has a whole fish (`1F41F`),
+  but no salmon fillet.
 - OpenMoji draws with thin **black** outlines and some shapes are unfilled (the glass of milk).
   On the dark theme the outlines disappear. Filled icons still read, but an outline-only
   shape like the glass of milk almost vanishes.
@@ -119,12 +131,18 @@ routes are far too slow to run inline, and both are fine for a background job.
 - **OpenMoji is CC BY-SA 4.0.** Shipping it means crediting it ("All emojis designed by
   OpenMoji – the open-source emoji and icon project. License: CC BY-SA 4.0") somewhere
   reachable in the app, for example an About or Credits page, and keeping the licence text.
-  **Share-alike** applies to adaptations: a recoloured or edited OpenMoji must also be
-  CC BY-SA. Displaying the icons unchanged next to our own code does not relicense the code.
+  **Share-alike** applies to adaptations: under §3(b)(1) of the licence, a recoloured or edited
+  OpenMoji must be shared under CC BY-SA 4.0, a later version of it, or a BY-SA Compatible
+  License. Displaying the icons unchanged next to our own code does not relicense the code.
   The vendored subset and its attribution are in `frontend/public/icon-spike/` (see
   `ATTRIBUTION.md`).
 - Other sets would carry lighter terms, but they bring the same coverage gap and a style
   mismatch: Noto Emoji (Apache 2.0), Fluent Emoji (MIT), Twemoji (CC BY 4.0).
+- **Iconify** is not a set but a catalogue of many sets, with thousands of food icons among
+  them. Each set keeps its own licence (from MIT and Apache 2.0 through CC BY and CC BY-SA),
+  so an icon's terms have to be checked per set, and taking icons from several sets to cover
+  the gaps brings back the mixed styles that one set was meant to avoid. The spike did not
+  try it.
 - **Drawn icons** come from our own model on our own hardware, with no third-party material,
   so no attribution is needed.
 
@@ -133,12 +151,28 @@ routes are far too slow to run inline, and both are fine for a background job.
 Build **route (b)** next round: the model draws each product's icon once, in the background,
 in the fixed style, and falls back to the category emoji. **Do not vendor a set.** An icon set
 would add a licence obligation, a second visual style and dark-mode fixes, and it would only
-improve the 11 easy products, which already look fine drawn. Keep the palette and the prompt
-from `backend/scripts/icon_spike.py`, move the sanitiser into the app unchanged, and let the
-operator redraw or pick another product's icon when the model misses, as it did for the
-Karelian pasty.
+improve the 11 easy products, which already look fine drawn. This reverses the backlog's
+unruled direction in Q18 ("one curated base set in one style", generating only the gaps): with
+(b) filling every product at a usable level, a base set would become a second style for the
+easy products rather than the main source. What the operator gives up is OpenMoji's polish on
+the common items (tomato, banana, carrot, egg), which look better than the drawings.
+
+Keep the palette and the prompt from `backend/scripts/icon_spike.py` and move the sanitiser
+into the app. Fix the edge cases the #106 review found on the way: an SVG left with only an
+empty `<g/>` still counts as drawable, a namespaced element with an allowed local name is
+re-emitted as SVG, and dropped tail text does not mark the result as changed. Let the operator
+redraw or pick another product's icon when the model misses, as it did for the Karelian pasty.
 
 ### Next-round build outline
+
+> **Departure from the spec, needs an operator ruling.** The spec proposed a single
+> `product_master.icon` column holding a set's icon id or a reference to a generated SVG.
+> Items 1 and 3 replace it with the SVG markup in the database (`icon_svg`), an `icon_status`,
+> an optional `icon_ref`, a new endpoint and new schema fields. The reason: the drawings are
+> under 1 KB, so keeping them in the row means no file store or volume for generated SVGs, they
+> are covered by the database backup, and a pending icon can be told apart from a failed one.
+> The spec's single column still works if the job writes each SVG to a served directory and
+> stores its path; that is fewer schema changes, at the cost of a writable volume to back up.
 
 1. **`product_master.icon_svg`** (`Text`, nullable) holding the sanitised SVG markup, which is
    under 1 KB for the drawings seen here. Add `icon_status` (`pending | ready | failed`), or
@@ -153,11 +187,14 @@ Karelian pasty.
    product update over the WebSocket so tiles refresh. A failure leaves the icon `NULL`. Budget
    about 1–5 minutes per product on `c2.qwen3.8-27b`, and queue jobs one at a time, because
    the gateway serves one request at a time.
-3. **Serving:** `GET /api/v1/products/{id}/icon.svg` returns the stored markup with
+3. **Serving:** `GET /api/products/{id}/icon.svg` (the app mounts its routes at `/api`,
+   `backend/app/main.py`) returns the stored markup with
    `Content-Type: image/svg+xml`, `Content-Security-Policy: default-src 'none'` and
    `X-Content-Type-Options: nosniff`. The frontend only ever uses it as `<img src>`, never
    `dangerouslySetInnerHTML`. Add an `icon_url` or `has_icon` to the product and inventory
-   schemas and to `types/`.
+   schemas and to `types/`. Like every `/api` route it sits behind the AG1 token check, and an
+   `<img src>` cannot send the `Authorization` header that check reads, so the build has to
+   decide how the image request authenticates (for example, fetch it into a blob URL).
 4. **Override on `frontend/components/products/ProductEditSheet.tsx`:** show the current icon
    with **Redraw** (queue the job again, optionally with a hint such as "oval rye pastry with
    rice filling") and **Use category emoji** (clear it). A later option is to reuse another
@@ -183,6 +220,8 @@ which this UI does not need. Revisit it if the drawn icons turn out to fall shor
 - One run of 20 products at temperature 0.2. The variance between runs was not measured, and
   a redraw may come out better or worse.
 - "Right" and "recognisable" are one reviewer's judgement from renders, not a user test.
-- The comparison page runs in the Next app. The contact sheets in
-  `frontend/public/icon-spike/screenshots/` were rendered from the
-  same SVGs with resvg, because this container has no browser. They omit the colour emoji.
+- The comparison page runs in the Next app. The contact sheets
+  [`contact-sheet-1.png`](../../frontend/public/icon-spike/screenshots/contact-sheet-1.png) and
+  [`contact-sheet-2.png`](../../frontend/public/icon-spike/screenshots/contact-sheet-2.png)
+  were rendered from the same SVGs with resvg, because this container has no browser. They
+  omit the colour emoji.
