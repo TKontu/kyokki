@@ -1,0 +1,574 @@
+{
+  "products": [
+    {
+      "name": "Tomato",
+      "pick": {
+        "icon": "1F345",
+        "file": "/icon-spike/openmoji/1F345.svg",
+        "annotation": "tomato",
+        "emoji": "🍅",
+        "reason": "Direct match: tomato icon",
+        "valid_answer": true,
+        "latency_s": 39.5
+      },
+      "category": "produce",
+      "category_icon": "🥬",
+      "draw": {
+        "file": "/icon-spike/generated/tomato.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 297,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 145.1,
+            "error": null
+          }
+        ],
+        "latency_s": 145.1
+      }
+    },
+    {
+      "name": "Banana",
+      "pick": {
+        "icon": "1F34C",
+        "file": "/icon-spike/openmoji/1F34C.svg",
+        "annotation": "banana",
+        "emoji": "🍌",
+        "reason": "Direct match: banana emoji",
+        "valid_answer": true,
+        "latency_s": 32.9
+      },
+      "category": "fruits",
+      "category_icon": "🍎",
+      "draw": {
+        "file": "/icon-spike/generated/banana.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 381,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 83.9,
+            "error": null
+          }
+        ],
+        "latency_s": 83.9
+      }
+    },
+    {
+      "name": "Orange",
+      "pick": {
+        "icon": "1F34A",
+        "file": "/icon-spike/openmoji/1F34A.svg",
+        "annotation": "tangerine",
+        "emoji": "🍊",
+        "reason": "Tangerine emoji is the standard, most recognizable icon for an orange",
+        "valid_answer": true,
+        "latency_s": 44.6
+      },
+      "category": "fruits",
+      "category_icon": "🍎",
+      "draw": {
+        "file": "/icon-spike/generated/orange.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 341,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 32.6,
+            "error": null
+          }
+        ],
+        "latency_s": 32.6
+      }
+    },
+    {
+      "name": "Carrot",
+      "pick": {
+        "icon": "1F955",
+        "file": "/icon-spike/openmoji/1F955.svg",
+        "annotation": "carrot",
+        "emoji": "🥕",
+        "reason": "Direct match: carrot icon",
+        "valid_answer": true,
+        "latency_s": 37.8
+      },
+      "category": "produce",
+      "category_icon": "🥬",
+      "draw": {
+        "file": "/icon-spike/generated/carrot.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 467,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 72.1,
+            "error": null
+          }
+        ],
+        "latency_s": 72.1
+      }
+    },
+    {
+      "name": "Potato",
+      "pick": {
+        "icon": "1F954",
+        "file": "/icon-spike/openmoji/1F954.svg",
+        "annotation": "potato",
+        "emoji": "🥔",
+        "reason": "Direct match — potato emoji",
+        "valid_answer": true,
+        "latency_s": 38.7
+      },
+      "category": "produce",
+      "category_icon": "🥬",
+      "draw": {
+        "file": "/icon-spike/generated/potato.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 484,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 25.7,
+            "error": null
+          }
+        ],
+        "latency_s": 25.7
+      }
+    },
+    {
+      "name": "Cucumber",
+      "pick": {
+        "icon": "1F952",
+        "file": "/icon-spike/openmoji/1F952.svg",
+        "annotation": "cucumber",
+        "emoji": "🥒",
+        "reason": "Direct match: cucumber icon",
+        "valid_answer": true,
+        "latency_s": 31.1
+      },
+      "category": "produce",
+      "category_icon": "🥬",
+      "draw": {
+        "file": "/icon-spike/generated/cucumber.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 547,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 57.2,
+            "error": null
+          }
+        ],
+        "latency_s": 57.2
+      }
+    },
+    {
+      "name": "Milk",
+      "pick": {
+        "icon": "1F95B",
+        "file": "/icon-spike/openmoji/1F95B.svg",
+        "annotation": "glass of milk",
+        "emoji": "🥛",
+        "reason": "glass of milk is a direct match",
+        "valid_answer": true,
+        "latency_s": 10.5
+      },
+      "category": "dairy",
+      "category_icon": "🥛",
+      "draw": {
+        "file": "/icon-spike/generated/milk.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 353,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 268.3,
+            "error": null
+          }
+        ],
+        "latency_s": 268.3
+      }
+    },
+    {
+      "name": "Quark",
+      "pick": {
+        "icon": "1F9C0",
+        "file": "/icon-spike/openmoji/1F9C0.svg",
+        "annotation": "cheese wedge",
+        "emoji": "🧀",
+        "reason": "Quark is a fresh cheese; cheese wedge is the closest dairy icon",
+        "valid_answer": true,
+        "latency_s": 28.0
+      },
+      "category": "dairy",
+      "category_icon": "🥛",
+      "draw": {
+        "file": "/icon-spike/generated/quark.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 326,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 273.3,
+            "error": null
+          }
+        ],
+        "latency_s": 273.3
+      }
+    },
+    {
+      "name": "Eggs",
+      "pick": {
+        "icon": "1F95A",
+        "file": "/icon-spike/openmoji/1F95A.svg",
+        "annotation": "egg",
+        "emoji": "🥚",
+        "reason": "egg icon directly represents the product",
+        "valid_answer": true,
+        "latency_s": 41.9
+      },
+      "category": "dairy",
+      "category_icon": "🥛",
+      "draw": {
+        "file": "/icon-spike/generated/eggs.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 380,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 262.8,
+            "error": null
+          }
+        ],
+        "latency_s": 262.8
+      }
+    },
+    {
+      "name": "Butter",
+      "pick": {
+        "icon": "1F9C8",
+        "file": "/icon-spike/openmoji/1F9C8.svg",
+        "annotation": "butter",
+        "emoji": "🧈",
+        "reason": "Direct match: butter icon with dairy tag",
+        "valid_answer": true,
+        "latency_s": 35.4
+      },
+      "category": "dairy",
+      "category_icon": "🥛",
+      "draw": {
+        "file": "/icon-spike/generated/butter.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 259,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 37.1,
+            "error": null
+          }
+        ],
+        "latency_s": 37.1
+      }
+    },
+    {
+      "name": "Cheddar",
+      "pick": {
+        "icon": "1F9C0",
+        "file": "/icon-spike/openmoji/1F9C0.svg",
+        "annotation": "cheese wedge",
+        "emoji": "🧀",
+        "reason": "cheese wedge directly represents cheddar",
+        "valid_answer": true,
+        "latency_s": 6.7
+      },
+      "category": "cheese",
+      "category_icon": "🧀",
+      "draw": {
+        "file": "/icon-spike/generated/cheddar.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 239,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 77.6,
+            "error": null
+          }
+        ],
+        "latency_s": 77.6
+      }
+    },
+    {
+      "name": "Minced beef",
+      "pick": {
+        "icon": null,
+        "file": null,
+        "annotation": null,
+        "emoji": null,
+        "reason": "No icon represents ground/minced meat; all meat icons show whole cuts or bones",
+        "valid_answer": true,
+        "latency_s": 19.6
+      },
+      "category": "meat",
+      "category_icon": "🥩",
+      "draw": {
+        "file": "/icon-spike/generated/minced-beef.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 287,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 86.2,
+            "error": null
+          }
+        ],
+        "latency_s": 86.2
+      }
+    },
+    {
+      "name": "Chicken fillet strips",
+      "pick": {
+        "icon": "1F357",
+        "file": "/icon-spike/openmoji/1F357.svg",
+        "annotation": "poultry leg",
+        "emoji": "🍗",
+        "reason": "poultry leg is tagged chicken, closest to chicken fillet strips",
+        "valid_answer": true,
+        "latency_s": 13.9
+      },
+      "category": "meat",
+      "category_icon": "🥩",
+      "draw": {
+        "file": "/icon-spike/generated/chicken-fillet-strips.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 531,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 44.1,
+            "error": null
+          }
+        ],
+        "latency_s": 44.1
+      }
+    },
+    {
+      "name": "Salmon",
+      "pick": {
+        "icon": null,
+        "file": null,
+        "annotation": null,
+        "emoji": null,
+        "reason": "No fish or salmon icon available; closest options (fish cake, fried shrimp) are not recognizable as salmon",
+        "valid_answer": true,
+        "latency_s": 13.0
+      },
+      "category": "fish",
+      "category_icon": "🐟",
+      "draw": {
+        "file": "/icon-spike/generated/salmon.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 469,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 92.0,
+            "error": null
+          }
+        ],
+        "latency_s": 92.0
+      }
+    },
+    {
+      "name": "Rye bread",
+      "pick": {
+        "icon": "1F35E",
+        "file": "/icon-spike/openmoji/1F35E.svg",
+        "annotation": "bread",
+        "emoji": "🍞",
+        "reason": "Rye bread is a loaf of bread; the bread icon is the most recognizable match.",
+        "valid_answer": true,
+        "latency_s": 14.1
+      },
+      "category": "bread",
+      "category_icon": "🍞",
+      "draw": {
+        "file": "/icon-spike/generated/rye-bread.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 482,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 60.7,
+            "error": null
+          }
+        ],
+        "latency_s": 60.7
+      }
+    },
+    {
+      "name": "Karelian pasty",
+      "pick": {
+        "icon": "1F959",
+        "file": "/icon-spike/openmoji/1F959.svg",
+        "annotation": "stuffed flatbread",
+        "emoji": "🥙",
+        "reason": "stuffed flatbread matches the round, filled flat pastry shape of a Karelian pasty",
+        "valid_answer": true,
+        "latency_s": 20.0
+      },
+      "category": "bread",
+      "category_icon": "🍞",
+      "draw": {
+        "file": "/icon-spike/generated/karelian-pasty.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 459,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 40.4,
+            "error": null
+          }
+        ],
+        "latency_s": 40.4
+      }
+    },
+    {
+      "name": "Oat drink",
+      "pick": {
+        "icon": "1F95B",
+        "file": "/icon-spike/openmoji/1F95B.svg",
+        "annotation": "glass of milk",
+        "emoji": "🥛",
+        "reason": "oat drink is a milk alternative, glass of milk is the closest visual match",
+        "valid_answer": true,
+        "latency_s": 16.2
+      },
+      "category": "beverages",
+      "category_icon": "🥤",
+      "draw": {
+        "file": "/icon-spike/generated/oat-drink.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 347,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 29.5,
+            "error": null
+          }
+        ],
+        "latency_s": 29.5
+      }
+    },
+    {
+      "name": "Apple juice",
+      "pick": {
+        "icon": "1F34E",
+        "file": "/icon-spike/openmoji/1F34E.svg",
+        "annotation": "red apple",
+        "emoji": "🍎",
+        "reason": "Red apple is the most recognizable stand-in for apple juice",
+        "valid_answer": true,
+        "latency_s": 17.1
+      },
+      "category": "beverages",
+      "category_icon": "🥤",
+      "draw": {
+        "file": "/icon-spike/generated/apple-juice.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 420,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 57.8,
+            "error": null
+          }
+        ],
+        "latency_s": 57.8
+      }
+    },
+    {
+      "name": "Crisps",
+      "pick": {
+        "icon": null,
+        "file": null,
+        "annotation": null,
+        "emoji": null,
+        "reason": "No icon resembles thin potato crisps; fries are too different in shape",
+        "valid_answer": true,
+        "latency_s": 17.8
+      },
+      "category": "snacks",
+      "category_icon": "🍿",
+      "draw": {
+        "file": "/icon-spike/generated/crisps.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 536,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 84.5,
+            "error": null
+          }
+        ],
+        "latency_s": 84.5
+      }
+    },
+    {
+      "name": "Coffee",
+      "pick": {
+        "icon": "E0C6",
+        "file": "/icon-spike/openmoji/E0C6.svg",
+        "annotation": "roasted coffee bean",
+        "emoji": "",
+        "reason": "roasted coffee bean directly represents coffee as a pantry product",
+        "valid_answer": true,
+        "latency_s": 13.3
+      },
+      "category": "pantry",
+      "category_icon": "🥫",
+      "draw": {
+        "file": "/icon-spike/generated/coffee.svg",
+        "parsed": true,
+        "sanitised_changed": false,
+        "bytes": 513,
+        "attempts": [
+          {
+            "attempt": 1,
+            "latency_s": 60.7,
+            "error": null
+          }
+        ],
+        "latency_s": 60.7
+      }
+    }
+  ],
+  "runs": {
+    "pick": {
+      "model": "c2.qwen3.8-27b",
+      "at": "2026-09-26T10:30:44+00:00"
+    },
+    "draw": {
+      "model": "c2.qwen3.8-27b",
+      "at": "2026-09-26T10:39:02+00:00"
+    }
+  }
+}

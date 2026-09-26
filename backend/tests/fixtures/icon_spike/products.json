@@ -1,0 +1,25 @@
+{
+  "_comment": "Q18 icon spike: generic English product names, each with its seeded category (backend/app/db/seed_categories.py) and that category's emoji, which is what the tile shows today. 'difficulty' is a guess at how hard a distinct icon is to find: easy = a Unicode emoji exists, hard = nothing close.",
+  "products": [
+    { "name": "Tomato", "category": "produce", "category_icon": "🥬", "difficulty": "easy" },
+    { "name": "Banana", "category": "fruits", "category_icon": "🍎", "difficulty": "easy" },
+    { "name": "Orange", "category": "fruits", "category_icon": "🍎", "difficulty": "easy" },
+    { "name": "Carrot", "category": "produce", "category_icon": "🥬", "difficulty": "easy" },
+    { "name": "Potato", "category": "produce", "category_icon": "🥬", "difficulty": "easy" },
+    { "name": "Cucumber", "category": "produce", "category_icon": "🥬", "difficulty": "easy" },
+    { "name": "Milk", "category": "dairy", "category_icon": "🥛", "difficulty": "easy" },
+    { "name": "Quark", "category": "dairy", "category_icon": "🥛", "difficulty": "hard" },
+    { "name": "Eggs", "category": "dairy", "category_icon": "🥛", "difficulty": "easy" },
+    { "name": "Butter", "category": "dairy", "category_icon": "🥛", "difficulty": "easy" },
+    { "name": "Cheddar", "category": "cheese", "category_icon": "🧀", "difficulty": "easy" },
+    { "name": "Minced beef", "category": "meat", "category_icon": "🥩", "difficulty": "medium" },
+    { "name": "Chicken fillet strips", "category": "meat", "category_icon": "🥩", "difficulty": "medium" },
+    { "name": "Salmon", "category": "fish", "category_icon": "🐟", "difficulty": "medium" },
+    { "name": "Rye bread", "category": "bread", "category_icon": "🍞", "difficulty": "hard" },
+    { "name": "Karelian pasty", "category": "bread", "category_icon": "🍞", "difficulty": "hard" },
+    { "name": "Oat drink", "category": "beverages", "category_icon": "🥤", "difficulty": "hard" },
+    { "name": "Apple juice", "category": "beverages", "category_icon": "🥤", "difficulty": "medium" },
+    { "name": "Crisps", "category": "snacks", "category_icon": "🍿", "difficulty": "medium" },
+    { "name": "Coffee", "category": "pantry", "category_icon": "🥫", "difficulty": "easy" }
+  ]
+}
