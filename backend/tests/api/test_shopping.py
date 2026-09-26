@@ -2,11 +2,15 @@
 
 from datetime import UTC
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.idempotency_key import IdempotencyKey
 from app.models.product_master import ProductMaster
 from app.models.shopping_list_item import ShoppingListItem
 
@@ -543,3 +547,186 @@ class TestShoppingIntegrityErrors:
         )
 
         assert response.status_code == 400
+
+
+BANANAS = {
+    "name": "Bananas",
+    "quantity": "6",
+    "unit": "pcs",
+    "priority": "normal",
+    "source": "manual",
+}
+
+
+@pytest.fixture
+def shopping_broadcast():
+    with patch(
+        "app.api.endpoints.shopping.broadcast_shopping_list_update",
+        new_callable=AsyncMock,
+    ) as mock:
+        yield mock
+
+
+async def _count(db: AsyncSession, model) -> int:
+    return int((await db.execute(select(func.count()).select_from(model))).scalar())
+
+
+async def _unpurchased(db: AsyncSession) -> ShoppingListItem:
+    item = ShoppingListItem(
+        id=uuid4(),
+        name="Milk",
+        quantity=Decimal("2"),
+        unit="dl",
+        priority="normal",
+        source="manual",
+        is_purchased=False,
+    )
+    db.add(item)
+    await db.commit()
+    return item
+
+
+class TestIdempotentCreate:
+    """AG6 follow-up: `kyokki shopping add` retries safely with an Idempotency-Key."""
+
+    async def test_a_repeated_key_replays_without_a_second_item(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        headers = {"Idempotency-Key": "shop-add-1"}
+
+        first = await client.post("/api/shopping/", json=BANANAS, headers=headers)
+        second = await client.post("/api/shopping/", json=BANANAS, headers=headers)
+
+        assert (first.status_code, second.status_code) == (201, 201)
+        assert second.json() == first.json()
+        assert "Idempotent-Replayed" not in first.headers
+        assert second.headers.get("Idempotent-Replayed") == "true"
+        assert await _count(test_db, ShoppingListItem) == 1
+        assert await _count(test_db, IdempotencyKey) == 1
+        shopping_broadcast.assert_awaited_once()
+
+    async def test_an_equal_body_spelled_differently_replays(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        headers = {"Idempotency-Key": "shop-add-2"}
+        first = await client.post("/api/shopping/", json=BANANAS, headers=headers)
+
+        # 6.0 for "6", and the defaults left out
+        second = await client.post(
+            "/api/shopping/",
+            json={"name": "Bananas", "quantity": 6.0, "unit": "pcs"},
+            headers=headers,
+        )
+
+        assert second.status_code == 201
+        assert second.json() == first.json()
+        assert await _count(test_db, ShoppingListItem) == 1
+
+    async def test_the_same_key_with_another_body_is_a_conflict(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        headers = {"Idempotency-Key": "shop-add-3"}
+        await client.post("/api/shopping/", json=BANANAS, headers=headers)
+
+        response = await client.post(
+            "/api/shopping/", json={**BANANAS, "quantity": "12"}, headers=headers
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "conflict"
+        assert await _count(test_db, ShoppingListItem) == 1
+        shopping_broadcast.assert_awaited_once()
+
+    async def test_no_key_means_two_items(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        first = await client.post("/api/shopping/", json=BANANAS)
+        second = await client.post("/api/shopping/", json=BANANAS)
+
+        assert (first.status_code, second.status_code) == (201, 201)
+        assert first.json()["id"] != second.json()["id"]
+        assert "Idempotent-Replayed" not in second.headers
+        assert await _count(test_db, ShoppingListItem) == 2
+        assert await _count(test_db, IdempotencyKey) == 0
+        assert shopping_broadcast.await_count == 2
+
+    async def test_a_refused_create_is_not_remembered(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        headers = {"Idempotency-Key": "shop-add-4"}
+        body = {**BANANAS, "product_master_id": str(uuid4())}
+
+        refused = await client.post("/api/shopping/", json=body, headers=headers)
+
+        assert refused.status_code == 400
+        assert await _count(test_db, IdempotencyKey) == 0
+        shopping_broadcast.assert_not_awaited()
+
+
+class TestIdempotentPurchase:
+    """AG6 follow-up: `kyokki shopping done ID` retries safely with an Idempotency-Key."""
+
+    async def test_a_repeated_key_replays_without_running_again(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        item = await _unpurchased(test_db)
+        url = f"/api/shopping/{item.id}/purchase"
+        headers = {"Idempotency-Key": "shop-buy-1"}
+
+        first = await client.post(url, headers=headers)
+        second = await client.post(url, headers=headers)
+
+        assert (first.status_code, second.status_code) == (200, 200)
+        assert first.json()["is_purchased"] is True
+        # The same purchased_at: the replay did not stamp a new one
+        assert second.json() == first.json()
+        assert second.headers.get("Idempotent-Replayed") == "true"
+        assert await _count(test_db, IdempotencyKey) == 1
+        shopping_broadcast.assert_awaited_once()
+
+    async def test_the_same_key_with_another_request_is_a_conflict(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        item = await _unpurchased(test_db)
+        other = await _unpurchased(test_db)
+        headers = {"Idempotency-Key": "shop-buy-2"}
+        await client.post(f"/api/shopping/{item.id}/purchase", headers=headers)
+
+        unbuy = await client.post(
+            f"/api/shopping/{item.id}/purchase?purchased=false", headers=headers
+        )
+        elsewhere = await client.post(
+            f"/api/shopping/{other.id}/purchase", headers=headers
+        )
+
+        assert (unbuy.status_code, elsewhere.status_code) == (409, 409)
+        assert unbuy.json()["detail"]["code"] == "conflict"
+        assert elsewhere.json()["detail"]["code"] == "conflict"
+        shopping_broadcast.assert_awaited_once()
+
+    async def test_no_key_runs_every_time(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        item = await _unpurchased(test_db)
+        url = f"/api/shopping/{item.id}/purchase"
+
+        first = await client.post(url)
+        second = await client.post(url)
+
+        assert (first.status_code, second.status_code) == (200, 200)
+        assert "Idempotent-Replayed" not in second.headers
+        assert await _count(test_db, IdempotencyKey) == 0
+        assert shopping_broadcast.await_count == 2
+
+    async def test_an_unknown_item_is_not_remembered(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        headers = {"Idempotency-Key": "shop-buy-3"}
+
+        response = await client.post(
+            f"/api/shopping/{uuid4()}/purchase", headers=headers
+        )
+
+        assert response.status_code == 404
+        assert await _count(test_db, IdempotencyKey) == 0
+        shopping_broadcast.assert_not_awaited()

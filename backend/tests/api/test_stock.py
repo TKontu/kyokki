@@ -230,11 +230,38 @@ class TestStockAdd:
         broadcast.assert_awaited_once()
         assert broadcast.await_args.kwargs["action"] == "created"
 
-    async def test_an_unknown_product_id_is_invalid(
+    async def test_an_unknown_product_id_is_not_found(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        # The same answer stock/consume gives for an unknown id.
+        product_id = str(uuid4())
+        response = await client.post(
+            "/api/stock/add", json={"product_id": product_id, "quantity": 1}
+        )
+
+        assert response.status_code == 404
+        detail = response.json()["detail"]
+        assert detail["code"] == "not_found"
+        assert product_id in detail["message"]
+        assert await _count(seeded_db, InventoryItem) == 0
+        broadcast.assert_not_awaited()
+
+    async def test_a_new_product_without_a_category_is_still_invalid(
         self, client: AsyncClient, seeded_db
     ) -> None:
         response = await client.post(
-            "/api/stock/add", json={"product_id": str(uuid4()), "quantity": 1}
+            "/api/stock/add", json={"name": "Peas", "quantity": 1, "unit": "g"}
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["code"] == "invalid"
+
+    async def test_an_unknown_category_is_still_invalid(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        response = await client.post(
+            "/api/stock/add",
+            json={"name": "Peas", "category": "nope", "quantity": 1, "unit": "g"},
         )
 
         assert response.status_code == 400

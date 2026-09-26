@@ -1,8 +1,10 @@
 """Tests for receipt confirmation endpoint."""
 
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
-from uuid import uuid4
+from unittest.mock import AsyncMock, patch
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -11,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.main import app
 from app.models.category import Category
+from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
+from app.services.generic_products import build_inventory_item
 
 
 @pytest.fixture
@@ -458,3 +462,76 @@ class TestConfirmNewProducts:
         )
 
         assert response.status_code == 422
+
+
+class TestConfirmMovesStock:
+    """Q19: a confirm whose receipt replaces a product's placeholder shelf life re-dates the
+    stock that placeholder dated, and says so over the WebSocket once it has committed."""
+
+    async def test_the_re_dated_item_is_broadcast(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        processed_receipt: dict,
+        sample_product: ProductMaster,
+    ):
+        bought = date(2026, 9, 1)
+        sample_product.shelf_life_source = "category"
+        in_the_fridge = build_inventory_item(
+            sample_product, quantity=Decimal("5"), purchase_date=bought
+        )
+        test_db.add(in_the_fridge)
+        receipt = await test_db.get(Receipt, UUID(processed_receipt["id"]))
+        assert receipt is not None
+        # The model read the milk off this receipt and estimated how long it keeps
+        receipt.ocr_structured = {
+            "lines": [{"name": "Valio Whole Milk 1L", "shelf_life_days": 12}]
+        }
+        await test_db.commit()
+        in_the_fridge_id = in_the_fridge.id
+        assert in_the_fridge.expiry_date == bought + timedelta(days=7)
+
+        with patch(
+            "app.services.receipt_confirm.broadcast_inventory_update",
+            new_callable=AsyncMock,
+        ) as broadcast:
+            response = await client.post(
+                f"/api/receipts/{processed_receipt['id']}/confirm",
+                json={
+                    "items": [
+                        {
+                            "index": 0,
+                            "product_id": processed_receipt["product_id"],
+                            "quantity": 1,
+                            "unit": "dl",
+                            "purchase_date": "2026-09-20",
+                        }
+                    ]
+                },
+            )
+
+        assert response.status_code == 200, response.text
+        moved = await test_db.get(
+            InventoryItem, in_the_fridge_id, populate_existing=True
+        )
+        assert moved is not None
+        assert moved.expiry_date == bought + timedelta(days=12)
+        updates = [
+            call.kwargs
+            for call in broadcast.await_args_list
+            if call.kwargs["action"] == "updated"
+        ]
+        assert updates == [
+            {
+                "inventory_item_id": in_the_fridge_id,
+                "action": "updated",
+                "current_quantity": Decimal("5"),
+                "status": "sealed",
+            }
+        ]
+        created = [
+            call.kwargs
+            for call in broadcast.await_args_list
+            if call.kwargs["action"] == "created"
+        ]
+        assert len(created) == 1

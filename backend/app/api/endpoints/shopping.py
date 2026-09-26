@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.endpoints.stock import IdempotencyKeyHeader, claim_request, replayed
@@ -21,15 +22,23 @@ from app.schemas.shopping_list_item import (
     ShoppingListItemResponse,
     ShoppingListItemUpdate,
 )
-from app.services import shopping_generate
+from app.services import idempotency, shopping_generate
 from app.services.broadcast_helpers import broadcast_shopping_list_update
 
 router = APIRouter()
 logger = get_logger(__name__)
 
 GENERATE_ROUTE = "POST /api/shopping/generate"
+CREATE_ROUTE = "POST /api/shopping/"
+PURCHASE_ROUTE = "POST /api/shopping/{id}/purchase"
 GeneratedAction = Literal["created", "updated"]
 EXPORT_MEDIA_TYPES = {"text": "text/plain", "markdown": "text/markdown"}
+
+
+class _PurchaseRequest(BaseModel):
+    """What a purchase call asks for, hashed for its Idempotency-Key with the item id."""
+
+    purchased: bool
 
 
 @router.get("/", response_model=list[ShoppingListItemResponse])
@@ -119,8 +128,11 @@ async def generate_shopping_list(
     its `reorder_quantity`, or the shortfall when that is not set. An open item for the
     product is raised to the need instead of being joined by a second one.
 
-    Errors: 400 `invalid` (no source, or an unknown one), 409 `conflict`
+    Errors: 400 `invalid` (`sources` is not a non-empty list of known source names:
+    a bare string, an object, a list holding a non-string, an unknown name, an empty
+    list, or no `sources`), 409 `conflict`
     (Idempotency-Key reused with another body). A dry run is never remembered.
+    Two runs at once serialise: the second merges into the first's items.
     """
     claim = (
         None if body.dry_run else claim_request(body, idempotency_key, GENERATE_ROUTE)
@@ -178,13 +190,18 @@ async def get_shopping_item(
 )
 async def create_shopping_item(
     item_in: ShoppingListItemCreate,
+    idempotency_key: str | None = IdempotencyKeyHeader,
     db: AsyncSession = Depends(get_db),
-):
+) -> Any:
     """Create a new shopping list item.
 
     Can be either:
     - Linked to a product_master (product_master_id provided)
     - Free-text item (product_master_id is null)
+
+    With an Idempotency-Key, the same key and body within 24 h replays the first 201
+    (`Idempotent-Replayed: true`) without adding or broadcasting again; the same key
+    with another body is 409 `conflict`.
     """
     logger.info(
         "create_shopping_item",
@@ -207,8 +224,12 @@ async def create_shopping_item(
     # spelling a vocabulary alongside Literal and StrEnum. `ShoppingSource` does it at the
     # schema now, so an unknown value never reaches this function (H24).
 
-    async with handle_integrity_errors():
-        item = await shopping_list_item.create(db, obj_in=item_in)
+    claim = claim_request(item_in, idempotency_key, CREATE_ROUTE)
+    async with idempotency.held(db, claim):
+        if (stored := await replayed(db, claim)) is not None:
+            return stored
+        async with handle_integrity_errors():
+            item = await shopping_generate.create_item(db, item_in, claim=claim)
 
     # Broadcast creation
     await broadcast_shopping_list_update(
@@ -266,22 +287,37 @@ async def mark_item_purchased(
     purchased: bool = Query(
         True, description="Mark as purchased (true) or unpurchased (false)"
     ),
+    idempotency_key: str | None = IdempotencyKeyHeader,
     db: AsyncSession = Depends(get_db),
-):
+) -> Any:
     """Mark a shopping list item as purchased or unpurchased.
 
     When marked as purchased, sets is_purchased=true and records purchased_at timestamp.
     When marked as unpurchased, sets is_purchased=false and clears purchased_at.
+
+    With an Idempotency-Key, the same key for the same item and `purchased` within 24 h
+    replays the first answer (`Idempotent-Replayed: true`, the same `purchased_at`)
+    without running or broadcasting again; the same key for another item or value is
+    409 `conflict`. An unknown item (404) is not remembered.
     """
     logger.info(
         "mark_item_purchased",
         extra={"item_id": str(item_id), "purchased": purchased},
     )
 
-    async with handle_integrity_errors():
-        item = await shopping_list_item.mark_purchased(
-            db, item_id=item_id, purchased=purchased
-        )
+    claim = claim_request(
+        _PurchaseRequest(purchased=purchased),
+        idempotency_key,
+        PURCHASE_ROUTE,
+        item_id=item_id,
+    )
+    async with idempotency.held(db, claim):
+        if (stored := await replayed(db, claim)) is not None:
+            return stored
+        async with handle_integrity_errors():
+            item = await shopping_generate.mark_purchased(
+                db, item_id, purchased=purchased, claim=claim
+            )
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

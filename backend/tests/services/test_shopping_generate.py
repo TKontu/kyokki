@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -34,7 +35,7 @@ async def _product(
     min_stock: str | None = None,
     reorder: str | None = None,
 ) -> ProductMaster:
-    unit_type = {"dl": "volume", "l": "volume", "g": "weight", "pcs": "count"}[unit]
+    unit_type = {"dl": "volume", "g": "weight", "pcs": "count"}[unit]
     product = ProductMaster(
         id=uuid4(),
         canonical_name=name,
@@ -180,20 +181,44 @@ class TestWhatIsLow:
 
         assert result.added == result.skipped == []
 
-    async def test_stock_in_a_compatible_unit_is_converted(self, db) -> None:
-        juice = await _product(db, "Juice", unit="l", min_stock="2")
-        await _stock(db, juice, "5", unit="dl")
+    async def test_stock_in_the_products_own_unit_is_counted(self, db) -> None:
+        # Units are stored canonical (dl | tsp | tbsp | g | pcs): grams against grams.
+        butter = await _product(db, "Butter", unit="g", min_stock="500")
+        await _stock(db, butter, "200", unit="g")
+        await _stock(db, butter, "50", unit="g", status="opened")
 
         result = await shopping_generate.generate(db, LOW, dry_run=False)
 
         [line] = result.added
         assert (line.on_hand, line.need, line.unit) == (
-            Decimal("0.5"),
-            Decimal("1.5"),
-            "l",
+            Decimal("250"),
+            Decimal("250"),
+            "g",
         )
         [item] = await _items(db)
-        assert (item.quantity, item.unit) == (Decimal("15"), "dl")
+        assert (item.quantity, item.unit) == (Decimal("250"), "g")
+
+    @pytest.mark.parametrize("spoon", ["tsp", "tbsp"])
+    async def test_spoons_against_decilitres_are_skipped(self, db, spoon) -> None:
+        # tsp and tbsp are canonical in their own right and do not convert to dl.
+        vinegar = await _product(db, "Vinegar", unit="dl", min_stock="2")
+        await _stock(db, vinegar, "3", unit=spoon)
+
+        result = await shopping_generate.generate(db, LOW, dry_run=False)
+
+        assert result.added == result.updated == result.unchanged == []
+        [line] = result.skipped
+        assert (line.product_id, line.unit, line.min_stock) == (
+            vinegar.id,
+            "dl",
+            Decimal("2"),
+        )
+        # Stock that cannot be counted: no need, no on_hand, no item.
+        assert (line.need, line.on_hand, line.item_id) == (None, None, None)
+        assert line.reason == (
+            f"stock in {spoon} cannot be counted against min_stock in dl"
+        )
+        assert await _count(db) == 0
 
     async def test_stock_in_an_incompatible_unit_is_skipped(self, db) -> None:
         eggs = await _product(db, "Eggs", unit="pcs", min_stock="6")
@@ -248,6 +273,36 @@ class TestMerging:
         assert [line.item_id for line in second.unchanged] == [first.added[0].item_id]
         assert await _count(db) == 1
 
+    async def test_an_open_item_in_a_unit_that_cannot_hold_the_need_is_skipped(
+        self, db
+    ) -> None:
+        # The stock counts, so the need is known; the open item is in grams and a need in
+        # decilitres cannot be written into it. Nothing is added beside it.
+        milk = await _product(db, "Milk", min_stock="10")
+        await _stock(db, milk, "4")
+        open_item = await _open_item(db, milk, "500", unit="g")
+
+        result = await shopping_generate.generate(db, LOW, dry_run=False)
+
+        assert result.added == result.updated == result.unchanged == []
+        [line] = result.skipped
+        assert (line.product_id, line.item_id) == (milk.id, open_item.id)
+        assert (line.need, line.on_hand, line.min_stock, line.unit) == (
+            Decimal("6"),
+            Decimal("4"),
+            Decimal("10"),
+            "dl",
+        )
+        assert (
+            line.reason == "the open list item is in g, which cannot hold a need in dl"
+        )
+        [item] = await _items(db)
+        assert (item.id, item.quantity, item.unit) == (
+            open_item.id,
+            Decimal("500"),
+            "g",
+        )
+
     async def test_a_purchased_item_is_not_reused(self, db) -> None:
         milk = await _product(db, "Milk", min_stock="10")
         await _stock(db, milk, "4")
@@ -292,7 +347,50 @@ class TestDryRun:
 
 
 class TestSources:
-    @pytest.mark.parametrize("sources", [[], ["recipe"], ["low_stock", "meal_plan"]])
-    async def test_only_low_stock_is_a_source(self, db, sources) -> None:
-        with pytest.raises(InvalidGenerate):
+    @pytest.mark.parametrize(
+        "sources",
+        [
+            [],
+            ["recipe"],
+            ["low_stock", "meal_plan"],
+            "low_stock",
+            {"recipe": {"id": 1}},
+            ["low_stock", {"recipe": {"id": 1}}],
+            None,
+            [None],
+            [1],
+        ],
+    )
+    async def test_only_a_list_of_known_sources_is_accepted(self, db, sources) -> None:
+        with pytest.raises(InvalidGenerate) as refused:
             await shopping_generate.generate(db, sources, dry_run=False)
+
+        assert "low_stock" in str(refused.value)
+
+
+class TestSerialised:
+    async def test_a_real_run_takes_the_generate_lock(self, db) -> None:
+        taken: list[str] = []
+        real_execute = db.execute
+
+        async def spy(statement, *args, **kwargs):
+            taken.append(str(statement))
+            return await real_execute(statement, *args, **kwargs)
+
+        with patch.object(db, "execute", side_effect=spy):
+            await shopping_generate.generate(db, LOW, dry_run=False)
+
+        assert any("pg_advisory_xact_lock" in sql for sql in taken)
+
+    async def test_a_dry_run_takes_no_lock(self, db) -> None:
+        taken: list[str] = []
+        real_execute = db.execute
+
+        async def spy(statement, *args, **kwargs):
+            taken.append(str(statement))
+            return await real_execute(statement, *args, **kwargs)
+
+        with patch.object(db, "execute", side_effect=spy):
+            await shopping_generate.generate(db, LOW, dry_run=True)
+
+        assert not any("pg_advisory" in sql for sql in taken)

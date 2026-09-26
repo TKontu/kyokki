@@ -18,17 +18,23 @@ and the rows are cleaned up at the end.
 import asyncio
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.crud.inventory_item import consume_inventory_item
+from app.crud.shopping_list_item import shopping_list_item as crud_shopping
 from app.models.category import Category
 from app.models.consumption_log import ConsumptionLog
+from app.models.idempotency_key import IdempotencyKey
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
+from app.models.shopping_list_item import ShoppingListItem
+from app.services import shopping_generate
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_db]
 
@@ -153,3 +159,224 @@ class TestTwoConsumesAtOnce:
         assert sorted(results) == ["consumed", "refused"]
         assert await _remaining(committed, stocked_item) == Decimal("3.00")
         assert len(await _logs(committed, stocked_item)) == 1
+
+
+@pytest.fixture
+async def low_products(committed):
+    """Three products below their minimum, with no stock at all; removed afterwards."""
+    suffix = uuid4().hex[:8]
+    category_id = f"conc-{suffix}"
+
+    async with committed() as session:
+        session.add(
+            Category(
+                id=category_id,
+                display_name=f"Concurrency {suffix}",
+                default_shelf_life_days=14,
+                sort_order=999,
+            )
+        )
+        await session.flush()
+        products = [
+            ProductMaster(
+                canonical_name=f"{name} {suffix}",
+                category=category_id,
+                storage_type="refrigerator",
+                default_shelf_life_days=14,
+                unit_type="volume",
+                default_unit="dl",
+                min_stock_quantity=Decimal(5),
+            )
+            for name in ("Milk", "Cream", "Yoghurt")
+        ]
+        session.add_all(products)
+        await session.commit()
+        product_ids = [product.id for product in products]
+
+    yield product_ids
+
+    async with committed() as session:
+        await session.execute(
+            delete(ShoppingListItem).where(
+                ShoppingListItem.product_master_id.in_(product_ids)
+            )
+        )
+        await session.execute(
+            delete(ProductMaster).where(ProductMaster.id.in_(product_ids))
+        )
+        await session.execute(delete(Category).where(Category.id == category_id))
+        await session.commit()
+
+
+class TestTwoGeneratesAtOnce:
+    async def test_the_second_sees_the_first_s_items(
+        self, committed, low_products
+    ) -> None:
+        """AG6 review: two generates without a shared key both inserted (3 low -> 5 items).
+
+        Reading the open items is slowed down so both callers are sure to overlap; the
+        advisory lock makes the second wait for the first's commit and then find its items.
+        """
+        real_get_by_product = crud_shopping.get_by_product
+
+        async def slow_get_by_product(db, *, product_master_id):
+            items = await real_get_by_product(db, product_master_id=product_master_id)
+            await asyncio.sleep(0.05)
+            return items
+
+        async def generate() -> None:
+            async with committed() as session:
+                await shopping_generate.generate(session, ["low_stock"], dry_run=False)
+
+        with patch.object(
+            crud_shopping, "get_by_product", side_effect=slow_get_by_product
+        ):
+            await asyncio.gather(generate(), generate())
+
+        async with committed() as session:
+            items = (
+                (
+                    await session.execute(
+                        select(ShoppingListItem).where(
+                            ShoppingListItem.product_master_id.in_(low_products)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert sorted(item.product_master_id for item in items) == sorted(low_products)
+
+
+@pytest.fixture
+async def own_requests(committed):
+    """A client whose every request gets its own session and connection, committing for
+    real, with the shopping broadcast mocked. Rows made under the test's keys go after."""
+    from app.db.session import get_db
+    from app.main import app
+
+    async def override_get_db():
+        async with committed() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with patch(
+            "app.api.endpoints.shopping.broadcast_shopping_list_update",
+            new_callable=AsyncMock,
+        ) as broadcast:
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                yield client, broadcast
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+async def race_names(committed):
+    """A unique item name and key prefix; their rows are deleted afterwards."""
+    suffix = uuid4().hex[:8]
+    yield f"Race item {suffix}", f"race-{suffix}"
+
+    async with committed() as session:
+        await session.execute(
+            delete(ShoppingListItem).where(
+                ShoppingListItem.name == f"Race item {suffix}"
+            )
+        )
+        await session.execute(
+            delete(IdempotencyKey).where(IdempotencyKey.key.like(f"race-{suffix}%"))
+        )
+        await session.commit()
+
+
+def _slow(real):
+    """The CRUD write, then a pause before the answer is remembered: a retry that
+    arrives now finds the item committed and no key stored yet."""
+
+    async def slow(db: AsyncSession, **kwargs):
+        result = await real(db, **kwargs)
+        await asyncio.sleep(0.3)
+        return result
+
+    return slow
+
+
+class TestTwoShoppingRetriesAtOnce:
+    """AG6 follow-up: a client that times out and retries while its first request still
+    runs. `idempotency.held` makes the retry wait for the stored answer and replay it."""
+
+    async def test_two_creates_with_one_key_make_one_item(
+        self, committed, own_requests, race_names
+    ) -> None:
+        client, broadcast = own_requests
+        name, key = race_names
+        body = {"name": name, "quantity": 2, "unit": "pcs"}
+        headers = {"Idempotency-Key": f"{key}-create"}
+
+        with patch.object(
+            crud_shopping, "create", side_effect=_slow(crud_shopping.create)
+        ):
+            first, second = await asyncio.gather(
+                client.post("/api/shopping/", json=body, headers=headers),
+                client.post("/api/shopping/", json=body, headers=headers),
+            )
+
+        assert (first.status_code, second.status_code) == (201, 201)
+        assert first.json() == second.json()
+        replayed = [
+            r.headers.get("Idempotent-Replayed") == "true" for r in (first, second)
+        ]
+        assert sorted(replayed) == [False, True]
+        async with committed() as session:
+            items = (
+                (
+                    await session.execute(
+                        select(ShoppingListItem).where(ShoppingListItem.name == name)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        assert len(items) == 1
+        assert broadcast.await_count == 1
+
+    async def test_two_purchases_with_one_key_run_once(
+        self, committed, own_requests, race_names
+    ) -> None:
+        client, broadcast = own_requests
+        name, key = race_names
+        async with committed() as session:
+            item = ShoppingListItem(
+                name=name,
+                quantity=Decimal(2),
+                unit="pcs",
+                priority="normal",
+                source="manual",
+                is_purchased=False,
+            )
+            session.add(item)
+            await session.commit()
+            item_id = item.id
+        url = f"/api/shopping/{item_id}/purchase"
+        headers = {"Idempotency-Key": f"{key}-buy"}
+
+        with patch.object(
+            crud_shopping,
+            "mark_purchased",
+            side_effect=_slow(crud_shopping.mark_purchased),
+        ):
+            first, second = await asyncio.gather(
+                client.post(url, headers=headers),
+                client.post(url, headers=headers),
+            )
+
+        assert (first.status_code, second.status_code) == (200, 200)
+        # One purchase ran: the replay carries the same purchased_at
+        assert first.json() == second.json()
+        replayed = [
+            r.headers.get("Idempotent-Replayed") == "true" for r in (first, second)
+        ]
+        assert sorted(replayed) == [False, True]
+        assert broadcast.await_count == 1
