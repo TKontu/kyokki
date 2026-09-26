@@ -31,11 +31,11 @@ examples:
 
 exit codes:
   0 ok
-  1 error: cannot reach the server, a 5xx, an answer that is not the expected
-    JSON, or a change sent that got no answer (it may have been applied)
+  1 error: cannot reach the server, a 5xx, an answer that is not JSON, or a
+    change sent that got no answer (it may have been applied)
   2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
-  3 not found: nothing matches the name, or no product has the id
-  4 ambiguous name: the candidates are printed on stdout
-  5 insufficient stock
-  6 conflict: the name belongs to another product, or a reused Idempotency-Key
+  3 not found: no shopping item has the ID
+  4 ambiguous name: does not occur for this command
+  5 insufficient stock: does not occur for this command
+  6 conflict: a reused Idempotency-Key (409)
   7 auth: missing or unknown token (401), or a read token on a write (403)

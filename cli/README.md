@@ -46,15 +46,25 @@ The shopping commands call `/api/shopping/`:
 
 | Command | Request | Exit codes beyond 0, 1, 2 and 7 |
 | ------- | ------- | ------------------------------- |
-| `shopping list` | `GET /api/shopping/?include_purchased=true&priority=P` | |
-| `shopping add` | `POST /api/shopping/` `{name, quantity, unit, priority?, product_master_id?}` | 6 (reused key) |
-| `shopping done` | `POST /api/shopping/{ID}/purchase?purchased=true\|false` | 3 (no such item), 6 |
-| `shopping remove` | `DELETE /api/shopping/{ID}` | 3 (no such item), 6 |
+| `shopping list` | `GET /api/shopping/?include_purchased=true&priority=P&limit=500&skip=N`, page after page | |
+| `shopping add` | `POST /api/shopping/` `{name, quantity, unit, priority?, product_master_id?}` | 3 (unknown `--product-id`), 6 (reused key) |
+| `shopping done` | `POST /api/shopping/{ID}/purchase?purchased=true\|false` | 3 (no such item), 6 (reused key) |
+| `shopping remove` | `DELETE /api/shopping/{ID}`, no Idempotency-Key | 3 (no such item, also one already removed) |
 | `shopping generate` | `POST /api/shopping/generate` `{sources: ["low_stock"], dry_run}` | 6; any 400 or 422 is 2 |
 | `shopping export` | `GET /api/shopping/export?format=text\|markdown` | |
 
-AMOUNT without UNIT (or the reverse) is a usage error, exit 2. `done` and `remove` report
-a 404 as `not_found` (exit 3), whether the server's detail is a plain string or coded.
+- `list` shows every item: the server answers at most 500 rows a request, so the CLI
+  asks again with `skip` until a page comes back short.
+- `add`: a blank NAME, or AMOUNT without UNIT (or the reverse), is a usage error (exit
+  2) and nothing is sent. Options may come anywhere on the line, also between NAME and
+  AMOUNT (`shopping add milk --priority urgent 1 l`). An unknown `--product-id` (the
+  server's foreign-key 400) is `not_found`, exit 3.
+- `done` and `remove` report a 404 as `not_found` (exit 3) only when it is the answer
+  for a missing item: a coded `not_found`, or the router's `Shopping list item ID not
+  found`. Any other 404 (a wrong route, a proxy's page) stays `http_404`, exit 1.
+- `remove` sends no Idempotency-Key, because the server ignores it on DELETE: nothing
+  could replay. Removing is safe to repeat instead. If a remove got no answer, run it
+  again; exit 3 then means the first one removed it.
 
 ## Output
 
@@ -65,14 +75,16 @@ When a name is ambiguous the candidates are printed in both modes.
 
 Where the CLI adds to or builds the document itself:
 
-- `stock add`, `stock consume`, `product name add`, `shopping add`, `shopping done`,
-  `shopping remove` and `shopping generate` add `"replayed": true|false`: true when the
-  server replayed the answer to an earlier request with the same Idempotency-Key
-  instead of applying the change again.
-- `shopping remove` answers 204 with no body; `--json` prints `{"id": ..., "removed":
-  true, "replayed": ...}`.
-- `shopping export` prints the server's text/plain or text/markdown body unchanged on a
-  terminal, and `{"format": ..., "text": ...}` with `--json`. A success that is not
+- `stock add`, `stock consume`, `product name add`, `shopping add`, `shopping done`
+  and `shopping generate` add `"replayed": true|false`: true when the server replayed
+  the answer to an earlier request with the same Idempotency-Key instead of applying
+  the change again.
+- `shopping remove` answers 204 with no body; the JSON is `{"id": ..., "removed":
+  true}`.
+- `shopping export` is the exception to "JSON whenever stdout is not a terminal": it
+  writes the server's text/plain or text/markdown body unchanged, to a terminal, a
+  file or a pipe (`shopping export --format markdown > list.md`), and prints
+  `{"format": ..., "text": ...}` only with an explicit `--json`. A success that is not
   text/plain or text/markdown (an HTML login page, JSON) is `bad_response`.
 - `shopping generate` prints the backend's `{added, updated, unchanged, skipped,
   dry_run}` object; on a terminal it groups the products under those headings, with
@@ -100,10 +112,11 @@ Mutations send an `Idempotency-Key`: by default the SHA-256 of the command line 
 `--url` and `--token` and their values, and the output-only `--json` and `--verbose`) and
 the current UTC minute, so re-running the same command within the minute, with or
 without those flags, does not add or consume twice. `--idempotency-key KEY` sets one
-explicitly. A dry run sends none. The mutations are `stock add`, `stock consume`,
-`product name add`, `shopping add`, `shopping done`, `shopping remove` and `shopping
-generate`; `shopping done ID` and `shopping done ID --undo` are different command lines,
-so they get different keys.
+explicitly. A dry run sends none. The keyed mutations are `stock add`, `stock
+consume`, `product name add`, `shopping add`, `shopping done` and `shopping generate`;
+`shopping done ID` and `shopping done ID --undo` are different command lines, so they
+get different keys. `shopping remove` sends no key (see above): a repeat is harmless and
+exits 3.
 
 When a change was sent but no answer came back (a read timeout), the CLI exits 1 with
 `unknown_outcome`, prints the key it used and the command to retry with

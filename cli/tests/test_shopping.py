@@ -106,7 +106,7 @@ def test_list_asks_for_open_items(api: FakeApi, run: Runner) -> None:
     assert result.code == 0
     assert api.last.method == "GET"
     assert api.last.url.path == LIST_PATH
-    assert dict(api.last.url.params) == {}
+    assert dict(api.last.url.params) == {"limit": "500", "skip": "0"}
     assert api.last.headers["Authorization"] == f"Bearer {TOKEN}"
     assert "Idempotency-Key" not in api.last.headers
     assert result.json() == [SHOPPING_ITEM]
@@ -118,7 +118,40 @@ def test_list_all_and_priority(api: FakeApi, run: Runner) -> None:
     assert dict(api.last.url.params) == {
         "include_purchased": "true",
         "priority": "urgent",
+        "limit": "500",
+        "skip": "0",
     }
+
+
+def test_list_pages_through_the_whole_list(api: FakeApi, run: Runner) -> None:
+    rows = [{**SHOPPING_ITEM, "name": f"item {n}"} for n in range(1203)]
+
+    def page(request: httpx.Request) -> httpx.Response:
+        skip = int(request.url.params["skip"])
+        limit = int(request.url.params["limit"])
+        return httpx.Response(200, json=rows[skip : skip + limit])
+
+    api.routes[("GET", LIST_PATH)] = page
+    result = run("shopping", "list", "--all")
+    assert result.code == 0
+    assert [r.url.params["skip"] for r in api.requests] == ["0", "500", "1000"]
+    assert {r.url.params["include_purchased"] for r in api.requests} == {"true"}
+    assert result.json() == rows
+
+
+def test_list_an_exact_page_asks_once_more(api: FakeApi, run: Runner) -> None:
+    rows = [SHOPPING_ITEM] * 500
+
+    def page(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=rows if request.url.params["skip"] == "0" else []
+        )
+
+    api.routes[("GET", LIST_PATH)] = page
+    result = run("shopping", "list")
+    assert result.code == 0
+    assert len(api.requests) == 2
+    assert len(result.json()) == 500
 
 
 def test_list_rejects_an_unknown_priority(api: FakeApi, run: Runner) -> None:
@@ -210,6 +243,68 @@ def test_add_rejects_bad_arguments(api: FakeApi, run: Runner, argv: list[str]) -
     assert api.requests == []
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["shopping", "add", "Milk", "--priority", "urgent", "1", "l"],
+        ["shopping", "add", "--priority", "urgent", "Milk", "1", "l"],
+        ["shopping", "add", "Milk", "1", "--priority", "urgent", "l"],
+        ["shopping", "add", "Milk", "--json", "1", "l", "--priority", "urgent"],
+    ],
+    ids=["flag-before-amount", "flag-first", "flag-between", "json-between"],
+)
+def test_add_flags_and_positionals_mix(
+    api: FakeApi, run: Runner, argv: list[str]
+) -> None:
+    api.on("POST", LIST_PATH, 201, SHOPPING_ITEM)
+    result = run(*argv)
+    assert result.code == 0, result.err
+    assert api.last_json() == {
+        "name": "Milk",
+        "quantity": 1,
+        "unit": "l",
+        "priority": "urgent",
+    }
+
+
+def test_add_intermixed_still_rejects_extra_words(api: FakeApi, run: Runner) -> None:
+    result = run("shopping", "add", "Milk", "--priority", "low", "1", "l", "extra")
+    assert result.code == 2
+    assert api.requests == []
+
+
+@pytest.mark.parametrize("name", ["", "   ", "\t"])
+def test_add_a_blank_name_is_usage(api: FakeApi, run: Runner, name: str) -> None:
+    result = run("shopping", "add", name)
+    assert result.code == 2
+    assert result.json()["code"] == "usage"
+    assert api.requests == []
+
+
+def test_add_an_unknown_product_id_is_not_found(api: FakeApi, run: Runner) -> None:
+    api.error("POST", LIST_PATH, 400, "Referenced record does not exist.")
+    result = run("shopping", "add", "Milk", "--product-id", PRODUCT_ID)
+    assert result.code == 3
+    body = result.json()
+    assert body["code"] == "not_found"
+    assert PRODUCT_ID in body["message"]
+
+
+def test_add_a_coded_not_found_product_is_3(api: FakeApi, run: Runner) -> None:
+    detail = {"code": "not_found", "message": f"product '{PRODUCT_ID}' not found"}
+    api.error("POST", LIST_PATH, 404, detail)
+    result = run("shopping", "add", "Milk", "--product-id", PRODUCT_ID)
+    assert result.code == 3
+    assert result.json() == detail
+
+
+def test_add_a_foreign_key_400_without_product_id_stays_usage(
+    api: FakeApi, run: Runner
+) -> None:
+    api.error("POST", LIST_PATH, 400, "Referenced record does not exist.")
+    assert run("shopping", "add", "Milk").code == 2
+
+
 def test_add_human(api: FakeApi, run: Runner, tty: None) -> None:
     api.on("POST", LIST_PATH, 201, SHOPPING_ITEM)
     result = run("shopping", "add", "Milk", "1", "l")
@@ -289,8 +384,25 @@ def test_remove_deletes(api: FakeApi, run: Runner) -> None:
     assert result.code == 0
     assert api.last.method == "DELETE"
     assert api.last.url.path == ITEM_PATH
-    assert len(api.last.headers["Idempotency-Key"]) == 64
-    assert result.json() == {"id": ITEM_ID, "removed": True, "replayed": False}
+    assert "Idempotency-Key" not in api.last.headers
+    assert result.json() == {"id": ITEM_ID, "removed": True}
+
+
+def test_remove_takes_no_idempotency_key(api: FakeApi, run: Runner) -> None:
+    result = run("shopping", "remove", ITEM_ID, "--idempotency-key", "k")
+    assert result.code == 2
+    assert api.requests == []
+
+
+def test_remove_a_read_timeout_is_connection_and_says_rerun(
+    api: FakeApi, run: Runner
+) -> None:
+    api.routes[("DELETE", ITEM_PATH)] = _times_out
+    result = run("shopping", "remove", ITEM_ID)
+    assert result.code == 1
+    detail = result.json()
+    assert detail["code"] == "connection"
+    assert "exit 3" in detail["hint"]
 
 
 def test_remove_human(api: FakeApi, run: Runner, tty: None) -> None:
@@ -337,6 +449,36 @@ def test_an_unknown_item_is_not_found(
     body = result.json()
     assert body["code"] == "not_found"
     assert ITEM_ID in body["message"]
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "argv"),
+    [
+        ("POST", PURCHASE_PATH, ["shopping", "done", ITEM_ID]),
+        ("DELETE", ITEM_PATH, ["shopping", "remove", ITEM_ID]),
+    ],
+)
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(404, json={"detail": "Not Found"}),
+        httpx.Response(404, text="<html>404 Not Found</html>"),
+        httpx.Response(404, json={"detail": "Product 42 not found"}),
+    ],
+    ids=["route", "proxy-html", "other-string"],
+)
+def test_another_404_stays_1(
+    api: FakeApi,
+    run: Runner,
+    method: str,
+    path: str,
+    argv: list[str],
+    answer: httpx.Response,
+) -> None:
+    api.routes[(method, path)] = answer
+    result = run(*argv)
+    assert result.code == 1
+    assert result.json()["code"] == "http_404"
 
 
 def test_an_unknown_item_human(api: FakeApi, run: Runner, tty: None) -> None:
@@ -468,10 +610,33 @@ def test_export_json(api: FakeApi, run: Runner) -> None:
     api.routes[("GET", EXPORT_PATH)] = text_answer(
         EXPORT_MARKDOWN, "text/markdown; charset=utf-8"
     )
-    result = run("shopping", "export", "--format", "markdown")
+    result = run("shopping", "export", "--format", "markdown", "--json")
     assert result.code == 0
     assert result.json() == {"format": "markdown", "text": EXPORT_MARKDOWN}
     assert "Idempotency-Key" not in api.last.headers
+
+
+@pytest.mark.parametrize(
+    ("fmt", "body", "media_type"),
+    [
+        ("text", EXPORT_TEXT, "text/plain; charset=utf-8"),
+        ("markdown", EXPORT_MARKDOWN, "text/markdown; charset=utf-8"),
+    ],
+)
+def test_export_redirected_writes_the_text_not_json(
+    api: FakeApi, run: Runner, fmt: str, body: str, media_type: str
+) -> None:
+    # No tty fixture: stdout is not a terminal, as in `export > list.md`.
+    api.routes[("GET", EXPORT_PATH)] = text_answer(body, media_type)
+    result = run("shopping", "export", "--format", fmt)
+    assert result.code == 0
+    assert result.out == body
+
+
+def test_export_json_flag_before_the_command(api: FakeApi, run: Runner) -> None:
+    api.routes[("GET", EXPORT_PATH)] = text_answer(EXPORT_TEXT, "text/plain")
+    result = run("--json", "shopping", "export")
+    assert result.json() == {"format": "text", "text": EXPORT_TEXT}
 
 
 @pytest.mark.parametrize(
@@ -518,7 +683,8 @@ EVERY_COMMAND: list[tuple[str, str, list[str]]] = [
     ("POST", GENERATE_PATH, ["shopping", "generate"]),
     ("GET", EXPORT_PATH, ["shopping", "export"]),
 ]
-MUTATIONS = [case for case in EVERY_COMMAND if case[0] != "GET"]
+# remove sends no key: the server ignores Idempotency-Key on DELETE.
+MUTATIONS = [case for case in EVERY_COMMAND if case[0] == "POST"]
 IDS = [" ".join(case[2][:2]) for case in EVERY_COMMAND]
 MUTATION_IDS = [" ".join(case[2][:2]) for case in MUTATIONS]
 
