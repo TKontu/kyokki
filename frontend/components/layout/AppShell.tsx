@@ -83,7 +83,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )
         })}
       </nav>
-      <div className="min-w-0 flex-1">
+      {/* A column, so a page can take the height left under the bar: the fridge fills it */}
+      <div className="flex min-w-0 flex-1 flex-col">
         {/* Above every screen, and silent unless something is wrong (H45) */}
         <StatusBanner />
         {children}

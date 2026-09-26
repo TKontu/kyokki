@@ -124,6 +124,20 @@ describe('fridge mocks page', () => {
     expect(document.documentElement).not.toHaveClass('dark')
   })
 
+  it('shows the production portrait fridge beside the mocks, on sample stock (Q17-B)', () => {
+    mockItems([])
+    window.history.replaceState(null, '', '/components-demo/fridge?design=portrait&sample=on')
+    render(<FridgeMocksPage />)
+
+    expect(designButton('Upright')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('fridge-cielo')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Dairy' })).getByRole('img')).toBeInTheDocument()
+
+    fireEvent.click(designButton(FRIDGE_MOCKS[1].name))
+    expect(screen.queryByTestId('fridge-cielo')).not.toBeInTheDocument()
+    expect(screen.getByTestId(`fridge-mock-${FRIDGE_MOCKS[1].id}`)).toBeInTheDocument()
+  })
+
   it('says so while live stock loads', () => {
     mockUseInventoryList.mockReturnValue({ isLoading: true, isError: false, data: undefined })
     render(<FridgeMocksPage />)

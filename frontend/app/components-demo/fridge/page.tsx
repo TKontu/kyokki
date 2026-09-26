@@ -3,14 +3,28 @@
 /**
  * Fridge design mocks (Q17-M): the operator picks the fridge that replaces FridgeView on `/`.
  *
- * Every design on live stock, with sample stock for an empty homelab. Sized to a landscape
- * iPad with no scrolling. The address can name the starting state, for screenshots:
- * `?design=rosso&sample=on&theme=dark`.
+ * Every design on live stock, with sample stock for an empty homelab, and - last, "Upright" -
+ * the fridge `/` now draws (Q17-B: Cielo redrawn for portrait), to compare against the mocks
+ * on the upright iPad (810×1080). The page takes the height under the app's bar and nothing
+ * scrolls. The address can name the starting state, for screenshots:
+ * `?design=portrait&sample=on&theme=dark`.
  */
 
 import React, { useEffect, useMemo, useState } from 'react'
-import { FRIDGE_MOCKS, fixtureItems } from '@/components/fridge-mocks'
+import { CieloFridge } from '@/components/fridge/CieloFridge'
+import { FRIDGE_MOCKS, fixtureItems, type FridgeMock } from '@/components/fridge-mocks'
 import { useInventoryList } from '@/hooks/useInventory'
+
+/** The mocks, and the production fridge they led to. */
+const DESIGNS: FridgeMock[] = [
+  ...FRIDGE_MOCKS,
+  {
+    id: 'portrait',
+    name: 'Upright',
+    description: 'Cielo for the portrait iPad, as on Stock',
+    Component: CieloFridge,
+  },
+]
 
 type Theme = 'auto' | 'light' | 'dark'
 
@@ -29,7 +43,7 @@ const segmentOff =
   'text-ui-text-secondary hover:bg-ui-bg/60 dark:text-ui-dark-text-secondary dark:hover:bg-ui-dark-bg/60'
 
 export default function FridgeMocksPage() {
-  const [designId, setDesignId] = useState(FRIDGE_MOCKS[0].id)
+  const [designId, setDesignId] = useState(DESIGNS[0].id)
   const [sample, setSample] = useState(false)
   const [theme, setTheme] = useState<Theme>('auto')
   const live = useInventoryList()
@@ -39,7 +53,7 @@ export default function FridgeMocksPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const design = params.get('design')
-    if (design && FRIDGE_MOCKS.some((mock) => mock.id === design)) setDesignId(design)
+    if (design && DESIGNS.some((mock) => mock.id === design)) setDesignId(design)
     if (params.get('sample') === 'on') setSample(true)
     const asked = params.get('theme')
     if (asked === 'light' || asked === 'dark') setTheme(asked)
@@ -52,7 +66,7 @@ export default function FridgeMocksPage() {
     return () => root.classList.remove('light', 'dark')
   }, [theme])
 
-  const design = FRIDGE_MOCKS.find((mock) => mock.id === designId) ?? FRIDGE_MOCKS[0]
+  const design = DESIGNS.find((mock) => mock.id === designId) ?? DESIGNS[0]
   const Fridge = design.Component
   const items = sample ? samples : live.data
 
@@ -75,17 +89,17 @@ export default function FridgeMocksPage() {
   }
 
   return (
-    <div className="flex h-[100dvh] flex-col gap-3 overflow-hidden bg-ui-bg px-4 py-3 dark:bg-ui-dark-bg">
-      <header className="flex shrink-0 items-center gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden bg-ui-bg px-4 py-3 dark:bg-ui-dark-bg">
+      <header className="flex shrink-0 flex-wrap items-center gap-3">
         <h1 className="w-20 text-sm font-semibold leading-tight text-ui-text dark:text-ui-dark-text">
           Fridge designs
         </h1>
         <div
           role="group"
           aria-label="Design"
-          className="flex min-w-0 flex-1 gap-1 rounded-2xl bg-ui-bg-tertiary p-1 dark:bg-ui-dark-bg-secondary"
+          className="order-last flex min-w-0 basis-full gap-1 rounded-2xl bg-ui-bg-tertiary p-1 dark:bg-ui-dark-bg-secondary xl:order-none xl:basis-0 xl:flex-1"
         >
-          {FRIDGE_MOCKS.map((mock) => {
+          {DESIGNS.map((mock) => {
             const on = mock.id === design.id
             return (
               <button
@@ -106,7 +120,7 @@ export default function FridgeMocksPage() {
           aria-pressed={sample}
           onClick={() => setSample((on) => !on)}
           className={
-            'min-h-touch shrink-0 rounded-2xl border-2 px-3 text-sm font-medium ' +
+            'ml-auto min-h-touch shrink-0 rounded-2xl border-2 px-3 text-sm font-medium xl:ml-0 ' +
             (sample
               ? 'border-primary-500 bg-primary-50 text-primary-800 dark:border-primary-400 dark:bg-primary-900/40 dark:text-primary-100'
               : 'border-ui-border-strong text-ui-text-secondary dark:border-ui-dark-border-strong dark:text-ui-dark-text-secondary')

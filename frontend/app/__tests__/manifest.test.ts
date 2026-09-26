@@ -20,9 +20,9 @@ describe('manifest', () => {
     expect(m.short_name).toBe(BRAND_NAME)
   })
 
-  it('asks for landscape, which is how the iPad is mounted', () => {
+  it('asks for portrait, which is how the iPad is mounted (Q17)', () => {
     // iOS ignores this for home-screen web apps; Android and Chrome honour it
-    expect(m.orientation).toBe('landscape')
+    expect(m.orientation).toBe('portrait')
   })
 
   it('carries both icon sizes as real PNGs', () => {

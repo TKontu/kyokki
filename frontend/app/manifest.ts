@@ -6,7 +6,8 @@ import { BACKGROUND_COLOR, BRAND_COLOR, BRAND_NAME, ICON_SIZES, iconPath } from 
  *
  * This is what turns Add to Home Screen on the iPad into a full-screen app rather than a
  * bookmark. iOS also needs the `appleWebApp` metadata in `app/layout.tsx`, and it ignores
- * `orientation` for home-screen web apps - the wall mount decides that.
+ * `orientation` for home-screen web apps - the wall mount decides that. The iPad is mounted
+ * upright (Q17), so the app asks for portrait where a platform listens.
  *
  * No service worker: the stack is served over plain HTTP on the LAN, which is not a secure
  * context, so registration would be refused. Offline stays post-MVP for that reason.
@@ -19,7 +20,7 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: '/',
     scope: '/',
     display: 'standalone',
-    orientation: 'landscape',
+    orientation: 'portrait',
     background_color: BACKGROUND_COLOR,
     theme_color: BRAND_COLOR,
     icons: ICON_SIZES.map((size) => ({
