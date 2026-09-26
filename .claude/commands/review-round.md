@@ -16,13 +16,15 @@ Review every PR in the current round, fix small issues, route larger ones back. 
 3. **Confirm the gates.** CI green, or — for a tier the project's CI skips — run the correct local
    gate: `docs/conventions.md` names those under "Gates that do not run in CI", and the commands
    themselves come from the **Project Commands** table in `CLAUDE.md`. Do not accept "tests pass"
-   without seeing which tests actually ran.
+   without seeing which tests actually ran. Polling CI and reading a failed job's log is the
+   `ci-watcher` agent type's job (Sonnet, read-only).
 
 4. **Check scope.** Did the PR change only the paths its spec listed as owned? A file outside the
    owned set is a finding even if the change is good, because a sibling may own it this round.
 
 5. **Small issues** — lint, a missing test, a doc line, a clear local bug: fix them directly on the
-   PR branch and note exactly what you changed. A PR you pushed fixes to cannot be self-merged;
+   PR branch and note exactly what you changed. Delegate a fix whose change is already stated to
+   the `quick-fixer` agent type (Sonnet); keep anything that needs judgement for yourself. A PR you pushed fixes to cannot be self-merged;
    flag it for operator confirmation at merge time.
 
 6. **Larger issues** — scope, design, a real defect needing the author's context: do NOT fix in
