@@ -1,15 +1,17 @@
 """AG2: resolve a name to a product, and teach a product a new name."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import func, inspect, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
+from app.services import product_lookup
 
 
 @pytest.fixture(autouse=True)
@@ -18,6 +20,32 @@ def broadcast():
         "app.api.endpoints.products.broadcast_product_update", new_callable=AsyncMock
     ) as mock:
         yield mock
+
+
+@pytest.fixture
+async def own_sessions(db_engine, committed_db_session: AsyncSession):
+    """Every request gets a session of its own on its own connection, committing for real.
+
+    The savepoint ``db_session`` runs everything on one connection, so a second writer
+    racing the request cannot be staged in it. ``committed_db_session`` truncates after.
+    """
+    from app.db.seed_categories import seed_categories
+    from app.db.session import get_db
+    from app.main import app
+
+    await seed_categories(committed_db_session)
+    await committed_db_session.commit()
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def override_get_db():
+        async with factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        yield committed_db_session
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 def _id(obj):
@@ -142,6 +170,35 @@ class TestTeachAName:
         assert row.product_master_id == _id(mince)
         broadcast.assert_awaited_once()
 
+    async def test_its_own_name_without_a_name_row_is_200_unchanged(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        # Written straight to product_master, as Open Food Facts enrichment does
+        oats = ProductMaster(
+            id=uuid4(),
+            canonical_name="Oat milk",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=7,
+            unit_type="volume",
+            default_unit="dl",
+        )
+        seeded_db.add(oats)
+        await seeded_db.commit()
+
+        response = await client.post(
+            f"/api/products/{_id(oats)}/names", json={"name": "OAT  milk"}
+        )
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert (body["name"], body["source"], body["removable"]) == (
+            "oat milk",
+            "canonical",
+            False,
+        )
+        broadcast.assert_not_awaited()
+
     async def test_a_name_it_already_has_is_200_unchanged(
         self, client: AsyncClient, seeded_db
     ) -> None:
@@ -228,3 +285,57 @@ class TestTeachAName:
 
         assert deleted.status_code == 204
         assert await _names(seeded_db, "jauheliha") == []
+
+
+class TestTeachRace:
+    @pytest.mark.parametrize("lands", ["during_its_write", "before_its_write"], ids=str)
+    async def test_the_same_name_taught_elsewhere_meanwhile_is_a_conflict(
+        self,
+        client: AsyncClient,
+        own_sessions: AsyncSession,
+        db_engine,
+        broadcast,
+        lands: str,
+    ) -> None:
+        """Another request teaches the name to Milk between this one's check and write.
+
+        Landing during the write is a unique violation on insert; landing before it,
+        `learn_product_name` sees the other product's row and leaves it alone.
+        """
+        milk_id = _id(await _product(own_sessions, "Milk"))
+        cream_id = _id(await _product(own_sessions, "Cream"))
+        other_writer = async_sessionmaker(db_engine, class_=AsyncSession)
+        real_learn = product_lookup.learn_product_name
+        commits: list[asyncio.Task] = []
+
+        async def racing_learn(db, product, name, source="model"):
+            if not commits:
+                other = other_writer()
+                other.add(
+                    ProductName(product_master_id=milk_id, name=name, source="cook")
+                )
+                await other.flush()  # not committed: this request cannot see it yet
+
+                async def commit_soon() -> None:
+                    await asyncio.sleep(0.2)
+                    await other.commit()
+                    await other.close()
+
+                commits.append(asyncio.create_task(commit_soon()))
+                if lands == "before_its_write":
+                    await commits[0]
+            return await real_learn(db, product, name, source=source)
+
+        with patch("app.services.product_lookup.learn_product_name", new=racing_learn):
+            response = await client.post(
+                f"/api/products/{cream_id}/names", json={"name": "Moo"}
+            )
+        await asyncio.gather(*commits)
+
+        assert response.status_code == 409, response.text
+        detail = response.json()["detail"]
+        assert detail["code"] == "conflict"
+        assert detail["product_id"] == str(milk_id)
+        (row,) = await _names(own_sessions, "moo")
+        assert row.product_master_id == milk_id
+        broadcast.assert_not_awaited()

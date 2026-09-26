@@ -6,12 +6,13 @@ never taken for a hit. It is offered back as candidates, and the caller decides.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import bindparam, select, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -184,6 +185,52 @@ def _entry(row: Any) -> ProductNameEntry:
     )
 
 
+async def _teach(
+    db: AsyncSession, product_id: UUID, key: str, claim: IdempotencyClaim | None
+) -> TaughtName:
+    """`teach_name`'s work in the open transaction; does not commit."""
+    product = await crud_product.get_product(db, product_id)
+    if product is None:
+        raise ProductNotFound(f"No product with id {product_id}", by_name=False)
+    owner = await product_for_name(db, key, trust_model=False)
+    if owner is not None and owner.id != product.id:
+        raise NameTaken(key, owner)
+
+    if key == normalize_product_name(
+        str(product.canonical_name)
+    ) and not await _name_row(db, key):
+        await learn_product_name(db, product, key, source=NameSource.CANONICAL)
+        created = False
+    else:
+        created = await learn_product_name(db, product, key, source=NameSource.COOK)
+    row: Any = await _name_row(db, key)
+    if row.product_master_id != product.id:
+        # Taught to another product after our check: learn_product_name left it alone.
+        other = await crud_product.get_product(db, row.product_master_id)
+        raise NameTaken(key, cast(ProductMaster, other))  # the row's FK: it exists
+
+    taught = TaughtName(created=created, entry=_entry(row))
+    if claim is not None:
+        await idempotency.remember(
+            db, claim, taught.status_code, taught.entry.model_dump(mode="json")
+        )
+    return taught
+
+
+async def _name_row(db: AsyncSession, key: str) -> ProductName | None:
+    return (
+        (
+            await db.execute(
+                select(ProductName)
+                .where(ProductName.name == key)
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+
 async def teach_name(
     db: AsyncSession,
     product_id: UUID,
@@ -194,34 +241,26 @@ async def teach_name(
     """Make ``name`` mean this product, as the cook's word, and commit.
 
     A name the product already has is left as it is (a model's guess for it becomes the
-    cook's word, as `learn_product_name` does). A model's guess pointing at another product
-    is re-pointed, again as `learn_product_name` does; a canonical or cook name of another
-    product is refused.
+    cook's word, as `learn_product_name` does). So is its own canonical name when no
+    `product_name` row records it yet (a product Open Food Facts wrote): the missing
+    canonical row is filled in, which changes what no name means. A model's guess pointing
+    at another product is re-pointed, again as `learn_product_name` does; a canonical or
+    cook name of another product is refused - also when another request teaches it the
+    name between this one's check and its write.
 
     Raises:
         ProductNotFound: No such product.
         NameTaken: The name already means another product.
     """
+    key = normalize_product_name(name)
     try:
-        product = await crud_product.get_product(db, product_id)
-        if product is None:
-            raise ProductNotFound(f"No product with id {product_id}", by_name=False)
-        key = normalize_product_name(name)
-        owner = await product_for_name(db, key, trust_model=False)
-        if owner is not None and owner.id != product.id:
-            raise NameTaken(key, owner)
-
-        created = await learn_product_name(db, product, key, source=NameSource.COOK)
-        row: Any = (
-            (await db.execute(select(ProductName).where(ProductName.name == key)))
-            .scalars()
-            .one()
-        )
-        taught = TaughtName(created=created, entry=_entry(row))
-        if claim is not None:
-            await idempotency.remember(
-                db, claim, taught.status_code, taught.entry.model_dump(mode="json")
-            )
+        try:
+            taught = await _teach(db, product_id, key, claim)
+        except IntegrityError:
+            # Another request wrote this name after our check: look again, and it is
+            # either another product's (NameTaken) or already ours (unchanged).
+            await db.rollback()
+            taught = await _teach(db, product_id, key, claim)
         await db.commit()
     except BaseException:
         await db.rollback()
@@ -232,7 +271,7 @@ async def teach_name(
         extra={
             "product_id": str(product_id),
             "product_name": key,
-            "name_created": created,
+            "name_created": taught.created,
         },
     )
     return taught
