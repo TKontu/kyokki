@@ -2,9 +2,9 @@
 
 /**
  * AppShell (MVP-P1)
- * The one persistent piece of navigation. A narrow rail down the left in landscape, which is
- * where the iPad has room to spare; a bar across the top on a phone, where it does not.
- * Pages keep their own header and their own actions.
+ * The one persistent piece of navigation. A bar across the top below `lg` (1024 px) - which is
+ * how the iPad, mounted upright at 810×1080 (Q17), sees it - and a narrow rail down the left
+ * on anything wider. Pages keep their own header and their own actions.
  */
 
 import Link from 'next/link'
@@ -83,7 +83,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )
         })}
       </nav>
-      <div className="min-w-0 flex-1">
+      {/* A column, so a page can take the height left under the bar: the fridge fills it */}
+      <div className="flex min-w-0 flex-1 flex-col">
         {/* Above every screen, and silent unless something is wrong (H45) */}
         <StatusBanner />
         {children}

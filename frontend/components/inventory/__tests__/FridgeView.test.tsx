@@ -6,6 +6,11 @@
 import React from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { FridgeView } from '../FridgeView'
+import { CIELO_BOX } from '@/components/fridge/CieloFridge'
+import { dotCapacity } from '@/components/fridge/capacity'
+import { crowdedItems } from '@/components/fridge/__fixtures__/crowded'
+import { many, stale } from '@/components/fridge/__fixtures__/stock'
+import { AREAS } from '@/lib/fridge'
 import type { InventoryItem } from '@/types/inventory'
 
 jest.mock('@/hooks/useInventory')
@@ -90,6 +95,35 @@ describe('FridgeView', () => {
     const { container } = render(<FridgeView />)
 
     expect(container.textContent).not.toMatch(/\d/)
+  })
+
+  it('shows no numbers on a crowded fridge, its "more" markers included', () => {
+    mockItems(crowdedItems())
+    const { container } = render(
+      <FridgeView onConsume={jest.fn()} onMore={jest.fn()} onClearExpired={jest.fn()} />
+    )
+
+    expect(screen.getAllByTestId('more-dots')).toHaveLength(AREAS.length)
+    expect(screen.getByRole('button', { name: 'All going stale' })).toBeInTheDocument()
+    expect(container.textContent).not.toMatch(/\d/)
+  })
+
+  it('shows what fits on the shelf and a more tile for the rest (Q17)', () => {
+    mockItems(stale(12))
+    render(<FridgeView onConsume={jest.fn()} onMore={jest.fn()} />)
+
+    fireEvent.click(within(area('Going stale')).getByRole('button', { name: 'All going stale' }))
+
+    const sheet = screen.getByRole('dialog', { name: 'Going stale' })
+    expect(within(sheet).getAllByRole('button', { name: /, going stale$/ })).toHaveLength(12)
+  })
+
+  it('marks an area that holds more than it can show (Q17)', () => {
+    mockItems(many(dotCapacity(CIELO_BOX.bread) + 1, { category: 'bread', category_icon: '🍞' }))
+    render(<FridgeView />)
+
+    expect(within(area('Bread')).getByTestId('more-dots')).toBeInTheDocument()
+    expect(within(area('Dairy')).queryByTestId('more-dots')).not.toBeInTheDocument()
   })
 
   it('puts what is going stale on the shelf across the top', () => {

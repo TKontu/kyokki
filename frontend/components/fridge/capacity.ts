@@ -1,0 +1,51 @@
+/**
+ * How many dots an area's region can show (Q17-B).
+ *
+ * Everything laid over the drawing - label, emoji, dots - is sized in the drawing's own units
+ * and scales with it, so what fits in a region depends on its box alone and can be worked out
+ * here rather than measured. When an area holds more than that, the last slot becomes a
+ * "more" marker: a region never cuts its dots off without saying so.
+ */
+
+import type { Box } from './drawing'
+
+/** A dot's diameter, in drawing units. */
+export const DOT = 13
+/** The space between two dots. */
+export const DOT_GAP = 5
+/** From one dot to the next. */
+export const DOT_PITCH = DOT + DOT_GAP
+/** The region's inner padding, each side. */
+export const PAD = 6
+/** The label row above the dots, with the gap below it. */
+export const HEADER = 30
+
+/** How many dots fit side by side in a region drawn in `box`. */
+function dotColumns({ w }: Box): number {
+  return Math.max(0, Math.floor((w - PAD * 2 + DOT_GAP) / DOT_PITCH))
+}
+
+/** How many dots fit in a region drawn in `box`. */
+export function dotCapacity(box: Box): number {
+  const rows = Math.floor((box.h - PAD * 2 - HEADER + DOT_GAP) / DOT_PITCH)
+  return dotColumns(box) * Math.max(0, rows)
+}
+
+/**
+ * Where the dot in slot `index` sits, from the region's top left, in drawing units: rows left
+ * to right below the label. Dots are placed here rather than flowed, so where a dot - or the
+ * "more" marker - is drawn is exactly what this says, and a test can hold it to the box.
+ */
+export function dotSlot(index: number, box: Box): { left: number; top: number } {
+  const columns = Math.max(1, dotColumns(box))
+  return {
+    left: PAD + (index % columns) * DOT_PITCH,
+    top: PAD + HEADER + Math.floor(index / columns) * DOT_PITCH,
+  }
+}
+
+/** What a region shows of `list`: all of it, or what fits beside a "more" marker. */
+export function fitDots<T>(list: T[], capacity: number): { shown: T[]; more: boolean } {
+  if (list.length <= capacity) return { shown: list, more: false }
+  return { shown: list.slice(0, Math.max(0, capacity - 1)), more: true }
+}
