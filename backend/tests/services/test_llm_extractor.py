@@ -239,22 +239,29 @@ class TestInstructions:
         """H54: TUMMA RYPÄLE came back as Raisin, TIKKUPERUNAT as Potato (Q14).
 
         Measured before and after on the 49-line fixture (docs/vLLM_MANUAL_TEST.md).
+        Each mapping is pinned as written, not as words found anywhere in the prompt:
+        "juice" and "grape" would be there without the glossary.
         """
-        text = build_instructions(CATEGORIES)
-        glossary = text.lower()
-        assert "rypäle" in glossary and "grape" in glossary
-        assert "rusina" in glossary and "raisin" in glossary
-        assert "tikkuperunat" in glossary and "french fries" in glossary
-        assert "täysmehu" in glossary and "juice" in glossary
-        assert "riisipiirakka" in glossary and "karelian pasty" in glossary
-        assert "valmisruoka" in glossary and "ateria" in glossary
-        assert "ready_meals" in text
+        glossary = " ".join(build_instructions(CATEGORIES).split())
+        assert 'TUMMA RYPÄLE -> "Grape"' in glossary
+        assert 'RUSINA is "Raisin"' in glossary
+        assert 'TIKKUPERUNAT -> "French fries"' in glossary
+        assert 'RIISIPIIRAKKA -> "Karelian pasty"' in glossary
+        assert "VALMISRUOKA, ATERIA -> c = ready_meals" in glossary
+
+    def test_the_glossary_maps_mehu_to_a_juice_of_its_fruit(self):
+        """Attempt 1's bare "MEHU = juice" flattened TÄYSMEHU OMENA to plain Juice."""
+        glossary = " ".join(build_instructions(CATEGORIES).split())
+        assert 'TÄYSMEHU OMENA -> "Apple juice" (MEHU is juice)' in glossary
 
     def test_the_glossary_keeps_a_multivitamin_supplement_out_of_juice(self):
         """NAMIVITA MONIVITAMIINI is a supplement; MONIVITAMIINI APPELSIINI is a juice."""
-        text = build_instructions(CATEGORIES)
-        assert "MONIVITAMIINI" in text
-        assert "APPELSIINI" in text
+        glossary = " ".join(build_instructions(CATEGORIES).split())
+        assert 'MONIVITAMIINI APPELSIINI -> "Multivitamin juice"' in glossary
+        assert (
+            "MONIVITAMIINI with no flavour is a vitamin supplement, household"
+            in glossary
+        )
 
     def test_ask_for_a_shelf_life_on_every_food_line(self):
         """With the glossary added, 3 of 7 runs answered sl only for the prompt's own
