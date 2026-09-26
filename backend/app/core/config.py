@@ -107,9 +107,11 @@ class Settings(BaseSettings):
         return None if v == "" else v
 
     # Product icons (Q18): the model draws each product a flat 48x48 SVG in the background.
-    # The receipt model by default: it drew all 20 spike products in ~10 s each, and a second
-    # model on the same c2 GPU would make llama-swap unload it and cold-load receipts.
-    ICON_MODEL: str = "c2.muse-glimmer"
+    # qwen3.8-27b, measured on the spike's 20 products (2026-09-26): ~17 clear against ~4-6 for
+    # muse-glimmer, at ~50 s a drawing. It is not the receipt model, so llama-swap may swap
+    # muse-glimmer out while an icon is drawn and the next receipt waits for it to load again.
+    # Set it to c2.muse-glimmer to trade icon quality for no swap.
+    ICON_MODEL: str = "c2.qwen3.8-27b"
     ICON_TIMEOUT: float = 600.0  # seconds; qwen3.8-27b took up to 273 s for one drawing
 
     # Telegram receipt drop-in bot (MVP-T1). The bot is disabled while no token is set.
