@@ -1961,7 +1961,20 @@ not rulings.
 
 **Operator actions and rulings still needed:**
 - [ ] Run "Re-estimate all (keeps yours)" on `/products`: dry run, read the proposal, apply.
-- [ ] Q18 storage: the SVG in the database (recommended) or files on a volume.
+- [x] Q18 storage: **the SVG in the database** (ruling 2026-09-26).
+- [ ] Run `backend/scripts/backfill_icons.py` after round 2026-09-26-9 deploys (icons for existing products).
+
+**Rulings at planning (2026-09-26):** a learned shelf life is stored as `shelf_life_source='cook'`
+("set by you"), so estimates never overwrite it; no separate "learned" label for now.
+
+Round 2026-09-26-9 (base `49ff0c5`):
+- A1: **Q24**: a corrected date teaches the product (`feat/q24-learn-from-dates`; backend only, no migration;
+  the median of the product's last 5 cook-stated dates, then re-date its estimated items);
+- A2: **Q18** step 1: the local model draws each product's icon, stored in the DB, served at
+  `/api/products/{id}/icon.svg`, Redraw and "use category emoji" on the product sheet (`feat/q18-product-icons`; owns the alembic head);
+- A3: layout pass **Q20** (no title label), **Q23** (a bread basket on the larder), **Q22** wording
+  ("Put back" / "Corrected"), **Q25** (category row on the item sheet) (`feat/fridge-layout-pass`).
+- Deferred: **Q26** receipt provenance (a migration and `ItemEditSheet`, both taken this round).
 
 ---
 
@@ -2113,7 +2126,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Next: Q18 (needs the icon-route ruling), the portrait pass on the other screens
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [ ] Q24 learn from dates  [ ] Q18 icons step 1  [ ] Q20/Q23/Q22/Q25 layout pass
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
