@@ -39,7 +39,7 @@ jobs:
         run: ruff format --check cli/
 
       - name: Run mypy (strict)
-        run: mypy cli/kyokki
+        run: mypy --config-file cli/pyproject.toml cli/kyokki
 
       - name: Run pytest
         run: pytest cli/tests -v
@@ -52,3 +52,9 @@ jobs:
           code=$?
           set -e
           test "$code" -eq 2
+
+      - name: A plain (non-editable) install runs
+        run: |
+          python -m venv "$RUNNER_TEMP/kyokki-plain"
+          "$RUNNER_TEMP/kyokki-plain/bin/pip" install ./cli
+          "$RUNNER_TEMP/kyokki-plain/bin/kyokki" -h > /dev/null

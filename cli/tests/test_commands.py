@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from conftest import ITEM_ID, PRODUCT_ID, TOKEN, URL, FakeApi, Runner
 
 STOCK_ROW = {
@@ -208,7 +209,7 @@ def test_stock_add_by_name(api: FakeApi, run: Runner) -> None:
         "purchase_date": "2026-09-26",
     }
     assert len(api.last.headers["Idempotency-Key"]) == 64
-    assert result.json() == {"item": ITEM, "product_created": True}
+    assert result.json() == {"item": ITEM, "product_created": True, "replayed": False}
 
 
 def test_stock_add_minimal_by_id(api: FakeApi, run: Runner) -> None:
@@ -265,7 +266,7 @@ def test_stock_consume_by_name(api: FakeApi, run: Runner) -> None:
         "dry_run": False,
     }
     assert "Idempotency-Key" in api.last.headers
-    assert result.json() == CONSUMED
+    assert result.json() == {**CONSUMED, "replayed": False}
 
 
 def test_stock_consume_by_id(api: FakeApi, run: Runner) -> None:
@@ -318,6 +319,20 @@ def test_replayed_answer_is_noted(api: FakeApi, run: Runner, tty: None) -> None:
     assert "replayed" in result.err
 
 
+def test_replayed_is_in_the_json_document(api: FakeApi, run: Runner) -> None:
+    api.on(
+        "POST",
+        "/api/stock/consume",
+        body=CONSUMED,
+        headers={"Idempotent-Replayed": "true"},
+    )
+    api.on("POST", "/api/stock/add", 201, {"item": ITEM, "product_created": False})
+    replay = run("stock", "consume", "Milk", "2", "dl")
+    fresh = run("stock", "add", "Milk", "1")
+    assert replay.json() == {**CONSUMED, "replayed": True}
+    assert fresh.json() == {"item": ITEM, "product_created": False, "replayed": False}
+
+
 # --- product ------------------------------------------------------------------
 
 
@@ -365,7 +380,7 @@ def test_product_name_add(api: FakeApi, run: Runner) -> None:
     assert result.code == 0
     assert api.last_json() == {"name": "Maito"}
     assert "Idempotency-Key" in api.last.headers
-    assert result.json() == entry
+    assert result.json() == {**entry, "replayed": False}
 
 
 def test_product_name_add_human(api: FakeApi, run: Runner, tty: None) -> None:
@@ -411,6 +426,17 @@ def test_flags_override_environment(api: FakeApi, run: Runner) -> None:
     run("--url", "http://other:9000/", "--token", "other-token", "category", "list")
     assert str(api.last.url) == "http://other:9000/api/categories"
     assert api.last.headers["Authorization"] == "Bearer other-token"
+
+
+@pytest.mark.parametrize(
+    "url", ["http://other:17300/api", "http://other:17300/api/", "http://other:17300"]
+)
+def test_a_base_url_ending_in_api_is_normalised(
+    api: FakeApi, run: Runner, url: str
+) -> None:
+    api.on("GET", "/api/categories", body=[])
+    assert run("--url", url, "category", "list").code == 0
+    assert str(api.last.url) == "http://other:17300/api/categories"
 
 
 def test_global_options_work_after_the_command(api: FakeApi, run: Runner) -> None:

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kyokki import output
-from kyokki.api import ERROR, Api, CliError
+from kyokki.api import ERROR, NOT_FOUND, Api, CliError
 
 UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -46,9 +46,10 @@ def _date(value: Any) -> str | None:
 
 def doctor(ctx: Context) -> Outcome:
     try:
-        ctx.api.request("GET", "/api/health/live")
+        ctx.api.request("GET", "/api/health/live", expect=dict)
     except CliError as exc:
-        if exc.status is None:  # no answer at all: already says "cannot reach"
+        # No answer at all already says "cannot reach"; a 2xx that is not JSON says so.
+        if exc.status is None or exc.code == "bad_response":
             raise
         raise CliError(
             ERROR,
@@ -59,7 +60,7 @@ def doctor(ctx: Context) -> Outcome:
             },
             exc.status,
         ) from exc
-    me = ctx.api.request("GET", "/api/whoami").body or {}
+    me = ctx.api.request("GET", "/api/whoami", expect=dict).body
     document = {
         "url": ctx.api.url,
         "reachable": True,
@@ -97,6 +98,7 @@ def stock_list(ctx: Context) -> Outcome:
             "expiring_days": a.expiring,
             "category": a.category,
         },
+        expect=list,
     ).body
 
     def human() -> str:
@@ -143,10 +145,17 @@ def stock_add(ctx: Context) -> Outcome:
         "purchase_date": _date(a.purchased),
     }
     body.update({k: v for k, v in optional.items() if v is not None})
-    answer = ctx.api.request(
-        "POST", "/api/stock/add", body=body, idempotency_key=ctx.idempotency_key
-    )
-    result = answer.body or {}
+    try:
+        answer = ctx.api.request(
+            "POST",
+            "/api/stock/add",
+            body=body,
+            idempotency_key=ctx.idempotency_key,
+            expect=dict,
+        )
+    except CliError as exc:
+        raise _unknown_id_as_not_found(exc, body) from None
+    result = answer.body
 
     def human() -> str:
         item = result.get("item") or {}
@@ -167,6 +176,21 @@ def stock_add(ctx: Context) -> Outcome:
     return Outcome(result, human, answer.replayed)
 
 
+def _unknown_id_as_not_found(exc: CliError, body: dict[str, Any]) -> CliError:
+    """add answers an unknown product id with 400 ``invalid``, consume with 404
+    ``not_found``; the CLI reports both as not found (exit 3)."""
+    detail = exc.detail
+    if (
+        "product_id" in body
+        and exc.status == 400
+        and isinstance(detail, dict)
+        and detail.get("code") == "invalid"
+        and "not found" in str(detail.get("message", ""))
+    ):
+        return CliError(NOT_FOUND, {**detail, "code": "not_found"}, exc.status)
+    return exc
+
+
 def stock_consume(ctx: Context) -> Outcome:
     a = ctx.args
     body: dict[str, Any] = (
@@ -182,8 +206,9 @@ def stock_consume(ctx: Context) -> Outcome:
         "/api/stock/consume",
         body=body,
         idempotency_key=None if a.dry_run else ctx.idempotency_key,
+        expect=dict,
     )
-    result = answer.body or {}
+    result = answer.body
 
     def human() -> str:
         unit = result.get("unit", a.unit)
@@ -214,12 +239,9 @@ def stock_consume(ctx: Context) -> Outcome:
 
 
 def product_resolve(ctx: Context) -> Outcome:
-    result = (
-        ctx.api.request(
-            "GET", "/api/products/resolve", params={"name": ctx.args.name}
-        ).body
-        or {}
-    )
+    result = ctx.api.request(
+        "GET", "/api/products/resolve", params={"name": ctx.args.name}, expect=dict
+    ).body
 
     def human() -> str:
         lines = []
@@ -262,8 +284,9 @@ def product_name_add(ctx: Context) -> Outcome:
         f"/api/products/{a.product_id}/names",
         body={"name": a.name},
         idempotency_key=ctx.idempotency_key,
+        expect=dict,
     )
-    entry = answer.body or {}
+    entry = answer.body
 
     def human() -> str:
         name = entry.get("name", a.name)
@@ -278,7 +301,7 @@ def product_name_add(ctx: Context) -> Outcome:
 
 
 def category_list(ctx: Context) -> Outcome:
-    categories = ctx.api.request("GET", "/api/categories").body or []
+    categories = ctx.api.request("GET", "/api/categories", expect=list).body
 
     def human() -> str:
         return output.table(

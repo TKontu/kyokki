@@ -113,3 +113,83 @@ def test_no_token_in_a_server_error_that_echoes_it(api: FakeApi, run: Runner) ->
     result = run("stock", "list", "--verbose")
     assert result.code == 7
     assert_clean(result.out, result.err)
+
+
+# --- a token read from a CRLF file, a non-ASCII token, a short token ---------
+
+
+@pytest.mark.parametrize("suffix", ["\r", "\n", "\r\n", " "])
+@pytest.mark.parametrize("token_flag", [False, True], ids=["env", "flag"])
+def test_surrounding_whitespace_is_stripped(
+    api: FakeApi,
+    run: Runner,
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+    token_flag: bool,
+) -> None:
+    api.on("GET", "/api/categories", body=[])
+    if token_flag:
+        result = run("--token", TOKEN + suffix, "category", "list")
+    else:
+        monkeypatch.setenv("KYOKKI_TOKEN", TOKEN + suffix)
+        result = run("category", "list")
+    assert result.code == 0
+    assert api.last.headers["Authorization"] == f"Bearer {TOKEN}"
+    assert_clean(result.out, result.err)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [f"{TOKEN[:6]}\r{TOKEN[6:]}", f"{TOKEN[:6]}\x1b{TOKEN[6:]}", f"{TOKEN}ä", "tökeni"],
+    ids=["inner-cr", "esc", "non-ascii-tail", "non-ascii"],
+)
+@pytest.mark.parametrize("token_flag", [False, True], ids=["env", "flag"])
+@pytest.mark.parametrize("json_mode", [False, True], ids=["tty", "json"])
+def test_a_token_with_control_or_non_ascii_characters_is_a_usage_error(
+    api: FakeApi,
+    run: Runner,
+    monkeypatch: pytest.MonkeyPatch,
+    bad: str,
+    token_flag: bool,
+    json_mode: bool,
+) -> None:
+    from kyokki import output
+
+    monkeypatch.setattr(output, "stdout_is_tty", lambda: not json_mode)
+    api.on("GET", "/api/categories", body=[])
+    if token_flag:
+        result = run("--token", bad, "category", "list")
+    else:
+        monkeypatch.setenv("KYOKKI_TOKEN", bad)
+        result = run("category", "list")
+    assert result.code == 2
+    assert api.requests == []
+    assert "token" in result.err
+    for text in (result.out, result.err):
+        assert bad not in text
+        assert repr(bad)[1:-1] not in text
+        assert bad.encode("unicode_escape").decode() not in text
+        assert TOKEN not in text
+
+
+def test_a_header_error_never_prints_the_exception_text(
+    api: FakeApi, run: Runner
+) -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.LocalProtocolError(f"Illegal header value b'Bearer {TOKEN}\\r'")
+
+    api.routes[("GET", "/api/categories")] = refuse
+    result = run("category", "list")
+    assert result.code == 1
+    assert "Illegal header" not in result.out + result.err
+    assert_clean(result.out, result.err)
+
+
+@pytest.mark.parametrize("short", ["abc1234", "k9"])
+def test_a_short_token_is_masked_too(
+    api: FakeApi, run: Runner, monkeypatch: pytest.MonkeyPatch, short: str
+) -> None:
+    monkeypatch.setenv("KYOKKI_TOKEN", short)
+    result = run("stock", "list", "--location", short)
+    assert result.code == 2
+    assert short not in result.out + result.err

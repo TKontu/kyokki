@@ -11,8 +11,6 @@ from contextlib import contextmanager
 from typing import Any, TextIO
 
 MASK = "***"
-# Shorter values are not treated as secrets: masking "ab" would mangle ordinary output.
-MIN_SECRET_LENGTH = 8
 
 
 def stdout_is_tty() -> bool:
@@ -75,8 +73,12 @@ class RedactingWriter:
 
 @contextmanager
 def redacted(secrets: list[str]) -> Iterator[None]:
-    """Mask ``secrets`` on stdout and stderr for the duration."""
-    real = [s for s in secrets if s and len(s) >= MIN_SECRET_LENGTH]
+    """Mask ``secrets`` on stdout and stderr for the duration.
+
+    Every configured token is masked whatever its length: a short one mangles some
+    output, which is better than printing it.
+    """
+    real = [s for s in secrets if s]
     if not real:
         yield
         return

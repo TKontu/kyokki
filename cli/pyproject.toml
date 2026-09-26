@@ -12,7 +12,7 @@ dependencies = ["httpx>=0.27"]
 
 [project.optional-dependencies]
 # Tests mock HTTP with httpx.MockTransport, so no respx.
-dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+dev = ["pytest>=8", "ruff==0.12.12", "mypy>=1.10"]
 
 [project.scripts]
 kyokki = "kyokki.cli:main"
