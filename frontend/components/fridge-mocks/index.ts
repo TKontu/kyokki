@@ -18,7 +18,7 @@ export const FRIDGE_MOCKS: FridgeMock[] = [
   {
     id: 'cielo',
     name: 'Cielo',
-    description: 'Pastel blue, freezer drawer below',
+    description: 'Pastel blue, freezer drawer',
     Component: Cielo,
   },
   {

@@ -21,7 +21,7 @@ const THEMES: { id: Theme; label: string }[] = [
 ]
 
 const segment =
-  'min-h-touch rounded-xl px-3 text-left transition-colors focus:outline-none ' +
+  'min-h-touch rounded-xl px-3 text-left focus:outline-none ' +
   'focus-visible:ring-2 focus-visible:ring-primary-400 '
 const segmentOn =
   'bg-ui-bg text-ui-text shadow-ui-sm dark:bg-ui-dark-bg-tertiary dark:text-ui-dark-text'
@@ -106,7 +106,7 @@ export default function FridgeMocksPage() {
           aria-pressed={sample}
           onClick={() => setSample((on) => !on)}
           className={
-            'min-h-touch shrink-0 rounded-2xl border-2 px-3 text-sm font-medium transition-colors ' +
+            'min-h-touch shrink-0 rounded-2xl border-2 px-3 text-sm font-medium ' +
             (sample
               ? 'border-primary-500 bg-primary-50 text-primary-800 dark:border-primary-400 dark:bg-primary-900/40 dark:text-primary-100'
               : 'border-ui-border-strong text-ui-text-secondary dark:border-ui-dark-border-strong dark:text-ui-dark-text-secondary')
