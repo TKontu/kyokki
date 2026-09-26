@@ -234,8 +234,8 @@ async def update_inventory_item(
         status=item.status,
         product_name=item.product_name,
     )
-    # A date set by hand may have taught the product a shelf life (Q24), moving its other
-    # estimated items with it
+    # A date set by hand may have taught the product a shelf life (Q24), moving its items
+    # dated from the shelf life (`expiry_source='calculated'`) with it
     await _announce_moved(result.moved, item.product_name)
 
     return item

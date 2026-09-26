@@ -1872,9 +1872,10 @@ class TestRecentlyUsedUp:
 class TestCorrectedDatesTeachTheProduct:
     """Q24: correcting an item's date teaches its product, and the next pack is closer.
 
-    The acceptance scenario from the friction log: tortillas dated a week out that keep
-    until November. One correction sets the product's shelf life, as if the cook had typed
-    it on the Products screen, and the product's other estimated items move with it.
+    The acceptance scenario from spec A1 (round 2026-09-26-9) for Q24: tortillas dated a
+    week out that keep until November. One correction sets the product's shelf life, as if
+    the cook had typed it on the Products screen, and the product's items dated from the
+    shelf life (`expiry_source='calculated'`) move with it.
     """
 
     TODAY = date.today()
@@ -2024,3 +2025,57 @@ class TestCorrectedDatesTeachTheProduct:
         )
 
         assert await _logs_for(seeded_db, item["id"]) == []
+
+    async def test_a_thawed_item_never_teaches_the_product(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """Mince frozen 90 days, thawed and dated two days out is not a 92-day shelf life.
+
+        The correction keeps the cook's date but stays `frozen`, so it is never an
+        observation - not now, and not when a sibling's correction relearns later.
+        """
+        mince = {"name": "Mince", "category": "meat", "unit": "g", "quantity": 400}
+        item = await self._add(
+            client,
+            **mince,
+            location="main_fridge",
+            purchase_date=str(self.TODAY - timedelta(days=90)),
+        )
+        product_id = item["product_master_id"]
+        url = f"/api/inventory/{item['id']}"
+        frozen = (await client.patch(url, json={"location": "freezer"})).json()
+        assert frozen["expiry_source"] == "frozen"
+        thawed = (await client.patch(url, json={"location": "main_fridge"})).json()
+        assert thawed["expiry_source"] == "frozen"
+        before = await self._product(seeded_db, product_id)
+        days, source = before.default_shelf_life_days, before.shelf_life_source
+
+        response = await client.patch(
+            url, json={"expiry_date": str(self.TODAY + timedelta(days=2))}
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["expiry_date"] == str(self.TODAY + timedelta(days=2))
+        assert body["expiry_source"] == "frozen"
+        after = await self._product(seeded_db, product_id)
+        assert (after.default_shelf_life_days, after.shelf_life_source) == (
+            days,
+            source,
+        )
+
+        # Later: two fresh packs are corrected, 10 days then 4. Had the thawed one
+        # counted, three observations would give the median of [92, 10, 4] = 10
+        for implied in (10, 4):
+            fresh = await self._add(
+                client, **mince, location="main_fridge", purchase_date=str(self.TODAY)
+            )
+            await client.patch(
+                f"/api/inventory/{fresh['id']}",
+                json={"expiry_date": str(self.TODAY + timedelta(days=implied))},
+            )
+        learned = await self._product(seeded_db, product_id)
+        assert (learned.default_shelf_life_days, learned.shelf_life_source) == (
+            4,
+            "cook",
+        )

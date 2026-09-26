@@ -118,18 +118,72 @@ class TestWhatIsLearned:
 
         assert tortillas.default_shelf_life_days == 60
 
-    async def test_an_even_count_takes_the_lower_median(
+    async def test_with_two_the_most_recent_wins(
+        self, db_session: AsyncSession, tortillas: ProductMaster
+    ) -> None:
+        """An older row implying 3 days must not hold back a correction to +60."""
+        await _add(
+            db_session,
+            _item(tortillas, days=3, purchase_date=BOUGHT),
+            _item(tortillas, days=60, purchase_date=BOUGHT + timedelta(days=1)),
+        )
+
+        await _learn(db_session, tortillas)
+
+        assert tortillas.default_shelf_life_days == 60
+
+    async def test_with_two_the_most_recent_wins_downwards_too(
         self, db_session: AsyncSession, tortillas: ProductMaster
     ) -> None:
         await _add(
             db_session,
-            _item(tortillas, days=40, purchase_date=BOUGHT),
-            _item(tortillas, days=50, purchase_date=BOUGHT + timedelta(days=1)),
+            _item(tortillas, days=60, purchase_date=BOUGHT),
+            _item(tortillas, days=40, purchase_date=BOUGHT + timedelta(days=1)),
         )
 
         await _learn(db_session, tortillas)
 
         assert tortillas.default_shelf_life_days == 40
+
+    async def test_with_two_bought_the_same_day_the_later_created_wins(
+        self, db_session: AsyncSession, tortillas: ProductMaster
+    ) -> None:
+        await _add(db_session, _item(tortillas, days=60), _item(tortillas, days=45))
+
+        await _learn(db_session, tortillas)
+
+        assert tortillas.default_shelf_life_days == 45
+
+    async def test_three_take_the_median(
+        self, db_session: AsyncSession, tortillas: ProductMaster
+    ) -> None:
+        await _add(
+            db_session,
+            *[
+                _item(tortillas, days=days, purchase_date=BOUGHT + timedelta(days=i))
+                for i, days in enumerate([60, 3, 50])
+            ],
+        )
+
+        await _learn(db_session, tortillas)
+
+        assert tortillas.default_shelf_life_days == 50
+
+    async def test_an_even_count_takes_the_mean_of_the_middle_two_rounded_half_up(
+        self, db_session: AsyncSession, tortillas: ProductMaster
+    ) -> None:
+        await _add(
+            db_session,
+            *[
+                _item(tortillas, days=days, purchase_date=BOUGHT + timedelta(days=i))
+                for i, days in enumerate([10, 40, 20, 31])
+            ],
+        )
+
+        await _learn(db_session, tortillas)
+
+        # sorted 10, 20, 31, 40: (20 + 31) / 2 = 25.5 -> 26
+        assert tortillas.default_shelf_life_days == 26
 
     async def test_only_the_last_five_count(
         self, db_session: AsyncSession, tortillas: ProductMaster
@@ -180,14 +234,35 @@ class TestWhatIsLearned:
         assert learned.observations == 2
         assert tortillas.default_shelf_life_days == 60
 
-    async def test_an_expiry_before_purchase_clamps_to_one_day(
+    @pytest.mark.parametrize("days", [0, -3])
+    async def test_an_expiry_on_or_before_purchase_is_ignored(
+        self, db_session: AsyncSession, tortillas: ProductMaster, days: int
+    ) -> None:
+        """An "eat today" entry says nothing about how long a sealed pack keeps."""
+        await _add(db_session, _item(tortillas, days=days))
+
+        assert await _learn(db_session, tortillas) is None
+
+        assert (tortillas.default_shelf_life_days, tortillas.shelf_life_source) == (
+            7,
+            "model",
+        )
+
+    async def test_an_ignored_date_does_not_take_a_recent_slot(
         self, db_session: AsyncSession, tortillas: ProductMaster
     ) -> None:
-        await _add(db_session, _item(tortillas, days=-3))
+        """The newest row dated on its purchase day is skipped; the one before it wins."""
+        await _add(
+            db_session,
+            _item(tortillas, days=60, purchase_date=BOUGHT),
+            _item(tortillas, days=0, purchase_date=BOUGHT + timedelta(days=1)),
+        )
 
-        await _learn(db_session, tortillas)
+        learned = await _learn(db_session, tortillas)
 
-        assert tortillas.default_shelf_life_days == 1
+        assert learned is not None
+        assert learned.observations == 1
+        assert tortillas.default_shelf_life_days == 60
 
 
 class TestWhatIsNotAnObservation:

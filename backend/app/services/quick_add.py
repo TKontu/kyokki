@@ -14,7 +14,7 @@ from app.models.inventory_item import InventoryItem
 from app.schemas.inventory_item import QuickAddRequest
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import ProductResolver, build_inventory_item
-from app.services.shelf_life_learning import learn_from_item
+from app.services.shelf_life_learning import learn_from_item, lock_product
 
 logger = get_logger(__name__)
 
@@ -31,10 +31,13 @@ async def quick_add(db: AsyncSession, request: QuickAddRequest) -> QuickAddResul
     """Find or create the generic product and add a sealed inventory item for it.
 
     A typed expiry date is the cook's statement of how long this pack keeps, so the product
-    learns from it in the same transaction (Q24): its shelf life becomes the cook's, and its
-    other estimated items move with it. Those moves are broadcast here, after the commit,
-    because both routes that add stock - quick add and the agents' stock add, which wraps
-    this - answer with the new item alone.
+    learns from it in the same transaction (Q24). What it learns follows the rule in
+    `shelf_life_learning` - the most recent of one or two dates, the median of the last five
+    from three on - not necessarily the number just typed. A date typed for the freezer, or
+    one on or before the purchase date, teaches nothing. The product's items dated from its
+    shelf life (`expiry_source='calculated'`) move with it. Those moves are broadcast here,
+    after the commit, because both routes that add stock - quick add and the agents' stock
+    add, which wraps this - answer with the new item alone.
 
     Raises:
         InvalidProductRequest: unknown product, or a new product without a valid category.
@@ -47,6 +50,10 @@ async def quick_add(db: AsyncSession, request: QuickAddRequest) -> QuickAddResul
             unit=request.unit,
             quantity=request.quantity,
         )
+        if request.expiry_date is not None:
+            # The product before the item: the insert takes a key-share lock on it, and
+            # learning then needs it for update (see `lock_product`)
+            await lock_product(db, cast(UUID, product.id))
         item = build_inventory_item(
             product,
             quantity=request.quantity,

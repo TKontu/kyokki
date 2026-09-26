@@ -293,7 +293,8 @@ async def update_inventory_item(
         item_update: Fields to update.
         on_dated_by_hand: Awaited with the item, before the commit, when this update set its
             date by hand (`expiry_source` became `manual` because the client sent a new date
-            and no source). What the date teaches the product (Q24) lands in this transaction.
+            and no source). What the date teaches the product (Q24) lands in this
+            transaction. A new date on a `frozen` item stays `frozen` and is not passed.
 
     Returns:
         Updated inventory item if found, None otherwise.
@@ -377,7 +378,15 @@ async def update_inventory_item(
         and "expiry_source" not in update_data
         and update_data["expiry_date"] != row.expiry_date
     )
-    if dated_by_hand:
+    if dated_by_hand and str(row.expiry_source) == "frozen":
+        # A date set by hand on an item whose clock is the freezer's - still frozen, or
+        # thawed. The cook's date is kept, but the source stays `frozen`: the date counts
+        # from when it went in, not from purchase, so it must never teach the product a
+        # shelf life (Q24) - 90 days frozen then two in the fridge is not 92 - and, like
+        # every `frozen` date, it is never recomputed.
+        update_data["expiry_source"] = "frozen"
+        dated_by_hand = False
+    elif dated_by_hand:
         # A date set by hand, so the badge no longer claims it was calculated
         update_data["expiry_source"] = "manual"
     elif (

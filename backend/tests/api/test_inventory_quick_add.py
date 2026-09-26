@@ -340,3 +340,13 @@ class TestATypedDateTeachesTheProduct:
 
         product = await self._product(seeded_db, item["product_master_id"])
         assert product.shelf_life_source != "cook"
+
+    async def test_an_eat_today_date_teaches_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """A date on the purchase day says nothing about how long a sealed pack keeps."""
+        item = await self._add(client, expiry_date=str(self.TODAY))
+
+        product = await self._product(seeded_db, item["product_master_id"])
+        assert product.shelf_life_source != "cook"
+        assert product.default_shelf_life_days > 1

@@ -10,13 +10,21 @@ writes to the whole catalog in one go, so an answer that is confident and absurd
 be dropped rather than stored.
 """
 
+import asyncio
 import json
+from datetime import date, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.db.seed_categories import SEED_CATEGORIES
+from app.models.category import Category
+from app.models.inventory_item import InventoryItem
+from app.models.product_master import ProductMaster
 from app.services.catalog_estimates import (
     INSTRUCTIONS,
     Estimate,
@@ -496,3 +504,124 @@ class TestPlausibleBands:
         for category in SEED_CATEGORIES:
             low, high = PLAUSIBLE_DAYS[category["id"]]
             assert low <= category["default_shelf_life_days"] <= high, category["id"]
+
+
+class TestACookNumberLearnedMeanwhile:
+    """Q24: the cook's number can arrive while the model is still answering.
+
+    A new product is estimated in the background after its response. If the cook corrects
+    one of its items before the model answers, the product learns a `cook` number, and the
+    estimate - which checked `may_estimate` before it asked - must not then write over it.
+    This needs two committed connections: the correction lands from another one.
+    """
+
+    @pytest.fixture
+    async def committed(self, db_engine):
+        return async_sessionmaker(db_engine, expire_on_commit=False)
+
+    @pytest.fixture
+    async def product_id(self, committed):
+        suffix = uuid4().hex[:8]
+        category_id = f"race-{suffix}"
+        async with committed() as session:
+            session.add(
+                Category(
+                    id=category_id,
+                    display_name=f"Race {suffix}",
+                    default_shelf_life_days=7,
+                    sort_order=999,
+                )
+            )
+            await session.flush()
+            product = ProductMaster(
+                canonical_name=f"Tortillas {suffix}",
+                category=category_id,
+                storage_type="pantry",
+                default_shelf_life_days=7,
+                shelf_life_source="category",
+                unit_type="count",
+                default_unit="pcs",
+            )
+            session.add(product)
+            await session.flush()
+            session.add(
+                InventoryItem(
+                    product_master_id=product.id,
+                    initial_quantity=Decimal(8),
+                    current_quantity=Decimal(8),
+                    unit="pcs",
+                    status="sealed",
+                    purchase_date=date.today(),
+                    expiry_date=date.today() + timedelta(days=60),
+                    expiry_source="calculated",
+                    location="pantry",
+                )
+            )
+            await session.commit()
+            product_id = product.id
+
+        yield product_id
+
+        async with committed() as session:
+            await session.execute(
+                delete(InventoryItem).where(
+                    InventoryItem.product_master_id == product_id
+                )
+            )
+            await session.execute(
+                delete(ProductMaster).where(ProductMaster.id == product_id)
+            )
+            await session.execute(delete(Category).where(Category.id == category_id))
+            await session.commit()
+
+    async def test_a_slow_estimate_does_not_overwrite_it(
+        self, committed, product_id
+    ) -> None:
+        asked = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_model(products):
+            asked.set()
+            await release.wait()
+            return [
+                Estimate(id=p.id, shelf_life_days=14, opened_shelf_life_days=None)
+                for p in products
+            ]
+
+        async def estimate() -> None:
+            async with committed() as session:
+                product = await session.get(ProductMaster, product_id)
+                assert product is not None
+                await estimate_products(session, [product], apply=True)
+
+        with patch(
+            "app.services.catalog_estimates.estimate_shelf_lives",
+            new=AsyncMock(side_effect=slow_model),
+        ):
+            running = asyncio.create_task(estimate())
+            await asyncio.wait_for(asked.wait(), timeout=10)
+            # The cook's correction teaches the product while the model is answering
+            async with committed() as session:
+                product = await session.get(ProductMaster, product_id)
+                assert product is not None
+                product.default_shelf_life_days = 60
+                product.shelf_life_source = "cook"
+                await session.commit()
+            release.set()
+            await asyncio.wait_for(running, timeout=10)
+
+        async with committed() as session:
+            product = await session.get(ProductMaster, product_id)
+            assert product is not None
+            assert (product.default_shelf_life_days, product.shelf_life_source) == (
+                60,
+                "cook",
+            )
+            item = (
+                await session.execute(
+                    InventoryItem.__table__.select().where(
+                        InventoryItem.product_master_id == product_id
+                    )
+                )
+            ).one()
+            assert item.expiry_date == date.today() + timedelta(days=60)
