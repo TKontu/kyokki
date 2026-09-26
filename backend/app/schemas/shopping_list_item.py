@@ -76,3 +76,45 @@ class ShoppingListItemResponse(ShoppingListItemBase):
     purchased_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class ShoppingGenerateRequest(BaseModel):
+    """What to build a shopping list from (AG6). Only ``low_stock`` exists for now.
+
+    An empty or unknown source is refused by the service as 400 ``invalid``, not here,
+    so an agent gets the stable error shape rather than a 422.
+    """
+
+    sources: list[str] = Field(
+        ..., description="low_stock: every product below its min_stock_quantity"
+    )
+    dry_run: bool = Field(False, description="Plan only; nothing is written")
+
+
+class ShoppingGenerateLine(BaseModel):
+    """One product the generator looked at, and what came of it.
+
+    ``need``, ``on_hand`` and ``min_stock`` are in ``unit``, the product's own unit.
+    ``item_id`` is the list item added, raised or left alone (none on a dry run's added
+    lines). A skipped line has no ``need`` or ``on_hand`` and says why in ``reason``.
+    """
+
+    product_id: UUID
+    name: str
+    need: JsonDecimal | None = None
+    unit: str
+    on_hand: JsonDecimal | None = None
+    min_stock: JsonDecimal
+    item_id: UUID | None = None
+    reason: str | None = None
+
+
+class ShoppingGenerateResponse(BaseModel):
+    """added: new list items. updated: open items raised to the need. unchanged: open
+    items already big enough. skipped: products whose stock could not be counted."""
+
+    added: list[ShoppingGenerateLine] = Field(default_factory=list)
+    updated: list[ShoppingGenerateLine] = Field(default_factory=list)
+    unchanged: list[ShoppingGenerateLine] = Field(default_factory=list)
+    skipped: list[ShoppingGenerateLine] = Field(default_factory=list)
+    dry_run: bool

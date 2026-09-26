@@ -1,23 +1,35 @@
 """Shopping list API endpoints."""
 
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.endpoints.stock import IdempotencyKeyHeader, claim_request, replayed
+from app.api.errors import AgentError
 from app.api.exceptions import handle_integrity_errors
 from app.core.logging import get_logger
 from app.crud.shopping_list_item import shopping_list_item
 from app.db.session import get_db
 from app.schemas.shopping_list_item import (
+    ShoppingGenerateLine,
+    ShoppingGenerateRequest,
+    ShoppingGenerateResponse,
     ShoppingListItemCreate,
     ShoppingListItemResponse,
     ShoppingListItemUpdate,
 )
+from app.services import shopping_generate
 from app.services.broadcast_helpers import broadcast_shopping_list_update
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+GENERATE_ROUTE = "POST /api/shopping/generate"
+GeneratedAction = Literal["created", "updated"]
+EXPORT_MEDIA_TYPES = {"text": "text/plain", "markdown": "text/markdown"}
 
 
 @router.get("/", response_model=list[ShoppingListItemResponse])
@@ -67,6 +79,80 @@ async def get_urgent_items(
 
     items = await shopping_list_item.get_urgent_items(db)
     return items
+
+
+# Static paths before /{item_id}, which would otherwise take "export" for an id and 422.
+@router.get(
+    "/export",
+    response_class=PlainTextResponse,
+    responses={
+        200: {"content": {"text/plain": {}, "text/markdown": {}}},
+        400: {"description": "`invalid`: an unknown format"},
+    },
+)
+async def export_shopping_list(
+    format: str = Query(
+        "text", description="text (`- name quantity unit`) or markdown (a checklist)"
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> PlainTextResponse:
+    """The open list, urgent first and then by name, as plain text or Markdown (UTF-8).
+
+    Errors: 400 `invalid` (an unknown format).
+    """
+    try:
+        text = await shopping_generate.export(db, format)
+    except ValueError as exc:
+        raise AgentError("invalid", str(exc)) from exc
+    return PlainTextResponse(text, media_type=EXPORT_MEDIA_TYPES[format])
+
+
+@router.post("/generate", response_model=ShoppingGenerateResponse)
+async def generate_shopping_list(
+    body: ShoppingGenerateRequest,
+    idempotency_key: str | None = IdempotencyKeyHeader,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Put what the kitchen is short of on the list, merged into the open items.
+
+    `low_stock`: every product with a `min_stock_quantity` whose stock is below it needs
+    its `reorder_quantity`, or the shortfall when that is not set. An open item for the
+    product is raised to the need instead of being joined by a second one.
+
+    Errors: 400 `invalid` (no source, or an unknown one), 409 `conflict`
+    (Idempotency-Key reused with another body). A dry run is never remembered.
+    """
+    claim = (
+        None if body.dry_run else claim_request(body, idempotency_key, GENERATE_ROUTE)
+    )
+    if (stored := await replayed(db, claim)) is not None:
+        return stored
+    try:
+        async with handle_integrity_errors():
+            result = await shopping_generate.generate(
+                db, body.sources, dry_run=body.dry_run, claim=claim
+            )
+    except shopping_generate.InvalidGenerate as exc:
+        raise AgentError("invalid", str(exc)) from exc
+
+    if not result.dry_run:
+        touched: list[tuple[GeneratedAction, ShoppingGenerateLine]] = [
+            ("created", line) for line in result.added
+        ] + [("updated", line) for line in result.updated]
+        for action, line in touched:
+            item: Any = await shopping_list_item.get(db, id=line.item_id)
+            if item is None:
+                continue
+            await broadcast_shopping_list_update(
+                shopping_list_item_id=item.id,
+                action=action,
+                name=item.name,
+                quantity=item.quantity,
+                unit=item.unit,
+                priority=item.priority,
+                is_purchased=item.is_purchased,
+            )
+    return result
 
 
 @router.get("/{item_id}", response_model=ShoppingListItemResponse)
