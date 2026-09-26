@@ -1,6 +1,7 @@
 import json
 import logging
 import logging.config
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,6 +53,58 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_entry, ensure_ascii=False, default=str)
 
 
+# A ``token=`` query parameter carries an API secret: the WebSocket takes ``?token=`` because
+# browsers cannot set its headers, and uvicorn logs every handshake and request with the full
+# query string. The name must follow ``?`` or ``&``; the value ends at ``&``, whitespace or ``"``.
+# Each letter may be percent-encoded ("tok%65n"): Starlette decodes the name, so that spelling
+# authenticates too.
+_TOKEN_PARAM = re.compile(
+    r'([?&](?:t|%74)(?:o|%6f)(?:k|%6b)(?:e|%65)(?:n|%6e)=)[^&\s"]*', re.IGNORECASE
+)
+
+
+def _redact(value: object) -> object:
+    return _TOKEN_PARAM.sub(r"\1***", value) if isinstance(value, str) else value
+
+
+class TokenRedactingFilter(logging.Filter):
+    """Rewrite ``token=<value>`` to ``token=***`` in a record's message and string args.
+
+    uvicorn passes the request path as an arg, so the message alone is not enough. The
+    filter only rewrites; it never drops a record.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if (
+            record.args
+            and isinstance(record.msg, str)
+            and _TOKEN_PARAM.search(record.msg)
+        ):
+            # The token sits in the template ("?token=%s"). Redacting the template alone
+            # leaves an argument with no placeholder, formatting fails, and logging's error
+            # handler prints the raw arguments - the secret - to stderr. Format first.
+            try:
+                message = record.getMessage()
+            except (TypeError, ValueError, KeyError):
+                # A template that cannot be formatted anyway: keep it, drop the arguments.
+                message = record.msg
+            record.msg = _redact(message)
+            record.args = None
+            return True
+        record.msg = _redact(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(_redact(arg) for arg in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {key: _redact(arg) for key, arg in record.args.items()}
+        return True
+
+
+# uvicorn may install its own handlers on these (its default log config, or a server started
+# without ``setup_logging``); any handler found on them gets the filter too. After
+# ``setup_logging`` the ``uvicorn`` logger's handlers are the console and file ones above.
+_UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
+
+
 def setup_logging() -> None:
     """Setup structured logging configuration"""
 
@@ -69,6 +122,7 @@ def setup_logging() -> None:
     logging_config = {
         "version": 1,
         "disable_existing_loggers": False,
+        "filters": {"redact_tokens": {"()": TokenRedactingFilter}},
         "formatters": {
             "json": {
                 "()": JSONFormatter,
@@ -81,12 +135,14 @@ def setup_logging() -> None:
                 "level": "INFO",
                 "formatter": "standard" if settings.DEBUG else "json",
                 "stream": sys.stdout,
+                "filters": ["redact_tokens"],
             },
             "file": {
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": "INFO",
                 "formatter": "json",
                 "filename": str(log_dir / "app.log"),
+                "filters": ["redact_tokens"],
                 "maxBytes": 10485760,  # 10MB
                 "backupCount": 5,
             },
@@ -95,6 +151,7 @@ def setup_logging() -> None:
                 "level": "ERROR",
                 "formatter": "json",
                 "filename": str(log_dir / "error.log"),
+                "filters": ["redact_tokens"],
                 "maxBytes": 10485760,  # 10MB
                 "backupCount": 5,
             },
@@ -123,6 +180,12 @@ def setup_logging() -> None:
     }
 
     logging.config.dictConfig(logging_config)
+
+    # Handler-level, so records propagated from child loggers are covered as well.
+    for name in _UVICORN_LOGGERS:
+        for handler in logging.getLogger(name).handlers:
+            if not any(isinstance(f, TokenRedactingFilter) for f in handler.filters):
+                handler.addFilter(TokenRedactingFilter())
 
 
 def get_logger(name: str) -> logging.Logger:
