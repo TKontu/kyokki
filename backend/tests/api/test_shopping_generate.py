@@ -293,3 +293,23 @@ class TestIdempotency:
         assert real.status_code == 200
         assert real.json()["dry_run"] is False
         assert await _count(seeded_db, ShoppingListItem) == 1
+
+
+class TestPublishedSchema:
+    """The request schema an agent or a generated client reads from OpenAPI."""
+
+    def _request_schema(self) -> dict:
+        from app.main import app
+
+        return app.openapi()["components"]["schemas"]["ShoppingGenerateRequest"]
+
+    def test_sources_is_required(self) -> None:
+        # A missing `sources` is refused at runtime (400 `invalid`), so the schema says so.
+        assert "sources" in self._request_schema().get("required", [])
+
+    def test_the_sources_enum_is_the_services(self) -> None:
+        from app.services.shopping_generate import SOURCES
+
+        sources = self._request_schema()["properties"]["sources"]
+        assert sources["type"] == "array"
+        assert sources["items"]["enum"] == list(SOURCES)

@@ -26,6 +26,7 @@ from app.crud.shopping_list_item import shopping_list_item as crud_shopping
 from app.models.product_master import ProductMaster
 from app.models.shopping_list_item import ShoppingListItem
 from app.schemas.shopping_list_item import (
+    GENERATE_SOURCES,
     ShoppingGenerateLine,
     ShoppingGenerateResponse,
     ShoppingListItemCreate,
@@ -42,8 +43,9 @@ from app.services.units import canonical_factor, quantise
 logger = get_logger(__name__)
 
 LOW_STOCK = "low_stock"
-#: The sources `generate` understands. ``recipe`` and ``meal_plan`` wait for AG5.
-SOURCES = (LOW_STOCK,)
+#: The sources `generate` understands, as the request schema publishes them.
+#: ``recipe`` and ``meal_plan`` wait for AG5.
+SOURCES = GENERATE_SOURCES
 
 #: The one advisory lock every real `generate` takes, whatever its sources.
 GENERATE_LOCK = "kyokki:shopping-generate"

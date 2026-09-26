@@ -664,7 +664,7 @@ class TestIdempotentCreate:
 
 
 class TestIdempotentPurchase:
-    """AG6 follow-up: `kyokki shopping buy` retries safely with an Idempotency-Key."""
+    """AG6 follow-up: `kyokki shopping done ID` retries safely with an Idempotency-Key."""
 
     async def test_a_repeated_key_replays_without_running_again(
         self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast

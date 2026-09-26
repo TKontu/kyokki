@@ -79,6 +79,19 @@ class ShoppingListItemResponse(ShoppingListItemBase):
     model_config = {"from_attributes": True}
 
 
+#: The sources `POST /api/shopping/generate` understands (``shopping_generate.SOURCES``).
+#: ``recipe`` and ``meal_plan`` wait for AG5.
+GENERATE_SOURCES: tuple[str, ...] = ("low_stock",)
+
+
+def _sources_required(schema: dict[str, Any]) -> None:
+    """Publish ``sources`` as required. The field defaults to None only so that a missing
+    one reaches the service and is refused as 400 ``invalid`` rather than a 422."""
+    required = schema.setdefault("required", [])
+    if "sources" not in required:
+        required.insert(0, "sources")
+
+
 class ShoppingGenerateRequest(BaseModel):
     """What to build a shopping list from (AG6). Only ``low_stock`` exists for now.
 
@@ -86,16 +99,21 @@ class ShoppingGenerateRequest(BaseModel):
     non-empty list of known source names (a bare string, an object, a list holding an
     object, an unknown name, an empty list, or no ``sources`` at all) is 400 ``invalid``,
     so an agent gets the stable error shape rather than a 422. The schema still documents
-    it as a list of names. ``dry_run`` is validated as usual.
+    it as a required list of names. ``dry_run`` is validated as usual.
     """
 
     sources: Annotated[
         Any,
         WithJsonSchema(
-            {"type": "array", "items": {"type": "string", "enum": ["low_stock"]}}
+            {
+                "type": "array",
+                "items": {"type": "string", "enum": list(GENERATE_SOURCES)},
+            }
         ),
     ] = Field(None, description="low_stock: every product below its min_stock_quantity")
     dry_run: bool = Field(False, description="Plan only; nothing is written")
+
+    model_config = {"json_schema_extra": _sources_required}
 
 
 class ShoppingGenerateLine(BaseModel):

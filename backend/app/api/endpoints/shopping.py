@@ -129,7 +129,8 @@ async def generate_shopping_list(
     product is raised to the need instead of being joined by a second one.
 
     Errors: 400 `invalid` (`sources` is not a non-empty list of known source names:
-    a bare string, an object, an unknown name, an empty list), 409 `conflict`
+    a bare string, an object, a list holding a non-string, an unknown name, an empty
+    list, or no `sources`), 409 `conflict`
     (Idempotency-Key reused with another body). A dry run is never remembered.
     Two runs at once serialise: the second merges into the first's items.
     """
