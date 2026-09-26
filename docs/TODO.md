@@ -1833,14 +1833,14 @@ Round 2026-09-26-6 builds these:
 - A3: Q18-S.
 
 **Review follow-ups (round 2026-09-26-6 review, 2026-09-26),** not fixed in the lane PRs:
-- [ ] Q17 build (in Q17-B's spec, round 2026-09-26-3): a region's dots are cut off without a sign when they overflow
+- [x] Q17 build (in Q17-B's spec, round 2026-09-26-3; fixed in #113: a white "+" marks overflow, the stale strip never scrolls sideways): a region's dots are cut off without a sign when they overflow
   (`components/fridge-mocks/shared.tsx:204`, `overflow-hidden`), and Crema's going-stale strip
   scrolls sideways at 1180×820. Put both into the build spec for whichever mock is chosen.
 - [ ] Q19 (#105), operator nod: a catalog apply marks every product the model answered as
   `model`, including ones it agreed with, so a `scope=guesses` apply also moves those out of the
   guesses (`catalog_estimates.py:338`). Deliberate and tested. There are also two untested
   paths: the confirm broadcast of `resolver.moved`, and "an idempotent replay schedules no
-  estimate".
+  estimate". **The two paths are tested in #112 (no defect found); the operator nod is still open.**
 
 **Operator actions before planning:**
 - [ ] Run H56 (*Products → Estimate the guesses*, dry run, then apply) and report whether the
@@ -1865,6 +1865,21 @@ Round 2026-09-26-3:
 - A1: **Q17-B**: the Cielo fridge on `/`, drawn for the portrait iPad (`feat/q17-cielo-portrait`);
 - A2: AG3's `kyokki shopping` commands (`feat/ag3-cli-shopping`);
 - A3: the agent API follow-ups from the AG6 and Q19 review (`fix/agent-api-followups`).
+
+**Round 2026-09-26-3 is merged** (2026-09-26): #113 Q17-B, #111 AG3 `kyokki shopping`, #112 the
+agent API follow-ups. Each went through a verdict panel and one fix-up pass on its own branch.
+- **Q17-B done (#113):** `/` is the Cielo fridge drawn for 810×1080 portrait. The stale strip is
+  6 tiles plus "More" (a sheet). Overflowing areas end in a "+" disc. No digits anywhere. The
+  manifest says `portrait`.
+- **Operator ruling at review (2026-09-26), amending the portrait ruling above:** the larder sits
+  **beside the freezer drawer**, not under the fridge (saves ~150 px of height). The look was
+  approved from the PR screenshots (`assets/q17-cielo-portrait` @ `7f5b792`).
+- Follow-ups from the round:
+  - [ ] `IngredientTile`'s "…" button is 32 px (below the 44 px touch minimum) everywhere
+    except the stale strip, where #113 enlarged it from the outside.
+  - [ ] Portrait pass on `/area/[id]`, `/products` and receipt review (screenshots at
+    810×1080 on `assets/q17-cielo-portrait/q17b/info-*`).
+  - [ ] Deploy the round to the homelab and look at `/` on the iPad.
 
 Increments (to plan): **Q17** fridge illustration (a mock, then the build); **Q18-S** icon spike,
 then **Q18** product icons (a model field, the mapping, an override on the product screen);
@@ -2021,7 +2036,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [ ] Q17-B Cielo portrait (`feat/q17-cielo-portrait`)
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged 2026-09-26, not yet deployed. Next: Q18 (needs the icon-route ruling), the portrait pass on the other screens
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
