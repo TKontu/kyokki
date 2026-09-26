@@ -83,6 +83,13 @@ describe('areaOf', () => {
       'freezer', 'other',
     ])
   })
+
+  it('keeps bread with the pantry, not in the fridge (Q23)', () => {
+    const where = Object.fromEntries(AREAS.map((a) => [a.id, a.compartment]))
+
+    expect(where.bread).toBe('pantry')
+    expect(where.pantry).toBe('pantry')
+  })
 })
 
 describe('buildFridgeView', () => {

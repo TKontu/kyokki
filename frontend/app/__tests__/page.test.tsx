@@ -39,6 +39,18 @@ describe('Home Page', () => {
     await screen.findByText(/no items found/i)
   })
 
+  it('names the page for screen readers only, so the fridge gets the room (Q20)', async () => {
+    mockApi()
+    render(<Home />, { wrapper })
+
+    const title = screen.getByRole('heading', { level: 1, name: 'Kyokki' })
+    expect(title).toHaveClass('sr-only')
+    // Undo and + Add stay on the page, not in the app's bar
+    expect(screen.getByRole('button', { name: '+ Add' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Undo/ })).toBeInTheDocument()
+    await screen.findByText(/no items found/i)
+  })
+
   it('has an Add button that opens the quick add sheet', async () => {
     mockApi()
     render(<Home />, { wrapper })

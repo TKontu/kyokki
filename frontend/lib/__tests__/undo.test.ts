@@ -29,7 +29,11 @@ describe('describeUndo', () => {
     [step({ action: 'use_full' }), 'Finished · Apples'],
     [step({ action: 'discard' }), 'Thrown away · Apples'],
     [step({ action: 'restore' }), 'Put back · Apples'],
-    [step({ action: 'correct' }), 'Correction · Apples'],
+    // A grey "used today" tile tapped back is logged as an upward correction (Q22)
+    [step({ action: 'correct', quantity_consumed: 1 }), 'Put back · Apples'],
+    // A correction downwards, or one that changed nothing, came through the API
+    [step({ action: 'correct', quantity_consumed: -2 }), 'Corrected · Apples'],
+    [step({ action: 'correct', quantity_consumed: 0 }), 'Corrected · Apples'],
   ])('names one change by what happened to the food', (only, text) => {
     expect(describeUndo(preview(only))).toBe(text)
   })
@@ -42,6 +46,18 @@ describe('describeUndo', () => {
     )
 
     expect(describeUndo(shelf)).toBe('Thrown away · 3 items')
+  })
+
+  it.each([
+    [1, 'Put back · 2 items'],
+    [-1, 'Corrected · 2 items'],
+  ])('counts several corrections of %s and names them by their sign', (quantity, text) => {
+    const two = preview(
+      step({ action: 'correct', quantity_consumed: quantity }),
+      step({ action: 'correct', quantity_consumed: quantity, product_name: 'Milk' })
+    )
+
+    expect(describeUndo(two)).toBe(text)
   })
 
   it('shows an action this build has never heard of rather than hiding it', () => {
