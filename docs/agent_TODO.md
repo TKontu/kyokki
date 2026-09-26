@@ -27,6 +27,19 @@ Planned 2026-09-14. ~~Starts after MVP-P3~~ **Started 2026-09-25** (operator rul
 
   Next round: `kyokki shopping` commands (from AG6's contract) and AG4.
 
+  Review follow-ups (2026-09-26), not fixed in the lane PRs:
+  - [ ] AG6 (#102): two concurrent `POST /shopping/generate` calls without a shared
+    `Idempotency-Key` both insert, so duplicate open items appear. There is no lock or unique
+    constraint.
+  - [ ] AG6 (#102): `sources: list[str]` answers 422 to a bare string or to the
+    `{"recipe": {...}}` object form, not 400 `invalid`. Settle the source shape before AG5 and
+    the `kyokki shopping` commands.
+  - [ ] AG6 (#102): a skipped line in an incompatible unit carries `need`/`on_hand`, contrary
+    to the schema docstrings, and has no test. The unit-conversion test uses `l`, which
+    production never stores; tsp/tbsp against dl is the reachable case.
+  - [ ] AG1 log follow-up (#101): the filter scans message and args only, not `extra=` fields
+    or tracebacks. Nothing logs a token that way today.
+
 ## Goal
 A Hermes Agent or OpenClaw agent runs the kitchen through Kyokki the way a person would:
 - adds and consumes stock;

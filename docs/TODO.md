@@ -1831,6 +1831,16 @@ Round 2026-09-26-6 builds these:
 - A2: Q17-M;
 - A3: Q18-S.
 
+**Review follow-ups (round 2026-09-26-6 review, 2026-09-26),** not fixed in the lane PRs:
+- [ ] Q17 build: a region's dots are cut off without a sign when they overflow
+  (`components/fridge-mocks/shared.tsx:204`, `overflow-hidden`), and Crema's going-stale strip
+  scrolls sideways at 1180×820. Put both into the build spec for whichever mock is chosen.
+- [ ] Q19 (#105), operator nod: a catalog apply marks every product the model answered as
+  `model`, including ones it agreed with, so a `scope=guesses` apply also moves those out of the
+  guesses (`catalog_estimates.py:338`). Deliberate and tested. There are also two untested
+  paths: the confirm broadcast of `resolver.moved`, and "an idempotent replay schedules no
+  estimate".
+
 **Operator actions before planning:**
 - [ ] Run H56 (*Products → Estimate the guesses*, dry run, then apply) and report whether the
   fridge still looks all stale.
