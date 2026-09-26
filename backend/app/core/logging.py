@@ -1,6 +1,7 @@
 import json
 import logging
 import logging.config
+import re
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -52,6 +53,37 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_entry, ensure_ascii=False, default=str)
 
 
+# A ``token=`` query parameter carries an API secret: the WebSocket takes ``?token=`` because
+# browsers cannot set its headers, and uvicorn logs every handshake and request with the full
+# query string. The name must follow ``?`` or ``&``; the value ends at ``&``, whitespace or ``"``.
+_TOKEN_PARAM = re.compile(r'([?&]token=)[^&\s"]*', re.IGNORECASE)
+
+
+def _redact(value: object) -> object:
+    return _TOKEN_PARAM.sub(r"\1***", value) if isinstance(value, str) else value
+
+
+class TokenRedactingFilter(logging.Filter):
+    """Rewrite ``token=<value>`` to ``token=***`` in a record's message and string args.
+
+    uvicorn passes the request path as an arg, so the message alone is not enough. The
+    filter only rewrites; it never drops a record.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _redact(record.msg)
+        if isinstance(record.args, tuple):
+            record.args = tuple(_redact(arg) for arg in record.args)
+        elif isinstance(record.args, dict):
+            record.args = {key: _redact(arg) for key, arg in record.args.items()}
+        return True
+
+
+# uvicorn installs its own handlers on these before the app's lifespan runs, and
+# ``uvicorn.access`` does not propagate, so its handlers need the filter too.
+_UVICORN_LOGGERS = ("uvicorn", "uvicorn.error", "uvicorn.access")
+
+
 def setup_logging() -> None:
     """Setup structured logging configuration"""
 
@@ -69,6 +101,7 @@ def setup_logging() -> None:
     logging_config = {
         "version": 1,
         "disable_existing_loggers": False,
+        "filters": {"redact_tokens": {"()": TokenRedactingFilter}},
         "formatters": {
             "json": {
                 "()": JSONFormatter,
@@ -81,12 +114,14 @@ def setup_logging() -> None:
                 "level": "INFO",
                 "formatter": "standard" if settings.DEBUG else "json",
                 "stream": sys.stdout,
+                "filters": ["redact_tokens"],
             },
             "file": {
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": "INFO",
                 "formatter": "json",
                 "filename": str(log_dir / "app.log"),
+                "filters": ["redact_tokens"],
                 "maxBytes": 10485760,  # 10MB
                 "backupCount": 5,
             },
@@ -95,6 +130,7 @@ def setup_logging() -> None:
                 "level": "ERROR",
                 "formatter": "json",
                 "filename": str(log_dir / "error.log"),
+                "filters": ["redact_tokens"],
                 "maxBytes": 10485760,  # 10MB
                 "backupCount": 5,
             },
@@ -123,6 +159,12 @@ def setup_logging() -> None:
     }
 
     logging.config.dictConfig(logging_config)
+
+    # Handler-level, so records propagated from child loggers are covered as well.
+    for name in _UVICORN_LOGGERS:
+        for handler in logging.getLogger(name).handlers:
+            if not any(isinstance(f, TokenRedactingFilter) for f in handler.filters):
+                handler.addFilter(TokenRedactingFilter())
 
 
 def get_logger(name: str) -> logging.Logger:
