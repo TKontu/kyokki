@@ -30,9 +30,10 @@ export interface Area {
   label: string
   icon: string
   /**
-   * Where it lives: inside the fridge (body or door), the freezer drawer, the larder beside
-   * the fridge (the pantry's shelves and the bread basket on top), or Other's crate at the
-   * larder's foot. The drawing places each area in `CIELO_BOX`.
+   * Where it lives, for a reader: inside the fridge (body or door), the freezer drawer, the
+   * larder beside the fridge (the pantry's shelves and the bread basket on top), or Other's
+   * crate at the larder's foot. Descriptive only - nothing reads it; where an area is drawn is
+   * `CIELO_BOX` in `components/fridge/CieloFridge.tsx`.
    */
   compartment: 'fridge' | 'freezer' | 'pantry' | 'other'
   categories: string[]
@@ -43,7 +44,7 @@ export const AREAS: Area[] = [
   { id: 'veggies', label: 'Veggies', icon: '🥕', compartment: 'fridge', categories: ['produce'] },
   { id: 'fruits', label: 'Fruits', icon: '🍎', compartment: 'fridge', categories: ['fruits'] },
   { id: 'dairy', label: 'Dairy', icon: '🥛', compartment: 'fridge', categories: ['dairy', 'cheese'] },
-  // Bread is not kept cold: it sits in a basket on the larder (Q23)
+  // Bread lives in a basket by the larder (operator, 2026-09-26, Q23)
   { id: 'bread', label: 'Bread', icon: '🍞', compartment: 'pantry', categories: ['bread'] },
   { id: 'ready_meals', label: 'Ready meals', icon: '🍲', compartment: 'fridge', categories: ['ready_meals'] },
   { id: 'drinks', label: 'Drinks', icon: '🧃', compartment: 'fridge', categories: ['beverages'] },

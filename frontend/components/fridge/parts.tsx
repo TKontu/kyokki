@@ -197,8 +197,9 @@ export function Eggs({ x, base, count, gap = 20 }: { x: number; base: number; co
 }
 
 /**
- * A wicker basket standing on `box`'s bottom edge: the bread basket on the larder (Q23).
- * `loaves` puts a loaf and a baguette in it, peeking over the rim.
+ * A wicker basket standing on `box`'s bottom edge. The production fridge keeps bread in one on
+ * the larder (Q23); the mocks use it for Other. `loaves` puts a loaf and a baguette in it,
+ * peeking over the rim.
  */
 export function Basket({ box, loaves = false }: { box: Box; loaves?: boolean }) {
   const { x, y, w, h } = box

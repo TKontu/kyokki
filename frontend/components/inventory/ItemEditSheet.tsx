@@ -111,12 +111,34 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   }
 
   if (editingProduct) {
-    return product.data ? (
-      <ProductEditSheet
-        product={product.data}
-        onClose={() => setEditingProduct(false)}
-      />
-    ) : null
+    if (product.data) {
+      return <ProductEditSheet product={product.data} onClose={() => setEditingProduct(false)} />
+    }
+    // Never a blank screen: say what is happening, and on a failure lead back to the item
+    return (
+      <BottomSheet
+        open
+        onClose={onClose}
+        title={name}
+        footer={
+          product.isError ? (
+            <Button data-primary variant="secondary" size="lg" fullWidth onClick={() => setEditingProduct(false)}>
+              {`Back to ${name}`}
+            </Button>
+          ) : undefined
+        }
+      >
+        {product.isError ? (
+          <p role="alert" className="text-base text-red-600 dark:text-red-400">
+            {`Could not load the product details for ${name}.`}
+          </p>
+        ) : (
+          <p className="text-base text-ui-text-secondary dark:text-ui-dark-text-secondary">
+            Loading product details…
+          </p>
+        )}
+      </BottomSheet>
+    )
   }
 
   return (
@@ -169,13 +191,16 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">{subtitle}</p>
         )}
 
-        {/* The category is the product's: it is changed on the product's sheet, which also
-            re-dates this product's items (Q25) */}
+        {/* The category is the product's, so it is changed on the product's sheet (Q25). A new
+            category re-dates only the items whose date came from the old category's
+            placeholder shelf life; a date the product or the cook set stays. */}
         <div className="flex items-center justify-between gap-3">
           <p className="text-base text-ui-text dark:text-ui-dark-text">
-            {`Category: ${item.category_name || item.category}`}
+            {`Category: ${item.category_name || 'No category'}`}
           </p>
-          <Button variant="secondary" size="md" onClick={editProduct}>
+          {/* Held while a save is in flight: its success closes this sheet, and would take the
+              product's sheet with it mid-edit */}
+          <Button variant="secondary" size="md" disabled={busy} onClick={editProduct}>
             Change…
           </Button>
         </div>
@@ -183,7 +208,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
         {/* A wrong expiry is usually the product's shelf life, not this item's date,
             and until H18 there was no way to correct it. */}
         <div>
-          <Button variant="ghost" size="sm" onClick={editProduct}>
+          <Button variant="ghost" size="md" disabled={busy} onClick={editProduct}>
             Change product details…
           </Button>
         </div>

@@ -386,4 +386,96 @@ describe('ItemEditSheet: the product behind the item (Q25)', () => {
       expect(screen.queryByRole('button', { name: 'Mark as gone' })).not.toBeInTheDocument()
     }
   )
+
+  it('gives both ways to the product sheet a full touch target', () => {
+    mockApi()
+    renderSheet()
+
+    // 44 px (`min-h-touch`), not the 36 px of a small button
+    for (const name of ['Change…', 'Change product details…']) {
+      expect(screen.getByRole('button', { name })).toHaveClass('min-h-touch')
+    }
+  })
+
+  it('says "No category" rather than an id when the item has no category name', () => {
+    mockApi()
+    renderSheet({ ...OAT, category_name: '' })
+
+    expect(screen.getByText('Category: No category')).toBeInTheDocument()
+    expect(screen.queryByText(/beverages/)).not.toBeInTheDocument()
+  })
+
+  it('says it is loading the product rather than showing nothing', async () => {
+    mockApi()
+    let release: () => void = () => {}
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get(`${API_URL}/products/prod-oat`, async () => {
+        await released
+        return HttpResponse.json(OAT_PRODUCT)
+      }),
+      http.get(`${API_URL}/products/prod-oat/names`, () =>
+        HttpResponse.json({ names: [], printed: [] })
+      ),
+      http.get(`${API_URL}/categories`, () => HttpResponse.json([]))
+    )
+    renderSheet()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change…' }))
+
+    expect(await screen.findByText('Loading product details…')).toBeInTheDocument()
+    release()
+    expect(await screen.findByRole('heading', { name: 'Edit Oat drink' })).toBeInTheDocument()
+  })
+
+  it('says so when the product cannot be loaded, and leads back to the item', async () => {
+    mockApi()
+    server.use(
+      http.get(`${API_URL}/products/prod-oat`, () =>
+        HttpResponse.json({ detail: 'boom' }, { status: 500 })
+      )
+    )
+    renderSheet()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change…' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not load the product details for Oat drink.'
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Oat drink' }))
+    expect(screen.getByRole('button', { name: 'Mark as gone' })).toBeInTheDocument()
+    expect(screen.getByText('Category: Beverages')).toBeInTheDocument()
+  })
+
+  it('holds both Change buttons while a save is in flight', async () => {
+    let releasePatch: () => void = () => {}
+    const patched = new Promise<void>((resolve) => {
+      releasePatch = resolve
+    })
+    mockApi()
+    // The save stays in flight until the test lets it land
+    server.use(
+      http.patch(`${API_URL}/inventory/item-oat`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        await patched
+        return HttpResponse.json({ ...OAT, ...body })
+      })
+    )
+    // A landed save refreshes the header's Undo
+    server.use(http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null)))
+    const onClose = renderSheet()
+
+    fireEvent.click(screen.getByText('Freezer'))
+    fireEvent.click(save())
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Change…' })).toBeDisabled()
+    )
+    expect(screen.getByRole('button', { name: 'Change product details…' })).toBeDisabled()
+    releasePatch()
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled()
+  })
 })

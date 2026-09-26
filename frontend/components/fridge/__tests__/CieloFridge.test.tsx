@@ -25,11 +25,12 @@ function area(name: string) {
 }
 
 describe('CieloFridge', () => {
-  it('is drawn for the box the upright iPad leaves under the strip, not for a tall frame', () => {
-    // At 810×1080 portrait the fridge gets 778×793.5 px under the bar, the slim row of Undo
-    // and + Add, and the strip (measured in Chromium, Q20). Drawn to that box it fills it.
-    expect(PORTRAIT_BOX).toEqual({ w: 778, h: 793 })
+  it('is drawn to the shape of the box the upright iPad leaves under the strip', () => {
+    // PORTRAIT_BOX is measured in Chromium at 810×1080 on the sample stock, with the strip's
+    // names on one line. Drawn to its shape the fridge fills it, where a tall frame would leave
+    // bands; a wrapped strip leaves a few pixels less height and letterboxes slightly.
     expect(CIELO_WIDTH / CIELO_HEIGHT).toBeCloseTo(PORTRAIT_BOX.w / PORTRAIT_BOX.h, 2)
+    expect(CIELO_WIDTH).toBeGreaterThanOrEqual(PORTRAIT_BOX.w)
   })
 
   it('puts bread in a basket on the larder, above the pantry, out of the fridge (Q23)', () => {

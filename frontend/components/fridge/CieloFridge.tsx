@@ -33,11 +33,13 @@ export interface CieloFridgeProps {
 }
 
 /**
- * The box the fridge gets on the upright iPad (810×1080 CSS px), measured in Chromium: the
- * width less the page's padding, the height left under the app bar, the slim row of Undo and
- * + Add (Q20: no visible title) and the going-stale strip - 778×793.5. It is near-square - the
- * screen is portrait, the space under the strip is not - so the drawing is drawn to it rather
- * than as a tall frame, which would leave bands.
+ * The box the fridge gets on the upright iPad (810×1080 CSS px), measured in Chromium on the
+ * sample stock: the width less the page's padding, the height left under the app bar, the slim
+ * row of Undo and + Add (Q20: no visible title) and a going-stale strip whose names fit on one
+ * line - 778×793 (Chromium reports 793.5). The drawing is drawn to this box's shape. It is
+ * near-square - the screen is portrait, the space under the strip is not - so a tall drawing
+ * would leave bands. When a long name wraps in the strip, the box is a few pixels shorter and
+ * the drawing letterboxes slightly at its sides; it never scrolls.
  */
 export const PORTRAIT_BOX = { w: 778, h: 793 }
 

@@ -26,6 +26,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 function mockApi() {
   server.use(
     http.get(`${API_URL}/inventory`, () => HttpResponse.json([])),
+    http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null)),
     http.get(`${API_URL}/receipts`, () => HttpResponse.json([]))
   )
 }
