@@ -46,8 +46,15 @@ class TestPrompt:
     def test_a_kind_used_the_same_way_is_a_match(self) -> None:
         """H53 live run: HUNAJAMELONI / Honeydew answered null against Melon in both
         runs - "different variety" read as any variety (docs/vLLM_MANUAL_TEST.md)."""
-        assert "the same way IS the same thing" in INSTRUCTIONS
+        assert "A named kind of the same food" in INSTRUCTIONS
         assert '"Granny Smith" is "Apple"' in INSTRUCTIONS
+
+    def test_it_draws_one_line_between_same_and_different(self) -> None:
+        """PR #99 review: "Different variety ... are DIFFERENT" sat directly above "a
+        kind ... IS the same thing". The rule is what a cook buys and uses differently,
+        and no sentence may call every variety different."""
+        assert "buys and uses differently" in INSTRUCTIONS
+        assert "Different variety" not in INSTRUCTIONS
 
     def test_its_examples_are_not_the_reported_pairs(self) -> None:
         """Otherwise the live test would grade the prompt on its own worked examples."""
