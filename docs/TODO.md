@@ -1749,7 +1749,8 @@ These three came from the first look at wave V on the iPad, after deploying roun
   **Direction, not ruled:** one hand-drawn SVG illustration as the frame, with each area laid
   over the part of the fridge it belongs to (`lib/fridge.ts` `AREAS` gets a region in the
   drawing). Tiles or dots sit inside the region, and a tap still opens `/area/[id]`. It must
-  fit a landscape iPad without scrolling and keep today's taps and the going-stale shelf.
+  fit a ~~landscape~~ **portrait** iPad (ruling 2026-09-26, below) without scrolling and keep
+  today's taps and the going-stale shelf.
   Mock up first, and have the operator choose a mock before anything is built.
 - **Q18 — every item looks the same.** A tile shows its category's emoji (`category_icon`,
   wave V ruling), so every fruit is an apple, every vegetable lettuce and all meat a steak. The
@@ -1832,7 +1833,7 @@ Round 2026-09-26-6 builds these:
 - A3: Q18-S.
 
 **Review follow-ups (round 2026-09-26-6 review, 2026-09-26),** not fixed in the lane PRs:
-- [ ] Q17 build: a region's dots are cut off without a sign when they overflow
+- [ ] Q17 build (in Q17-B's spec, round 2026-09-26-3): a region's dots are cut off without a sign when they overflow
   (`components/fridge-mocks/shared.tsx:204`, `overflow-hidden`), and Crema's going-stale strip
   scrolls sideways at 1180×820. Put both into the build spec for whichever mock is chosen.
 - [ ] Q19 (#105), operator nod: a catalog apply marks every product the model answered as
@@ -1846,7 +1847,24 @@ Round 2026-09-26-6 builds these:
   fridge still looks all stale.
 - [ ] Say which items look wrong and what their dates are, or give the homelab API address so a
   read-only `GET /api/inventory` can be checked.
-- [ ] Choose a fridge mock (Q17) and an icon route (Q18) once the mocks and the spike exist.
+- [x] Choose a fridge mock (Q17): **Cielo** (2026-09-26, below).
+- [ ] Choose an icon route (Q18); the spike doc (`docs/spikes/Q18_product_icons.md`, fixed in #107)
+  also asks for a ruling on its icon-column design.
+
+**Operator rulings, 2026-09-26 (after the mocks):**
+- **The MVP fridge is Cielo** (closer to Cielo, not a copy).
+- **The iPad is always mounted vertically.** It is an **iPad 8th generation, 810×1080 CSS px in
+  portrait**, run from the Home Screen. Cielo as mocked (landscape, 1180×820) is recomposed for
+  portrait: the going-stale shelf becomes a strip across the top, the fridge body is tall, the
+  larder moves under it. Every earlier "landscape iPad" line in this file (P1, S2, V3) is
+  superseded by this. The manifest's `orientation` becomes `portrait`, although iOS ignores it
+  for Home Screen apps (see P2): the mount decides.
+- Approval is by screenshot at PR review.
+
+Round 2026-09-26-3:
+- A1: **Q17-B**: the Cielo fridge on `/`, drawn for the portrait iPad (`feat/q17-cielo-portrait`);
+- A2: AG3's `kyokki shopping` commands (`feat/ag3-cli-shopping`);
+- A3: the agent API follow-ups from the AG6 and Q19 review (`fix/agent-api-followups`).
 
 Increments (to plan): **Q17** fridge illustration (a mock, then the build); **Q18-S** icon spike,
 then **Q18** product icons (a model field, the mapping, an override on the product screen);
@@ -2003,7 +2021,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)"
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [ ] Q17-B Cielo portrait (`feat/q17-cielo-portrait`)
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
