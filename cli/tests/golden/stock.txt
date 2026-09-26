@@ -1,0 +1,27 @@
+usage: kyokki stock [-h] COMMAND ...
+
+What is in the kitchen, per product, and changing it.
+
+options:
+  -h, --help  show this help message and exit
+
+commands:
+  COMMAND
+    list      stock per product, soonest to expire first
+    add       add stock of a product, by name or id
+    consume   use up an amount of a product, first to expire first
+
+examples:
+  kyokki stock list --location freezer
+  kyokki stock add milk 1 l --category dairy
+  kyokki stock consume milk 2 dl
+
+exit codes:
+  0 ok
+  1 error: unreachable, server error (5xx) or an unexpected answer
+  2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
+  3 not found
+  4 ambiguous name: the candidates are printed on stdout
+  5 insufficient stock
+  6 conflict: the name belongs to another product, or a reused Idempotency-Key
+  7 auth: missing or unknown token (401), or a read token on a write (403)

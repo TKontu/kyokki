@@ -1,0 +1,54 @@
+usage: kyokki stock add [-h] [--category ID]
+                        [--location {main_fridge,freezer,pantry}]
+                        [--expiry YYYY-MM-DD] [--purchased YYYY-MM-DD]
+                        [--idempotency-key KEY] [--url URL] [--token TOKEN]
+                        [--json] [--verbose]
+                        NAME QUANTITY [UNIT]
+
+Add stock. NAME is reused if a product has it (any case) and created
+otherwise; a new product needs --category. A NAME that is a UUID is
+sent as the product id. Expiry and location default from the product.
+
+positional arguments:
+  NAME                  product name, or product id
+  QUANTITY              how much, in UNIT (a number above 0)
+  UNIT                  dl, tsp, tbsp, g, pcs (l, ml, kg and the like are
+                        converted by the server); default: the product's own
+                        unit
+
+options:
+  -h, --help            show this help message and exit
+  --category ID         category id for a new product, e.g. dairy
+  --location {main_fridge,freezer,pantry}
+                        where it goes; default: the product's storage
+  --expiry YYYY-MM-DD   expiry date; default: purchase date + shelf life
+  --purchased YYYY-MM-DD
+                        purchase date; default: today
+  --idempotency-key KEY
+                        retry key (at most 255 characters); default: SHA-256
+                        of this command line and the UTC minute, so a retry
+                        within the minute is safe
+
+connection and output:
+  --url URL             Kyokki base URL, e.g. http://kyokki.lan:8000 (default:
+                        $KYOKKI_URL)
+  --token TOKEN         API token, sent as a Bearer header and never printed
+                        (default: $KYOKKI_TOKEN)
+  --json                print the API's JSON (the default when stdout is not a
+                        terminal)
+  --verbose             log each request and its status to stderr
+
+examples:
+  kyokki stock add milk 1 l --category dairy
+  kyokki stock add 'minced beef' 400 g --location freezer
+  kyokki stock add 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 6 pcs --expiry 2026-10-03
+
+exit codes:
+  0 ok
+  1 error: unreachable, server error (5xx) or an unexpected answer
+  2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
+  3 not found
+  4 ambiguous name: the candidates are printed on stdout
+  5 insufficient stock
+  6 conflict: the name belongs to another product, or a reused Idempotency-Key
+  7 auth: missing or unknown token (401), or a read token on a write (403)

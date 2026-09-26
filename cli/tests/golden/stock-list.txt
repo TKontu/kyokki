@@ -1,0 +1,39 @@
+usage: kyokki stock list [-h] [--q NAME]
+                         [--location {main_fridge,freezer,pantry}]
+                         [--expiring DAYS] [--category ID] [--url URL]
+                         [--token TOKEN] [--json] [--verbose]
+
+Stock per product (and unit), summed over its items, soonest to
+expire first. A row marked ! expires within 3 days or already has.
+
+options:
+  -h, --help            show this help message and exit
+  --q NAME              part of a product name, any case
+  --location {main_fridge,freezer,pantry}
+                        only this location
+  --expiring DAYS       only products expiring within DAYS days
+  --category ID         only this category id, e.g. dairy
+
+connection and output:
+  --url URL             Kyokki base URL, e.g. http://kyokki.lan:8000 (default:
+                        $KYOKKI_URL)
+  --token TOKEN         API token, sent as a Bearer header and never printed
+                        (default: $KYOKKI_TOKEN)
+  --json                print the API's JSON (the default when stdout is not a
+                        terminal)
+  --verbose             log each request and its status to stderr
+
+examples:
+  kyokki stock list
+  kyokki stock list --q milk --location main_fridge
+  kyokki stock list --expiring 3 --json
+
+exit codes:
+  0 ok
+  1 error: unreachable, server error (5xx) or an unexpected answer
+  2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
+  3 not found
+  4 ambiguous name: the candidates are printed on stdout
+  5 insufficient stock
+  6 conflict: the name belongs to another product, or a reused Idempotency-Key
+  7 auth: missing or unknown token (401), or a read token on a write (403)
