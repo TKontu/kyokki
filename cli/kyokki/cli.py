@@ -5,6 +5,7 @@ import math
 import os
 import shlex
 import sys
+import textwrap
 import typing
 from collections.abc import Callable
 from datetime import date
@@ -16,6 +17,8 @@ from kyokki import api, commands, idempotency, output
 from kyokki.api import USAGE, Api, CliError
 
 LOCATIONS = ["main_fridge", "freezer", "pantry"]
+PRIORITIES = ["urgent", "normal", "low"]
+EXPORT_FORMATS = ["text", "markdown"]
 UNITS_HELP = (
     "dl, tsp, tbsp, g, pcs (l, ml, kg and the like are converted by the server)"
 )
@@ -39,13 +42,52 @@ environment:
   KYOKKI_TOKEN  API token (overridden by --token); sent as a Bearer header only"""
 
 
-def epilog(*examples: str, extra: str = "") -> str:
+def epilog(*examples: str, extra: str = "", exit_codes: str = EXIT_CODES) -> str:
     lines = ["examples:", *(f"  {example}" for example in examples)]
     parts = ["\n".join(lines)]
     if extra:
         parts.append(extra)
-    parts.append(EXIT_CODES)
+    parts.append(exit_codes)
     return "\n\n".join(parts)
+
+
+NOT_HERE = "does not occur for this command"
+
+
+def shopping_exit_codes(
+    *,
+    answer: str = "JSON",
+    changes: bool = True,
+    usage: str = "the API rejected the request (400 invalid, 422)",
+    not_found: str = "",
+    conflict: str = "",
+) -> str:
+    """The exit table in shopping terms: the same eight codes, each said as it
+    applies to the command, and the ones it cannot give marked as such."""
+    one = f"error: cannot reach the server, a 5xx, an answer that is not {answer}"
+    if changes:
+        one += ", or a change sent that got no answer (it may have been applied)"
+    meanings = [
+        "ok",
+        one,
+        f"usage: bad arguments, or {usage}",
+        f"not found: {not_found or NOT_HERE}",
+        f"ambiguous name: {NOT_HERE}",
+        f"insufficient stock: {NOT_HERE}",
+        f"conflict: {conflict or NOT_HERE}",
+        "auth: missing or unknown token (401), or a read token on a write (403)",
+    ]
+    lines = ["exit codes:"]
+    for code, meaning in enumerate(meanings):
+        lines.append(
+            textwrap.fill(
+                f"{code} {meaning}",
+                width=80,
+                initial_indent="  ",
+                subsequent_indent="    ",
+            )
+        )
+    return "\n".join(lines)
 
 
 # --- argument types -----------------------------------------------------------
@@ -86,6 +128,15 @@ def product_id(text: str) -> str:
     return text
 
 
+def item_id(text: str) -> str:
+    if not commands.looks_like_uuid(text):
+        raise argparse.ArgumentTypeError(
+            f"not a shopping item id (a UUID): {text!r}; find it with kyokki "
+            "shopping list"
+        )
+    return text
+
+
 def idempotency_key(text: str) -> str:
     if not text or len(text) > MAX_KEY_LENGTH:
         raise argparse.ArgumentTypeError(
@@ -110,6 +161,32 @@ class Parser(argparse.ArgumentParser):
         self.print_usage(sys.stderr)
         sys.stderr.write(f"{self.prog}: error: {message}\n")
         raise UsageError(message)
+
+
+class IntermixedParser(Parser):
+    """A leaf whose options may come between its positionals, as in
+    ``shopping add milk --priority urgent 1 l``: optional positionals would
+    otherwise end at the first option and leave ``1 l`` unrecognised.
+
+    The subcommand action calls ``parse_known_args``; this routes it through
+    ``parse_known_intermixed_args``, which calls ``parse_known_args`` again itself
+    (on 3.12), hence the guard.
+    """
+
+    _mixing = False
+
+    def parse_known_args(  # type: ignore[override]
+        self,
+        args: typing.Sequence[str] | None = None,
+        namespace: argparse.Namespace | None = None,
+    ) -> tuple[argparse.Namespace, list[str]]:
+        if self._mixing:
+            return super().parse_known_args(args, namespace)
+        self._mixing = True
+        try:
+            return self.parse_known_intermixed_args(args, namespace)
+        finally:
+            self._mixing = False
 
 
 def add_connection_options(parser: argparse.ArgumentParser, *, top: bool) -> None:
@@ -165,15 +242,23 @@ def leaf(
     description: str,
     examples: list[str],
     handler: Callable[[commands.Context], commands.Outcome],
+    exit_codes: str = EXIT_CODES,
+    intermixed: bool = False,
 ) -> argparse.ArgumentParser:
-    parser = subparsers.add_parser(
-        name,
-        help=summary,
-        description=description,
-        epilog=epilog(*examples),
-        formatter_class=Formatter,
-        allow_abbrev=False,
-    )
+    saved = subparsers._parser_class
+    if intermixed:
+        subparsers._parser_class = IntermixedParser
+    try:
+        parser = subparsers.add_parser(
+            name,
+            help=summary,
+            description=description,
+            epilog=epilog(*examples, exit_codes=exit_codes),
+            formatter_class=Formatter,
+            allow_abbrev=False,
+        )
+    finally:
+        subparsers._parser_class = saved
     parser.set_defaults(handler=handler)
     return parser
 
@@ -185,12 +270,13 @@ def group(
     summary: str,
     description: str,
     examples: list[str],
+    exit_codes: str = EXIT_CODES,
 ) -> "argparse._SubParsersAction[Parser]":
     parser = subparsers.add_parser(
         name,
         help=summary,
         description=description,
-        epilog=epilog(*examples),
+        epilog=epilog(*examples, exit_codes=exit_codes),
         formatter_class=Formatter,
         allow_abbrev=False,
     )
@@ -447,7 +533,220 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_connection_options(categories, top=False)
 
+    add_shopping_commands(top)
+
     return parser
+
+
+def add_shopping_commands(top: "argparse._SubParsersAction[Parser]") -> None:
+    item_missing = "no shopping item has the ID"
+    reused_key = "a reused Idempotency-Key (409)"
+    shopping = group(
+        top,
+        "shopping",
+        summary="read, add to, tick off and generate the shopping list",
+        description="The shopping list: open items, adding and ticking them off, filling\n"
+        "it from low stock, and exporting it as text.",
+        examples=[
+            "kyokki shopping list",
+            "kyokki shopping add milk 1 l --priority urgent",
+            "kyokki shopping generate --dry-run",
+        ],
+        exit_codes=shopping_exit_codes(
+            answer="the expected JSON (or text, for export)",
+            not_found=f"{item_missing} (done, remove), or no product has the "
+            "--product-id (add)",
+            conflict=f"{reused_key} (add, done, generate)",
+        ),
+    )
+
+    listing = leaf(
+        shopping,
+        "list",
+        summary="the open items, urgent first",
+        description="The open (not yet bought) items, urgent first. --all adds the ones\n"
+        "already bought. The ID column is what done and remove take. It shows\n"
+        "every item: the CLI asks for pages of 500 until the list runs out.",
+        examples=[
+            "kyokki shopping list",
+            "kyokki shopping list --priority urgent",
+            "kyokki shopping list --all --json",
+        ],
+        handler=commands.shopping_list,
+        exit_codes=shopping_exit_codes(answer="the expected JSON", changes=False),
+    )
+    listing.add_argument(
+        "--all", action="store_true", help="include items already bought"
+    )
+    listing.add_argument(
+        "--priority", choices=PRIORITIES, help="only items of this priority"
+    )
+    add_connection_options(listing, top=False)
+
+    add = leaf(
+        shopping,
+        "add",
+        summary="put an item on the list",
+        description="Put NAME on the shopping list. NAME is free text and must not be\n"
+        "blank. AMOUNT and UNIT go together; without --product-id they may be\n"
+        "left out, and the item is 1 pcs.\n\n"
+        "--product-id links the item to a product, so generate raises this item\n"
+        "instead of adding a second one. --product-id needs AMOUNT UNIT, in the\n"
+        "product's unit: generate skips a linked item it cannot count in that\n"
+        "unit. Options may come anywhere, also between NAME and AMOUNT.",
+        examples=[
+            "kyokki shopping add milk 1 l --priority urgent",
+            "kyokki shopping add 'dish soap'",
+            "kyokki shopping add eggs 12 pcs "
+            "--product-id 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01",
+        ],
+        handler=commands.shopping_add,
+        exit_codes=shopping_exit_codes(
+            not_found="no product has the --product-id",
+            conflict=reused_key,
+        ),
+        intermixed=True,
+    )
+    add.add_argument("name", metavar="NAME", help="what to buy, as it should read")
+    add.add_argument(
+        "amount",
+        nargs="?",
+        type=positive_number,
+        metavar="AMOUNT",
+        help="how much, in UNIT (a number above 0); default: 1 pcs, and "
+        "required with --product-id",
+    )
+    add.add_argument(
+        "unit", nargs="?", metavar="UNIT", help=f"{UNITS_HELP}; needs AMOUNT"
+    )
+    add.add_argument(
+        "--priority",
+        choices=PRIORITIES,
+        help="how badly it is needed; default: normal",
+    )
+    add.add_argument(
+        "--product-id",
+        type=product_id,
+        metavar="UUID",
+        help="the product it is (a UUID), from product resolve; needs AMOUNT UNIT",
+    )
+    add_idempotency_option(add)
+    add_connection_options(add, top=False)
+
+    done = leaf(
+        shopping,
+        "done",
+        summary="tick an item off as bought (or back on with --undo)",
+        description="Mark item ID as bought, or with --undo as not bought again. Exit 3\n"
+        "when no item has the id.",
+        examples=[
+            "kyokki shopping done 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+            "kyokki shopping done 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f --undo",
+        ],
+        handler=commands.shopping_done,
+        exit_codes=shopping_exit_codes(not_found=item_missing, conflict=reused_key),
+    )
+    done.add_argument(
+        "item_id",
+        type=item_id,
+        metavar="ID",
+        help="the item's id (a UUID), from shopping list",
+    )
+    done.add_argument(
+        "--undo", action="store_true", help="mark it not bought: back on the list"
+    )
+    add_idempotency_option(done)
+    add_connection_options(done, top=False)
+
+    remove = leaf(
+        shopping,
+        "remove",
+        summary="delete an item from the list",
+        description="Delete item ID from the shopping list, bought or not. Exit 3 when\n"
+        "no item has the id.\n\n"
+        "The server ignores Idempotency-Key on a delete, so none is sent and\n"
+        "it takes no retry key. Removing is safe to repeat instead: if a\n"
+        "remove got no answer, run it again, and exit 3 then means it was\n"
+        "already removed.",
+        examples=[
+            "kyokki shopping remove 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+            "kyokki shopping remove 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f --json",
+        ],
+        handler=commands.shopping_remove,
+        exit_codes=shopping_exit_codes(
+            not_found=f"{item_missing}, also when an earlier remove already deleted it"
+        ),
+    )
+    remove.add_argument(
+        "item_id",
+        type=item_id,
+        metavar="ID",
+        help="the item's id (a UUID), from shopping list",
+    )
+    add_connection_options(remove, top=False)
+
+    generate = leaf(
+        shopping,
+        "generate",
+        summary="put what the kitchen is short of on the list",
+        description="Fill the list from the kitchen. low-stock: every product with a\n"
+        "minimum stock whose stock is below it needs its reorder amount, or the\n"
+        "shortfall when it has no reorder amount, in the product's own unit. An\n"
+        "open item for the product is raised to the need rather than joined by\n"
+        "a second one. The answer groups the products into added, updated,\n"
+        "unchanged and skipped (with the reason).",
+        examples=[
+            "kyokki shopping generate --dry-run",
+            "kyokki shopping generate",
+            "kyokki shopping generate --from low-stock --json",
+        ],
+        handler=commands.shopping_generate,
+        exit_codes=shopping_exit_codes(
+            usage="the API rejected the request (400 invalid or any other 400, 422)",
+            conflict=reused_key,
+        ),
+    )
+    generate.add_argument(
+        "--from",
+        dest="source",
+        choices=list(commands.GENERATE_SOURCES),
+        default="low-stock",
+        help="what to generate from; default: low-stock",
+    )
+    generate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would change; change nothing (no Idempotency-Key)",
+    )
+    add_idempotency_option(generate)
+    add_connection_options(generate, top=False)
+
+    export = leaf(
+        shopping,
+        "export",
+        summary="the open list as plain text or a Markdown checklist",
+        description="Print the open list, urgent first and then by name, exactly as the\n"
+        "server renders it: text is '- name amount unit' per line, markdown a\n"
+        "'- [ ] name (amount unit)' checklist. The body is written as it is,\n"
+        'also when stdout is a file or a pipe; JSON ({"format": ..., "text":\n'
+        "...}) only with --json.",
+        examples=[
+            "kyokki shopping export",
+            "kyokki shopping export --format markdown > list.md",
+            "kyokki shopping export --json",
+        ],
+        handler=commands.shopping_export,
+        exit_codes=shopping_exit_codes(
+            answer="text/plain or text/markdown", changes=False
+        ),
+    )
+    export.add_argument(
+        "--format",
+        choices=EXPORT_FORMATS,
+        default="text",
+        help="text or markdown; default: text",
+    )
+    add_connection_options(export, top=False)
 
 
 # --- running ------------------------------------------------------------------
@@ -551,7 +850,10 @@ def run(argv: list[str], transport: httpx.BaseTransport | None) -> int:
 
     if outcome.replayed:
         output.note("note: replayed the answer to an identical earlier request")
-    if as_json:
+    if outcome.raw and not args.json:
+        # A body meant to be piped (export > list.md): JSON only when asked for.
+        sys.stdout.write(outcome.human())
+    elif as_json:
         document = outcome.document
         if hasattr(args, "idempotency_key") and isinstance(document, dict):
             document = {**document, "replayed": outcome.replayed}

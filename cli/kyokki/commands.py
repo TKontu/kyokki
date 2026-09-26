@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from kyokki import output
-from kyokki.api import ERROR, NOT_FOUND, Api, CliError
+from kyokki.api import ERROR, NOT_FOUND, USAGE, Api, CliError, usage_error
 
 UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -28,6 +28,8 @@ class Outcome:
     human: Callable[[], str]
     replayed: bool = False
     notes: list[str] = field(default_factory=list)
+    # The human text is a body to pass through unchanged, not a line to print.
+    raw: bool = False
 
 
 @dataclass
@@ -313,3 +315,247 @@ def category_list(ctx: Context) -> Outcome:
         )
 
     return Outcome(categories, human)
+
+
+# --- shopping -----------------------------------------------------------------
+
+SHOPPING_PATH = "/api/shopping/"
+# What `shopping add NAME` with no AMOUNT UNIT asks for: the API needs both.
+DEFAULT_SHOPPING_AMOUNT = 1
+DEFAULT_SHOPPING_UNIT = "pcs"
+GENERATE_SOURCES = {"low-stock": "low_stock"}
+# The API's largest page; list asks for pages of this size until one comes back short.
+SHOPPING_PAGE_SIZE = 500
+# The router's plain-string 404 for an unknown item id (a coded not_found is exit 3
+# already). Any other 404, a wrong route or a proxy's page, stays an error (exit 1).
+ITEM_NOT_FOUND = re.compile(r"^Shopping list item \S+ not found$")
+# handle_integrity_errors' 400 for an insert that points at a missing row.
+MISSING_REFERENCE = "Referenced record does not exist."
+
+
+def _item_not_found(exc: CliError) -> CliError:
+    """The router's plain-string 404 for an unknown item is not found (exit 3)."""
+    detail = exc.detail
+    if (
+        exc.status == 404
+        and isinstance(detail, dict)
+        and detail.get("code") == "http_404"
+        and ITEM_NOT_FOUND.match(str(detail.get("message", "")))
+    ):
+        return CliError(NOT_FOUND, {**detail, "code": "not_found"}, exc.status)
+    return exc
+
+
+def _unknown_product(exc: CliError, product_id: str | None) -> CliError:
+    """add with an unknown --product-id gets a foreign-key 400; that is not found."""
+    detail = exc.detail
+    if (
+        product_id
+        and exc.status == 400
+        and isinstance(detail, dict)
+        and detail.get("message") == MISSING_REFERENCE
+    ):
+        return CliError(
+            NOT_FOUND,
+            {"code": "not_found", "message": f"no product has the id {product_id}"},
+            exc.status,
+        )
+    return exc
+
+
+def shopping_list(ctx: Context) -> Outcome:
+    a = ctx.args
+    items: list[Any] = []
+    previous: list[Any] | None = None
+    while True:
+        page = ctx.api.request(
+            "GET",
+            SHOPPING_PATH,
+            params={
+                "include_purchased": "true" if a.all else None,
+                "priority": a.priority,
+                "limit": SHOPPING_PAGE_SIZE,
+                "skip": len(items),
+            },
+            expect=list,
+        ).body
+        # A server that ignored skip would answer the same page for ever.
+        if page == previous:
+            break
+        items.extend(page)
+        if len(page) < SHOPPING_PAGE_SIZE:
+            break
+        previous = page
+
+    def human() -> str:
+        if not items:
+            return "The shopping list is empty."
+        headers = ["NAME", "AMOUNT", "UNIT", "PRIORITY", "ID"]
+        if a.all:
+            headers.insert(4, "DONE")
+        rows = []
+        for item in items:
+            row = [
+                item.get("name", ""),
+                output.number(item.get("quantity")),
+                item.get("unit", ""),
+                item.get("priority", ""),
+                item.get("id", ""),
+            ]
+            if a.all:
+                row.insert(4, "yes" if item.get("is_purchased") else "no")
+            rows.append(row)
+        return output.table(headers, rows)
+
+    return Outcome(items, human)
+
+
+def shopping_add(ctx: Context) -> Outcome:
+    a = ctx.args
+    if not a.name.strip():
+        raise usage_error("NAME is empty; say what to buy")
+    if (a.amount is None) != (a.unit is None):
+        raise usage_error("give AMOUNT and UNIT together, or neither (1 pcs)")
+    if a.product_id and a.amount is None:
+        raise usage_error(
+            "--product-id needs AMOUNT UNIT: a linked item's amount must be in the "
+            "product's unit, or generate skips the item; e.g. shopping add milk 1 l "
+            "--product-id ID"
+        )
+    body: dict[str, Any] = {
+        "name": a.name,
+        "quantity": DEFAULT_SHOPPING_AMOUNT if a.amount is None else a.amount,
+        "unit": DEFAULT_SHOPPING_UNIT if a.unit is None else a.unit,
+    }
+    if a.priority:
+        body["priority"] = a.priority
+    if a.product_id:
+        body["product_master_id"] = a.product_id
+    try:
+        answer = ctx.api.request(
+            "POST",
+            SHOPPING_PATH,
+            body=body,
+            idempotency_key=ctx.idempotency_key,
+            expect=dict,
+        )
+    except CliError as exc:
+        raise _unknown_product(exc, a.product_id) from None
+    item = answer.body
+
+    def human() -> str:
+        return (
+            f"Added {output.number(item.get('quantity'))} {item.get('unit', '')} "
+            f"{item.get('name', a.name)} to the shopping list "
+            f"({item.get('priority', 'normal')})\nitem {item.get('id')}"
+        )
+
+    return Outcome(item, human, answer.replayed)
+
+
+def shopping_done(ctx: Context) -> Outcome:
+    a = ctx.args
+    try:
+        answer = ctx.api.request(
+            "POST",
+            f"{SHOPPING_PATH}{a.item_id}/purchase",
+            params={"purchased": "false" if a.undo else "true"},
+            idempotency_key=ctx.idempotency_key,
+            expect=dict,
+        )
+    except CliError as exc:
+        raise _item_not_found(exc) from None
+    item = answer.body
+
+    def human() -> str:
+        name = item.get("name", a.item_id)
+        if item.get("is_purchased"):
+            return f"Bought {name}"
+        return f"Back on the list: {name}"
+
+    return Outcome(item, human, answer.replayed)
+
+
+def shopping_remove(ctx: Context) -> Outcome:
+    a = ctx.args
+    # No Idempotency-Key: the server ignores it on DELETE, so nothing could replay.
+    # Deleting is safe to repeat instead; a repeat of one that applied is exit 3.
+    try:
+        ctx.api.request("DELETE", f"{SHOPPING_PATH}{a.item_id}")
+    except CliError as exc:
+        if exc.code == "connection" and isinstance(exc.detail, dict):
+            exc.detail["hint"] = (
+                "rerun the same command: removing twice removes nothing more, and "
+                "exit 3 then means the item is already removed"
+            )
+        raise _item_not_found(exc) from None
+    document = {"id": a.item_id, "removed": True}
+
+    def human() -> str:
+        return f"Removed {a.item_id} from the shopping list"
+
+    return Outcome(document, human)
+
+
+def shopping_generate(ctx: Context) -> Outcome:
+    a = ctx.args
+    body = {"sources": [GENERATE_SOURCES[a.source]], "dry_run": a.dry_run}
+    try:
+        answer = ctx.api.request(
+            "POST",
+            f"{SHOPPING_PATH}generate",
+            body=body,
+            idempotency_key=None if a.dry_run else ctx.idempotency_key,
+            expect=dict,
+        )
+    except CliError as exc:
+        # A bad sources shape is 400 or 422 depending on the server's version: usage.
+        if exc.status in (400, 422) and exc.exit_code != USAGE:
+            raise CliError(USAGE, exc.detail, exc.status) from None
+        raise
+    result = answer.body
+
+    def human() -> str:
+        dry = bool(result.get("dry_run"))
+        groups = [
+            ("Would add" if dry else "Added", "added"),
+            ("Would update" if dry else "Updated", "updated"),
+            ("Unchanged (already on the list)", "unchanged"),
+            ("Skipped", "skipped"),
+        ]
+        blocks = []
+        for title, key in groups:
+            lines = result.get(key) or []
+            if lines:
+                rows = [f"{title}:", *(f"  {_generate_line(line)}" for line in lines)]
+                blocks.append("\n".join(rows))
+        if not blocks:
+            return "Nothing is short; the shopping list is unchanged."
+        return "\n".join(blocks)
+
+    return Outcome(result, human, answer.replayed)
+
+
+def _generate_line(line: dict[str, Any]) -> str:
+    unit = line.get("unit", "")
+    text = str(line.get("name", ""))
+    if line.get("need") is not None:
+        text += (
+            f" {output.number(line['need'])} {unit}"
+            f" (on hand {output.number(line.get('on_hand'))},"
+            f" min {output.number(line.get('min_stock'))} {unit})"
+        )
+    if line.get("reason"):
+        text += f": {line['reason']}"
+    return text
+
+
+def shopping_export(ctx: Context) -> Outcome:
+    a = ctx.args
+    text = ctx.api.request(
+        "GET",
+        f"{SHOPPING_PATH}export",
+        params={"format": a.format},
+        expect="text",
+    ).body
+    return Outcome({"format": a.format, "text": text}, lambda: str(text), raw=True)
