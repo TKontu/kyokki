@@ -1,6 +1,8 @@
 """POST /api/inventory/quick-add and category default storage (MVP-S3)."""
 
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 from httpx import AsyncClient
@@ -9,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.seed_categories import seed_categories
 from app.db.session import get_db
 from app.main import app
+from app.models.product_master import ProductMaster
+from app.services import shelf_life_on_create
+from app.services.catalog_estimates import Estimate, EstimateRequest
 
 URL = "/api/inventory/quick-add"
 
@@ -219,3 +224,119 @@ class TestTheItemCarriesWhatTheScreenNeeds:
         listed = (await client.get(f"/api/inventory/{item['id']}")).json()
         assert listed["opened_shelf_life_days"] == 3
         assert listed["avg_piece_grams"] == 125.0
+
+
+class TestATypedDateTeachesTheProduct:
+    """Q24: a date typed at quick add is the cook's statement, and the product learns it."""
+
+    TODAY = date.today()
+
+    @pytest.fixture(autouse=True)
+    def _own_session(self, monkeypatch: pytest.MonkeyPatch, session_factory) -> None:
+        """The background estimate opens its own session; here it is the test's."""
+        monkeypatch.setattr(shelf_life_on_create, "open_session", session_factory)
+
+    @pytest.fixture
+    def sibling_broadcast(self):
+        with patch(
+            "app.services.quick_add.broadcast_inventory_update", new_callable=AsyncMock
+        ) as mock:
+            yield mock
+
+    async def _add(self, client: AsyncClient, **fields) -> dict:
+        body = {
+            "name": "Tortillas",
+            "category": "bread",
+            "quantity": 8,
+            "unit": "pcs",
+            "location": "pantry",
+            "purchase_date": str(self.TODAY),
+            **fields,
+        }
+        response = await client.post(URL, json=body)
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    async def _product(self, db: AsyncSession, product_id: str) -> ProductMaster:
+        product = await db.get(ProductMaster, UUID(product_id), populate_existing=True)
+        assert product is not None
+        return product
+
+    async def test_a_new_product_keeps_the_learned_days_through_its_estimate(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """The background estimate runs after the response and must not overwrite it."""
+
+        async def answer(products: list[EstimateRequest]) -> list[Estimate]:
+            return [
+                Estimate(id=p.id, shelf_life_days=7, opened_shelf_life_days=None)
+                for p in products
+            ]
+
+        estimated = AsyncMock(wraps=shelf_life_on_create.estimate_new_products)
+        with (
+            patch(
+                "app.services.catalog_estimates.estimate_shelf_lives",
+                new=AsyncMock(side_effect=answer),
+            ),
+            patch.object(shelf_life_on_create, "estimate_new_products", estimated),
+        ):
+            item = await self._add(
+                client, expiry_date=str(self.TODAY + timedelta(days=60))
+            )
+
+        # The estimate was queued for the new product and ran...
+        estimated.assert_awaited_once_with([UUID(item["product_master_id"])])
+        # ...and the learned number survived it
+        assert item["expiry_source"] == "manual"
+        product = await self._product(seeded_db, item["product_master_id"])
+        assert (product.default_shelf_life_days, product.shelf_life_source) == (
+            60,
+            "cook",
+        )
+
+    async def test_the_next_pack_without_a_date_is_dated_from_it(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        await self._add(client, expiry_date=str(self.TODAY + timedelta(days=60)))
+
+        following = await self._add(client)
+
+        assert following["expiry_date"] == str(self.TODAY + timedelta(days=60))
+        assert following["expiry_source"] == "calculated"
+
+    async def test_a_calculated_sibling_moves_and_is_announced(
+        self, client: AsyncClient, seeded_db: AsyncSession, sibling_broadcast
+    ) -> None:
+        older = await self._add(
+            client, purchase_date=str(self.TODAY - timedelta(days=5))
+        )
+
+        await self._add(client, expiry_date=str(self.TODAY + timedelta(days=60)))
+
+        moved = (await client.get(f"/api/inventory/{older['id']}")).json()
+        assert moved["expiry_date"] == str(self.TODAY + timedelta(days=55))
+        announced = [
+            c.kwargs["inventory_item_id"] for c in sibling_broadcast.await_args_list
+        ]
+        assert list(map(str, announced)) == [older["id"]]
+
+    async def test_without_a_date_nothing_is_learned(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        item = await self._add(client)
+
+        product = await self._product(seeded_db, item["product_master_id"])
+        assert product.shelf_life_source != "cook"
+
+    async def test_a_date_typed_for_the_freezer_teaches_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        item = await self._add(
+            client,
+            location="freezer",
+            expiry_date=str(self.TODAY + timedelta(days=180)),
+        )
+
+        product = await self._product(seeded_db, item["product_master_id"])
+        assert product.shelf_life_source != "cook"

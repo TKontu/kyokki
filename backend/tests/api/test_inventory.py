@@ -1,6 +1,7 @@
 """Tests for Inventory CRUD API endpoints."""
 
 from datetime import date, timedelta
+from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -12,6 +13,7 @@ from app.db.seed_categories import seed_categories
 from app.db.session import get_db
 from app.main import app
 from app.models.consumption_log import ConsumptionLog
+from app.models.product_master import ProductMaster
 
 
 @pytest.fixture
@@ -1865,3 +1867,160 @@ class TestRecentlyUsedUp:
         response = await client.get("/api/inventory")
 
         assert [i["id"] for i in response.json()] == [here["id"]]
+
+
+class TestCorrectedDatesTeachTheProduct:
+    """Q24: correcting an item's date teaches its product, and the next pack is closer.
+
+    The acceptance scenario from the friction log: tortillas dated a week out that keep
+    until November. One correction sets the product's shelf life, as if the cook had typed
+    it on the Products screen, and the product's other estimated items move with it.
+    """
+
+    TODAY = date.today()
+
+    async def _add(self, client: AsyncClient, **fields) -> dict:
+        body = {
+            "name": "Tortillas",
+            "category": "bread",
+            "quantity": 8,
+            "unit": "pcs",
+            "location": "pantry",
+            **fields,
+        }
+        response = await client.post("/api/inventory/quick-add", json=body)
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    async def _product(self, db: AsyncSession, product_id: str) -> ProductMaster:
+        product = await db.get(ProductMaster, UUID(product_id), populate_existing=True)
+        assert product is not None
+        return product
+
+    async def test_a_corrected_date_teaches_the_product_and_moves_its_siblings(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        older = await self._add(
+            client, purchase_date=str(self.TODAY - timedelta(days=10))
+        )
+        typed = await self._add(
+            client,
+            purchase_date=str(self.TODAY - timedelta(days=20)),
+            expiry_date=str(self.TODAY + timedelta(days=3)),
+            location="freezer",
+        )
+        today = await self._add(client, purchase_date=str(self.TODAY))
+        product_id = today["product_master_id"]
+        assert older["expiry_source"] == "calculated"
+        assert (await self._product(seeded_db, product_id)).default_shelf_life_days < 60
+
+        with patch(
+            "app.api.endpoints.inventory.broadcast_inventory_update",
+            new_callable=AsyncMock,
+        ) as broadcast:
+            response = await client.patch(
+                f"/api/inventory/{today['id']}",
+                json={"expiry_date": str(self.TODAY + timedelta(days=60))},
+            )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["expiry_date"] == str(self.TODAY + timedelta(days=60))
+        assert body["expiry_source"] == "manual"
+        product = await self._product(seeded_db, product_id)
+        assert (product.default_shelf_life_days, product.shelf_life_source) == (
+            60,
+            "cook",
+        )
+        # The calculated sibling moved to its own purchase date + 60...
+        moved = (await client.get(f"/api/inventory/{older['id']}")).json()
+        assert moved["expiry_date"] == str(self.TODAY + timedelta(days=50))
+        # ...the one whose date the cook typed did not
+        kept = (await client.get(f"/api/inventory/{typed['id']}")).json()
+        assert kept["expiry_date"] == typed["expiry_date"]
+        # Every open iPad hears about the edited item and the one that moved with it
+        announced = [c.kwargs["inventory_item_id"] for c in broadcast.await_args_list]
+        assert sorted(map(str, announced)) == sorted([today["id"], older["id"]])
+
+        # And the next pack of tortillas, added without a date, is already close
+        following = await self._add(client, purchase_date=str(self.TODAY))
+        assert following["expiry_date"] == str(self.TODAY + timedelta(days=60))
+        assert following["expiry_source"] == "calculated"
+
+    async def test_a_patch_naming_its_own_source_teaches_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        item = await self._add(client, purchase_date=str(self.TODAY))
+        before = await self._product(seeded_db, item["product_master_id"])
+        days, source = before.default_shelf_life_days, before.shelf_life_source
+
+        response = await client.patch(
+            f"/api/inventory/{item['id']}",
+            json={
+                "expiry_date": str(self.TODAY + timedelta(days=60)),
+                "expiry_source": "scanned",
+            },
+        )
+
+        assert response.status_code == 200
+        after = await self._product(seeded_db, item["product_master_id"])
+        assert (after.default_shelf_life_days, after.shelf_life_source) == (
+            days,
+            source,
+        )
+
+    async def test_a_patch_of_other_fields_teaches_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """A later quantity fix must not re-learn over a number the cook has since typed."""
+        item = await self._add(
+            client,
+            purchase_date=str(self.TODAY),
+            expiry_date=str(self.TODAY + timedelta(days=60)),
+        )
+        product = await self._product(seeded_db, item["product_master_id"])
+        product.default_shelf_life_days = 30
+        await seeded_db.commit()
+
+        response = await client.patch(
+            f"/api/inventory/{item['id']}", json={"current_quantity": 4}
+        )
+
+        assert response.status_code == 200
+        after = await self._product(seeded_db, item["product_master_id"])
+        assert after.default_shelf_life_days == 30
+
+    async def test_an_opened_items_date_teaches_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """Opening changed the clock, so its date says nothing about a sealed pack."""
+        item = await self._add(client, purchase_date=str(self.TODAY))
+        opened = await client.patch(
+            f"/api/inventory/{item['id']}", json={"opened_date": str(self.TODAY)}
+        )
+        assert opened.json()["opened_date"] == str(self.TODAY)
+        days = (
+            await self._product(seeded_db, item["product_master_id"])
+        ).default_shelf_life_days
+
+        response = await client.patch(
+            f"/api/inventory/{item['id']}",
+            json={"expiry_date": str(self.TODAY + timedelta(days=60))},
+        )
+
+        assert response.status_code == 200
+        after = await self._product(seeded_db, item["product_master_id"])
+        assert after.default_shelf_life_days == days
+        assert after.shelf_life_source != "cook"
+
+    async def test_a_date_correction_still_logs_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        item = await self._add(client, purchase_date=str(self.TODAY))
+
+        await client.patch(
+            f"/api/inventory/{item['id']}",
+            json={"expiry_date": str(self.TODAY + timedelta(days=60))},
+        )
+
+        assert await _logs_for(seeded_db, item["id"]) == []

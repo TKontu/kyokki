@@ -1,6 +1,6 @@
 """CRUD operations for InventoryItem model."""
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -279,7 +279,11 @@ def _event_for(current: str, update_data: dict[str, Any]) -> ItemEvent:
 
 
 async def update_inventory_item(
-    db: AsyncSession, item_id: UUID, item_update: InventoryItemUpdate
+    db: AsyncSession,
+    item_id: UUID,
+    item_update: InventoryItemUpdate,
+    *,
+    on_dated_by_hand: Callable[[InventoryItem], Awaitable[None]] | None = None,
 ) -> InventoryItem | None:
     """Update an inventory item.
 
@@ -287,6 +291,9 @@ async def update_inventory_item(
         db: Database session.
         item_id: Inventory item UUID.
         item_update: Fields to update.
+        on_dated_by_hand: Awaited with the item, before the commit, when this update set its
+            date by hand (`expiry_source` became `manual` because the client sent a new date
+            and no source). What the date teaches the product (Q24) lands in this transaction.
 
     Returns:
         Updated inventory item if found, None otherwise.
@@ -365,11 +372,12 @@ async def update_inventory_item(
         _start_opened_clock(db_item)
     row.status = new_status
 
-    if (
+    dated_by_hand = (
         "expiry_date" in update_data
         and "expiry_source" not in update_data
         and update_data["expiry_date"] != row.expiry_date
-    ):
+    )
+    if dated_by_hand:
         # A date set by hand, so the badge no longer claims it was calculated
         update_data["expiry_source"] = "manual"
     elif (
@@ -383,6 +391,9 @@ async def update_inventory_item(
 
     for field, value in update_data.items():
         setattr(db_item, field, value)
+
+    if dated_by_hand and on_dated_by_hand is not None:
+        await on_dated_by_hand(db_item)
 
     await db.commit()
     return await _reload(db, db_item.id)
