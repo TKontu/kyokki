@@ -283,7 +283,7 @@ def test_add_a_blank_name_is_usage(api: FakeApi, run: Runner, name: str) -> None
 
 def test_add_an_unknown_product_id_is_not_found(api: FakeApi, run: Runner) -> None:
     api.error("POST", LIST_PATH, 400, "Referenced record does not exist.")
-    result = run("shopping", "add", "Milk", "--product-id", PRODUCT_ID)
+    result = run("shopping", "add", "Milk", "1", "l", "--product-id", PRODUCT_ID)
     assert result.code == 3
     body = result.json()
     assert body["code"] == "not_found"
@@ -293,9 +293,37 @@ def test_add_an_unknown_product_id_is_not_found(api: FakeApi, run: Runner) -> No
 def test_add_a_coded_not_found_product_is_3(api: FakeApi, run: Runner) -> None:
     detail = {"code": "not_found", "message": f"product '{PRODUCT_ID}' not found"}
     api.error("POST", LIST_PATH, 404, detail)
-    result = run("shopping", "add", "Milk", "--product-id", PRODUCT_ID)
+    result = run("shopping", "add", "Milk", "1", "l", "--product-id", PRODUCT_ID)
     assert result.code == 3
     assert result.json() == detail
+
+
+@pytest.mark.parametrize("json_mode", [True, False], ids=["json", "tty"])
+def test_add_a_linked_product_needs_amount_and_unit(
+    api: FakeApi, run: Runner, monkeypatch: pytest.MonkeyPatch, json_mode: bool
+) -> None:
+    from kyokki import output
+
+    monkeypatch.setattr(output, "stdout_is_tty", lambda: not json_mode)
+    result = run("shopping", "add", "Milk", "--product-id", PRODUCT_ID)
+    assert result.code == 2
+    assert api.requests == []
+    text = result.out if json_mode else result.err
+    if json_mode:
+        assert result.json()["code"] == "usage"
+    assert "--product-id needs AMOUNT UNIT" in text
+    assert "product's unit" in text and "generate" in text
+
+
+def test_add_free_text_keeps_the_one_piece_default(api: FakeApi, run: Runner) -> None:
+    api.on("POST", LIST_PATH, 201, SHOPPING_ITEM)
+    assert run("shopping", "add", "Milk", "--priority", "low").code == 0
+    assert api.last_json() == {
+        "name": "Milk",
+        "quantity": 1,
+        "unit": "pcs",
+        "priority": "low",
+    }
 
 
 def test_add_a_foreign_key_400_without_product_id_stays_usage(

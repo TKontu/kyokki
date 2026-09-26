@@ -3,15 +3,19 @@ usage: kyokki shopping add [-h] [--priority {urgent,normal,low}]
                            [--url URL] [--token TOKEN] [--json] [--verbose]
                            NAME [AMOUNT] [UNIT]
 
-Put NAME on the shopping list. AMOUNT and UNIT go together; without
-them the item is 1 pcs. NAME is free text and must not be blank;
+Put NAME on the shopping list. NAME is free text and must not be
+blank. AMOUNT and UNIT go together; without --product-id they may be
+left out, and the item is 1 pcs.
+
 --product-id links the item to a product, so generate raises this item
-instead of adding a second one. Options may come anywhere, also
-between NAME and AMOUNT.
+instead of adding a second one. --product-id needs AMOUNT UNIT, in the
+product's unit: generate skips a linked item it cannot count in that
+unit. Options may come anywhere, also between NAME and AMOUNT.
 
 positional arguments:
   NAME                  what to buy, as it should read
-  AMOUNT                how much, in UNIT (a number above 0); default: 1 pcs
+  AMOUNT                how much, in UNIT (a number above 0); default: 1 pcs,
+                        and required with --product-id
   UNIT                  dl, tsp, tbsp, g, pcs (l, ml, kg and the like are
                         converted by the server); needs AMOUNT
 
@@ -19,7 +23,8 @@ options:
   -h, --help            show this help message and exit
   --priority {urgent,normal,low}
                         how badly it is needed; default: normal
-  --product-id UUID     the product it is (a UUID), from product resolve
+  --product-id UUID     the product it is (a UUID), from product resolve;
+                        needs AMOUNT UNIT
   --idempotency-key KEY
                         retry key (at most 255 characters); default: SHA-256
                         of this command line and the UTC minute, so a retry

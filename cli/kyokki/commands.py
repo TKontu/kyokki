@@ -416,6 +416,12 @@ def shopping_add(ctx: Context) -> Outcome:
         raise usage_error("NAME is empty; say what to buy")
     if (a.amount is None) != (a.unit is None):
         raise usage_error("give AMOUNT and UNIT together, or neither (1 pcs)")
+    if a.product_id and a.amount is None:
+        raise usage_error(
+            "--product-id needs AMOUNT UNIT: a linked item's amount must be in the "
+            "product's unit, or generate skips the item; e.g. shopping add milk 1 l "
+            "--product-id ID"
+        )
     body: dict[str, Any] = {
         "name": a.name,
         "quantity": DEFAULT_SHOPPING_AMOUNT if a.amount is None else a.amount,

@@ -105,6 +105,12 @@ def test_shopping_generate_help_keeps_the_backend_rule() -> None:
     assert "its reorder amount, or the shortfall when it has no reorder amount" in text
 
 
+def test_shopping_add_help_says_a_linked_product_needs_an_amount() -> None:
+    text = " ".join(render(HELP_PAGES["shopping-add"]).split())
+    assert "--product-id needs AMOUNT UNIT" in text
+    assert "without --product-id" in text
+
+
 def test_shopping_add_help_does_not_mention_a_kitchen_display() -> None:
     assert "kitchen display" not in render(HELP_PAGES["shopping-add"])
 

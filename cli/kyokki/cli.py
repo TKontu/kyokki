@@ -587,11 +587,13 @@ def add_shopping_commands(top: "argparse._SubParsersAction[Parser]") -> None:
         shopping,
         "add",
         summary="put an item on the list",
-        description="Put NAME on the shopping list. AMOUNT and UNIT go together; without\n"
-        "them the item is 1 pcs. NAME is free text and must not be blank;\n"
+        description="Put NAME on the shopping list. NAME is free text and must not be\n"
+        "blank. AMOUNT and UNIT go together; without --product-id they may be\n"
+        "left out, and the item is 1 pcs.\n\n"
         "--product-id links the item to a product, so generate raises this item\n"
-        "instead of adding a second one. Options may come anywhere, also\n"
-        "between NAME and AMOUNT.",
+        "instead of adding a second one. --product-id needs AMOUNT UNIT, in the\n"
+        "product's unit: generate skips a linked item it cannot count in that\n"
+        "unit. Options may come anywhere, also between NAME and AMOUNT.",
         examples=[
             "kyokki shopping add milk 1 l --priority urgent",
             "kyokki shopping add 'dish soap'",
@@ -611,7 +613,8 @@ def add_shopping_commands(top: "argparse._SubParsersAction[Parser]") -> None:
         nargs="?",
         type=positive_number,
         metavar="AMOUNT",
-        help="how much, in UNIT (a number above 0); default: 1 pcs",
+        help="how much, in UNIT (a number above 0); default: 1 pcs, and "
+        "required with --product-id",
     )
     add.add_argument(
         "unit", nargs="?", metavar="UNIT", help=f"{UNITS_HELP}; needs AMOUNT"
@@ -625,7 +628,7 @@ def add_shopping_commands(top: "argparse._SubParsersAction[Parser]") -> None:
         "--product-id",
         type=product_id,
         metavar="UUID",
-        help="the product it is (a UUID), from product resolve",
+        help="the product it is (a UUID), from product resolve; needs AMOUNT UNIT",
     )
     add_idempotency_option(add)
     add_connection_options(add, top=False)

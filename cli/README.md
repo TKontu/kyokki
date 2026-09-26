@@ -31,7 +31,7 @@ character is refused with exit 2 before anything is sent, without repeating it.
 | `kyokki product name add PRODUCT_ID NAME` | Teach a product another name |
 | `kyokki category list` | Category ids for `--category` |
 | `kyokki shopping list [--all] [--priority P]` | Open shopping items, urgent first (`--all` adds the bought ones) |
-| `kyokki shopping add NAME [AMOUNT UNIT] [--priority P] [--product-id UUID]` | Put an item on the list; without AMOUNT UNIT it is 1 pcs |
+| `kyokki shopping add NAME [AMOUNT UNIT] [--priority P] [--product-id UUID]` | Put an item on the list; a free-text item without AMOUNT UNIT is 1 pcs, `--product-id` needs AMOUNT UNIT |
 | `kyokki shopping done ID [--undo]` | Tick an item off as bought, or put it back with `--undo` |
 | `kyokki shopping remove ID` | Delete an item from the list |
 | `kyokki shopping generate [--from low-stock] [--dry-run]` | Put what the kitchen is short of on the list |
@@ -56,9 +56,12 @@ The shopping commands call `/api/shopping/`:
 - `list` shows every item: the server answers at most 500 rows a request, so the CLI
   asks again with `skip` until a page comes back short.
 - `add`: a blank NAME, or AMOUNT without UNIT (or the reverse), is a usage error (exit
-  2) and nothing is sent. Options may come anywhere on the line, also between NAME and
-  AMOUNT (`shopping add milk --priority urgent 1 l`). An unknown `--product-id` (the
-  server's foreign-key 400) is `not_found`, exit 3.
+  2) and nothing is sent. A free-text item without AMOUNT UNIT is 1 pcs. With
+  `--product-id`, AMOUNT UNIT are required (exit 2 without them, nothing sent): a
+  linked item's amount must be in the product's unit, or `generate` skips the item.
+  Options may come anywhere on the line, also between NAME and AMOUNT (`shopping add
+  milk --priority urgent 1 l`). An unknown `--product-id` (the server's foreign-key
+  400) is `not_found`, exit 3.
 - `done` and `remove` report a 404 as `not_found` (exit 3) only when it is the answer
   for a missing item: a coded `not_found`, or the router's `Shopping list item ID not
   found`. Any other 404 (a wrong route, a proxy's page) stays `http_404`, exit 1.
