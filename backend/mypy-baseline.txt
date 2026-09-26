@@ -22,7 +22,7 @@
 1	app/api/endpoints/products.py	return-value
 2	app/api/endpoints/scanner.py	type-arg
 22	app/api/endpoints/shopping.py	arg-type
-8	app/api/endpoints/shopping.py	no-untyped-def
+6	app/api/endpoints/shopping.py	no-untyped-def
 1	app/api/endpoints/websockets.py	no-untyped-def
 1	app/api/exceptions.py	no-untyped-def
 5	app/core/config.py	call-arg

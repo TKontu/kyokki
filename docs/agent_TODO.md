@@ -32,19 +32,42 @@ Planned 2026-09-14. ~~Starts after MVP-P3~~ **Started 2026-09-25** (operator rul
   the AG6/AG2 follow-ups below (A3, `fix/agent-api-followups`). A3 also covers idempotent
   `POST /shopping/` and `/purchase`, and a 404 `not_found` from `stock/add` for an unknown product.
   AG4 is still the agent's own job (ruling 2026-09-25).
+- **Round 2026-09-26-3 is merged** (#111 `kyokki shopping`, #112 API follow-ups, 2026-09-26).
+  Operator rulings at review:
+  - `shopping add NAME --product-id ID` requires AMOUNT UNIT (exit 2 otherwise); a free-text
+    add keeps the `1 pcs` default.
+  - The per-minute derived Idempotency-Key is **accepted for now**: within one UTC minute,
+    `done` / `done --undo` / `done` replays the first answer (reported `replayed: true`), and
+    the same holds for `stock consume`. Follow-up below.
 
   Review follow-ups (2026-09-26), not fixed in the lane PRs:
-  - [ ] AG6 (#102, in round 2026-09-26-3 A3): two concurrent `POST /shopping/generate` calls without a shared
+  - [x] AG6 (#102, fixed in #112 by a transaction advisory lock): two concurrent `POST /shopping/generate` calls without a shared
     `Idempotency-Key` both insert, so duplicate open items appear. There is no lock or unique
     constraint.
-  - [ ] AG6 (#102, in round 2026-09-26-3 A3): `sources: list[str]` answers 422 to a bare string or to the
+  - [x] AG6 (#102, fixed in #112: every bad shape is 400 `invalid`; `sources` is a list of
+    source names, published as required; `recipe` / `meal_plan` shapes wait for AG5): `sources: list[str]` answers 422 to a bare string or to the
     `{"recipe": {...}}` object form, not 400 `invalid`. Settle the source shape before AG5 and
     the `kyokki shopping` commands.
-  - [ ] AG6 (#102, in round 2026-09-26-3 A3): a skipped line in an incompatible unit carries `need`/`on_hand`, contrary
+  - [x] AG6 (#102, fixed and tested in #112): a skipped line in an incompatible unit carries `need`/`on_hand`, contrary
     to the schema docstrings, and has no test. The unit-conversion test uses `l`, which
     production never stores; tsp/tbsp against dl is the reachable case.
   - [ ] AG1 log follow-up (#101): the filter scans message and args only, not `extra=` fields
     or tracebacks. Nothing logs a token that way today.
+
+  Review follow-ups (round 2026-09-26-3, 2026-09-26):
+  - [ ] AG3 key scheme: the derived key is command line + UTC minute, so a flip and flip back
+    within a minute replays (see the ruling above). Options: a key only on explicit
+    `--idempotency-key` for state-flipping commands, or a key that includes the intended state.
+  - [ ] Shopping 404s are plain strings, not `AgentError` `not_found`; the CLI matches the exact
+    text `Shopping list item <id> not found` (and `Referenced record does not exist.` for an
+    unknown `--product-id`). Give them codes, then drop the text matching.
+  - [ ] Shopping create and purchase commit the item, then the idempotency answer, in two
+    commits; a crash in between lets a retry duplicate. Same window as `stock/add`.
+  - [ ] The `generate` lock does not cover a manual `POST /shopping/` or a PATCH (pre-existing).
+  - [ ] `DELETE /api/shopping/{id}` ignores `Idempotency-Key`; the CLI therefore sends none and
+    documents that a retried remove may exit 3.
+  - [ ] `cli/README.md`'s note on `stock add` mapping a 400 to not found is stale since #112
+    (the server now answers 404); several CLI test mocks model error shapes the server never sends.
 
 ## Goal
 A Hermes Agent or OpenClaw agent runs the kitchen through Kyokki the way a person would:
@@ -236,7 +259,9 @@ httpx plus argparse or Typer, with no backend imports.
   kyokki product alias add PRODUCT NAME [--store CHAIN]
   kyokki category list
   kyokki receipt upload FILE ; kyokki receipt status ID ; kyokki receipt confirm ID --all-matched
-  kyokki shopping list | add NAME [AMOUNT UNIT] | done ID | generate --from low-stock|recipe SLUG
+  kyokki shopping list [--all] [--priority P] | add NAME [AMOUNT UNIT] [--priority P] [--product-id ID]
+                  | done ID [--undo] | remove ID | generate [--from low-stock] [--dry-run]
+                  | export [--format text|markdown]         (shipped #111; --from recipe waits for AG5)
   kyokki recipe search QUERY | show SLUG | can-cook [--expiring] | cook SLUG [--servings N] [--dry-run]
   ```
 - **Tests:**
