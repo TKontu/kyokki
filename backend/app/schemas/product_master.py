@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.product_master import ShelfLifeSource
+from app.models.product_master import IconStatus, ShelfLifeSource
 from app.schemas.types import JsonDecimal, canonicalize_units
 from app.services.units import unit_type_for
 
@@ -114,10 +114,31 @@ class ProductMasterResponse(ProductMasterBase):
         description="Where the shelf life came from: the category, the model, or the cook",
     )
     off_data: dict | None = Field(None, description="Cached Open Food Facts data")
+    icon_status: IconStatus | None = Field(
+        None,
+        description=(
+            "The drawn icon (Q18): pending, ready, failed (any earlier drawing kept) or "
+            "cleared (the cook chose the category emoji); null: never drawn"
+        ),
+    )
+    icon_version: int | None = Field(
+        None,
+        description="Version for /products/{id}/icon.svg?v=; null: no drawing, show the emoji",
+    )
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class IconRedrawRequest(BaseModel):
+    """Draw a product's icon again (Q18), optionally with a word from the cook."""
+
+    hint: str | None = Field(
+        None,
+        max_length=200,
+        description='What it looks like, e.g. "oval rye pastry with rice filling"',
+    )
 
 
 class CatalogEstimateChange(BaseModel):

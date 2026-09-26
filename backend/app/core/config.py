@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     def empty_reasoning_strength_means_none(cls, v: object) -> object:
         return None if v == "" else v
 
+    # Product icons (Q18): the model draws each product a flat 48x48 SVG in the background.
+    # The receipt model by default: it drew all 20 spike products in ~10 s each, and a second
+    # model on the same c2 GPU would make llama-swap unload it and cold-load receipts.
+    ICON_MODEL: str = "c2.muse-glimmer"
+    ICON_TIMEOUT: float = 600.0  # seconds; qwen3.8-27b took up to 273 s for one drawing
+
     # Telegram receipt drop-in bot (MVP-T1). The bot is disabled while no token is set.
     # Receipt queue worker (python -m app.worker, MVP-R3)
     RECEIPT_WORKER_POLL_SECONDS: float = 2.0  # idle wait between queue checks

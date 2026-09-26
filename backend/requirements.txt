@@ -30,6 +30,9 @@ rapidfuzz>=3.6.1
 # HTTP client (for MinerU, vLLM, Open Food Facts)
 httpx>=0.26.0
 
+# Entity-safe XML parsing for the SVG icons the model draws (Q18)
+defusedxml>=0.7.1
+
 # Configuration
 python-dotenv>=1.0.1
 pydantic-settings>=2.3.0

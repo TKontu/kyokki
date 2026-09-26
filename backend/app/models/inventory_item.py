@@ -94,3 +94,9 @@ class InventoryItem(Base):
     @property
     def category_icon(self) -> str | None:
         return self.product_master.category_rel.icon
+
+    @property
+    def product_icon_version(self) -> int | None:
+        """The product's drawn icon, for its URL (Q18). None: the tile shows category_icon."""
+        version = self.product_master.icon_version
+        return None if version is None else int(version)

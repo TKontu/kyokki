@@ -224,6 +224,13 @@ class InventoryItemResponse(InventoryItemBase):
     category: str = Field(..., description="Category ID, e.g. dairy")
     category_name: str = Field(..., description="Category display name")
     category_icon: str | None = Field(None, description="Category emoji icon")
+    product_icon_version: int | None = Field(
+        None,
+        description=(
+            "Version of the product's drawn icon (Q18), for "
+            "/products/{product_master_id}/icon.svg?v=; null: show category_icon"
+        ),
+    )
     created_at: datetime
     consumed_at: datetime | None = None
 

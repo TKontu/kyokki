@@ -78,16 +78,18 @@ class TestTheSeed:
     def test_it_follows_the_current_head(self) -> None:
         assert _load_migration().down_revision == "b7d3e9a4c152"
 
-    def test_it_is_the_only_head(self) -> None:
+    def test_history_stays_one_line_through_it(self) -> None:
+        # Was "the only head" until Q18's product icons followed it; that test owns the head now.
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         config = Config()
         config.set_main_option("script_location", str(MIGRATION.parents[1]))
+        script = ScriptDirectory.from_config(config)
 
-        assert ScriptDirectory.from_config(config).get_heads() == [
-            _load_migration().revision
-        ]
+        (head,) = script.get_heads()
+        ancestors = {rev.revision for rev in script.walk_revisions("base", head)}
+        assert _load_migration().revision in ancestors
 
 
 class TestTheMigration:
