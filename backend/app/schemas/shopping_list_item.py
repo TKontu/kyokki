@@ -1,8 +1,9 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, WithJsonSchema, model_validator
 
 from app.schemas.types import JsonDecimal, canonicalize_units
 
@@ -81,13 +82,19 @@ class ShoppingListItemResponse(ShoppingListItemBase):
 class ShoppingGenerateRequest(BaseModel):
     """What to build a shopping list from (AG6). Only ``low_stock`` exists for now.
 
-    An empty or unknown source is refused by the service as 400 ``invalid``, not here,
-    so an agent gets the stable error shape rather than a 422.
+    ``sources`` takes any JSON value here and is checked by the service: anything but a
+    non-empty list of known source names (a bare string, an object, a list holding an
+    object, an unknown name, an empty list, or no ``sources`` at all) is 400 ``invalid``,
+    so an agent gets the stable error shape rather than a 422. The schema still documents
+    it as a list of names. ``dry_run`` is validated as usual.
     """
 
-    sources: list[str] = Field(
-        ..., description="low_stock: every product below its min_stock_quantity"
-    )
+    sources: Annotated[
+        Any,
+        WithJsonSchema(
+            {"type": "array", "items": {"type": "string", "enum": ["low_stock"]}}
+        ),
+    ] = Field(None, description="low_stock: every product below its min_stock_quantity")
     dry_run: bool = Field(False, description="Plan only; nothing is written")
 
 
@@ -96,7 +103,15 @@ class ShoppingGenerateLine(BaseModel):
 
     ``need``, ``on_hand`` and ``min_stock`` are in ``unit``, the product's own unit.
     ``item_id`` is the list item added, raised or left alone (none on a dry run's added
-    lines). A skipped line has no ``need`` or ``on_hand`` and says why in ``reason``.
+    lines). A skipped line says why in ``reason``, and there are two causes:
+
+    - The stock could not be counted: some of it is in a unit that does not convert to
+      the product's (``"stock in tsp cannot be counted against min_stock in dl"``). No
+      ``need``, ``on_hand`` or ``item_id``: nothing is known to be short.
+    - The need is known but the open list item for the product is in a unit that cannot
+      hold it (``"the open list item is in g, which cannot hold a need in dl"``). Carries
+      ``need`` and ``on_hand``, and ``item_id`` is that open item, left as it was; no
+      second item is added beside it.
     """
 
     product_id: UUID
@@ -111,7 +126,8 @@ class ShoppingGenerateLine(BaseModel):
 
 class ShoppingGenerateResponse(BaseModel):
     """added: new list items. updated: open items raised to the need. unchanged: open
-    items already big enough. skipped: products whose stock could not be counted."""
+    items already big enough. skipped: products whose stock could not be counted, or
+    whose open item's unit cannot hold the need (``ShoppingGenerateLine`` says which)."""
 
     added: list[ShoppingGenerateLine] = Field(default_factory=list)
     updated: list[ShoppingGenerateLine] = Field(default_factory=list)

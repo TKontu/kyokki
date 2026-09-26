@@ -25,7 +25,7 @@ from app.schemas.stock import (
 from app.services import idempotency
 from app.services import stock as stock_service
 from app.services.broadcast_helpers import broadcast_inventory_update
-from app.services.generic_products import InvalidProductRequest
+from app.services.generic_products import InvalidProductRequest, UnknownProduct
 from app.services.idempotency import IdempotencyClaim, IdempotencyConflict
 from app.services.product_lookup import AmbiguousProduct, ProductNotFound
 from app.services.shelf_life_on_create import schedule_estimates
@@ -127,8 +127,9 @@ async def add_stock(
     A new product is estimated in the background once this has answered (Q19); a replay
     schedules nothing, because the first request already did.
 
-    Errors: 400 `invalid` (unknown product id, a new product without a valid category),
-    409 `conflict` (Idempotency-Key reused with another body).
+    Errors: 404 `not_found` (unknown product id, as stock/consume answers it), 400
+    `invalid` (a new product without a valid category), 409 `conflict` (Idempotency-Key
+    reused with another body).
     """
     claim = claim_request(body, idempotency_key, ADD_ROUTE)
     async with idempotency.held(db, claim):
@@ -137,6 +138,8 @@ async def add_stock(
         try:
             async with handle_integrity_errors():
                 result = await stock_service.add_stock(db, body, claim=claim)
+        except UnknownProduct as exc:
+            raise AgentError("not_found", str(exc)) from exc
         except InvalidProductRequest as exc:
             raise AgentError("invalid", str(exc)) from exc
 

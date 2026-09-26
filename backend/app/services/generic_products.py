@@ -34,6 +34,14 @@ class InvalidProductRequest(ValueError):
     """The request names no usable product (unknown id, missing or unknown category)."""
 
 
+class UnknownProduct(InvalidProductRequest):
+    """The request's ``product_id`` names no product.
+
+    A subclass, so every caller that refuses an ``InvalidProductRequest`` still does; the
+    agents' stock add tells it apart to answer 404 ``not_found`` like stock consume.
+    """
+
+
 def tidy_name(name: str | None) -> str:
     return " ".join((name or "").split())
 
@@ -133,13 +141,13 @@ class ProductResolver:
         same name on one receipt share the first outcome; harmless, and rare.
 
         Raises:
-            InvalidProductRequest: unknown ``product_id``, no name, or a new product without a
-                valid category.
+            UnknownProduct: unknown ``product_id`` (an ``InvalidProductRequest``).
+            InvalidProductRequest: no name, or a new product without a valid category.
         """
         if product_id is not None:
             product = await self.db.get(ProductMaster, product_id)
             if product is None:
-                raise InvalidProductRequest(f"product '{product_id}' not found")
+                raise UnknownProduct(f"product '{product_id}' not found")
             return (
                 await self._learn(
                     product,

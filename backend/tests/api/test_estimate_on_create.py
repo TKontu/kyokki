@@ -23,6 +23,7 @@ from app.models.receipt import Receipt
 from app.services import shelf_life_on_create
 from app.services.catalog_estimates import Estimate, EstimateRequest
 from app.services.llm_extractor import LLMExtractionError
+from app.services.shelf_life_on_create import schedule_estimates
 
 BOUGHT = date(2026, 9, 1)
 PLACEHOLDER = {c["id"]: c["default_shelf_life_days"] for c in SEED_CATEGORIES}
@@ -154,6 +155,27 @@ class TestStockAdd:
         response = await client.post("/api/stock/add", json=QUICK_ADD)
 
         assert response.json()["product_created"] is False
+        estimator.assert_not_awaited()
+
+    async def test_an_idempotent_replay_schedules_no_estimate(
+        self, client: AsyncClient, seeded_db: AsyncSession, estimator
+    ) -> None:
+        headers = {"Idempotency-Key": "estimate-replay"}
+        first = await client.post("/api/stock/add", json=QUICK_ADD, headers=headers)
+        assert first.json()["product_created"] is True
+        estimator.assert_awaited_once()
+        estimator.reset_mock()
+
+        with patch(
+            "app.api.endpoints.stock.schedule_estimates", wraps=schedule_estimates
+        ) as scheduled:
+            again = await client.post("/api/stock/add", json=QUICK_ADD, headers=headers)
+
+        assert again.status_code == 201
+        assert again.headers.get("Idempotent-Replayed") == "true"
+        # The replayed body still says the product was new, and still nothing is asked.
+        assert again.json() == first.json()
+        scheduled.assert_not_called()
         estimator.assert_not_awaited()
 
     async def test_a_model_that_cannot_answer_still_returns_201(

@@ -64,14 +64,14 @@ async def _stock(db: AsyncSession, product: ProductMaster, quantity: str) -> Non
 
 
 async def _open_item(
-    db: AsyncSession, product: ProductMaster, quantity: str
+    db: AsyncSession, product: ProductMaster, quantity: str, *, unit: str = "dl"
 ) -> ShoppingListItem:
     item = ShoppingListItem(
         id=uuid4(),
         product_master_id=product.id,
         name=product.canonical_name,
         quantity=Decimal(quantity),
-        unit="dl",
+        unit=unit,
         priority="normal",
         source="manual",
         is_purchased=False,
@@ -175,8 +175,20 @@ class TestGenerate:
         assert await _count(seeded_db, ShoppingListItem) == 0
         broadcast.assert_not_awaited()
 
-    @pytest.mark.parametrize("sources", [[], ["recipe"], ["low_stock", "nope"]])
-    async def test_no_or_an_unknown_source_is_invalid(
+    @pytest.mark.parametrize(
+        "sources",
+        [
+            [],
+            ["recipe"],
+            ["low_stock", "nope"],
+            "low_stock",
+            {"recipe": {"id": "abc"}},
+            ["low_stock", {"recipe": {"id": "abc"}}],
+            None,
+            [3],
+        ],
+    )
+    async def test_anything_but_known_sources_is_invalid(
         self, client: AsyncClient, seeded_db, broadcast, sources
     ) -> None:
         response = await client.post(URL, json={"sources": sources})
@@ -185,6 +197,47 @@ class TestGenerate:
         detail = response.json()["detail"]
         assert detail["code"] == "invalid"
         assert "low_stock" in detail["message"]
+        assert await _count(seeded_db, ShoppingListItem) == 0
+        broadcast.assert_not_awaited()
+
+    async def test_no_sources_at_all_is_invalid(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        response = await client.post(URL, json={})
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["code"] == "invalid"
+
+    async def test_dry_run_is_still_a_validated_bool(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        response = await client.post(
+            URL, json={"sources": ["low_stock"], "dry_run": "maybe"}
+        )
+
+        assert response.status_code == 422
+
+    async def test_an_open_item_that_cannot_hold_the_need_is_skipped(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        milk = await _product(seeded_db, "Milk", min_stock="10")
+        milk_id = str(milk.id)
+        await _stock(seeded_db, milk, "4")
+        open_item = await _open_item(seeded_db, milk, "300", unit="g")
+        open_item_id = str(open_item.id)
+
+        response = await client.post(URL, json={"sources": ["low_stock"]})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["added"] == body["updated"] == body["unchanged"] == []
+        [line] = body["skipped"]
+        assert (line["product_id"], line["item_id"]) == (milk_id, open_item_id)
+        assert (line["need"], line["on_hand"], line["min_stock"]) == (6, 4, 10)
+        assert line["reason"] == (
+            "the open list item is in g, which cannot hold a need in dl"
+        )
+        assert await _count(seeded_db, ShoppingListItem) == 1
         broadcast.assert_not_awaited()
 
 

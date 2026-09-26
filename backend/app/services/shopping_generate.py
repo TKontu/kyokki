@@ -4,7 +4,12 @@ Only the ``low_stock`` source exists so far: every product with a ``min_stock_qu
 whose active stock is below it needs ``reorder_quantity``, or the shortfall when that is
 not set. Needs merge into the open list: an open item for the product is raised to the
 need rather than joined by a second one. Everything is written in one commit, together
-with the remembered ``Idempotency-Key`` response; a dry run writes nothing.
+with the remembered ``Idempotency-Key`` response; a dry run writes nothing. A real run
+holds a transaction-scoped advisory lock from before it reads the open list until that
+commit, so two at once serialise and the second merges into the first's items.
+
+Also the single-item writes (create, purchase) with their ``Idempotency-Key`` response
+stored straight after, and the open list as text.
 """
 
 from collections import defaultdict
@@ -13,7 +18,7 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -24,6 +29,7 @@ from app.schemas.shopping_list_item import (
     ShoppingGenerateLine,
     ShoppingGenerateResponse,
     ShoppingListItemCreate,
+    ShoppingListItemResponse,
     ShoppingPriority,
     ShoppingSource,
 )
@@ -39,6 +45,9 @@ LOW_STOCK = "low_stock"
 #: The sources `generate` understands. ``recipe`` and ``meal_plan`` wait for AG5.
 SOURCES = (LOW_STOCK,)
 
+#: The one advisory lock every real `generate` takes, whatever its sources.
+GENERATE_LOCK = "kyokki:shopping-generate"
+
 ExportFormat = Literal["text", "markdown"]
 EXPORT_FORMATS: tuple[ExportFormat, ...] = ("text", "markdown")
 
@@ -46,7 +55,7 @@ GenerateResult = ShoppingGenerateResponse
 
 
 class InvalidGenerate(ValueError):
-    """The request names no source, or one that does not exist."""
+    """``sources`` is not a non-empty list of known source names."""
 
 
 class _Incompatible(Exception):
@@ -74,14 +83,26 @@ def _amount(value: Decimal) -> Decimal:
     return quantise(value).normalize() + Decimal(0)
 
 
-def _check_sources(sources: Sequence[str]) -> None:
-    if not sources:
-        raise InvalidGenerate(f"Name at least one source: {', '.join(SOURCES)}")
+def _check_sources(sources: object) -> list[str]:
+    """The sources, when ``sources`` is a non-empty list of known source names.
+
+    Takes any JSON value, so a bare string or an object is refused here with the stable
+    error rather than by request validation.
+
+    Raises:
+        InvalidGenerate: Not a list, an empty one, or one holding anything but known names.
+    """
+    known = ", ".join(SOURCES)
+    if not isinstance(sources, list) or not sources:
+        raise InvalidGenerate(f"sources must be a list naming at least one of: {known}")
+    if not all(isinstance(source, str) for source in sources):
+        raise InvalidGenerate(f"sources must be names; the sources are {known}")
     unknown = sorted({source for source in sources if source not in SOURCES})
     if unknown:
         raise InvalidGenerate(
-            f"Unknown source {', '.join(unknown)}; the sources are {', '.join(SOURCES)}"
+            f"Unknown source {', '.join(unknown)}; the sources are {known}"
         )
+    return list(sources)
 
 
 async def _restock_products(db: AsyncSession) -> list[Any]:
@@ -199,7 +220,7 @@ async def _low_stock(
 
 async def generate(
     db: AsyncSession,
-    sources: Sequence[str],
+    sources: object,
     *,
     dry_run: bool,
     claim: IdempotencyClaim | None = None,
@@ -207,15 +228,23 @@ async def generate(
     """Work out what the kitchen needs and merge it into the open shopping list.
 
     One commit for every item added or raised, and for the remembered response when a
-    claim is given. A dry run computes the same result and rolls back.
+    claim is given. A real run takes the generate lock first and holds it to that commit,
+    so a second run at the same time waits and then sees these items. A dry run computes
+    the same result without the lock and rolls back.
 
     Raises:
-        InvalidGenerate: No source, or an unknown one.
+        InvalidGenerate: ``sources`` is not a non-empty list of known source names.
     """
-    _check_sources(sources)
+    names = _check_sources(sources)
     response = ShoppingGenerateResponse(dry_run=dry_run)
     try:
-        if LOW_STOCK in sources:
+        if not dry_run:
+            await db.execute(
+                select(
+                    func.pg_advisory_xact_lock(func.hashtextextended(GENERATE_LOCK, 0))
+                )
+            )
+        if LOW_STOCK in names:
             await _low_stock(db, response, dry_run=dry_run)
         if dry_run:
             await db.rollback()
@@ -232,7 +261,7 @@ async def generate(
     logger.info(
         "Shopping list generated",
         extra={
-            "sources": list(sources),
+            "sources": names,
             "dry_run": dry_run,
             "added": len(response.added),
             "updated": len(response.updated),
@@ -241,6 +270,61 @@ async def generate(
         },
     )
     return response
+
+
+async def _remember(
+    db: AsyncSession, claim: IdempotencyClaim | None, status_code: int, item: Any
+) -> None:
+    """Store the answer for ``claim`` in a commit of its own; nothing without a claim.
+
+    The item's write has already committed (the CRUD layer commits), so the caller holds
+    the key across both with ``idempotency.held``: a racing retry waits, then replays.
+    """
+    if claim is None:
+        return
+    body = ShoppingListItemResponse.model_validate(item).model_dump(mode="json")
+    try:
+        await idempotency.remember(db, claim, status_code, body)
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+
+
+async def create_item(
+    db: AsyncSession,
+    item_in: ShoppingListItemCreate,
+    *,
+    claim: IdempotencyClaim | None = None,
+) -> ShoppingListItem:
+    """Add one item to the list, and remember the 201 answer when a claim is given.
+
+    A refused write (an unknown product) rolls back and is not remembered.
+    """
+    try:
+        item = await crud_shopping.create(db, obj_in=item_in)
+    except BaseException:
+        await db.rollback()
+        raise
+    await _remember(db, claim, 201, item)
+    return item
+
+
+async def mark_purchased(
+    db: AsyncSession,
+    item_id: UUID,
+    *,
+    purchased: bool,
+    claim: IdempotencyClaim | None = None,
+) -> ShoppingListItem | None:
+    """Mark one item bought (or not), and remember the answer when a claim is given.
+
+    None when there is no such item; that is not remembered.
+    """
+    item = await crud_shopping.mark_purchased(db, item_id=item_id, purchased=purchased)
+    if item is not None:
+        await _remember(db, claim, 200, item)
+    return item
 
 
 def _quantity(value: Any) -> str:
