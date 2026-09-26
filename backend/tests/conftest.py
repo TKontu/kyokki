@@ -41,6 +41,18 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker("requires_db")
 
 
+@pytest.fixture(autouse=True)
+def _no_api_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep /api open whatever the developer's .env configures (AG1).
+
+    With KYOKKI_API_TOKENS set every request without a token is a 401, which would
+    fail most of the suite. tests/api/test_auth.py sets tokens itself.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "KYOKKI_API_TOKENS", [])
+
+
 @pytest.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
     """Async HTTP client for endpoints that do not touch the database.

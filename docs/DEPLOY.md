@@ -190,6 +190,49 @@ other chats get no reply except their chat id on `/start`, and nothing they send
 Keep the token secret: anyone with it can read what is sent to the bot. If it leaks, use
 `/revoke` in @BotFather and update `stack.env`.
 
+## Agent access tokens
+
+Port 17300 answers anyone on the LAN until `KYOKKI_API_TOKENS` is set. Once it holds at least
+one entry, every `/api` request (reads included) needs `Authorization: Bearer <secret>`; the
+WebSocket `/api/ws` may pass `?token=<secret>` instead. `/api/health` and `/api/health/live`
+stay open for the healthchecks. A `read` token may only `GET`/`HEAD`/`OPTIONS`; a `write`
+token may do everything. A missing or unknown token is a 401, a read token on a write a 403.
+
+The iPad never holds a token: the frontend's Next server adds its own (`KYOKKI_PROXY_TOKEN`)
+to every `/api` request it proxies. So once tokens are on, the iPad needs an entry too.
+That makes port 17301 an open door with the iPad's scope: anyone on the LAN who reaches the
+frontend reads and writes as `ipad`. Tokens guard 17300; keep 17301 to the devices you trust.
+Also, the WebSocket's `?token=` appears in `kyokki-api`'s access log (uvicorn logs the query
+string), so prefer the header wherever the client can set one.
+
+1. Generate one entry per client. Each command prints a `secret:` (give it to the client, it is
+   shown once) and an `entry:` (the name, scope and SHA-256 of the secret, for the config):
+
+   ```bash
+   docker compose --env-file stack.env -f docker-compose.prod.yml run --rm --no-deps \
+     kyokki-api python -m app.core.api_tokens new ipad write
+   docker compose --env-file stack.env -f docker-compose.prod.yml run --rm --no-deps \
+     kyokki-api python -m app.core.api_tokens new hermes write
+   ```
+
+2. In the stack environment (Portainer, or `stack.env`), set
+   `KYOKKI_API_TOKENS=<ipad entry>,<hermes entry>` and `KYOKKI_PROXY_TOKEN=<ipad secret>`.
+   Only hashes go in `KYOKKI_API_TOKENS`; a malformed entry stops the API at startup with an
+   error that names the entry.
+3. Redeploy (Portainer: *Update the stack*; or `up -d`), which restarts `kyokki-api` and
+   `frontend` with the new environment. The frontend image needs no rebuild.
+4. Verify:
+
+   ```bash
+   curl -H "Authorization: Bearer <hermes secret>" http://<host>:17300/api/whoami
+   # {"name":"hermes","scopes":["read","write"],"auth_enabled":true}
+   curl -i http://<host>:17300/api/inventory                  # 401 without a token
+   curl http://<host>:17301/api/whoami                          # via the iPad proxy: "ipad"
+   ```
+
+To revoke a client, remove its entry and redeploy. Rejections are logged by `kyokki-api` as
+`api_auth_rejected` with the token name (when known) and the path, never the secret.
+
 ## Operations
 
 Every `docker compose` command for this stack needs `--env-file stack.env`. The compose file

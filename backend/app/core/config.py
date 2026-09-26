@@ -4,6 +4,8 @@ from typing import Annotated, Literal
 from pydantic import SecretStr, computed_field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from app.core.api_tokens import parse_token_entries
+
 # backend/app/core/config.py -> backend/ -> the repository root
 BACKEND_ROOT = Path(__file__).parent.parent.parent
 PROJECT_ROOT = BACKEND_ROOT.parent
@@ -47,6 +49,25 @@ class Settings(BaseSettings):
     def parse_allowed_origins(cls, v: str | list) -> list[str]:
         if isinstance(v, str):
             return [o.strip() for o in v.split(",") if o.strip()]
+        return v
+
+    # API access tokens (AG1): comma-separated name:scope:sha256hex entries, scope
+    # read|write. Empty leaves /api open, as before. Generate entries with
+    # `python -m app.core.api_tokens new NAME SCOPE`; only the hash lives here.
+    KYOKKI_API_TOKENS: Annotated[list[str], NoDecode] = []
+
+    @field_validator("KYOKKI_API_TOKENS", mode="before")
+    @classmethod
+    def split_api_tokens(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [part.strip() for part in v.split(",") if part.strip()]
+        return v
+
+    @field_validator("KYOKKI_API_TOKENS", mode="after")
+    @classmethod
+    def validate_api_tokens(cls, v: list[str]) -> list[str]:
+        # Raises ApiTokenConfigError (not ValueError) so the hashes are not echoed.
+        parse_token_entries(v)
         return v
 
     # MinerU OCR Service
