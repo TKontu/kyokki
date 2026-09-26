@@ -105,11 +105,11 @@ def build_instructions(
 ) -> str:
     """The extraction prompt.
 
-    The catalog block is off by default since H17. It was there to keep generic names
-    consistent between receipts, capped at 300 names and growing with the catalog. A
-    name is a key now (H11), and confirm learns the generic name as a synonym, so
-    "Minced beef" reaches "Ground beef" next week without the prompt carrying the
-    catalog at all. `EXTRACTION_OFFERS_CATALOG` puts the list back.
+    The catalog block is on by default (`EXTRACTION_OFFERS_CATALOG`). It keeps generic
+    names consistent between receipts, capped at 300 names and growing with the catalog.
+    A name is a key now (H11) and confirm learns the generic name as a synonym, so the
+    block was expected to be droppable, but H17 measured the categories the model fills
+    in falling from 40 to 30-31 of 49 without it, so it stays; the setting turns it off.
     """
     listed = ", ".join(f"{c.id} ({c.name})" for c in categories) or "none"
     if not settings.EXTRACTION_OFFERS_CATALOG:

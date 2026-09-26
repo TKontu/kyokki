@@ -3,9 +3,13 @@
 Every prompt edit is measured before it is kept (Q7, Q8 in docs/vLLM_MANUAL_TEST.md): the
 model's per-line estimates are fragile, and a change aimed at one field has twice silenced
 the others. This runs the real `extract_from_text` with the configured model, the seeded
-categories and an empty catalog - no database - and counts everything the model returns.
+categories and, by default, an empty catalog - no database - and counts everything the model
+returns. Production offers the catalog (`EXTRACTION_OFFERS_CATALOG`, H17), and a catalog block
+has silenced the estimates before (Q7), so `--catalog N` offers the first N names of a fixed
+20-name warm catalog.
 
     python -m scripts.measure_extraction --runs 2 --fixture tests/fixtures/receipts/s_kaupat_order.txt
+    python -m scripts.measure_extraction --catalog 20 ...
     python -m scripts.measure_extraction --json ...
 
 Model calls run one after another: the gateway serves one request at a time.
@@ -18,6 +22,7 @@ import asyncio
 import json
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +50,32 @@ WATCH = (
     "RUSINA",
 )
 
+# A fixed warm catalog for `--catalog N`: generic names a household that shops like the
+# S-kaupat fixture would have confirmed, some matching its lines and some not. Fixed so
+# that runs on different branches offer the same block.
+CATALOG = (
+    "Milk",
+    "Lactose-free milk",
+    "Oat drink",
+    "Feta cheese",
+    "Cheddar",
+    "Bacon",
+    "Chicken fillet strips",
+    "Ground beef",
+    "Eggs",
+    "Butter",
+    "Tomato",
+    "Cucumber",
+    "Carrot",
+    "Onion",
+    "Banana",
+    "Apple",
+    "Potato",
+    "Rye bread",
+    "Orange juice",
+    "Chips",
+)
+
 
 def categories() -> list[CategoryOption]:
     return [
@@ -53,12 +84,15 @@ def categories() -> list[CategoryOption]:
     ]
 
 
-async def measure(text: str, options: list[CategoryOption]) -> dict[str, Any]:
+async def measure(
+    text: str, options: list[CategoryOption], catalog: Sequence[str]
+) -> dict[str, Any]:
     prompt_chars = len(
-        f"{build_instructions(options, ())}\n\nReceipt:\n{prefilter_receipt_text(text)}"
+        f"{build_instructions(options, catalog)}\n\n"
+        f"Receipt:\n{prefilter_receipt_text(text)}"
     )
     started = time.monotonic()
-    result = await extract_from_text(text, options, ())
+    result = await extract_from_text(text, options, catalog)
     seconds = round(time.monotonic() - started, 1)
     lines = result.lines
     return {
@@ -87,23 +121,42 @@ async def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs", type=int, default=2)
     parser.add_argument("--fixture", action="append", dest="fixtures")
+    parser.add_argument(
+        "--catalog",
+        type=int,
+        default=0,
+        metavar="N",
+        help=f"offer the first N of {len(CATALOG)} fixed catalog names (default 0)",
+    )
     parser.add_argument("--json", action="store_true", help="print raw numbers as JSON")
     args = parser.parse_args(argv)
     fixtures = args.fixtures or [DEFAULT_FIXTURE]
     options = categories()
+    catalog = CATALOG[: max(args.catalog, 0)]
+    if catalog and not settings.EXTRACTION_OFFERS_CATALOG:
+        parser.error("--catalog needs EXTRACTION_OFFERS_CATALOG on")
+    offered = (
+        f"{len(catalog)}-name catalog ({', '.join(catalog)})"
+        if catalog
+        else "empty catalog"
+    )
 
     results: list[dict[str, Any]] = []
     if not args.json:
         print(
             f"model {settings.LLM_MODEL} at {settings.LLM_BASE_URL}, "
             f"reasoning {settings.LLM_REASONING_STRENGTH}, "
-            f"{len(options)} seeded categories, empty catalog"
+            f"{len(options)} seeded categories, {offered}"
         )
     for fixture in fixtures:
         text = Path(fixture).read_text(encoding="utf-8")
         for run in range(1, args.runs + 1):
-            row = {"fixture": Path(fixture).name, "run": run}
-            row.update(await measure(text, options))
+            row: dict[str, Any] = {
+                "fixture": Path(fixture).name,
+                "run": run,
+                "catalog": len(catalog),
+            }
+            row.update(await measure(text, options, catalog))
             results.append(row)
             if args.json:
                 continue
