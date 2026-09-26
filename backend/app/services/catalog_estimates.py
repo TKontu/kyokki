@@ -49,16 +49,19 @@ BATCH_SIZE = 25
 
 INSTRUCTIONS = """For each product, say how long it keeps unopened, and how long once opened.
 
-These are generic kitchen staples, not specific brands. Answer for the ordinary version
-a home cook would buy in Finland, stored the usual way for its kind.
+These are generic kitchen staples, not specific brands. Answer for the usual version sold
+in a Finnish supermarket, stored in its usual place (fridge, fruit bowl, cupboard).
+Count every number from the day of purchase: how many days a home cook can still
+use it after bringing it home, not a best-before worst case.
 
-- d = days it keeps unopened, from the day it was bought. A whole number.
+- d = days it keeps unopened, counted from the day of purchase. A whole number.
 - o = days it keeps once opened, or null when opening does not apply (an apple, an onion).
   o is always smaller than d.
 
-Examples: minced beef -> d 2; fresh chicken -> d 3; sliced ham -> d 10, o 5;
-salami -> d 30, o 14; hard cheese -> d 60, o 21; milk -> d 7, o 5; rye crispbread ->
-d 720, o 60; dried pasta -> d 720; onion -> d 30; banana -> d 7.
+Examples: packed minced beef -> d 5; meat from the butcher's counter -> d 3;
+fresh fish -> d 3; banana -> d 5; tomato -> d 14; orange -> d 21; sliced ham -> d 10,
+o 5; salami -> d 30, o 14; hard cheese -> d 60, o 21; milk -> d 7, o 5;
+rye crispbread -> d 720, o 60; dried pasta -> d 720; onion -> d 30.
 
 Answer with JSON only: {"r": [{"id": "<the id given>", "d": <days>, "o": <days or null>}]}
 

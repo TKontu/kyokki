@@ -2,8 +2,9 @@
  * Staleness tiers (V1, operator ask 2026-09-24).
  *
  * The fridge view shows no numbers: a tile's colour says how soon to eat it. Red is going
- * stale (past its date, or a day left), orange a couple of days, green about a week, blue
- * longer, grey used up. Every tier also has a word, for screen readers and for anyone who
+ * stale (past its date, or two days or fewer left), orange three or four days, green five to
+ * seven, blue eight or more, grey used up. A tile is red only in its last two days (operator
+ * ruling 2026-09-26, Q19): counting a day earlier made most of a fresh shop red by day two. Every tier also has a word, for screen readers and for anyone who
  * cannot tell red from green - colour is never the only signal.
  */
 
@@ -52,8 +53,8 @@ export const STALENESS: Record<Staleness, StalenessStyle> = {
 export function stalenessOf(item: Pick<InventoryItem, 'expiry_date' | 'status'>): Staleness {
   if (item.status === 'empty') return 'consumed'
   const days = calculateDaysUntilExpiry(item.expiry_date)
-  if (days <= 1) return 'stale'
-  if (days <= 3) return 'soon'
+  if (days <= 2) return 'stale'
+  if (days <= 4) return 'soon'
   if (days <= 7) return 'week'
   return 'later'
 }

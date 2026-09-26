@@ -18,8 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.seed_categories import SEED_CATEGORIES
 from app.services.catalog_estimates import (
+    INSTRUCTIONS,
     Estimate,
     EstimateRequest,
+    band_for,
     build_prompt,
     parse_estimates,
     refresh_catalog_shelf_lives,
@@ -67,6 +69,63 @@ class TestBuildPrompt:
         prompt = build_prompt([MINCE])
 
         assert "5" not in prompt.split("Products:")[1]
+
+
+class TestTheKitchenAnchors:
+    """Q19: the examples the model calibrates against are the operator's own numbers.
+
+    The old examples (mince 2, banana 7) taught the model a fridge nobody has: most of a
+    fresh shop went red two days after it was bought.
+    """
+
+    @pytest.mark.parametrize(
+        "example",
+        [
+            "packed minced beef -> d 5",
+            "meat from the butcher's counter -> d 3",
+            "fresh fish -> d 3",
+            "banana -> d 5",
+            "tomato -> d 14",
+            "orange -> d 21",
+            "sliced ham -> d 10, o 5",
+            "salami -> d 30, o 14",
+            "hard cheese -> d 60, o 21",
+            "milk -> d 7, o 5",
+            "rye crispbread -> d 720, o 60",
+            "dried pasta -> d 720",
+            "onion -> d 30",
+        ],
+    )
+    def test_every_anchor_is_in_the_prompt(self, example: str) -> None:
+        assert example in " ".join(INSTRUCTIONS.split())
+
+    def test_the_old_short_numbers_are_gone(self) -> None:
+        flat = " ".join(INSTRUCTIONS.split())
+
+        assert "minced beef -> d 2;" not in flat
+        assert "banana -> d 7" not in flat
+
+    def test_it_counts_from_the_day_of_purchase_for_a_finnish_supermarket(self) -> None:
+        flat = " ".join(INSTRUCTIONS.split())
+
+        assert "from the day of purchase" in flat
+        assert "Finnish supermarket" in flat
+
+    @pytest.mark.parametrize(
+        "category, days",
+        [
+            ("meat", 5),
+            ("meat", 3),
+            ("fish", 3),
+            ("fruits", 5),
+            ("produce", 14),
+            ("fruits", 21),
+        ],
+    )
+    def test_every_anchor_is_inside_its_band(self, category: str, days: int) -> None:
+        low, high = band_for(category)
+
+        assert low <= days <= high
 
 
 class TestParseEstimates:

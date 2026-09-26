@@ -1,7 +1,8 @@
 /**
  * Staleness tiers (V1, operator ask 2026-09-24): the colour a tile wears instead of a number.
  *
- * Red is going stale, orange a couple of days, green about a week, blue longer, grey used up.
+ * Red is the last two days (or past), orange three or four, green five to seven, blue longer,
+ * grey used up.
  */
 
 import { STALENESS, stalenessOf } from '../staleness'
@@ -28,9 +29,11 @@ describe('stalenessOf', () => {
     [-1, 'stale'],
     [0, 'stale'],
     [1, 'stale'],
-    [2, 'soon'],
+    // Red only in the last two days (operator ruling 2026-09-26, Q19)
+    [2, 'stale'],
     [3, 'soon'],
-    [4, 'week'],
+    [4, 'soon'],
+    [5, 'week'],
     [7, 'week'],
     [8, 'later'],
     [400, 'later'],

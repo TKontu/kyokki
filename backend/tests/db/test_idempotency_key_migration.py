@@ -39,8 +39,12 @@ class TestTheRevision:
     def test_it_follows_the_placeholder_shelf_lives(self) -> None:
         assert _load_migration().down_revision == "e8b4f1c62a90"
 
-    def test_it_is_the_only_head(self) -> None:
-        assert _script().get_heads() == [_load_migration().revision]
+    def test_history_stays_one_line_through_it(self) -> None:
+        # Was "the only head" until Q19's 9c91d21d50ed followed it; that test owns the head now.
+        script = _script()
+        (head,) = script.get_heads()
+        ancestors = {rev.revision for rev in script.walk_revisions("base", head)}
+        assert _load_migration().revision in ancestors
 
 
 def _run(sync_conn, step: str) -> None:
