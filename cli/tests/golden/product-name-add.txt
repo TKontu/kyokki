@@ -1,0 +1,42 @@
+usage: kyokki product name add [-h] [--idempotency-key KEY] [--url URL]
+                               [--token TOKEN] [--json] [--verbose]
+                               PRODUCT_ID NAME
+
+Teach a product another name, as the cook's word. Afterwards stock
+consume and product resolve find the product by it. Exit 6 when the
+name already belongs to another product.
+
+positional arguments:
+  PRODUCT_ID            the product's id (a UUID), from product resolve or
+                        stock list --json
+  NAME                  the new name
+
+options:
+  -h, --help            show this help message and exit
+  --idempotency-key KEY
+                        retry key (at most 255 characters); default: SHA-256
+                        of this command line and the UTC minute, so a retry
+                        within the minute is safe
+
+connection and output:
+  --url URL             Kyokki base URL, e.g. http://kyokki.lan:8000 (default:
+                        $KYOKKI_URL)
+  --token TOKEN         API token, sent as a Bearer header and never printed
+                        (default: $KYOKKI_TOKEN)
+  --json                print the API's JSON (the default when stdout is not a
+                        terminal)
+  --verbose             log each request and its status to stderr
+
+examples:
+  kyokki product name add 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 maito
+  kyokki product name add 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 'oat milk'
+
+exit codes:
+  0 ok
+  1 error: unreachable, server error (5xx) or an unexpected answer
+  2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
+  3 not found
+  4 ambiguous name: the candidates are printed on stdout
+  5 insufficient stock
+  6 conflict: the name belongs to another product, or a reused Idempotency-Key
+  7 auth: missing or unknown token (401), or a read token on a write (403)

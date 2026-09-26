@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kyokki-cli"
+version = "0.1.0"
+description = "Command-line client for the Kyokki kitchen inventory API"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+# Tests mock HTTP with httpx.MockTransport, so no respx.
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+
+[project.scripts]
+kyokki = "kyokki.cli:main"
+
+[tool.setuptools]
+packages = ["kyokki"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["kyokki"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true

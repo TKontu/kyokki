@@ -1,0 +1,36 @@
+usage: kyokki product resolve [-h] [--url URL] [--token TOKEN] [--json]
+                              [--verbose]
+                              NAME
+
+Resolve a name: the product it names exactly (canonical or learned),
+else the closest candidates with a 0-1 score, and the normalised name
+to create when nothing matched. Never an error for no match.
+
+positional arguments:
+  NAME           the name to resolve
+
+options:
+  -h, --help     show this help message and exit
+
+connection and output:
+  --url URL      Kyokki base URL, e.g. http://kyokki.lan:8000 (default:
+                 $KYOKKI_URL)
+  --token TOKEN  API token, sent as a Bearer header and never printed
+                 (default: $KYOKKI_TOKEN)
+  --json         print the API's JSON (the default when stdout is not a
+                 terminal)
+  --verbose      log each request and its status to stderr
+
+examples:
+  kyokki product resolve milk
+  kyokki product resolve 'kevytmaito 1l' --json
+
+exit codes:
+  0 ok
+  1 error: unreachable, server error (5xx) or an unexpected answer
+  2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
+  3 not found
+  4 ambiguous name: the candidates are printed on stdout
+  5 insufficient stock
+  6 conflict: the name belongs to another product, or a reused Idempotency-Key
+  7 auth: missing or unknown token (401), or a read token on a write (403)
