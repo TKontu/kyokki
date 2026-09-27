@@ -65,13 +65,27 @@ def _completion(content: str) -> dict:
     return {"choices": [{"message": {"role": "assistant", "content": content}}]}
 
 
+# A key to leave out of the answer, as an older model answer did
+_ABSENT = object()
+
+
 def _compact(**overrides) -> str:
+    """A text answer in the production shape (Q27): lines cited, priced, `x`, `t`, `te`.
+
+    PR #131 F21. Pass ``key=_ABSENT`` to leave a key out.
+    """
     body = {
         "s": "S-KAUPAT",
         "d": "2026-01-02",
+        "lc": "fi",
+        "cc": "FI",
+        "t": 2.46,
+        "te": False,
         "p": [
             {
                 "n": "KEVYTMAITOJUOMA LAKTON",
+                "l": [3],
+                "p": 1.29,
                 "g": "Lactose-free milk",
                 "q": 1,
                 "w": None,
@@ -82,6 +96,8 @@ def _compact(**overrides) -> str:
             },
             {
                 "n": "PUNASIPULI",
+                "l": [4, 5],
+                "p": 1.17,
                 "g": "Red onion",
                 "q": 1,
                 "w": 0.33,
@@ -91,8 +107,13 @@ def _compact(**overrides) -> str:
                 "os": None,
             },
         ],
+        "x": [
+            {"l": 1, "k": "header", "a": None},
+            {"l": 6, "k": "total", "a": 2.46},
+        ],
     }
     body.update(overrides)
+    body = {k: v for k, v in body.items() if v is not _ABSENT}
     return json.dumps(body, ensure_ascii=False)
 
 
@@ -195,7 +216,8 @@ class TestResponseSchema:
         assert item["properties"]["pw"] == {"type": ["number", "null"]}
         assert item["properties"]["sl"] == {"type": ["integer", "null"]}
         assert item["properties"]["os"] == {"type": ["integer", "null"]}
-        assert schema["required"] == ["s", "d", "lc", "cc", "t", "p", "x"]
+        # te (Q27 verdict #18): whether the tax is added on top of the line totals
+        assert schema["required"] == ["s", "d", "lc", "cc", "t", "te", "p", "x"]
         other = schema["properties"]["x"]["items"]
         assert other["required"] == ["l", "k", "a"]
         assert other["properties"]["k"]["enum"] == [
@@ -227,6 +249,8 @@ class TestParseCompletion:
                 category="dairy",
                 shelf_life_days=10,
                 opened_shelf_life_days=5,
+                source_lines=[3],
+                price=1.29,
             ),
             ExtractedLine(
                 name="PUNASIPULI",
@@ -236,8 +260,15 @@ class TestParseCompletion:
                 piece_grams=110,
                 shelf_life_days=30,
                 category="produce",
+                source_lines=[4, 5],
+                price=1.17,
             ),
         ]
+        assert [(o.line, o.kind, o.amount) for o in result.other_lines] == [
+            (1, "header", None),
+            (6, "total", 2.46),
+        ]
+        assert (result.receipt_total, result.tax_exclusive) == (2.46, False)
 
     @pytest.mark.parametrize(
         ("raw", "expected"),
@@ -644,7 +675,8 @@ class TestNonFood:
 
 
 class TestCatalogIsANamingAidOnly:
-    """Q27: with a warm catalog the model returned only the six listed products."""
+    """Q27: a warm-catalog read returned only the six listed products; the old catalog
+    wording is the prime suspect for that loss, not a proven cause."""
 
     def test_the_block_asks_for_every_line_listed_or_not(self):
         text = build_instructions(CATEGORIES, ["Potato", "Hummus"])
@@ -735,7 +767,10 @@ class TestAccountingFields:
         assert (result.language, result.country) == ("fi", "FI")
 
     def test_older_answers_without_the_fields_still_parse(self):
-        result = parse_completion(_compact(), CATEGORY_IDS, method="text")
+        older = json.loads(_compact(lc=_ABSENT, cc=_ABSENT, t=_ABSENT, x=_ABSENT))
+        for product in older["p"]:
+            del product["l"], product["p"]
+        result = parse_completion(json.dumps(older), CATEGORY_IDS, method="text")
 
         assert all(line.source_lines == [] for line in result.lines)
         assert result.other_lines == []
@@ -854,3 +889,255 @@ class TestExtractUnaccountedLines:
 
         with patcher, pytest.raises(LLMExtractionError):
             await extract_unaccounted_lines(self.MISSING, CATEGORIES)
+
+
+class TestFailedAnswersArePersisted:
+    """Q27 verdict #13 and #19: the answers most worth diagnosing are kept."""
+
+    async def test_a_truncated_answer_carries_its_raw_completion(self):
+        response = _completion('{"p": [{"n": "MAITO"')
+        response["choices"][0]["finish_reason"] = "length"
+        patcher, _ = _mock_client(response_json=response)
+
+        with patcher, pytest.raises(LLMExtractionError) as caught:
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        assert caught.value.raw_completion == '{"p": [{"n": "MAITO"'
+
+    async def test_an_unparseable_answer_carries_its_raw_completion(self):
+        patcher, _ = _mock_client(response_json=_completion("I cannot read this"))
+
+        with patcher, pytest.raises(LLMExtractionError) as caught:
+            await extract_unaccounted_lines([(3, "MAITO 1,20")], CATEGORIES)
+
+        assert caught.value.raw_completion == "I cannot read this"
+
+    async def test_a_non_json_http_200_body_is_an_extraction_error(self):
+        """The body itself is not JSON: `response.json()` raised past the handler and
+        failed the receipt."""
+        patcher, post = _mock_client()
+        response = post.return_value
+        response.json.side_effect = json.JSONDecodeError("Expecting value", "<", 0)
+        response.text = "<html>gateway restarting</html>"
+
+        with patcher, pytest.raises(LLMExtractionError) as caught:
+            await extract_unaccounted_lines([(3, "MAITO 1,20")], CATEGORIES)
+
+        assert caught.value.raw_completion == "<html>gateway restarting</html>"
+
+    async def test_a_failed_answer_is_capped_too(self):
+        huge = "x" * (2 * RAW_COMPLETION_LIMIT)
+        patcher, _ = _mock_client(response_json=_completion(huge))
+
+        with patcher, pytest.raises(LLMExtractionError) as caught:
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        assert len(caught.value.raw_completion.encode("utf-8")) == RAW_COMPLETION_LIMIT
+
+    def test_an_error_without_an_answer_has_none(self):
+        assert LLMExtractionError("gateway down").raw_completion is None
+
+
+class TestVisionListsPricedNonProducts:
+    """Q27 verdict #6: a photo with a deposit or discount must not show a false gap."""
+
+    def test_the_prompt_asks_for_x_on_an_image_too(self):
+        text = " ".join(build_instructions(CATEGORIES).split())
+        assert "On an image there are no line numbers" in text
+        assert "still list each priced non-product line in x with l = null" in text
+
+    def test_the_schema_allows_an_x_entry_without_a_line_number(self):
+        schema = build_response_schema(["dairy"])
+        assert schema["properties"]["x"]["items"]["properties"]["l"] == {
+            "type": ["integer", "null"]
+        }
+
+    def test_a_vision_answer_keeps_x_without_line_numbers(self):
+        content = _compact(
+            x=[
+                {"l": None, "k": "deposit", "a": 0.25},
+                {"l": None, "k": "total", "a": 3},
+            ]
+        )
+
+        result = parse_completion(content, CATEGORY_IDS, method="vision")
+
+        assert [(o.line, o.kind, o.amount) for o in result.other_lines] == [
+            (None, "deposit", 0.25),
+            (None, "total", 3.0),
+        ]
+
+    def test_a_text_answer_still_needs_the_line_number(self):
+        content = _compact(x=[{"l": None, "k": "deposit", "a": 0.25}])
+
+        result = parse_completion(content, CATEGORY_IDS, method="text")
+
+        assert result.other_lines == []
+
+
+class TestTaxExclusiveTotals:
+    """Q27 verdict #18: a US receipt adds the tax after the line totals."""
+
+    def test_the_schema_and_prompt_ask_for_te(self):
+        schema = build_response_schema(["dairy"])
+        assert schema["properties"]["te"] == {"type": "boolean"}
+        assert "te" in schema["required"]
+        text = " ".join(build_instructions(CATEGORIES).split())
+        assert "te = true when the line totals do not include the tax" in text
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [(True, True), (False, False), (None, False), ("yes", False)],
+    )
+    def test_te_maps_to_tax_exclusive(self, value, expected):
+        result = parse_completion(_compact(te=value), CATEGORY_IDS, method="text")
+        assert result.tax_exclusive is expected
+
+    def test_an_answer_without_te_is_tax_inclusive(self):
+        answer = _compact(te=_ABSENT)
+        assert parse_completion(answer, CATEGORY_IDS, "text").tax_exclusive is False
+
+
+class TestLanguageAndCountryCodes:
+    """Q27 verdict #26: "FIN" or "fi-FI" silently ran with no profile."""
+
+    @pytest.mark.parametrize(
+        ("lc", "expected"),
+        [
+            ("fi", "fi"),
+            ("FI", "fi"),
+            ("fin", "fi"),
+            ("fi-FI", "fi"),
+            ("de_DE", "de"),
+            ("hrv", "hr"),
+            ("eng", "en"),
+            ("Finnish", None),
+            ("zzz", None),
+            ("f", None),
+            # PR #131 F17: only real ISO 639-1 codes
+            ("xx", None),
+            ("qq-FI", None),
+            (None, None),
+            (7, None),
+        ],
+    )
+    def test_language(self, lc, expected):
+        result = parse_completion(_compact(lc=lc), CATEGORY_IDS, "text")
+        assert result.language == expected
+
+    @pytest.mark.parametrize(
+        ("cc", "expected"),
+        [
+            ("FI", "FI"),
+            ("fi", "FI"),
+            ("FIN", "FI"),
+            ("fi-FI", "FI"),
+            ("en_US", "US"),
+            ("USA", "US"),
+            ("DEU", "DE"),
+            ("Finland", None),
+            ("XYZ", None),
+            ("", None),
+            # PR #131 F17: only real ISO 3166-1 codes; UK is the common alias of GB
+            ("UK", "GB"),
+            ("en-UK", "GB"),
+            ("xx", None),
+            ("QQ", None),
+        ],
+    )
+    def test_country(self, cc, expected):
+        result = parse_completion(_compact(cc=cc), CATEGORY_IDS, "text")
+        assert result.country == expected
+
+
+class TestPromptTextMatchesTheContract:
+    """Q27 verdict #21: the re-read asked for "every other line" in x."""
+
+    async def test_the_re_read_lists_only_priced_non_products(self):
+        patcher, post = _mock_client()
+
+        with patcher:
+            await extract_unaccounted_lines([(3, "MAITO 1,20")], CATEGORIES)
+
+        content = post.call_args.kwargs["json"]["messages"][0]["content"]
+        prompt = " ".join(content.split())
+        assert "every other one of these lines" not in prompt
+        assert "list each of these lines that carries an amount and is not" in prompt
+
+
+def _client_class_answering(client_class: MagicMock, content: str) -> None:
+    client = client_class.return_value
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    response = MagicMock()
+    response.json.return_value = _completion(content)
+    client.post = AsyncMock(return_value=response)
+
+
+class TestEstimateTimeout:
+    """Q27 verdict #17: estimates and selection wait LLM_ESTIMATE_TIMEOUT, not 420 s."""
+
+    async def test_catalog_estimates_use_the_estimate_timeout(self, monkeypatch):
+        from app.services import catalog_estimates
+
+        monkeypatch.setattr(settings, "LLM_ESTIMATE_TIMEOUT", 123.0)
+        with patch("app.services.catalog_estimates.httpx.AsyncClient") as client_class:
+            _client_class_answering(client_class, "{}")
+            await catalog_estimates._complete(
+                [
+                    catalog_estimates.EstimateRequest(
+                        id="1", name="Milk", category="dairy"
+                    )
+                ]
+            )
+
+        assert client_class.call_args.kwargs["timeout"] == 123.0
+
+    async def test_product_selection_uses_the_estimate_timeout(self, monkeypatch):
+        from app.services import product_selection
+
+        monkeypatch.setattr(settings, "LLM_ESTIMATE_TIMEOUT", 123.0)
+        line = product_selection.SelectionLine(
+            line_id="a",
+            printed="MAITO",
+            generic="Milk",
+            category="dairy",
+            candidate_ids=("00000000-0000-0000-0000-000000000001",),
+            candidate_names=("Milk",),
+        )
+        with patch("app.services.product_selection.httpx.AsyncClient") as client_class:
+            _client_class_answering(client_class, '{"r": []}')
+            await product_selection.select_products([line])
+
+        assert client_class.call_args.kwargs["timeout"] == 123.0
+
+    async def test_the_receipt_read_keeps_llm_timeout(self, monkeypatch):
+        monkeypatch.setattr(settings, "LLM_ESTIMATE_TIMEOUT", 123.0)
+        with patch("app.services.llm_extractor.httpx.AsyncClient") as client_class:
+            _client_class_answering(client_class, _compact())
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        assert client_class.call_args.kwargs["timeout"] == settings.LLM_TIMEOUT
+
+
+class TestConfigurationErrors:
+    """PR #131 F16: a non-ASCII API key failed the request before any response, and the
+    error handler read the unbound response: an UnboundLocalError, not a clear message."""
+
+    async def test_a_non_ascii_api_key_is_a_clear_configuration_error(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "LLM_API_KEY", "avain-öö")
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}))
+        real_client = httpx.AsyncClient
+
+        def client(*_args, **kwargs):
+            return real_client(transport=transport, timeout=kwargs.get("timeout"))
+
+        with (
+            patch("app.services.llm_extractor.httpx.AsyncClient", side_effect=client),
+            pytest.raises(LLMExtractionError, match="LLM_API_KEY") as caught,
+        ):
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        assert caught.value.raw_completion is None

@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from app.parsers.heuristic import parse_receipt_blocks, parse_receipt_text
+from app.parsers.profiles import FinnishProfile
+from app.services.llm_extractor import number_receipt_lines
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "receipts"
 
@@ -158,18 +160,34 @@ class TestKCitymarketSello:
     def result(self):
         return parse_receipt_text(_read("k_citymarket_sello.txt"))
 
-    def test_reads_exactly_the_fifteen_products(self, result, expected):
+    @pytest.fixture
+    def profile_lines(self):
+        numbered = number_receipt_lines(_read("k_citymarket_sello.txt"))
+        return FinnishProfile().product_lines(numbered)
+
+    def test_the_profile_reads_exactly_the_fifteen_products(
+        self, profile_lines, expected
+    ):
+        assert [
+            (line.name, line.quantity, line.weight_kg) for line in profile_lines
+        ] == [
+            (line["name"], line["quantity"], line["weight_kg"])
+            for line in expected["lines"]
+        ]
+
+    def test_the_profile_does_not_read_the_footer_after_the_total(self, profile_lines):
+        joined = " ".join(line.name for line in profile_lines)
+        for word in ("PLUSSAA", "Käyttötavaraostokset", "Ruokaostokset", "Credit"):
+            assert word not in joined
+
+    def test_the_fallback_reads_exactly_the_fifteen_products(self, result, expected):
+        """PR #131 F8: the fallback stops at the total, so the footer adds no rows."""
         assert [
             (line.name, line.quantity, line.weight_kg) for line in result.lines
         ] == [
             (line["name"], line["quantity"], line["weight_kg"])
             for line in expected["lines"]
         ]
-
-    def test_the_footer_after_the_total_is_not_read_as_products(self, result):
-        joined = " ".join(line.name for line in result.lines)
-        for word in ("PLUSSAA", "Käyttötavaraostokset", "Ruokaostokset", "Credit"):
-            assert word not in joined
 
     def test_date(self, result):
         assert result.purchase_date == date(2026, 9, 26)
@@ -191,7 +209,29 @@ class TestGlossaryReceipt:
         ]
 
 
-class TestStopsAtTheTotal:
+def _profile_names(text: str) -> list[tuple[str, float, float | None]]:
+    lines = FinnishProfile().product_lines(number_receipt_lines(text))
+    return [(line.name, line.quantity, line.weight_kg) for line in lines]
+
+
+class TestTheProfileStopsAtTheTotal:
+    """The stop-at-total rule belongs to the `fi` profile only (Q27 verdict #12)."""
+
+    @pytest.mark.parametrize("total", ["YHTEENSÄ 5,20", "Yhteensa 5,20", "SUMMA 5,20"])
+    def test_lines_after_the_first_total_are_not_products(self, total):
+        text = f"MAITO 1,20\nLEIPÄ 4,00\n{total}\nPLUSSAA KERRYTTÄVÄT OSTOT 5,20"
+        assert [name for name, _, _ in _profile_names(text)] == ["MAITO", "LEIPÄ"]
+
+    def test_a_name_merely_containing_summa_is_still_a_product(self):
+        text = "VÄLISUMMA 1,20\nSUMMAKALA 3,00\nMAITO 1,20"
+        assert [name for name, _, _ in _profile_names(text)] == ["SUMMAKALA", "MAITO"]
+
+
+class TestTheFallbackIsTheFinnishHeuristic:
+    """PR #131 F8: the last resort runs only when the model fails, and it is the Finnish
+    heuristic, so it keeps its own stop-at-total and skipped-line rules. A mid-receipt
+    SUMMA is an accepted limit of that last resort."""
+
     @pytest.mark.parametrize("total", ["YHTEENSÄ 5,20", "Yhteensa 5,20", "SUMMA 5,20"])
     def test_lines_after_the_first_total_are_not_products(self, total):
         text = f"MAITO 1,20\nLEIPÄ 4,00\n{total}\nPLUSSAA KERRYTTÄVÄT OSTOT 5,20"
@@ -200,17 +240,7 @@ class TestStopsAtTheTotal:
             "LEIPÄ",
         ]
 
-    def test_a_name_merely_containing_summa_is_still_a_product(self):
-        text = "VÄLISUMMA 1,20\nSUMMAKALA 3,00\nMAITO 1,20"
-        assert [line.name for line in parse_receipt_text(text).lines] == [
-            "SUMMAKALA",
-            "MAITO",
-        ]
-
-
-class TestDetailLinesAfterASkippedLine:
     def test_a_deposits_quantity_does_not_land_on_the_product_above(self):
-        """The deposit's own `2 KPL` used to give the beer a quantity of 2."""
         text = (
             "Pilsner Urquell 0,5l tlk 3,04\n"
             "Tolkkipantti 0,30\n"
@@ -223,11 +253,27 @@ class TestDetailLinesAfterASkippedLine:
             for line in parse_receipt_text(text).lines
         ] == [("Pilsner Urquell 0,5l tlk", 1, None), ("Banaani", 1, 0.412)]
 
+
+class TestDetailLinesAfterASkippedLine:
+    """The skipped-line rule belongs to the `fi` profile only (Q27 verdict #12)."""
+
+    def test_a_deposits_quantity_does_not_land_on_the_product_above(self):
+        """The deposit's own `2 KPL` used to give the beer a quantity of 2."""
+        text = (
+            "Pilsner Urquell 0,5l tlk 3,04\n"
+            "Tolkkipantti 0,30\n"
+            "2 KPL 0,15 €/KPL\n"
+            "Banaani 0,89\n"
+            "0,412 KG 2,15 €/KG"
+        )
+        assert _profile_names(text) == [
+            ("Pilsner Urquell 0,5l tlk", 1, None),
+            ("Banaani", 1, 0.412),
+        ]
+
     def test_a_weight_after_a_skipped_line_is_ignored_too(self):
         text = "OMENA 2,10\nPANTTI 0,10\n0,500 KG 4,20 €/KG"
-        assert [
-            (line.name, line.weight_kg) for line in parse_receipt_text(text).lines
-        ] == [("OMENA", None)]
+        assert _profile_names(text) == [("OMENA", 1, None)]
 
 
 class TestBlocksCiteTheirLines:

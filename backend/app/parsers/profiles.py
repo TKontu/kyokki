@@ -3,13 +3,16 @@
 Receipts from any shop, country and language go through the same format-agnostic core: the
 model numbers and accounts for every line. A profile is extra evidence for a country or
 language whose receipt grammar we know. When one is registered for what the model detected,
-reconciliation runs it on the same numbered lines, and any product line it finds that no
-model product cites is sent to the one targeted retry. A profile never decides alone and
-never replaces the core; the core imports profiles only through `profile_for`.
+reconciliation runs it on the same numbered lines, and a product line it finds that the model
+neither cited in a product nor listed in `x` is sent to the one targeted retry. A line the
+model accounted for is the model's call: a profile never overrides a model read, never
+decides alone and never replaces the core; the core imports profiles only through
+`profile_for`.
 
 A numbered text is every line of the receipt with the number it was given in the model's
-prompt, or None for a line the prompt left out, so a profile can still see (for example) a
-total line the prompt dropped, while only ever citing numbered lines.
+prompt. The prompt numbers every non-blank line, so the None a line may carry (a line a
+caller left out) is only there for callers such as the heuristic fallback, and a profile only
+ever cites numbered lines.
 """
 
 from collections.abc import Sequence

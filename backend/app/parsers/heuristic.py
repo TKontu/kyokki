@@ -7,15 +7,16 @@ review. It reads the grammar shared by Finnish receipts (ARCHITECTURE.md appendi
     3 KPL 1,88 €/KPL  |  2 x 2,89 EUR    quantity of the product above
     0,386 KG 3,89 €/KG | 0,436 kg x ...  weight of the product above
 
-Discounts (negative prices), totals, fees, deposits and payment lines are skipped, and reading
-stops at the first total: what follows it is loyalty, payment and VAT (Q27). A quantity or
-weight line belongs only to a product directly above it, so the `1 KPL` under a skipped deposit
-line stays with the deposit. Names stay as printed; there are no generic names or categories
-without the model.
+Discounts (negative prices), totals, fees, deposits and payment lines are skipped. Names stay
+as printed; there are no generic names or categories without the model.
 
 These are Finnish receipt formats. Besides the last-resort fallback, the parser is used only
 as the `fi` receipt profile (`app.parsers.profiles`), which adds evidence to the
-format-agnostic completeness check and never decides alone (Q27).
+format-agnostic completeness check and never decides alone (Q27). Reading stops at the
+first total, since what follows it is loyalty, payment and VAT; and a quantity or weight line
+belongs only to a product directly above it, so the `1 KPL` under a skipped deposit line stays
+with the deposit. Both rules hold for the fallback too: it runs only when the model has failed,
+and a mid-receipt SUMMA ending it early is an accepted limit of that last resort (PR #131 F8).
 """
 
 import re

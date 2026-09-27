@@ -123,8 +123,31 @@ Two honest limits:
 > `processing_started_at` and `error` to receipts, and the new `kyokki-worker` service reads the
 > queue; `up -d --build` starts it. Receipts uploaded before this release keep status `uploaded`;
 > queue one with `curl -X POST http://localhost:17300/api/receipts/<id>/process`. A receipt
-> left `processing` for more than `RECEIPT_STALE_MINUTES` (default 10), for example after the
+> left `processing` for longer than the stale window (`RECEIPT_STALE_MINUTES`; see the Q27 note
+> below for its default), for example after the
 > worker was restarted mid-read, is shown as `failed` and can be queued again the same way.
+
+> **Receipt line accounting (Q27, 2026-09): check `LLM_TIMEOUT` and `RECEIPT_STALE_MINUTES`.**
+> A receipt read now accounts for every priced line and may make one targeted re-read, so a
+> long receipt needs more model time. The compose file defaults `LLM_TIMEOUT` to 420 s, but a
+> Portainer stack created from an older `stack.env.example` sets `LLM_TIMEOUT=180` explicitly,
+> and an explicit value wins over the default: long receipts then still time out. In the
+> stack's environment:
+>
+> - set `LLM_TIMEOUT=420`;
+> - clear `RECEIPT_STALE_MINUTES` (leave it empty) or delete it. Empty, the stale window
+>   follows the per-receipt budget: OCR (`MINERU_TIMEOUT`) plus the larger of
+>   `3 x LLM_TIMEOUT` and `2 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT`, rounded up to minutes,
+>   plus 5 (28 minutes with the defaults). A first read and a re-read may each take
+>   `LLM_TIMEOUT` and the product selection `LLM_ESTIMATE_TIMEOUT`; the old window of 10
+>   minutes failed a slow but healthy receipt. A value below the budget is raised to it, and
+>   a receipt that was failed as stale or claimed again is no longer overwritten when its
+>   first read finishes late;
+> - optionally set `LLM_ESTIMATE_TIMEOUT` (default 180 s), which now limits the catalog
+>   estimate and product selection calls instead of `LLM_TIMEOUT`, so "Re-estimate all" does
+>   not wait 7 minutes a batch.
+>
+> Then **Pull and redeploy**. No migration is involved.
 
 > **Unit migration (MVP-U1, revision `a4f8c2d91e37`):** `alembic upgrade head` converts stored
 > quantities to `dl | tsp | tbsp | g | pcs` (e.g. 1000 ml becomes 10 dl). It prints a warning for

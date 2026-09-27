@@ -14,7 +14,7 @@ async def _serve() -> None:
         "Receipt worker started",
         extra={
             "poll_seconds": settings.RECEIPT_WORKER_POLL_SECONDS,
-            "stale_minutes": settings.RECEIPT_STALE_MINUTES,
+            "stale_minutes": settings.receipt_stale_minutes,
         },
     )
     await receipt_worker.run(AsyncSessionLocal, settings.RECEIPT_WORKER_POLL_SECONDS)

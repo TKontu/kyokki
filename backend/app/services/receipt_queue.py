@@ -29,7 +29,7 @@ def _now(now: datetime | None) -> datetime:
 
 def stale_error() -> str:
     return (
-        f"Processing did not finish within {settings.RECEIPT_STALE_MINUTES} minutes "
+        f"Processing did not finish within {settings.receipt_stale_minutes} minutes "
         "(worker restarted or stuck)"
     )
 
@@ -140,7 +140,7 @@ async def claim_next(
 
 async def fail_stale(db: AsyncSession, *, now: datetime | None = None) -> int:
     """Fail receipts that have been ``processing`` longer than the stale limit."""
-    cutoff = _now(now) - timedelta(minutes=settings.RECEIPT_STALE_MINUTES)
+    cutoff = _now(now) - timedelta(minutes=settings.receipt_stale_minutes)
     stale_ids = list(
         (
             await db.execute(

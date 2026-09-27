@@ -7,9 +7,12 @@ receipt, and ``chat_template_kwargs.reasoning_strength`` for reasoning models su
 
 Receipts come from any shop, country and language, so the rules are general and the Finnish
 strings in them are labelled examples (Q27). On the text path the receipt lines are numbered
-and the model accounts for every one: a product cites its lines in ``l``, every other line is
-listed in ``x`` with its kind. Reconciliation (``receipt_processing``) uses that to find the
-lines the model left out, without knowing anything about the receipt's format.
+and the model accounts for every line that carries an amount: a product cites its lines in
+``l``, and a priced line that is not a product is listed in ``x`` with its kind and amount.
+Lines without an amount need not be listed. Reconciliation (``receipt_processing``) uses that
+to find the priced lines the model left out, without knowing anything about the receipt's
+format. On an image there are no line numbers, but ``x`` still carries the kinds and amounts
+the receipt's arithmetic needs.
 """
 
 import base64
@@ -33,12 +36,22 @@ from app.parsers.base import (
     OtherLine,
     ReceiptExtraction,
 )
+from app.parsers.locale_codes import country_code, language_code
 
 logger = get_logger(__name__)
 
 
 class LLMExtractionError(Exception):
-    """The LLM call failed or returned output that does not match the contract."""
+    """The LLM call failed or returned output that does not match the contract.
+
+    ``raw_completion`` is the answer that could not be used (a truncated or unparseable
+    completion, or a body that is not JSON), capped, so the caller can persist it for
+    diagnosis; None when there was no answer at all (Q27).
+    """
+
+    def __init__(self, message: str, raw_completion: str | None = None) -> None:
+        super().__init__(message)
+        self.raw_completion = raw_completion
 
 
 @dataclass(frozen=True)
@@ -49,7 +62,7 @@ class CategoryOption:
     name: str
 
 
-# Lines that are never products: separators, totals, payment, VAT table, discounts, fees.
+# A price the model left at the end of a product name
 _TRAILING_PRICE = re.compile(r"\s+-?\d+[,.]\d{2}(\s*€)?$")
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL)
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
@@ -64,10 +77,12 @@ RAW_COMPLETION_LIMIT = 64 * 1024
 # a category would be a legal pick on the review screen and would put towels into stock (Q1).
 NON_FOOD = "household"
 
-# The catalog is a naming aid only. Worded "When an equivalent product is listed here, use
-# its name exactly", a warm catalog read as the list of what to extract: the model returned
-# the 6 listed products of a 15-line receipt and dropped the rest (Q27). H17 measured the
-# block's category benefit, so it stays, reworded; scripts/measure_extraction.py compares.
+# The catalog is a naming aid only. With the block worded "When an equivalent product is
+# listed here, use its name exactly", a warm-catalog read of a 15-line receipt returned 6
+# products (Q27). The block is the prime suspect for that loss, not a proven cause: no later
+# run reproduced 6 of 15, and the line accounting is what makes a loss visible and recovers
+# it. H17 measured the block's category benefit, so it stays, reworded so it cannot read as
+# the list of what to extract; scripts/measure_extraction.py compares.
 CATALOG_BLOCK = (
     "\n- Extract every product line on the receipt, whether or not it is in this list."
     " The list only tells you which name to use for an equivalent product: when one is"
@@ -78,9 +93,9 @@ _INSTRUCTIONS = """Extract every purchased product from this receipt. It may com
 
 Rules:
 - The receipt lines are numbered ("12: ..."). Every line that carries an amount (a number
-  with decimals, such as a price) is either part of a product in p or listed in x; lines
-  without any amount need not be listed. On an image there are no numbers: answer l = []
-  and x = [].
+  such as a price) is either part of a product in p or listed in x; lines without any amount
+  need not be listed. On an image there are no line numbers: answer l = [] for every
+  product, and still list each priced non-product line in x with l = null.
 - One entry per product. n = the product name exactly as written, without the price.
 - l = the numbers of all the lines the product was read from: its name line, or both lines
   when a long name wraps, and any line that gives its count, weight or unit price, whether
@@ -124,17 +139,19 @@ Rules:
   (negative for a discount), or null. Examples: UKUPNO, SUMME and TOTAL are totals; PDV and MwSt are tax; POPUST and
   Rabatt are discounts; Pfand is a deposit.
 - t = the receipt's grand total as a number, or null if none is printed.
+- te = true when the line totals do not include the tax and the tax is added on top of
+  them before the total (as on many US receipts); otherwise false.
 - Examples of Finnish words often misread: TUMMA RYPÄLE -> "Grape" (RUSINA is "Raisin");
   TIKKUPERUNAT -> "French fries"; TÄYSMEHU OMENA -> "Apple juice" (MEHU is juice);
   RIISIPIIRAKKA -> "Karelian pasty"; MONIVITAMIINI APPELSIINI -> "Multivitamin juice", but
   MONIVITAMIINI with no flavour is a vitamin supplement, household; VALMISRUOKA, ATERIA ->
   c = ready_meals.
 
-Return only compact JSON: {{"s": chain, "d": date, "lc": language, "cc": country, "t": total, "p": [{{"n": name, "l": [line numbers], "p": line total or null, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null, "pw": grams per piece or null, "sl": shelf life days or null, "os": opened shelf life days or null}}], "x": [{{"l": line number, "k": kind, "a": amount or null}}]}}."""
+Return only compact JSON: {{"s": chain, "d": date, "lc": language, "cc": country, "t": total, "te": tax added on top, "p": [{{"n": name, "l": [line numbers], "p": line total or null, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null, "pw": grams per piece or null, "sl": shelf life days or null, "os": opened shelf life days or null}}], "x": [{{"l": line number, "k": kind, "a": amount or null}}]}}."""
 
 _RETRY = """These numbered receipt lines were not accounted for in a first reading. Extract any
-products among them with the same rules, citing the same line numbers in l, and list every
-other one of these lines in x."""
+products among them with the same rules, citing the same line numbers in l, and list each of
+these lines that carries an amount and is not a product in x."""
 
 
 def number_receipt_lines(text: str) -> list[tuple[int | None, str]]:
@@ -234,13 +251,6 @@ def _line_numbers(value: Any) -> list[int]:
     return sorted({number for number in numbers if number is not None})
 
 
-def _code(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    tidy = value.strip()
-    return tidy if tidy.isalpha() and len(tidy) == 2 else None
-
-
 def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
     """Strict JSON schema for the compact contract; ``c`` may only be a known id or null."""
     return {
@@ -251,6 +261,8 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
             "lc": {"type": ["string", "null"]},
             "cc": {"type": ["string", "null"]},
             "t": {"type": ["number", "null"]},
+            # the line totals leave the tax out and it is added before the total (Q27)
+            "te": {"type": "boolean"},
             "p": {
                 "type": "array",
                 "items": {
@@ -277,7 +289,8 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
                 "items": {
                     "type": "object",
                     "properties": {
-                        "l": {"type": "integer"},
+                        # null on an image, which has no line numbers
+                        "l": {"type": ["integer", "null"]},
                         "k": {"enum": list(OTHER_LINE_KINDS)},
                         "a": {"type": ["number", "null"]},
                     },
@@ -285,7 +298,7 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
                 },
             },
         },
-        "required": ["s", "d", "lc", "cc", "t", "p", "x"],
+        "required": ["s", "d", "lc", "cc", "t", "te", "p", "x"],
     }
 
 
@@ -319,8 +332,12 @@ def _parse_date(value: Any) -> date | None:
         return None
 
 
-def _other_lines(value: Any) -> list[OtherLine]:
-    """The non-product lines the model listed; an entry without a line number is useless."""
+def _other_lines(value: Any, numbered: bool = True) -> list[OtherLine]:
+    """The priced non-product lines the model listed.
+
+    On text an entry without a line number accounts for nothing and is dropped; an image has
+    no line numbers, and its entries still carry the kinds and amounts the arithmetic needs.
+    """
     if not isinstance(value, list):
         return []
     others: list[OtherLine] = []
@@ -328,7 +345,7 @@ def _other_lines(value: Any) -> list[OtherLine]:
         if not isinstance(entry, dict):
             continue
         number = _line_number(entry.get("l"))
-        if number is None:
+        if number is None and numbered:
             continue
         kind = str(entry.get("k") or "").strip().casefold()
         others.append(
@@ -410,10 +427,11 @@ def parse_completion(
         store_chain=store.strip() if isinstance(store, str) and store.strip() else None,
         purchase_date=_parse_date(data.get("d")),
         lines=lines,
-        other_lines=_other_lines(data.get("x")),
+        other_lines=_other_lines(data.get("x"), numbered=method != "vision"),
         receipt_total=_number(data.get("t")),
-        language=_code(data.get("lc")),
-        country=_code(data.get("cc")),
+        tax_exclusive=data.get("te") is True,
+        language=language_code(data.get("lc")),
+        country=country_code(data.get("cc")),
         invalid_entries=invalid,
     )
 
@@ -452,6 +470,7 @@ async def _complete(
         }
 
     started = time.monotonic()
+    response: httpx.Response | None = None
     try:
         async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as client:
             response = await client.post(
@@ -463,21 +482,42 @@ async def _complete(
             body = response.json()
     except httpx.HTTPError as exc:
         raise LLMExtractionError(f"LLM request failed: {exc!r}") from exc
+    except ValueError as exc:
+        if response is None:
+            # The request could not even be built: a header such as the API key holds a
+            # character HTTP headers cannot carry (PR #131 F16)
+            raise LLMExtractionError(
+                "LLM request could not be sent; check LLM_API_KEY for non-ASCII "
+                f"characters ({type(exc).__name__})"
+            ) from exc
+        # HTTP 200 with a body that is not JSON (a proxy page, a restarting gateway)
+        raise LLMExtractionError(
+            f"LLM response body is not JSON: {exc}",
+            raw_completion=_cap(str(response.text or "")),
+        ) from exc
 
     try:
         choice = body["choices"][0]
         message_content = choice["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as exc:
-        raise LLMExtractionError("LLM response has no message content") from exc
+        raise LLMExtractionError(
+            "LLM response has no message content",
+            raw_completion=_cap(json.dumps(body, ensure_ascii=False, default=str)),
+        ) from exc
     logger.debug("LLM raw completion", extra={"chars": len(message_content)})
+    raw = _cap(str(message_content))
     # A cut-off answer can still parse as a shorter list; that is how lines vanish (Q27)
     if isinstance(choice, dict) and choice.get("finish_reason") == "length":
         raise LLMExtractionError(
-            f"LLM response was truncated at max_tokens ({settings.LLM_MAX_TOKENS})"
+            f"LLM response was truncated at max_tokens ({settings.LLM_MAX_TOKENS})",
+            raw_completion=raw,
         )
 
-    result = parse_completion(message_content, set(category_ids), method)
-    result.raw_completion = _cap(message_content)
+    try:
+        result = parse_completion(message_content, set(category_ids), method)
+    except LLMExtractionError as exc:
+        raise LLMExtractionError(str(exc), raw_completion=raw) from exc
+    result.raw_completion = raw
     logger.info(
         "Receipt extracted",
         extra={
@@ -509,8 +549,8 @@ async def extract_unaccounted_lines(
 ) -> ReceiptExtraction:
     """One targeted read of the lines a first read did not account for (Q27).
 
-    Same rules, schema and categories, but no catalog block: the block is what a first
-    read tends to mistake for the list of products to extract.
+    Same rules, schema and categories, but no catalog block: the block is the suspect,
+    not a proven cause, for the first read's lost lines (Q27), so the re-read leaves it out.
     """
     instructions = build_instructions(categories, ())
     prompt = f"{instructions}\n\n{_RETRY}\n\nReceipt lines:\n{format_numbered(lines)}"

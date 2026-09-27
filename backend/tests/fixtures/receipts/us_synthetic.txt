@@ -1,0 +1,14 @@
+# SYNTHETIC TEST RECEIPT - invented for Kyokki tests, not a real purchase
+FRESH MART #0000
+100 Main St, Springfield, IL 62701
+09/27/2026 10:15 AM
+WHOLE MILK 1 GAL              3.49
+BANANAS
+  2.12 lb @ 0.59/lb           1.25
+BREAD WHEAT                   1.74
+SUBTOTAL                      6.48
+TAX 8%                        0.52
+TOTAL                         7.00
+VISA                          7.00
+CHANGE DUE                    0.00
+THANK YOU FOR SHOPPING

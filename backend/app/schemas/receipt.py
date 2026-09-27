@@ -160,14 +160,16 @@ class Completeness(BaseModel):
         0,
         description=(
             "Priced lines still neither a product row nor a listed non-product after "
-            "recovery; normally 0"
+            "recovery, less those the receipt's own sums rule out (see ARCHITECTURE, line "
+            "accounting); normally 0"
         ),
     )
     items_sum: float | None = Field(
         None,
         description=(
-            "Line totals plus discounts, deposits and fees; compared with the total in "
-            "whole cents, within max(5 cents, 1 %)"
+            "Line totals, raw rows included, plus discounts, deposits and fees, and the "
+            "tax when the line totals leave it out; compared with the total in whole "
+            "cents, within max(5 cents, 1 %)"
         ),
     )
     receipt_total: float | None = Field(None, description="The printed total")
