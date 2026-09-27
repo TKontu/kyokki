@@ -16,18 +16,21 @@ Entrecôte → 🥩 "cut of meat" is borderline, and borderline goes to the oper
 
 ## Answer
 
-- **About half the products in a Finnish household basket have an exact emoji.** By my own
-  ruling, 88 of the 191 names do. Another 49 are borderline and need an operator ruling (every
-  specific cheese → 🧀, every fish → 🐟, rye bread → 🍞, herbs → 🌿 and so on). The last 54
-  have nothing and go straight to the gap list: yoghurts, quark, the cream family, condiments,
-  cleaning products and Finnish specialities.
+- **After the [operator rulings](#operator-rulings-2026-09-27), 118 of the 191 names have an
+  exact emoji and 73 go on the [gap list](#gap-list).** Before the rulings, my own count was
+  88 exact, 49 borderline and 54 with nothing. The operator decided the 49 per product, by
+  whether the emoji shows the product as it is bought: 30 became exact and 19 went to the gap
+  list. The gap list is mostly yoghurts, quark and the cream family, condiments, processed
+  meat and fish, cleaning products and Finnish specialities.
 - **The model is a good proposer but not a judge.** At reasoning `low` (the app's setting) it
   answered `exact` 85 times. 78 of those are right, so **precision is 0.92**. It found 78 of my
   88 exact products, so **recall is 0.89**. No exact answer named a different food. All 7 errors
   are the same kind: a generic or related emoji for a more specific product, such as Gouda → 🧀,
   Rainbow trout → 🐟, Red wine → 🍷 "wine glass" and Canned tomatoes → 🍅. The operator's rule
   forbids exactly that, so at this rate about **one displayed emoji in twelve would be a
-  closest-match leak** if the answers were accepted unreviewed.
+  closest-match leak** if the answers were accepted unreviewed. Re-scored against the
+  operator's rulings, `low` has precision 0.98 but recall only 0.70. The model does not know
+  the per-product rulings, so it leaves most of the newly exact products as borderline.
 - **Reasoning `high` does not help.** Precision is about the same (0.93), recall is lower
   (0.86), it takes about 4.5 times longer (67–132 s a batch against 11–23 s) and it agrees with
   `low` on only 158 of 191 products. It trades some leaks for others: it gets Gouda and trout
@@ -105,6 +108,9 @@ Entrecôte → 🥩 "cut of meat" is borderline, and borderline goes to the oper
 
 ## Precision and recall
 
+This is scored against my own ruling, made before the operator ruled. The re-score against the
+ruled set is under [Operator rulings](#operator-rulings-2026-09-27).
+
 | | Run 1 (`low`) | Run 2 (`high`) |
 | --- | --- | --- |
 | `exact` answers | 85 | 82 |
@@ -144,7 +150,9 @@ Entrecôte → 🥩 "cut of meat" is borderline, and borderline goes to the oper
 ## Full results
 
 Grouped by the run 1 (`low`) answer. *High* is run 2's answer for the same product. *My
-ruling* is the precision check. *Why* is the model's own reason, from run 1.
+ruling* is the precision check made before the operator ruled; the 49 rows marked "borderline"
+there are settled under [Operator rulings](#operator-rulings-2026-09-27). *Why* is the model's
+own reason, from run 1.
 
 ### Model said exact (85)
 
@@ -353,18 +361,68 @@ ruling* is the precision check. *Why* is the model's own reason, from run 1.
 | Pickles | condiments | none | none | none | no pickle emoji |
 
 
+## Operator rulings (2026-09-27)
+
+**The principle, in the operator's words:** "It needs to be precise, so it doesn't require
+cognitive effort." Matches are decided **per product, not per family**. An emoji counts only if
+it depicts the product **as it looks when bought**.
+
+The operator ruled on all 49 borderline products. **30 became exact and 19 went to the gap
+list.** Across the 191 names that makes **118 exact and 73 on the gap list**, with nothing left
+unruled.
+
+| Ruling | Exact (yes) | Gap list (no) |
+| --- | --- | --- |
+| 🧀 for a named cheese that is whole or sliced | Cheddar, Gouda, Emmental, Keisarinna cheese, Feta | Mozzarella, Blue cheese, Cottage cheese (pre-grated cheese is no as well) |
+| 🥩 for a whole, steak-like cut | Entrecôte, Pork chops ¹ | Minced beef, Reindeer sauté ¹ (fillet slices and strips are no) |
+| 🐟 for a named fish sold as fish, whole or fillet | Salmon, Rainbow trout, Baltic herring | Fish fingers, Canned tuna, Pickled herring ² |
+| 🥬 / 🌿 for a named green or herb | Lettuce 🥬, Cabbage 🥬, Spinach 🥬, Parsley 🌿, Dill 🌿 | none |
+| 🍞 for other breads, 🫓 for pita and tortilla | Rye bread 🍞, Rye crispbread 🍞, Pita bread 🫓, Tortilla wraps 🫓 | none |
+| A drink vessel for the drink | Coffee ☕, Glögi ☕, Tea 🍵, Red wine 🍷, Sparkling wine 🍾, Cola 🥤 | none |
+| A dish for its ingredient | Rice 🍚, Spaghetti 🍝, Instant noodles 🍜, Liver casserole 🍲 | Canned tomatoes and Tomato puree (must not be 🍅); Hot dog sausages (must not be 🌭, which has a bun) |
+| Single products | Orange 🍊 | Chanterelles 🍄, Whole chicken 🐔, Margarine 🧈, Dish soap 🧼, Sponge cloth 🧽, Multivitamin 💊, Painkillers 💊, Shampoo 🧴 |
+
+¹ **My application of the principle, to confirm.** The operator did not name these two. Pork
+chops are a whole cut, so they get 🥩. Reindeer sauté (poronkäristys) is sold as frozen
+shavings, like strips, so it goes to the gap list.
+² **Planner's application of the principle, to confirm.** These are processed forms, not
+the fish as it is bought.
+
+The operator did not rule on the exact calls I made myself, where the emoji's name is not
+literally the product's name: Mandarin 🍊 "tangerine", Sweet potato 🍠 "roasted sweet potato",
+Frozen peas 🫛 "pea pod", Kidney beans 🫘 "beans", Sweet corn 🌽 "ear of corn", Kitchen roll and
+Toilet paper 🧻 "roll of paper", Cut flowers 💐 "bouquet", and Foam hand soap and Liquid soap 🧼
+"soap". All of them depict the product as it is bought, so they stay exact.
+
+**The model re-scored against the ruled set.** It was prompted with the old definition, under
+which a family emoji is borderline.
+
+| | Run 1 (`low`) | Run 2 (`high`) |
+| --- | --- | --- |
+| precision | 83/85 = **0.98** | 78/82 = 0.95 |
+| recall (of 118) | 83/118 = **0.70** | 78/118 = 0.66 |
+| exact answers that are now wrong | Whole chicken 🐔, Canned tomatoes 🍅 | the same two, plus Dish soap 🧼 and Sparkling wine 🍷 (the ruling is 🍾) |
+
+Recall drops because the model sends most of the newly exact family products to `borderline`
+or `none`. The prompt has no per-product rulings, which is why the curated table below has to
+carry them.
+
 ## Gap list
 
-These products need a generated icon. There are **54 by my ruling**, plus whichever of the 49
-borderline products the operator rules out.
+These **73 products** need a generated icon: the 54 with no candidate emoji and the 19 the
+operator ruled out. The ruled-out products are marked *(ruled)*.
 
 - **Dairy:** Quark, Drinking yoghurt, Natural yoghurt, Turkish yoghurt, Viili, Skyr, Buttermilk,
-  Crème fraîche, Sour cream, Whipping cream
+  Crème fraîche, Sour cream, Whipping cream, Margarine *(ruled)*
+- **Cheese:** Mozzarella *(ruled)*, Blue cheese *(ruled)*, Cottage cheese *(ruled)*
 - **Bread and bakery:** Karelian pasty, Cinnamon bun
-- **Meat:** Chicken fillet strips, Sausage, Sliced ham, Meatballs
-- **Vegetables:** Parsnip, Swede, Leek, Zucchini, Sauerkraut
+- **Meat:** Chicken fillet strips, Sausage, Sliced ham, Meatballs, Minced beef *(ruled)*,
+  Hot dog sausages *(ruled)*, Whole chicken *(ruled)*, Reindeer sauté *(ruled ¹)*
+- **Fish:** Pickled herring *(ruled ²)*, Canned tuna *(ruled ²)*, Fish fingers *(ruled ²)*
+- **Vegetables:** Parsnip, Swede, Leek, Zucchini, Sauerkraut, Chanterelles *(ruled)*
 - **Fruit and berries:** Pomegranate, Lingonberries, Raspberries
-- **Dry goods and pantry:** Wheat flour, Porridge oats, Sugar, Olive oil
+- **Dry goods and pantry:** Wheat flour, Porridge oats, Sugar, Olive oil, Canned tomatoes
+  *(ruled)*, Tomato puree *(ruled)*
 - **Condiments and spreads:** Ketchup, Mustard, Mayonnaise, Strawberry jam, Apple sauce,
   Taco sauce, Sweet chili dip, Beetroot hummus, Pickles (🫝 pickle exists from Emoji 18.0,
   above the cutoff)
@@ -372,15 +430,15 @@ borderline products the operator rules out.
 - **Snacks:** Crisps, Tortilla chips, Potato sticks, Salty liquorice
 - **Ready meals:** Lasagne
 - **Household:** Tampons, Compost bags, Bin bags, Laundry rinse vinegar, Kitchen cleaning
-  spray, All-purpose cleaner, Laundry detergent, Toothpaste
+  spray, All-purpose cleaner, Laundry detergent, Toothpaste, Dish soap *(ruled)*, Sponge cloth
+  *(ruled)*, Multivitamin *(ruled)*, Painkillers *(ruled)*, Shampoo *(ruled)*
 
-## Borderline: operator rulings needed
+## Borderline as submitted (now ruled)
 
-Each row names the candidate emoji and the question. A "yes" makes it exact; a "no" puts it on
-the gap list. Most rulings are really about a **family**, so eight rulings settle nearly all
-49 rows:
+This is the list the operator ruled on, kept for the record. It was grouped by family; the
+[rulings](#operator-rulings-2026-09-27) decide each product on its own.
 
-| Family ruling | Products it settles | Candidate |
+| Family question | Products | Candidate |
 | --- | --- | --- |
 | Does 🧀 "cheese wedge" stand for a named cheese? | Cheddar, Gouda, Feta, Mozzarella, Emmental, Blue cheese, Keisarinna cheese, Cottage cheese | 🧀 |
 | Does 🐟 "fish" stand for a named fish, raw or processed? | Salmon, Rainbow trout, Baltic herring, Pickled herring, Canned tuna, Fish fingers | 🐟 |
@@ -388,26 +446,9 @@ the gap list. Most rulings are really about a **family**, so eight rulings settl
 | Does 🍞 "bread" (a white loaf) stand for other breads? | Rye bread, Rye crispbread | 🍞 |
 | Does 🫓 "flatbread" stand for pita and tortilla? | Pita bread, Tortilla wraps | 🫓 |
 | Does 🥬 "leafy green" / 🌿 "herb" stand for a named green or herb? | Lettuce, Cabbage, Spinach, Parsley, Dill | 🥬 🌿 |
-| Does a drink vessel stand for the drink? | Coffee ☕ "hot beverage", Tea 🍵/☕, Glögi ☕, Red wine 🍷 "wine glass", Sparkling wine 🍾, Cola 🥤 "cup with straw" | ☕ 🍵 🍷 🍾 🥤 |
-| Does a dish or processed form stand for the ingredient? | Rice 🍚 "cooked rice", Spaghetti 🍝, Instant noodles 🍜 "steaming bowl", Canned tomatoes 🍅, Tomato puree 🍅, Liver casserole 🍲 "pot of food", Hot dog sausages 🌭 "hot dog" | 🍚 🍝 🍜 🍅 🍲 🌭 |
-
-Single rows:
-
-| Product | Candidate | Question |
-| --- | --- | --- |
-| Orange | 🍊 tangerine | Is the tangerine emoji an orange? Apple's artwork looks like one. |
-| Whole chicken | 🐔 chicken | The live bird, for a whole bird to roast |
-| Chanterelles | 🍄 mushroom / 🍄‍🟫 brown mushroom | A named mushroom under the generic one |
-| Margarine | 🧈 butter | Margarine is not butter |
-| Dish soap | 🧼 soap | Washing-up liquid as a bar of soap |
-| Sponge cloth | 🧽 sponge | A cloth (Wettex) as a sponge |
-| Multivitamin, Painkillers | 💊 pill | Medicine by its form |
-| Shampoo | 🧴 lotion bottle | A bottle of something else |
-
-My ruling also takes the model's `exact` for these, which the operator may still want to see:
-Mandarin 🍊 "tangerine", Sweet potato 🍠 "roasted sweet potato", Frozen peas 🫛 "pea pod",
-Kidney beans 🫘 "beans", Sweet corn 🌽 "ear of corn", Kitchen roll / Toilet paper 🧻 "roll of
-paper", Cut flowers 💐 "bouquet" and Foam hand soap / Liquid soap 🧼 "soap".
+| Does a drink vessel stand for the drink? | Coffee, Tea, Glögi, Red wine, Sparkling wine, Cola | ☕ 🍵 🍷 🍾 🥤 |
+| Does a dish or processed form stand for the ingredient? | Rice, Spaghetti, Instant noodles, Canned tomatoes, Tomato puree, Liver casserole, Hot dog sausages | 🍚 🍝 🍜 🍅 🍲 🌭 |
+| Single products | Orange, Whole chicken, Chanterelles, Margarine, Dish soap, Sponge cloth, Multivitamin, Painkillers, Shampoo | 🍊 🐔 🍄 🧈 🧼 🧽 💊 🧴 |
 
 ## Running it on the real catalog
 
@@ -451,13 +492,17 @@ Not implemented here.
 
    The tile shows `emoji` only for `exact` and `cook`. Everything else shows the generated icon
    when one exists (the ComfyUI lane), and the category emoji until then.
-2. **Deterministic first:** keep a curated table `generic name → emoji`, seeded from the 88
-   exact products here plus the operator's family rulings. A new product's generic name is
-   looked up there before any model call. With the table, the common groceries never depend on
-   the model's 0.92 precision.
+2. **Deterministic first:** keep a curated table `generic name → emoji or none`. It is **per
+   product, not per family**: Gouda → 🧀 does not imply Mozzarella → 🧀. Seed it with the 118
+   exact and 73 gap-list products here, including the
+   [operator rulings](#operator-rulings-2026-09-27). Its rule for new products is the
+   operator's principle: an emoji counts only if it depicts the product as it looks when
+   bought ("precise, so it doesn't require cognitive effort"). A new product's generic name is
+   looked up there before any model call, so the common groceries never depend on the model.
 3. **Model second:** for names the table does not know, ask the model at reasoning `low`,
-   batched, as this script does. Store `exact` answers as `proposed` and show them on a short
-   review list, since at 0.92 they cannot go straight to the tile. A confirmed answer goes into
+   batched, as this script does, with the principle and the seeded rulings in the prompt in
+   place of the old family-level definition. Store `exact` answers as `proposed` and show them
+   on a short review list, since at 0.92–0.98 precision they cannot go straight to the tile. A confirmed answer goes into
    the curated table, so the same generic name is never asked again.
 4. **Cook override:** the product edit sheet gets an emoji picker limited to the reference list
    (`scripts/emoji_food.json`, moved under `app/` but outside any `data/` folder, which
