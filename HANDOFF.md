@@ -1,6 +1,6 @@
 # Handoff
 Generated-UTC: 2026-09-27T16:00:00Z
-Base-SHA: 378aadb90d9a35f6edeb740b98e5f9f7c1ec6ab4
+Base-SHA: 378aadb82e5e50d348170d012a50780a0a0e38e4
 
 ## Round delta
 - Round 2026-09-27-3 is merged, **deployed** and reconciled:
