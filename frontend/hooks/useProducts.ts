@@ -140,3 +140,37 @@ export function useForgetName(productId: string) {
     },
   })
 }
+
+/** Refresh what shows a product's icon: the product itself and the tiles (Q18). */
+function useInvalidateIcon() {
+  const queryClient = useQueryClient()
+  return () => {
+    queryClient.invalidateQueries({ queryKey: productKeys.all })
+    queryClient.invalidateQueries({ queryKey: ['inventory'] })
+  }
+}
+
+/**
+ * Mutation: draw the product's icon again (Q18), optionally with the cook's hint.
+ *
+ * Answers at once with the product pending; the drawing lands minutes later and the
+ * inventory poll brings it to the tiles. Not retried: each call queues another drawing.
+ */
+export function useRedrawProductIcon() {
+  const invalidate = useInvalidateIcon()
+  return useMutation({
+    mutationFn: ({ id, hint }: { id: string; hint?: string | null }) =>
+      productsAPI.redrawIcon(id, hint),
+    retry: false,
+    onSuccess: invalidate,
+  })
+}
+
+/** Mutation: use the category emoji instead of the drawing (Q18). */
+export function useClearProductIcon() {
+  const invalidate = useInvalidateIcon()
+  return useMutation({
+    mutationFn: (id: string) => productsAPI.clearIcon(id),
+    onSuccess: invalidate,
+  })
+}

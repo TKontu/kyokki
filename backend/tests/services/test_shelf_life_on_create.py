@@ -21,6 +21,7 @@ from app.services import shelf_life_on_create
 from app.services.catalog_estimates import Estimate, EstimateRequest
 from app.services.generic_products import ProductResolver, build_inventory_item
 from app.services.llm_extractor import LLMExtractionError
+from app.services.product_icons import draw_icons
 from app.services.shelf_life_on_create import (
     estimate_new_products,
     schedule_estimates,
@@ -241,15 +242,31 @@ class TestEstimateNewProducts:
 
 
 class TestScheduleEstimates:
-    def test_it_adds_one_task_for_all_the_products(self) -> None:
+    def test_it_adds_one_estimate_for_all_the_products(self) -> None:
         tasks = BackgroundTasks()
         ids = [uuid4(), uuid4()]
 
         schedule_estimates(tasks, ids)
 
-        (task,) = tasks.tasks
-        assert task.func is estimate_new_products
+        (task,) = [t for t in tasks.tasks if t.func is estimate_new_products]
         assert task.args == (ids,)
+
+    def test_the_estimate_goes_before_the_icons(self) -> None:
+        """The shelf life dates the food; the drawing only decorates it (Q18)."""
+        tasks = BackgroundTasks()
+
+        schedule_estimates(tasks, [uuid4()])
+
+        assert [t.func for t in tasks.tasks] == [estimate_new_products, draw_icons]
+
+    def test_each_new_product_gets_its_icon_drawn(self) -> None:
+        tasks = BackgroundTasks()
+        ids = [uuid4(), uuid4()]
+
+        schedule_estimates(tasks, ids)
+
+        (task,) = [t for t in tasks.tasks if t.func is draw_icons]
+        assert list(task.args[0]) == ids
 
     def test_no_products_schedules_nothing(self) -> None:
         tasks = BackgroundTasks()

@@ -19,6 +19,9 @@ export interface InventoryItem {
   category: string // Category ID, e.g. 'dairy'
   category_name: string // Category display name
   category_icon: string | null // Category emoji
+  // Version of the product's drawn icon (Q18), for productsAPI.iconUrl. Null or absent: no
+  // drawing, show category_icon. Optional so fixtures written before Q18 still type-check.
+  product_icon_version?: number | null
   receipt_id: string | null // UUID
   initial_quantity: number // Decimal, sent as a JSON number (DEC-2)
   current_quantity: number // Decimal, sent as a JSON number (DEC-2)

@@ -370,6 +370,11 @@ def _no_model_selection():
 
     The catalog refresh (Q11) is the second such call and gets the same treatment: it
     answers with nothing, so a test that does not say otherwise proposes no changes.
+
+    Product icons (Q18) are the third: every create path queues a drawing, and a test that
+    commits for real would otherwise send it to the gateway (and could swap the receipt
+    model off its GPU). The drawing call answers nothing, so the job ends `failed`; a test
+    that wants a drawing patches `product_icons._complete` itself.
     """
     from unittest.mock import AsyncMock, patch
 
@@ -383,6 +388,11 @@ def _no_model_selection():
             "app.services.catalog_estimates.estimate_shelf_lives",
             new_callable=AsyncMock,
             return_value=[],
+        ),
+        patch(
+            "app.services.product_icons._complete",
+            new_callable=AsyncMock,
+            return_value="",
         ),
     ):
         yield selection

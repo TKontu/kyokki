@@ -246,7 +246,7 @@ async def broadcast_shopping_list_update(
 
 async def broadcast_product_update(
     product_id: UUID,
-    action: Literal["updated", "name_forgotten", "alias_forgotten"],
+    action: Literal["updated", "name_forgotten", "alias_forgotten", "icon_updated"],
     product_name: str | None = None,
 ) -> None:
     """Broadcast a change to a product or the names that resolve to it (H52).

@@ -8,6 +8,8 @@ import type { Unit } from './inventory'
 export type StorageType = 'refrigerator' | 'freezer' | 'pantry'
 export type UnitType = 'volume' | 'weight' | 'count'
 export type ShelfLifeSource = 'category' | 'model' | 'cook'
+// Where a product's drawn icon stands (Q18). `cleared`: the cook chose the category emoji.
+export type IconStatus = 'pending' | 'ready' | 'failed' | 'cleared'
 // Whose word a learned name is (H51): the product's own, the cook's, or a model guess.
 export type NameSource = 'canonical' | 'cook' | 'model'
 
@@ -33,6 +35,11 @@ export interface ProductMaster {
   reorder_quantity: number | null // > 0 or null
   off_product_id: string | null // Open Food Facts product ID
   off_data: Record<string, unknown> | null // Cached OFF data
+  // The icon the model drew (Q18). Null status: never drawn. `failed` keeps any earlier
+  // drawing. A version means there is a drawing to show; null means show the category emoji.
+  // Optional so fixtures written before Q18 still type-check.
+  icon_status?: IconStatus | null
+  icon_version?: number | null
   created_at: string // ISO datetime
   updated_at: string // ISO datetime
 }
@@ -70,6 +77,11 @@ export interface ProductMasterUpdate {
   min_stock_quantity?: number | null // >= 0
   reorder_quantity?: number | null // > 0
   off_product_id?: string | null
+}
+
+/** Draw a product's icon again (Q18), optionally in the cook's words. */
+export interface IconRedrawRequest {
+  hint?: string | null // at most 200 characters
 }
 
 export interface ProductListParams {

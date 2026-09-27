@@ -1,6 +1,7 @@
-import apiClient from './client'
+import apiClient, { API_BASE_URL } from './client'
 import type {
   CatalogEstimateResponse,
+  IconRedrawRequest,
   ProductListParams,
   ProductMaster,
   ProductMasterUpdate,
@@ -65,5 +66,41 @@ export async function forgetPrintedName(id: string, aliasId: string): Promise<vo
   return apiClient.delete<void>(`/products/${id}/aliases/${aliasId}`)
 }
 
-const productsAPI = { list, get, update, estimate, names, forgetName, forgetPrintedName }
+/**
+ * Where a product's drawn icon is served (Q18), for an `<img src>`.
+ *
+ * The version is part of the URL, so a redrawn icon is a new URL and never the cached old
+ * one. An `<img>` cannot send the bearer token, but it does not need to: the middleware adds
+ * it server-side to every same-origin `/api` request. Never fetch this into the DOM as markup.
+ */
+export function iconUrl(productId: string, version: number): string {
+  return `${API_BASE_URL}/products/${encodeURIComponent(productId)}/icon.svg?v=${version}`
+}
+
+/**
+ * Draw the product's icon again (Q18), optionally in the cook's words. Answers at once with
+ * `icon_status: 'pending'`; the drawing lands in the background minutes later.
+ */
+export async function redrawIcon(id: string, hint?: string | null): Promise<ProductMaster> {
+  const body: IconRedrawRequest = { hint: hint?.trim() ? hint.trim() : null }
+  return apiClient.post<ProductMaster>(`/products/${id}/icon`, body)
+}
+
+/** Drop the drawing: the tile shows the category emoji again until the cook redraws it. */
+export async function clearIcon(id: string): Promise<ProductMaster> {
+  return apiClient.delete<ProductMaster>(`/products/${id}/icon`)
+}
+
+const productsAPI = {
+  list,
+  get,
+  update,
+  estimate,
+  names,
+  forgetName,
+  forgetPrintedName,
+  iconUrl,
+  redrawIcon,
+  clearIcon,
+}
 export default productsAPI

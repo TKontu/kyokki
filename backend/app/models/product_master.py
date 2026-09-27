@@ -10,11 +10,12 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 
 from app.db.base_class import Base
 
@@ -33,6 +34,15 @@ class ShelfLifeSource(StrEnum):
     CATEGORY = "category"
     MODEL = "model"
     COOK = "cook"
+
+
+class IconStatus(StrEnum):
+    """Where a product's drawn icon stands (Q18). NULL in the column: never drawn."""
+
+    PENDING = "pending"  # being drawn, or waiting for the drawing lock
+    READY = "ready"
+    FAILED = "failed"  # the last drawing failed; any earlier one is kept
+    CLEARED = "cleared"  # the cook chose the category emoji; nothing redraws on its own
 
 
 class ProductMaster(Base):
@@ -95,6 +105,16 @@ class ProductMaster(Base):
     off_product_id = Column(String, nullable=True, index=True)  # OFF barcode
     off_data = Column(JSONB, nullable=True)  # cached nutrition, image, etc.
 
+    # The icon the model drew for it (Q18): sanitised SVG markup, capped at 8 KB (drawings
+    # so far were 0.2-0.6 KB). Deferred, so listing products does not load it; only
+    # GET /products/{id}/icon.svg reads it.
+    icon_svg = deferred(Column(Text, nullable=True))
+    # pending (drawing), ready, failed (kept any earlier drawing) or cleared (the cook chose
+    # the category emoji; nothing redraws it on its own). NULL: never drawn.
+    icon_status = Column(String, nullable=True)
+    # When icon_svg last changed; NULL exactly when there is no drawing to show.
+    icon_updated_at = Column(DateTime(timezone=True), nullable=True)
+
     # Timestamps
     created_at = Column(
         DateTime(timezone=True),
@@ -118,3 +138,9 @@ class ProductMaster(Base):
     shopping_list_items = relationship(
         "ShoppingListItem", back_populates="product_master"
     )
+
+    @property
+    def icon_version(self) -> int | None:
+        """Whole seconds of icon_updated_at, for the icon URL; None: show the emoji."""
+        updated = self.icon_updated_at
+        return None if updated is None else int(updated.timestamp())
