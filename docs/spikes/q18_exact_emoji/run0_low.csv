@@ -1,0 +1,192 @@
+name,category,emoji,match,why
+Tomato,produce,🍅,exact,emoji name is tomato
+Banana,fruits,🍌,exact,emoji name is banana
+Orange,fruits,,none,"no orange emoji, tangerine is different"
+Carrot,produce,🥕,exact,emoji name is carrot
+Potato,produce,🥔,exact,emoji name is potato
+Cucumber,produce,🥒,exact,emoji name is cucumber
+Milk,dairy,🥛,exact,example Milk -> glass of milk
+Quark,dairy,,none,no quark emoji
+Eggs,dairy,🥚,exact,example Eggs -> egg
+Butter,dairy,🧈,exact,emoji name is butter
+Cheddar,cheese,🧀,borderline,"cheddar is a cheese, emoji is cheese wedge"
+Minced beef,meat,🥩,borderline,"minced beef is meat, emoji is cut of meat"
+Chicken fillet strips,meat,🐔,borderline,"strips are chicken, emoji is chicken"
+Salmon,fish,🐟,borderline,"salmon is a fish, emoji is fish"
+Rye bread,bread,🍞,borderline,"rye bread is bread, emoji is white loaf"
+Karelian pasty,bread,,none,no pasty emoji
+Oat drink,beverages,,none,no oat drink emoji
+Apple juice,beverages,,none,no apple juice emoji
+Crisps,snacks,,none,no crisps emoji
+Coffee,pantry,☕,borderline,coffee is a hot beverage
+White bread,bread,🍞,exact,white bread is bread
+Apple,fruits,🍎,borderline,"emoji is red apple, product is generic apple"
+Milk chocolate with hazelnuts,snacks,🍫,exact,milk chocolate is chocolate bar
+Drinking yoghurt,dairy,,none,no yoghurt emoji
+Gouda,cheese,🧀,borderline,"gouda is cheese, emoji is cheese wedge"
+Dish soap,household,,none,no dish soap emoji
+Natural yoghurt,dairy,,none,no yoghurt emoji
+Chocolate chip cookies,snacks,🍪,exact,chocolate chip cookies are cookies
+Chocolate ice cream,frozen,🍨,exact,chocolate ice cream is ice cream
+Grapes,fruits,🍇,exact,grapes is grapes
+Entrecôte,meat,🥩,borderline,entrecôte is cut of meat
+Plum tomatoes,produce,🍅,exact,plum tomatoes are tomato
+Mini bell peppers,produce,🫑,exact,mini bell peppers are bell pepper
+Parsnip,produce,,none,"parsnip no emoji, carrot is different"
+Foam hand soap,household,,none,no hand soap emoji
+Broccoli,produce,🥦,exact,broccoli is broccoli
+Tampons,household,,none,no tampon emoji
+Sauerkraut,produce,,none,no sauerkraut emoji
+Beetroot hummus,condiments,,none,no hummus emoji
+Lactose-free milk drink,dairy,🥛,borderline,milk drink is glass of milk
+Apple sauce,condiments,,none,no sauce emoji
+Mango,fruits,🥭,exact,emoji name is mango
+Feta,cheese,🧀,borderline,"feta is a cheese, emoji is generic cheese wedge"
+Pomegranate,fruits,,none,no pomegranate emoji
+Taco sauce,condiments,,none,no taco sauce emoji
+Crème fraîche,dairy,,none,no crème fraîche emoji
+Tortilla chips,snacks,,none,no tortilla chips emoji
+Bacon,meat,🥓,exact,emoji name is bacon
+Keisarinna cheese,cheese,🧀,borderline,"Keisarinna is a cheese, emoji is generic cheese wedge"
+Compost bags,household,,none,no compost bags emoji
+Bin bags,household,,none,no bin bags emoji
+Rye crispbread,bread,🍞,borderline,"crispbread is bread, emoji is white loaf"
+Potato sticks,snacks,,none,no potato sticks emoji
+Olive oil,pantry,,none,no olive oil emoji
+Green apple,fruits,🍏,exact,emoji name is green apple
+Pear,fruits,🍐,exact,emoji name is pear
+Laundry rinse vinegar,household,,none,no laundry rinse vinegar emoji
+Liquid soap,household,🧼,exact,emoji name is soap
+Sweet chili dip,condiments,,none,no sweet chili dip emoji
+Sponge cloth,household,🧽,exact,emoji name is sponge
+Kitchen cleaning spray,household,,none,no cleaning spray emoji
+All-purpose cleaner,household,,none,no cleaner emoji
+Glögi,beverages,☕,borderline,"glögi is hot beverage, broader term"
+Turkish yoghurt,dairy,,none,no yoghurt emoji
+Red onion,produce,🧅,exact,red onion is onion
+Lettuce,produce,🥬,borderline,lettuce is leafy green
+Tomato puree,pantry,🍅,borderline,puree is tomato product
+Multivitamin,household,💊,borderline,multivitamin is pill form
+Lime,fruits,🍋‍🟩,exact,lime is lime
+Mozzarella,cheese,🧀,borderline,mozzarella is cheese
+Wheat flour,pantry,,none,no flour emoji
+Sour cream,dairy,,none,no sour cream emoji
+Parsley,produce,🌿,borderline,parsley is herb
+Cherry tomatoes,produce,🍅,exact,cherry tomatoes are tomatoes
+Margarine,dairy,🧈,borderline,margarine is butter-like
+Whipping cream,dairy,,none,no cream emoji
+Viili,dairy,,none,no viili emoji
+Cottage cheese,cheese,🧀,borderline,cottage cheese is cheese
+Emmental,cheese,🧀,borderline,emmental is cheese
+Blue cheese,cheese,🧀,borderline,blue cheese is cheese
+Buttermilk,dairy,,none,no emoji names buttermilk
+Skyr,dairy,,none,no emoji names skyr
+Baguette,bread,🥖,exact,emoji is baguette bread
+Croissant,bread,🥐,exact,emoji is croissant
+Bagel,bread,🥯,exact,emoji is bagel
+Pretzel,bread,🥨,exact,emoji is pretzel
+Pita bread,bread,🫓,borderline,pita is a flatbread
+Tortilla wraps,bread,🫓,borderline,tortilla is a flatbread
+Cinnamon bun,bread,,none,no emoji names cinnamon bun
+Toast bread,bread,🍞,borderline,toast bread is bread
+Pancakes,frozen,🥞,exact,emoji is pancakes
+Sausage,meat,,none,no emoji names sausage
+Hot dog sausages,meat,🌭,borderline,hot dog sausages is hot dog
+Sliced ham,meat,,none,no emoji names ham
+Pork chops,meat,🥩,borderline,pork chop is cut of meat
+Whole chicken,meat,🐔,exact,emoji is chicken
+Chicken drumsticks,meat,🍗,exact,emoji is poultry leg
+Meatballs,meat,,none,no emoji names meatballs
+Reindeer sauté,meat,🥩,borderline,reindeer is cut of meat
+Rainbow trout,fish,🐟,borderline,trout is a fish
+Baltic herring,fish,🐟,borderline,herring is a fish
+Pickled herring,fish,🐟,borderline,herring is a fish
+Shrimp,fish,🍤,borderline,shrimp vs fried shrimp
+Canned tuna,fish,🐟,borderline,tuna is a fish
+Fish fingers,frozen,🐟,borderline,fish fingers are fish
+Squid,fish,,none,no squid emoji
+Oysters,fish,,none,no oyster emoji
+Onion,produce,🧅,exact,onion matches
+Garlic,produce,🧄,exact,garlic matches
+Bell pepper,produce,🫑,exact,bell pepper matches
+Avocado,produce,🥑,exact,avocado matches
+Sweet corn,produce,🌽,exact,sweet corn is ear of corn
+Mushrooms,produce,🍄,exact,mushrooms match
+Chanterelles,produce,🍄,borderline,chanterelle is a mushroom
+Swede,produce,,none,no swede emoji
+Cabbage,produce,🥬,borderline,cabbage is leafy green
+Spinach,produce,🥬,borderline,spinach is leafy green
+Leek,produce,,none,no leek emoji
+Zucchini,produce,,none,no zucchini emoji
+Aubergine,produce,🍆,exact,aubergine is eggplant
+Ginger,produce,🫚,exact,emoji is ginger root
+Chili pepper,produce,🌶️,exact,emoji is hot pepper
+Frozen peas,frozen,🫛,exact,emoji is pea pod
+Kidney beans,pantry,🫘,exact,emoji is beans
+Dill,produce,🌿,borderline,"dill is a herb, emoji is generic herb"
+Olives,condiments,🫒,exact,emoji is olive
+Sweet potato,produce,🍠,borderline,emoji is roasted sweet potato
+Lemon,fruits,🍋,exact,emoji is lemon
+Strawberries,fruits,🍓,exact,emoji is strawberry
+Blueberries,fruits,🫐,exact,emoji is blueberries
+Lingonberries,fruits,,none,no lingonberry emoji
+Raspberries,fruits,,none,no raspberry emoji
+Watermelon,fruits,🍉,exact,emoji is watermelon
+Melon,fruits,🍈,exact,emoji is melon
+Pineapple,fruits,🍍,exact,emoji is pineapple
+Kiwi,fruits,🥝,exact,emoji is kiwi fruit
+Peach,fruits,🍑,exact,emoji is peach
+Cherries,fruits,🍒,exact,emoji is cherries
+Coconut,fruits,🥥,exact,emoji is coconut
+Mandarin,fruits,🍊,borderline,mandarin is a tangerine type
+Rice,pantry,🍚,exact,cooked rice matches rice
+Spaghetti,pantry,🍝,exact,spaghetti matches spaghetti
+Porridge oats,pantry,,none,no oats emoji
+Sugar,pantry,,none,no sugar emoji
+Salt,pantry,🧂,exact,salt matches salt
+Honey,pantry,🍯,exact,honey pot names honey
+Peanuts,snacks,🥜,exact,peanuts matches peanuts
+Chestnuts,snacks,🌰,exact,chestnut matches chestnuts
+Tea,beverages,,none,"no tea emoji, only vessels"
+Popcorn,snacks,🍿,exact,popcorn matches popcorn
+Chocolate bar,snacks,🍫,exact,chocolate bar matches chocolate bar
+Salty liquorice,snacks,,none,no liquorice emoji
+Lollipop,snacks,🍭,exact,lollipop matches lollipop
+Canned tomatoes,pantry,🍅,exact,tomato matches canned tomatoes
+Instant noodles,pantry,,none,no instant noodles emoji
+Ketchup,condiments,,none,no ketchup emoji
+Mustard,condiments,,none,no mustard emoji
+Mayonnaise,condiments,,none,no mayonnaise emoji
+Strawberry jam,condiments,,none,no jam emoji
+Orange juice,beverages,,none,no orange juice emoji
+Beer,beverages,🍺,exact,beer mug names beer
+Red wine,beverages,🍷,borderline,wine glass is container for wine
+Sparkling wine,beverages,🍾,borderline,bottle with popping cork for sparkling wine
+Mineral water,beverages,,none,no water emoji
+Cola,beverages,,none,no cola emoji
+Yerba mate,beverages,🧉,exact,mate names yerba mate
+Frozen pizza,frozen,🍕,exact,pizza names frozen pizza
+Sushi,ready_meals,🍣,exact,sushi names sushi
+Dumplings,frozen,🥟,exact,dumpling names dumplings
+Falafel,ready_meals,🧆,exact,falafel names falafel
+Lasagne,ready_meals,,none,no lasagne emoji
+Burrito,ready_meals,🌯,exact,burrito names burrito
+Hamburger,ready_meals,🍔,exact,hamburger names hamburger
+Liver casserole,ready_meals,🍲,borderline,pot of food is generic for casserole
+Ice cubes,frozen,🧊,exact,ice names ice cubes
+Doughnut,bread,🍩,exact,doughnut names doughnut
+Cupcake,bread,🧁,exact,cupcake names cupcake
+Toilet paper,household,🧻,exact,roll of paper names toilet paper
+Kitchen roll,household,🧻,borderline,roll of paper is generic for kitchen roll
+Toothbrush,household,🪥,exact,toothbrush names toothbrush
+Toothpaste,household,,none,no toothpaste emoji
+Shampoo,household,,none,no shampoo emoji
+Candles,household,🕯️,exact,candle matches candles
+Batteries,household,🔋,exact,battery matches batteries
+Dish sponge,household,🧽,exact,sponge matches dish sponge
+Laundry detergent,household,,none,no laundry detergent emoji
+Light bulb,household,💡,exact,light bulb matches
+Painkillers,household,💊,exact,pill names painkillers
+Plasters,household,🩹,exact,adhesive bandage is plaster
+Cut flowers,household,💐,exact,bouquet is cut flowers
+Pickles,condiments,,none,no pickle emoji
