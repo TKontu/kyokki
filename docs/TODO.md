@@ -1975,6 +1975,18 @@ not rulings.
   Whatever the cause, the review screen must never lose a line silently: every extracted line is
   shown (household ones folded but counted), and lines the OCR text has but the extraction lacks
   are flagged ("3 lines on the receipt were not read").
+  **Triage (2026-09-27), receipt `0ebd779e…` (K-Citymarket Sello, e-receipt PDF, text path):** the text
+  holds all 15 product lines and `prefilter_receipt_text` keeps them; the model returned 6, all of them
+  products already in the catalog, so the prompt's catalog block ("use its name exactly. Known
+  products: …") is the prime suspect; nothing after extraction drops lines. The heuristic parser finds
+  all 15 on this text (plus 4 footer lines after `YHTEENSÄ`). A second bug on the same receipt: the
+  catalog's `pack_grams` (250) overrode the printed "200g". Round 2026-09-27-2 builds the fix:
+  - B1 (`fix/q27-extraction-completeness`): reconcile the model's lines against the heuristic, one
+    targeted retry for missed lines, then heuristic recovery; completeness counts, the raw completion
+    and truncation/invalid entries persisted; the heuristic stops at the total; the printed pack size
+    wins; the catalog block reworded and measured live on muse-glimmer.
+  - B2 (`feat/q27-review-completeness`): a shortfall banner and "recovered" markers on the review
+    screen, an "Add a missed item" row, and a "Show receipt text" disclosure (first slice of Q28).
 - **Q28 — the receipt and what the model made of it cannot be audited.** After processing, the iPad
   shows only the extracted rows. There is no way to see the receipt image or PDF, the OCR text,
   or the model's raw answer, and no way back to a confirmed receipt's contents. The API already
@@ -1987,8 +1999,7 @@ not rulings.
 
 **Operator actions and rulings still needed:**
 - [ ] Run "Re-estimate all (keeps yours)" on `/products`: dry run, read the proposal, apply.
-- [ ] Q27 triage: give the homelab API address and a read token, or open `GET /api/receipts/{id}`
-  for today's receipt, so the missing lines can be traced to extraction, household or non-food.
+- [x] Q27 triage: done 2026-09-27 from `GET /api/receipts/{id}` (see Q27).
 - [x] Q18 storage: **the SVG in the database** (ruling 2026-09-26).
 - [ ] Deploy round 2026-09-26-9 (`alembic upgrade head` for the icon columns), then run
   `backend/scripts/backfill_icons.py --dry-run` and without it (about 50 s per product on qwen).
