@@ -2044,6 +2044,29 @@ Round 2026-09-26-9 (base `49ff0c5`):
     short on the iPad.
   - [ ] `IngredientTile`'s own "…" button is still 32 px outside the stale strip.
 
+
+#### Operator design notes — the fridge and the app shell (2026-09-27)
+
+Noted by the operator after living with round 2026-09-26-9; not yet planned or ruled beyond what is
+written here.
+
+- **Q29 — colour scheme of the fridge screen:** the fridge frame pastel light blue, a light beige
+  background, and shelves in a light wood colour.
+- **Q30 — a living window:** the window on the right shows the time of day (light, dusk, night) and
+  the current phase of the moon.
+- **Q31 — a light/dark theme toggle:** a user-chosen light or dark theme. Today the theme follows the
+  system setting only (`frontend/tailwind.config.ts` `darkMode` reads `prefers-color-scheme`, with a
+  `.dark`/`.light` class override already supported).
+- **Q32 — no Scan button in the top bar:** remove `Scan` from the `AppShell` destinations
+  (`frontend/components/layout/AppShell.tsx`, `{ href: '/scan', … }`); receipts still arrive via the
+  Receipts page and the Telegram bot.
+- **Q33 — a settings page, concealed:** a dedicated settings page, reachable from an unobtrusive
+  "⋯" (three dots) button rather than the main navigation. Q31's theme toggle is its first setting.
+- **Q34 — the fridge door reaches the freezer:** the open door extends further down so it aligns
+  with, or overlaps, the freezer drawer section.
+- **Q35 — pantry: sauces and condiments** get their own section in the larder.
+- **Q36 — pantry: spices** get their own section in the larder.
+
 ---
 
 ## Phase 1: MVP
