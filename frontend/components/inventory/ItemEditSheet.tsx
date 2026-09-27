@@ -5,6 +5,9 @@
  * "Edit" behind a tile's "…": correct expiry and location, mark as gone, or delete. No amount:
  * the UI tracks presence, not quantities (V2, operator ask 2026-09-24); "Used up" is on the
  * item sheet and a tile tap.
+ *
+ * The category belongs to the product, not the item, so it shows here with a way to change
+ * it: both "Change…" and "Change product details…" open the product's sheet (Q25).
  */
 
 import React, { useState } from 'react'
@@ -79,9 +82,8 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
     })
   }
 
-  const subtitle = [item.category_name, item.purchase_date && `Added ${item.purchase_date}`]
-    .filter(Boolean)
-    .join(' · ')
+  const subtitle = item.purchase_date ? `Added ${item.purchase_date}` : ''
+  const editProduct = () => setEditingProduct(true)
 
   if (confirmingDelete) {
     return (
@@ -109,12 +111,34 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   }
 
   if (editingProduct) {
-    return product.data ? (
-      <ProductEditSheet
-        product={product.data}
-        onClose={() => setEditingProduct(false)}
-      />
-    ) : null
+    if (product.data) {
+      return <ProductEditSheet product={product.data} onClose={() => setEditingProduct(false)} />
+    }
+    // Never a blank screen: say what is happening, and on a failure lead back to the item
+    return (
+      <BottomSheet
+        open
+        onClose={onClose}
+        title={name}
+        footer={
+          product.isError ? (
+            <Button data-primary variant="secondary" size="lg" fullWidth onClick={() => setEditingProduct(false)}>
+              {`Back to ${name}`}
+            </Button>
+          ) : undefined
+        }
+      >
+        {product.isError ? (
+          <p role="alert" className="text-base text-red-600 dark:text-red-400">
+            {`Could not load the product details for ${name}.`}
+          </p>
+        ) : (
+          <p className="text-base text-ui-text-secondary dark:text-ui-dark-text-secondary">
+            Loading product details…
+          </p>
+        )}
+      </BottomSheet>
+    )
   }
 
   return (
@@ -167,11 +191,25 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">{subtitle}</p>
         )}
 
+        {/* The category is the product's, so it is changed on the product's sheet (Q25). A new
+            category re-dates only the items whose date came from the old category's
+            placeholder shelf life; a date the product or the cook set stays. */}
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-base text-ui-text dark:text-ui-dark-text">
+            {`Category: ${item.category_name || 'No category'}`}
+          </p>
+          {/* Held while a save is in flight: its success closes this sheet, and would take the
+              product's sheet with it mid-edit */}
+          <Button variant="secondary" size="md" disabled={busy} onClick={editProduct}>
+            Change…
+          </Button>
+        </div>
+
         {/* A wrong expiry is usually the product's shelf life, not this item's date,
             and until H18 there was no way to correct it. */}
         <div>
-          <Button variant="ghost" size="sm" onClick={() => setEditingProduct(true)}>
-            {`Edit ${name}…`}
+          <Button variant="ghost" size="md" disabled={busy} onClick={editProduct}>
+            Change product details…
           </Button>
         </div>
 

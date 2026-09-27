@@ -2,7 +2,8 @@
  * The fridge's areas (V3, operator ask 2026-09-24).
  *
  * The stock screen is drawn as a fridge: an area per kind of food, plus the freezer and the
- * pantry as compartments of their own, and a shelf across the top for what is going stale.
+ * larder (pantry and bread) as compartments of their own, and a shelf across the top for what
+ * is going stale.
  * Categories map to areas here and only here; the backend's seeded ids are in
  * `backend/app/db/seed_categories.py`, and the test pins that every one has an area.
  */
@@ -28,7 +29,12 @@ export interface Area {
   id: AreaId
   label: string
   icon: string
-  /** Where it is drawn: inside the fridge body, or a compartment of its own below it. */
+  /**
+   * Where it lives, for a reader: inside the fridge (body or door), the freezer drawer, the
+   * larder beside the fridge (the pantry's shelves and the bread basket on top), or Other's
+   * crate at the larder's foot. Descriptive only - nothing reads it; where an area is drawn is
+   * `CIELO_BOX` in `components/fridge/CieloFridge.tsx`.
+   */
   compartment: 'fridge' | 'freezer' | 'pantry' | 'other'
   categories: string[]
 }
@@ -38,7 +44,8 @@ export const AREAS: Area[] = [
   { id: 'veggies', label: 'Veggies', icon: '🥕', compartment: 'fridge', categories: ['produce'] },
   { id: 'fruits', label: 'Fruits', icon: '🍎', compartment: 'fridge', categories: ['fruits'] },
   { id: 'dairy', label: 'Dairy', icon: '🥛', compartment: 'fridge', categories: ['dairy', 'cheese'] },
-  { id: 'bread', label: 'Bread', icon: '🍞', compartment: 'fridge', categories: ['bread'] },
+  // Bread lives in a basket by the larder (operator, 2026-09-26, Q23)
+  { id: 'bread', label: 'Bread', icon: '🍞', compartment: 'pantry', categories: ['bread'] },
   { id: 'ready_meals', label: 'Ready meals', icon: '🍲', compartment: 'fridge', categories: ['ready_meals'] },
   { id: 'drinks', label: 'Drinks', icon: '🧃', compartment: 'fridge', categories: ['beverages'] },
   {
