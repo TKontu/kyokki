@@ -48,6 +48,7 @@ const ICONS: Record<string, string> = {
   pantry: '🥫',
   beverages: '🥤',
   condiments: '🍯',
+  spices: '🧂',
   snacks: '🍿',
   household: '🧽',
 }
@@ -77,6 +78,7 @@ const SAMPLES: Sample[] = [
   ['Sparkling water', 'beverages', 'later', 60],
   ['Pasta', 'pantry', 'later', 120],
   ['Ketchup', 'condiments', 'later', 90],
+  ['Oregano', 'spices', 'later', 300],
   ['Crisps', 'snacks', 'week', 2],
   ['Frozen peas', 'produce', 'later', 150, true],
   ['Ice cream', 'frozen', 'later', 100, true],

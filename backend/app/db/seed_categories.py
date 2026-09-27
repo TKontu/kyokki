@@ -125,6 +125,17 @@ SEED_CATEGORIES = [
         "sort_order": 110,
     },
     {
+        # Q36: spices have a larder section of their own. They keep for years; 720 days is
+        # the cautious end. Products already filed elsewhere stay there until the cook moves
+        # them - the seed adds the category, it does not re-file anything.
+        "id": "spices",
+        "display_name": "Spices & Herbs",
+        "icon": "🧂",
+        "default_shelf_life_days": 720,
+        "frozen_shelf_life_days": None,
+        "sort_order": 115,
+    },
+    {
         "id": "snacks",
         "display_name": "Snacks",
         "icon": "🍿",

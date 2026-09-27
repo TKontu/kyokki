@@ -32,7 +32,9 @@ const BOX: Record<AreaId, Box> = {
   bread: { x: 458, y: 164, w: 298, h: 118 },
   ready_meals: { x: 458, y: 288, w: 298, h: 118 },
   drinks: { x: 814, y: 420, w: 112, h: 300 },
-  pantry: { x: 34, y: 170, w: 182, h: 510 },
+  pantry: { x: 34, y: 170, w: 182, h: 250 },
+  condiments: { x: 34, y: 426, w: 182, h: 124 },
+  spices: { x: 34, y: 556, w: 182, h: 124 },
   freezer: { x: 284, y: 40, w: 156, h: 704 },
   other: { x: 34, y: 694, w: 182, h: 84 },
 }

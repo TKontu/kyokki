@@ -42,7 +42,7 @@ const item = (overrides: Partial<InventoryItem> = {}): InventoryItem => ({
 // Mirrors backend/app/db/seed_categories.py: every seeded category needs an area.
 const SEEDED = [
   'meat', 'fish', 'dairy', 'cheese', 'produce', 'fruits', 'bread',
-  'ready_meals', 'frozen', 'pantry', 'beverages', 'condiments', 'snacks',
+  'ready_meals', 'frozen', 'pantry', 'beverages', 'condiments', 'spices', 'snacks',
 ]
 
 beforeEach(() => {
@@ -57,7 +57,17 @@ describe('areaOf', () => {
     expect(areaOf(item({ category: 'fish' }))).toBe('meat')
     expect(areaOf(item({ category: 'cheese' }))).toBe('dairy')
     expect(areaOf(item({ category: 'produce' }))).toBe('veggies')
-    expect(areaOf(item({ category: 'condiments' }))).toBe('pantry')
+    expect(areaOf(item({ category: 'snacks' }))).toBe('pantry')
+  })
+
+  it('gives sauces and spices larder sections of their own (Q35, Q36)', () => {
+    expect(areaOf(item({ category: 'condiments' }))).toBe('condiments')
+    expect(areaOf(item({ category: 'spices' }))).toBe('spices')
+    const larder = AREAS.filter((a) => a.compartment === 'pantry').map((a) => a.id)
+    expect(larder).toEqual(expect.arrayContaining(['pantry', 'condiments', 'spices']))
+    expect(AREAS.find((a) => a.id === 'pantry')?.categories).toEqual(['pantry', 'snacks'])
+    expect(AREAS.find((a) => a.id === 'condiments')?.label).toBe('Sauces & condiments')
+    expect(AREAS.find((a) => a.id === 'spices')?.label).toBe('Spices')
   })
 
   it('puts anything in the freezer in the freezer, whatever it is', () => {
@@ -80,7 +90,7 @@ describe('areaOf', () => {
   it('lists the areas in fridge order', () => {
     expect(AREAS.map((a) => a.id)).toEqual([
       'meat', 'veggies', 'fruits', 'dairy', 'bread', 'ready_meals', 'drinks', 'pantry',
-      'freezer', 'other',
+      'condiments', 'spices', 'freezer', 'other',
     ])
   })
 })

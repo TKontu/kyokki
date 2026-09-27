@@ -6,7 +6,7 @@
 import React from 'react'
 import { render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { AppShell } from '../AppShell'
+import { AppShell, DESTINATIONS } from '../AppShell'
 
 let pathname = '/'
 jest.mock('next/navigation', () => ({ usePathname: () => pathname }))
@@ -35,16 +35,43 @@ describe('AppShell', () => {
     expect(screen.getByText('the page')).toBeInTheDocument()
   })
 
-  it('offers stock, scan and receipts', () => {
+  it('offers stock and receipts', () => {
     renderShell()
 
     const nav = screen.getByRole('navigation', { name: 'Main' })
     expect(within(nav).getByRole('link', { name: /stock/i })).toHaveAttribute('href', '/')
-    expect(within(nav).getByRole('link', { name: /scan/i })).toHaveAttribute('href', '/scan')
     expect(within(nav).getByRole('link', { name: /receipts/i })).toHaveAttribute(
       'href',
       '/receipts'
     )
+  })
+
+  it('has no Scan button: scanning starts from Receipts (Q32)', () => {
+    renderShell()
+
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    expect(within(nav).queryByRole('link', { name: /scan/i })).not.toBeInTheDocument()
+    expect(DESTINATIONS.map((d) => d.href)).not.toContain('/scan')
+  })
+
+  it('tucks Settings behind an unobtrusive "More" button, not a destination (Q33)', () => {
+    renderShell()
+
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    const more = within(nav).getByRole('link', { name: 'More' })
+    expect(more).toHaveAttribute('href', '/settings')
+    expect(more.textContent).toContain('⋯')
+    // A full touch target, in both the top bar and the rail
+    expect(more.className).toMatch(/min-h-touch/)
+    expect(more.className).toMatch(/min-w-touch/)
+    expect(DESTINATIONS.map((d) => d.href)).not.toContain('/settings')
+  })
+
+  it('marks More current on the settings page', () => {
+    pathname = '/settings'
+    renderShell()
+
+    expect(screen.getByRole('link', { name: 'More' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('offers Gone, the only screen that shows what is no longer in stock', () => {
@@ -56,7 +83,6 @@ describe('AppShell', () => {
 
   it.each([
     ['/', /stock/i],
-    ['/scan', /scan/i],
     ['/receipts', /receipts/i],
     ['/gone', /gone/i],
   ])('marks %s as the current page', (path, name) => {

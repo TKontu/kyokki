@@ -28,6 +28,8 @@ export function crowdedItems(): InventoryItem[] {
     ...many(over('ready_meals'), { category: 'ready_meals', category_icon: '🍲' }),
     ...many(over('drinks'), { category: 'beverages', category_icon: '🥤' }),
     ...many(over('pantry'), { category: 'pantry', category_icon: '🥫' }),
+    ...many(over('condiments'), { category: 'condiments', category_icon: '🍯' }),
+    ...many(over('spices'), { category: 'spices', category_icon: '🧂' }),
     ...many(over('freezer'), { category: 'frozen', category_icon: '🧊', location: 'freezer' }),
     ...many(over('other'), { category: 'household', category_icon: '🧽' }),
   ]

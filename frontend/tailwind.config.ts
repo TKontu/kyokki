@@ -47,6 +47,24 @@ const config: Config = {
           'text-tertiary': '#909296',
         },
 
+        // The fridge scene (Q29). One value per token, set in globals.css: the dark theme
+        // swaps the variables, so a class needs no `dark:` twin.
+        fridge: Object.fromEntries(
+          [
+            'scene',
+            'floor',
+            'frame',
+            'frame-edge',
+            'liner',
+            'inside',
+            'wood',
+            'wood-edge',
+            'larder',
+            'larder-edge',
+            'larder-inside',
+          ].map((token) => [token, `rgb(var(--fridge-${token}) / <alpha-value>)`])
+        ),
+
         // Primary accent (blue - clean and professional)
         primary: {
           50: '#e7f5ff',

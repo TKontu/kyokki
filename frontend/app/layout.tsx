@@ -10,6 +10,7 @@ import {
   THEME_COLOR_DARK,
   THEME_COLOR_LIGHT,
 } from "@/lib/brand";
+import { THEME_SCRIPT } from "@/lib/theme";
 import { Providers } from "./providers";
 
 const geistSans = localFont({
@@ -64,7 +65,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    // suppressHydrationWarning: the theme script may put .light or .dark on <html> before
+    // React hydrates, which is the point of it (Q31)
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* The stored theme, applied before the first paint so a dark kitchen never flashes */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

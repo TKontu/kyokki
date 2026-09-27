@@ -83,13 +83,24 @@ export function Hinge({ x, y, ids }: { x: number; y: number; ids: PartIds }) {
   return <rect x={x} y={y} width={18} height={14} rx={3} fill={`url(#${ids.chromeY})`} />
 }
 
-/** A glass shelf seen edge-on: a pale pane with a bright front edge. */
+/**
+ * A glass shelf seen edge-on: a pale pane behind a light wood front trim (Q29: the shelves are
+ * light wood; the pane keeps the fridge looking like a fridge).
+ */
 export function GlassShelf({ x, y, w, ids }: { x: number; y: number; w: number; ids: PartIds }) {
   return (
     <g>
-      <rect x={x} y={y - 3} width={w} height={7} fill={`url(#${ids.glass})`} opacity={0.85} />
-      <line x1={x} x2={x + w} y1={y - 3} y2={y - 3} className="stroke-white dark:stroke-sky-200/60" strokeWidth={1.5} />
-      <line x1={x} x2={x + w} y1={y + 4} y2={y + 4} className="stroke-sky-300/80 dark:stroke-sky-400/40" strokeWidth={1} />
+      <rect x={x} y={y - 5} width={w} height={6} fill={`url(#${ids.glass})`} opacity={0.85} />
+      <line x1={x} x2={x + w} y1={y - 5} y2={y - 5} className="stroke-white dark:stroke-sky-200/60" strokeWidth={1.5} />
+      <rect
+        x={x}
+        y={y + 1}
+        width={w}
+        height={5}
+        rx={1.5}
+        className="fill-fridge-wood stroke-fridge-wood-edge"
+        strokeWidth={1}
+      />
     </g>
   )
 }

@@ -23,6 +23,7 @@ PLAUSIBLE_DAYS: dict[str, tuple[int, int]] = {
     "pantry": (7, 1825),
     "beverages": (7, 1825),
     "condiments": (7, 1825),
+    "spices": (30, 1825),
     "snacks": (7, 730),
 }
 # A category nobody listed above still gets a sanity check, just a loose one.

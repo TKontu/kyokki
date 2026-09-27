@@ -52,6 +52,15 @@ describe('Home Page', () => {
     await screen.findByText(/no items found/i)
   })
 
+  it('stands the fridge on the warm beige scene, in both themes (Q29)', async () => {
+    mockApi()
+    const { container } = render(<Home />, { wrapper })
+
+    // A token, not a literal: the dark theme swaps its value for a warm dark one
+    expect(container.firstElementChild).toHaveClass('bg-fridge-scene')
+    await screen.findByText(/no items found/i)
+  })
+
   it('has an Add button that opens the quick add sheet', async () => {
     mockApi()
     render(<Home />, { wrapper })

@@ -5,6 +5,9 @@
  * The one persistent piece of navigation. A bar across the top below `lg` (1024 px) - which is
  * how the iPad, mounted upright at 810×1080 (Q17), sees it - and a narrow rail down the left
  * on anything wider. Pages keep their own header and their own actions.
+ *
+ * Settings is not a destination (Q33): it sits behind an unobtrusive "⋯" at the bar's far end
+ * (the rail's foot), for the few things a kitchen changes once.
  */
 
 import Link from 'next/link'
@@ -21,7 +24,7 @@ interface Destination {
 
 export const DESTINATIONS: Destination[] = [
   { href: '/', label: 'Stock', icon: '🧊' },
-  { href: '/scan', label: 'Scan', icon: '📷' },
+  // No Scan (Q32): scanning starts from Receipts, which links to /scan
   {
     href: '/receipts',
     label: 'Receipts',
@@ -82,6 +85,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Link>
           )
         })}
+        <Link
+          href="/settings"
+          aria-label="More"
+          title="Settings"
+          aria-current={pathname === '/settings' ? 'page' : undefined}
+          className={[
+            'ml-auto flex min-h-touch min-w-touch shrink-0 items-center justify-center self-center',
+            'rounded-full text-2xl leading-none no-select lg:ml-0 lg:mt-auto lg:self-center',
+            'text-ui-text-tertiary hover:bg-ui-bg-tertiary dark:text-ui-dark-text-tertiary',
+            'dark:hover:bg-ui-dark-bg-tertiary focus:outline-none focus-visible:ring-2',
+            'focus-visible:ring-primary-400',
+            pathname === '/settings' ? 'bg-ui-bg-tertiary dark:bg-ui-dark-bg-tertiary' : '',
+          ].join(' ')}
+        >
+          <span aria-hidden="true">⋯</span>
+        </Link>
       </nav>
       {/* A column, so a page can take the height left under the bar: the fridge fills it */}
       <div className="flex min-w-0 flex-1 flex-col">

@@ -152,3 +152,50 @@ class TestReadyMeals:
         await db_session.commit()
 
         assert await db_session.get(Category, "ready_meals") is not None
+
+
+class TestSpices:
+    """Q36: spices get their own larder section, so they need a category of their own."""
+
+    async def test_it_is_seeded_as_a_long_keeping_larder_category(
+        self, db_session: AsyncSession
+    ) -> None:
+        await seed_categories(db_session)
+        await db_session.commit()
+
+        category = await db_session.get(Category, "spices")
+
+        assert category is not None
+        assert category.display_name == "Spices & Herbs"
+        assert category.icon == "🧂"
+        assert category.default_shelf_life_days == 720
+        assert category.frozen_shelf_life_days is None
+
+    def test_it_sorts_next_to_condiments(self) -> None:
+        order = [
+            c["id"] for c in sorted(SEED_CATEGORIES, key=lambda c: c["sort_order"])
+        ]
+
+        assert order.index("spices") == order.index("condiments") + 1
+
+    async def test_a_database_seeded_before_it_gains_it_untouched(
+        self, db_session: AsyncSession
+    ) -> None:
+        """The migrate job reseeds on every deploy: spices lands, existing rows stay as edited."""
+        from sqlalchemy.dialects.postgresql import insert
+
+        older = [c for c in SEED_CATEGORIES if c["id"] != "spices"]
+        await db_session.execute(insert(Category).values(older))
+        await db_session.commit()
+        condiments = await db_session.get(Category, "condiments")
+        assert condiments is not None
+        condiments.display_name = "Sauces"
+        await db_session.commit()
+
+        await seed_categories(db_session)
+        await db_session.commit()
+
+        assert await db_session.get(Category, "spices") is not None
+        condiments = await db_session.get(Category, "condiments")
+        assert condiments is not None
+        assert condiments.display_name == "Sauces"
