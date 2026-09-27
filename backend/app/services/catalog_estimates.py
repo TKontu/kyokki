@@ -22,10 +22,11 @@ import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -263,6 +264,26 @@ def may_estimate(product: ProductMaster) -> bool:
     return str(product.shelf_life_source) != "cook"
 
 
+async def _lock_still_estimable(db: AsyncSession, ids: Sequence[UUID]) -> set[UUID]:
+    """Lock these products, re-read, and return the ones an estimate may still change.
+
+    Locked in id order, product before items as everywhere else, so two applies and a
+    learning step wait for each other instead of deadlocking.
+    """
+    if not ids:
+        return set()
+    products = (
+        await db.execute(
+            select(ProductMaster)
+            .where(ProductMaster.id.in_(ids))
+            .order_by(ProductMaster.id)
+            .with_for_update(of=ProductMaster)
+            .execution_options(populate_existing=True)
+        )
+    ).scalars()
+    return {cast(UUID, product.id) for product in products if may_estimate(product)}
+
+
 async def estimate_products(
     db: AsyncSession, products: Sequence[ProductMaster], *, apply: bool
 ) -> CatalogRefresh:
@@ -334,8 +355,16 @@ async def estimate_products(
 
     moved: list[MovedInventoryItem] = []
     if apply:
+        # The model took its time, and the cook may have set a number meanwhile - a
+        # corrected date teaches the product one (Q24). Re-read every answered product
+        # under a row lock and leave any that is now `cook`.
+        still_estimable = await _lock_still_estimable(
+            db, [UUID(estimate.id) for estimate in estimates]
+        )
+        changes = [change for change in changes if change.id in still_estimable]
         for estimate in estimates:
-            by_id[estimate.id].shelf_life_source = "model"
+            if UUID(estimate.id) in still_estimable:
+                by_id[estimate.id].shelf_life_source = "model"
         for change in changes:
             product = by_id[str(change.id)]
             product.default_shelf_life_days = change.proposed_days
