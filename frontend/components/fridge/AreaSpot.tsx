@@ -30,6 +30,8 @@ export interface AreaSpotProps {
   maxEmoji?: number
   /** Rounds the focus ring and the press to the shape drawn beneath. */
   radius?: string
+  /** The label's size in drawing units: smaller for a long name on a narrow shelf. */
+  labelSize?: number
 }
 
 const pct = (part: number, whole: number) => `${(part / whole) * 100}%`
@@ -53,6 +55,7 @@ export function AreaSpot({
   height,
   maxEmoji = 3,
   radius = 'rounded-xl',
+  labelSize = 13,
 }: AreaSpotProps) {
   // A length in the drawing's units, as a share of the canvas's width
   const u = (units: number) => `calc(${units} * 100cqw / ${width})`
@@ -87,7 +90,7 @@ export function AreaSpot({
         >
           <span
             className="rounded-full bg-white/85 font-semibold leading-tight text-slate-800 shadow-sm dark:bg-slate-950/75 dark:text-slate-100"
-            style={{ fontSize: u(13), padding: `${u(2)} ${u(7)}` }}
+            style={{ fontSize: u(labelSize), padding: `${u(2)} ${u(labelSize === 13 ? 7 : 5)}` }}
           >
             {area.label}
           </span>

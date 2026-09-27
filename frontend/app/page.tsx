@@ -21,7 +21,8 @@ export default function Home() {
   const [clearing, setClearing] = useState<InventoryItem[] | null>(null)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    // The fridge stands on a light beige wall (Q29); the token turns warm dark in the dark theme
+    <div className="flex min-h-0 flex-1 flex-col bg-fridge-scene">
       {/* No visible title (Q20): the app's bar already says where this is, and the height goes
           to the fridge. Undo and + Add keep their full touch size in a slim row. */}
       <header className="flex items-center justify-end gap-3 px-4 pt-2">

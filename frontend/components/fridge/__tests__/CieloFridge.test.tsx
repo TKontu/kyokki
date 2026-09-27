@@ -6,10 +6,17 @@
  */
 
 import React from 'react'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { AREAS } from '@/lib/fridge'
 import { fixtureItems } from '@/components/fridge-mocks/fixtures'
-import { CIELO_BOX, CIELO_HEIGHT, CIELO_WIDTH, CieloFridge, PORTRAIT_BOX } from '../CieloFridge'
+import {
+  CIELO_BOX,
+  CIELO_HEIGHT,
+  CIELO_WIDTH,
+  CieloFridge,
+  PORTRAIT_BOX,
+  labelSizeFor,
+} from '../CieloFridge'
 import { DOT, dotCapacity } from '../capacity'
 import { crowdedItems } from '../__fixtures__/crowded'
 import { TODAY, item, many } from '../__fixtures__/stock'
@@ -43,6 +50,70 @@ describe('CieloFridge', () => {
     expect(other.y).toBeGreaterThanOrEqual(pantry.y + pantry.h)
     // The top glass shelf bread left behind goes to ready meals
     expect(ready_meals.y).toBeLessThan(60)
+  })
+
+  it('gives sauces and spices their own sections of the larder, under the pantry (Q35, Q36)', () => {
+    const { pantry, condiments, spices, other, bread } = CIELO_BOX
+    for (const box of [condiments, spices]) {
+      // In the larder's column, beside the fridge body
+      expect(box.x).toBeGreaterThanOrEqual(bread.x)
+      expect(box.x + box.w).toBeLessThanOrEqual(bread.x + bread.w)
+      expect(box.y).toBeGreaterThanOrEqual(pantry.y + pantry.h)
+      expect(box.y + box.h).toBeLessThanOrEqual(other.y)
+    }
+    expect(condiments.y + condiments.h).toBeLessThanOrEqual(spices.y)
+    render(<CieloFridge items={[item()]} />)
+    expect(screen.getByRole('link', { name: 'Open Sauces & condiments' })).toHaveAttribute(
+      'href',
+      '/area/condiments'
+    )
+    expect(screen.getByRole('link', { name: 'Open Spices' })).toHaveAttribute('href', '/area/spices')
+  })
+
+  it('fits a long name on a narrow shelf with a smaller label, and leaves the rest alone', () => {
+    const byId = (id: string) => AREAS.find((each) => each.id === id)!
+    expect(labelSizeFor(byId('condiments'), CIELO_BOX.condiments)).toBeLessThan(13)
+    expect(labelSizeFor(byId('spices'), CIELO_BOX.spices)).toBe(13)
+    expect(labelSizeFor(byId('ready_meals'), CIELO_BOX.ready_meals)).toBe(13)
+  })
+
+  it('opens the door down to the freezer drawer, as a real fridge door would (Q34)', () => {
+    const { dairy, drinks, freezer } = CIELO_BOX
+    // The door's lower bin reaches the freezer section's height
+    expect(drinks.y + drinks.h).toBeGreaterThanOrEqual(freezer.y + freezer.h - 10)
+    expect(drinks.y).toBeGreaterThan(dairy.y + dairy.h)
+    const { container } = render(<CieloFridge items={[item()]} />)
+    const door = container.querySelector('[data-part="door"]')
+    expect(door).not.toBeNull()
+    const bottom = Number(door!.getAttribute('data-bottom'))
+    expect(bottom).toBeGreaterThanOrEqual(freezer.y + freezer.h)
+  })
+
+  it('draws a window with the sky of the hour and the moon in its phase (Q30)', () => {
+    jest.setSystemTime(new Date(2026, 8, 26, 23, 0))
+    const { container } = render(<CieloFridge items={[item()]} />)
+
+    const sky = container.querySelector('[data-part="window-sky"]')
+    expect(sky?.getAttribute('data-sky')).toBe('night')
+    const moon = container.querySelector('[data-part="moon"]')
+    expect(moon).not.toBeNull()
+    expect(Number(moon!.getAttribute('opacity'))).toBe(1)
+    expect(sky!.closest('[aria-hidden="true"]')).not.toBeNull()
+  })
+
+  it('turns the window to day as the clock moves on, without a reload', () => {
+    jest.setSystemTime(new Date(2026, 8, 27, 4, 55))
+    const { container } = render(<CieloFridge items={[item()]} />)
+    expect(container.querySelector('[data-part="window-sky"]')?.getAttribute('data-sky')).toBe(
+      'night'
+    )
+
+    act(() => {
+      jest.advanceTimersByTime(10 * 60 * 1000)
+    })
+    expect(container.querySelector('[data-part="window-sky"]')?.getAttribute('data-sky')).toBe(
+      'morning'
+    )
   })
 
   it('always draws the bread basket, and the crate only for Other', () => {
@@ -125,6 +196,10 @@ describe('CieloFridge', () => {
   it.each([
     ['Freezer', 'freezer'],
     ['Pantry', 'pantry'],
+    ['Sauces & condiments', 'condiments'],
+    ['Spices', 'spices'],
+    ['Drinks', 'drinks'],
+    ['Dairy', 'dairy'],
     ['Bread', 'bread'],
     ['Other', 'other'],
     ['Ready meals', 'ready_meals'],

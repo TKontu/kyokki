@@ -2,7 +2,7 @@
  * The fridge's areas (V3, operator ask 2026-09-24).
  *
  * The stock screen is drawn as a fridge: an area per kind of food, plus the freezer and the
- * larder (pantry and bread) as compartments of their own, and a shelf across the top for what
+ * larder (pantry, sauces, spices and bread) as compartments of their own, and a shelf across the top for what
  * is going stale.
  * Categories map to areas here and only here; the backend's seeded ids are in
  * `backend/app/db/seed_categories.py`, and the test pins that every one has an area.
@@ -22,6 +22,8 @@ export type AreaId =
   | 'ready_meals'
   | 'drinks'
   | 'pantry'
+  | 'condiments'
+  | 'spices'
   | 'freezer'
   | 'other'
 
@@ -31,8 +33,8 @@ export interface Area {
   icon: string
   /**
    * Where it lives, for a reader: inside the fridge (body or door), the freezer drawer, the
-   * larder beside the fridge (the pantry's shelves and the bread basket on top), or Other's
-   * crate at the larder's foot. Descriptive only - nothing reads it; where an area is drawn is
+   * larder beside the fridge (its shelves - pantry, sauces, spices - and the bread basket on
+   * top), or Other's crate at the larder's foot. Descriptive only - nothing reads it; where an area is drawn is
    * `CIELO_BOX` in `components/fridge/CieloFridge.tsx`.
    */
   compartment: 'fridge' | 'freezer' | 'pantry' | 'other'
@@ -48,13 +50,16 @@ export const AREAS: Area[] = [
   { id: 'bread', label: 'Bread', icon: '🍞', compartment: 'pantry', categories: ['bread'] },
   { id: 'ready_meals', label: 'Ready meals', icon: '🍲', compartment: 'fridge', categories: ['ready_meals'] },
   { id: 'drinks', label: 'Drinks', icon: '🧃', compartment: 'fridge', categories: ['beverages'] },
+  { id: 'pantry', label: 'Pantry', icon: '🥫', compartment: 'pantry', categories: ['pantry', 'snacks'] },
+  // Sauces and spices each have a larder shelf of their own (operator, 2026-09-27, Q35, Q36)
   {
-    id: 'pantry',
-    label: 'Pantry',
-    icon: '🥫',
+    id: 'condiments',
+    label: 'Sauces & condiments',
+    icon: '🍯',
     compartment: 'pantry',
-    categories: ['pantry', 'condiments', 'snacks'],
+    categories: ['condiments'],
   },
+  { id: 'spices', label: 'Spices', icon: '🧂', compartment: 'pantry', categories: ['spices'] },
   { id: 'freezer', label: 'Freezer', icon: '🧊', compartment: 'freezer', categories: ['frozen'] },
   { id: 'other', label: 'Other', icon: '📦', compartment: 'other', categories: [] },
 ]

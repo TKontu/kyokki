@@ -78,7 +78,7 @@ const OLD_HAM = item({
 
 const FRIDGE_ORDER = [
   'Meat & fish', 'Veggies', 'Fruits', 'Dairy', 'Bread', 'Ready meals', 'Drinks',
-  'Pantry', 'Freezer',
+  'Pantry', 'Sauces & condiments', 'Spices', 'Freezer',
 ]
 
 function area(name: string) {

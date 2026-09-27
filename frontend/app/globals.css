@@ -25,6 +25,20 @@
   /* Animation */
   --transition-fast: 150ms;
   --transition-normal: 300ms;
+
+  /* The fridge scene (Q29): a pastel light-blue fridge on a light beige wall, light wood
+     shelves. RGB triplets, so Tailwind's `fridge-*` colours can take an alpha. */
+  --fridge-scene: 245 237 222;
+  --fridge-floor: 230 216 190;
+  --fridge-frame: 191 224 241;
+  --fridge-frame-edge: 150 196 219;
+  --fridge-liner: 246 250 252;
+  --fridge-inside: 253 254 255;
+  --fridge-wood: 228 199 158;
+  --fridge-wood-edge: 196 158 110;
+  --fridge-larder: 250 245 234;
+  --fridge-larder-edge: 222 208 184;
+  --fridge-larder-inside: 253 251 246;
 }
 
 /* color-scheme tells the browser to paint its own controls (file pickers, date inputs,
@@ -46,6 +60,18 @@
     --border-strong: #424549;
     --text-secondary: #c1c2c5;
     --text-tertiary: #909296;
+    /* The same scene at night: a dusky blue fridge, a warm dark wall, darker wood */
+    --fridge-scene: 42 37 32;
+    --fridge-floor: 33 28 24;
+    --fridge-frame: 94 127 147;
+    --fridge-frame-edge: 70 101 121;
+    --fridge-liner: 48 53 59;
+    --fridge-inside: 41 44 49;
+    --fridge-wood: 122 90 58;
+    --fridge-wood-edge: 90 65 40;
+    --fridge-larder: 60 53 46;
+    --fridge-larder-edge: 78 69 59;
+    --fridge-larder-inside: 47 42 37;
   }
 }
 
@@ -59,6 +85,18 @@
   --border-strong: #424549;
   --text-secondary: #c1c2c5;
   --text-tertiary: #909296;
+  /* The same scene at night: a dusky blue fridge, a warm dark wall, darker wood */
+  --fridge-scene: 42 37 32;
+  --fridge-floor: 33 28 24;
+  --fridge-frame: 94 127 147;
+  --fridge-frame-edge: 70 101 121;
+  --fridge-liner: 48 53 59;
+  --fridge-inside: 41 44 49;
+  --fridge-wood: 122 90 58;
+  --fridge-wood-edge: 90 65 40;
+  --fridge-larder: 60 53 46;
+  --fridge-larder-edge: 78 69 59;
+  --fridge-larder-inside: 47 42 37;
 }
 
 body {

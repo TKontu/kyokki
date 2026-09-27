@@ -151,7 +151,7 @@ describe('FridgeView', () => {
       .map((region) => region.getAttribute('aria-label'))
     expect(names).toEqual([
       'Meat & fish', 'Veggies', 'Fruits', 'Dairy', 'Bread', 'Ready meals', 'Drinks',
-      'Pantry', 'Freezer',
+      'Pantry', 'Sauces & condiments', 'Spices', 'Freezer',
     ])
   })
 

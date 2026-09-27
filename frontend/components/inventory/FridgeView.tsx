@@ -26,7 +26,7 @@ export interface FridgeViewProps {
 
 const EMPTY_MESSAGE =
   'No items found. Add one with + Add, or share a receipt to the Telegram bot - you can also ' +
-  'scan one on the Scan screen.'
+  'scan one from Receipts.'
 
 export function FridgeView({ onConsume, onMore, onClearExpired }: FridgeViewProps) {
   const { data: items, isLoading, isError, error } = useInventoryList()
