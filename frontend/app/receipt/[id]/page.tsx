@@ -11,6 +11,8 @@ import React, { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
+import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
+import { fieldInputClass, fieldLabelClass } from '@/components/ui/formStyles'
 import {
   ReceiptItemRow,
   canInclude,
@@ -23,7 +25,221 @@ import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { toISODate } from '@/lib/dates'
 import { isStale, readMethod, receiptDate, storeName } from '@/lib/receipts'
-import type { ConfirmedItemCreate, ExtractedItem } from '@/types/receipt'
+import type { Category } from '@/types/category'
+import type {
+  ConfirmedItemCreate,
+  ExtractedItem,
+  Receipt,
+  ReceiptUnit,
+} from '@/types/receipt'
+
+/** An item the read missed altogether, added by hand; confirmed as a free line (Q27). */
+interface MissedItem {
+  key: number
+  name: string
+  category: string
+  quantity: string
+  unit: ReceiptUnit
+}
+
+const UNITS: { value: ReceiptUnit; label: string }[] = [
+  { value: 'pcs', label: 'pcs' },
+  { value: 'g', label: 'g' },
+  { value: 'dl', label: 'dl' },
+]
+
+/**
+ * Whether the read lines fall short of the printed total by more than rounding: 1% of the total,
+ * and never less than 0.05 in whatever currency the receipt is in.
+ */
+function totalMismatch(itemsSum: number | null, receiptTotal: number | null): boolean {
+  if (itemsSum === null || receiptTotal === null) return false
+  return Math.abs(receiptTotal - itemsSum) > Math.max(0.05, Math.abs(receiptTotal) * 0.01)
+}
+
+/**
+ * Nine of fifteen lines once vanished between the receipt and this screen without a word (Q27).
+ * When the backend had to put lines back, or the read still does not account for the whole
+ * receipt, say so, so the cook knows what to check.
+ */
+function CompletenessBanner({ receipt }: { receipt: Receipt }) {
+  const completeness = receipt.completeness
+  if (!completeness) return null
+  const recovered = completeness.recovered_by_retry + completeness.recovered_raw_lines
+  const unaccounted = completeness.unaccounted_lines
+  const { items_sum: itemsSum, receipt_total: receiptTotal, text_lines: textLines } = completeness
+  const mismatch = totalMismatch(itemsSum, receiptTotal)
+  if (recovered <= 0 && unaccounted <= 0 && !mismatch) return null
+  const invalid = completeness.invalid_entries
+  return (
+    <div
+      role="status"
+      className="mb-4 rounded-ui border border-yellow-400 bg-yellow-50 p-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-200"
+    >
+      {recovered > 0 && (
+        <p>
+          {`${textLines === null ? recovered : `${recovered} of ${textLines}`} lines were not ` +
+            'read by the model — they are recovered below, please check them.'}
+        </p>
+      )}
+      {unaccounted > 0 && (
+        <p>{`${unaccounted} ${unaccounted === 1 ? 'line' : 'lines'} could not be read — see the receipt text.`}</p>
+      )}
+      {mismatch && itemsSum !== null && receiptTotal !== null && (
+        <p>
+          {`The items add up to ${itemsSum.toFixed(2)} but the receipt total is ` +
+            `${receiptTotal.toFixed(2)} — something may be missing.`}
+        </p>
+      )}
+      {invalid > 0 && (
+        <p className="mt-1">
+          {`The model's answer had ${invalid} unusable ${invalid === 1 ? 'entry' : 'entries'}.`}
+        </p>
+      )}
+    </div>
+  )
+}
+
+function RecoveredMarker({ item }: { item: ExtractedItem }) {
+  if (!item.recovered) return null
+  return (
+    <p className="mb-1 flex flex-wrap items-center gap-2 text-sm text-yellow-700 dark:text-yellow-400">
+      <span className="rounded-full border border-current px-2 py-0.5 text-xs font-medium">
+        recovered
+      </span>
+      {item.recovered === 'raw_line' && <span>from the receipt text — pick a category</span>}
+    </p>
+  )
+}
+
+type MissedDraft = Omit<MissedItem, 'key'>
+
+const EMPTY_MISSED: MissedDraft = { name: '', category: '', quantity: '1', unit: 'pcs' }
+
+/** The last row of the list: name, category and amount for something the read missed. */
+function AddMissedItem({
+  categories,
+  onAdd,
+}: {
+  categories: Category[]
+  onAdd: (item: MissedDraft) => void
+}) {
+  const [draft, setDraft] = useState<MissedDraft>(EMPTY_MISSED)
+  // Confirm needs a name and a category to create a product from a line on no receipt row
+  const ready =
+    draft.name.trim() !== '' && draft.category !== '' && Number(draft.quantity) > 0
+  const update = (changes: Partial<MissedDraft>) =>
+    setDraft((current) => ({ ...current, ...changes }))
+
+  return (
+    <section
+      aria-label="Add a missed item"
+      className="mt-3 rounded-ui border border-dashed border-ui-border p-3 dark:border-ui-dark-border"
+    >
+      <h2 className="text-base font-medium text-ui-text dark:text-ui-dark-text">
+        Add a missed item
+      </h2>
+      <div className="mt-2 flex flex-wrap items-end gap-3">
+        <div className="min-w-48 flex-1">
+          <span aria-hidden="true" className={fieldLabelClass}>
+            Name
+          </span>
+          <input
+            id="missed-name"
+            type="text"
+            aria-label="Missed item name"
+            value={draft.name}
+            onChange={(event) => update({ name: event.target.value })}
+            className={`${fieldInputClass} mt-1`}
+          />
+        </div>
+        <div className="min-w-48 flex-1">
+          <span aria-hidden="true" className={fieldLabelClass}>
+            Category
+          </span>
+          <select
+            id="missed-category"
+            aria-label="Missed item category"
+            value={draft.category}
+            onChange={(event) => update({ category: event.target.value })}
+            className={`${fieldInputClass} mt-1`}
+          >
+            <option value="">Pick a category…</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {`${category.icon ?? ''} ${category.display_name}`.trim()}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <div className="w-28">
+          <span aria-hidden="true" className={fieldLabelClass}>
+            Amount
+          </span>
+          <input
+            id="missed-quantity"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="any"
+            aria-label="Missed item quantity"
+            value={draft.quantity}
+            onChange={(event) => update({ quantity: event.target.value })}
+            className={`${fieldInputClass} mt-1`}
+          />
+        </div>
+        <ChoiceGroup
+          label="Missed item unit"
+          name="missed-unit"
+          options={UNITS}
+          value={draft.unit}
+          onChange={(unit) => update({ unit })}
+          className="w-48 grid-cols-3"
+        />
+        <Button
+          size="lg"
+          variant="secondary"
+          disabled={!ready}
+          onClick={() => {
+            if (!ready) return
+            onAdd({ ...draft, name: draft.name.trim() })
+            setDraft(EMPTY_MISSED)
+          }}
+        >
+          Add to list
+        </Button>
+      </div>
+    </section>
+  )
+}
+
+/** The text the read worked from, so the cook can check a line against it (Q28). */
+function ReceiptText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="mt-6">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="receipt-text"
+        onClick={() => setOpen((shown) => !shown)}
+        className="min-h-touch text-sm text-ui-text-secondary underline dark:text-ui-dark-text-secondary"
+      >
+        {open ? 'Hide receipt text' : 'Show receipt text'}
+      </button>
+      {open && (
+        <pre
+          id="receipt-text"
+          className="mt-2 max-h-96 overflow-auto whitespace-pre rounded-ui border border-ui-border bg-gray-50 p-3 font-mono text-xs text-ui-text dark:border-ui-dark-border dark:bg-gray-900 dark:text-ui-dark-text"
+        >
+          {text}
+        </pre>
+      )}
+    </div>
+  )
+}
 
 function initialRow(item: ExtractedItem): ReviewRow {
   const name = item.generic_name ?? item.name
@@ -76,6 +292,9 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   // is the model's guess; only a cook who has actually seen the lines can teach
   // anything from them (H08).
   const [householdSeen, setHouseholdSeen] = useState(false)
+  // Items the read missed altogether, added by hand (Q27); keyed so one can be removed.
+  const [missed, setMissed] = useState<MissedItem[]>([])
+  const [nextMissedKey, setNextMissedKey] = useState(1)
 
   const sortedCategories = useMemo(
     () => [...(categories ?? [])].sort((a, b) => a.sort_order - b.sort_order),
@@ -212,6 +431,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   const visible = rows.filter((entry) => !household.includes(entry))
   const included = rows.filter(({ row }) => row.include)
   const skipped = visible.length - included.length
+  const toAdd = included.length + missed.length
   const purchaseDate = receipt.purchase_date ?? toISODate(new Date())
 
   const submit = () => {
@@ -231,6 +451,16 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
         ? { ...base, product_id: productId }
         : { ...base, name: row.name.trim(), category: row.category }
     })
+    // A hand-added item is on no receipt line, so it names no line and teaches no alias.
+    for (const extra of missed) {
+      items.push({
+        name: extra.name,
+        category: extra.category,
+        quantity: Number(extra.quantity),
+        unit: extra.unit,
+        purchase_date: purchaseDate,
+      })
+    }
 
     // Only teach from lines the cook has actually looked at. A misjudgement inside
     // a fold that was never opened would otherwise be remembered forever, hiding a
@@ -302,9 +532,11 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
       </header>
 
       <main className={`${mainClass} pb-32`}>
+        <CompletenessBanner receipt={receipt} />
         <ul className="flex flex-col gap-3">
           {(showHousehold ? rows : visible).map(({ item, row }) => (
             <li key={item.index}>
+              <RecoveredMarker item={item} />
               <ReceiptItemRow
                 item={item}
                 row={row}
@@ -319,6 +551,43 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
             </li>
           ))}
         </ul>
+        {missed.length > 0 && (
+          <ul aria-label="Added by hand" className="mt-3 flex flex-col gap-3">
+            {missed.map((extra) => (
+              <li
+                key={extra.key}
+                className="flex items-center justify-between gap-3 rounded-ui border border-ui-border p-3 dark:border-ui-dark-border"
+              >
+                <div className="min-w-0">
+                  <p className="text-base font-medium text-ui-text dark:text-ui-dark-text">
+                    {extra.name}
+                  </p>
+                  <p className="text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
+                    {`${sortedCategories.find((c) => c.id === extra.category)?.display_name ?? extra.category} · ${extra.quantity} ${extra.unit} · added by hand`}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  aria-label={`Remove ${extra.name}`}
+                  onClick={() =>
+                    setMissed((current) => current.filter((other) => other.key !== extra.key))
+                  }
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <AddMissedItem
+          categories={sortedCategories}
+          onAdd={(extra) => {
+            setMissed((current) => [...current, { ...extra, key: nextMissedKey }])
+            setNextMissedKey((key) => key + 1)
+          }}
+        />
+        {receipt.ocr_raw_text && <ReceiptText text={receipt.ocr_raw_text} />}
       </main>
 
       <footer className="fixed inset-x-0 bottom-0 flex items-center justify-between gap-4 border-t border-ui-border bg-white px-6 py-3 pb-[env(safe-area-inset-bottom)] dark:border-ui-dark-border dark:bg-ui-dark-bg">
@@ -364,9 +633,9 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
           {/* Confirming nothing is how an all-household receipt, a duplicate, or a
               read that found no lines gets finished. Without it the receipt stays
               `completed` and the home banner counts it as waiting forever (H08). */}
-          {included.length === 0
+          {toAdd === 0
             ? 'Dismiss receipt'
-            : `Add ${included.length} ${included.length === 1 ? 'item' : 'items'}`}
+            : `Add ${toAdd} ${toAdd === 1 ? 'item' : 'items'}`}
         </Button>
       </footer>
     </div>

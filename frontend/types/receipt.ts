@@ -30,6 +30,26 @@ export type MatchConfidence = 'exact' | 'high' | 'medium' | 'low'
  */
 export type MatchSource = 'alias' | 'name' | 'selected' | 'none'
 
+/**
+ * How a line the model's first answer left out was put back (Q27).
+ * model_retry: the model read it on a second, targeted pass.
+ * raw_line: the receipt line's raw text, kept as the name - no generic name and no category,
+ * so the cook has to pick one.
+ */
+export type RecoveredBy = 'model_retry' | 'raw_line'
+
+/** How much of the receipt the read accounted for (Q27). */
+export interface ReceiptCompleteness {
+  text_lines: number | null // Product lines in the receipt text; null when read from a photo
+  model_lines: number // Lines the model's first answer returned
+  recovered_by_retry: number
+  recovered_raw_lines: number
+  invalid_entries: number // Entries in the model's answer that could not be used
+  unaccounted_lines: number // Lines still not read after recovery
+  items_sum: number | null // What the read lines add up to
+  receipt_total: number | null // The total printed on the receipt
+}
+
 export interface ExtractedItem {
   index: number // Position in the stored line list; kept for one release
   line_id: string | null // Stable identity, kept across re-reads; null before H12
@@ -53,6 +73,7 @@ export interface ExtractedItem {
   printed_unit: string | null // Unit the receipt used, when the unit was converted
   storage_type: StorageType
   location: 'main_fridge' | 'freezer' | 'pantry'
+  recovered?: RecoveredBy | null // Put back after the model missed it; absent on older receipts
 }
 
 export interface Receipt {
@@ -74,6 +95,8 @@ export interface Receipt {
   extraction_method: ExtractionMethod | null
   fallback_reason: string | null // Why the heuristic parser was used instead of the model
   items: ExtractedItem[]
+  // Null or absent for older receipts and for receipts read from a photo (Q27)
+  completeness?: ReceiptCompleteness | null
   created_at: string // ISO datetime
 }
 

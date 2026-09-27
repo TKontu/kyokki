@@ -2,6 +2,7 @@ import {
   type InventoryItem,
   type ProductMaster,
   type Category,
+  type ExtractedItem,
   type Receipt,
   APIError,
   NetworkError,
@@ -140,6 +141,53 @@ describe('TypeScript Types', () => {
         created_at: '2024-01-01T00:00:00Z',
       }
       expect(receipt.items[0].unit).toBe('g')
+    })
+
+    it('should carry how a line was recovered and the read completeness (Q27)', () => {
+      const item: ExtractedItem = {
+        index: 7,
+        line_id: null,
+        name: 'KG BANAANI',
+        generic_name: null,
+        quantity: 1200,
+        unit: 'g',
+        product_id: null,
+        product_name: null,
+        match_score: null,
+        match_confidence: null,
+        match_source: null,
+        verified: false,
+        suggested_category: null,
+        piece_grams: null,
+        pack_grams: null,
+        shelf_life_days: null,
+        opened_shelf_life_days: null,
+        non_food: false,
+        printed_quantity: null,
+        printed_unit: null,
+        storage_type: 'refrigerator',
+        location: 'main_fridge',
+        recovered: 'raw_line',
+      }
+      const completeness: Receipt['completeness'] = {
+        text_lines: 15,
+        model_lines: 6,
+        recovered_by_retry: 8,
+        recovered_raw_lines: 1,
+        invalid_entries: 2,
+        unaccounted_lines: 0,
+        items_sum: 42.1,
+        receipt_total: 42.1,
+      }
+      // A photo receipt has no text to count lines in; only the arithmetic applies
+      const photo: Receipt['completeness'] = { ...completeness, text_lines: null }
+      const retried: ExtractedItem['recovered'] = 'model_retry'
+      // Older receipts carry neither field
+      const older: ExtractedItem['recovered'] = null
+      expect(item.recovered).toBe('raw_line')
+      expect(completeness?.text_lines).toBe(15)
+      expect(photo?.text_lines).toBeNull()
+      expect([retried, older]).toEqual(['model_retry', null])
     })
   })
 

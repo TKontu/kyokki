@@ -697,3 +697,313 @@ describe('ReceiptReviewPage', () => {
     expect((confirms[0] as { items: unknown[] }).items).toHaveLength(50)
   })
 })
+
+describe('ReceiptReviewPage completeness (Q27)', () => {
+  // The K-Citymarket receipt: 15 product lines, the model returned 6, nine were put back
+  const COMPLETE: NonNullable<Receipt['completeness']> = {
+    text_lines: 15,
+    model_lines: 6,
+    recovered_by_retry: 9,
+    recovered_raw_lines: 0,
+    invalid_entries: 0,
+    unaccounted_lines: 0,
+    items_sum: 42.1,
+    receipt_total: 42.1,
+  }
+
+  function shortReceipt(completeness = COMPLETE): Receipt {
+    const read = Array.from({ length: 6 }, (_, index) => item(index))
+    const recovered = Array.from({ length: 9 }, (_, n) =>
+      item(6 + n, { recovered: 'model_retry' })
+    )
+    return receipt({ completeness }, [...read, ...recovered])
+  }
+
+  it('says how many lines the model missed and marks the recovered ones', async () => {
+    mockApi(shortReceipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 14')
+    expect(
+      screen.getByText(
+        '9 of 15 lines were not read by the model — they are recovered below, please check them.'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('recovered')).toHaveLength(9)
+    expect(within(rows()[6]).getByText('recovered')).toBeInTheDocument()
+    expect(within(rows()[5]).queryByText('recovered')).not.toBeInTheDocument()
+    // The header counts every row, recovered ones included
+    expect(screen.getByText('15 items read, 0 already known')).toBeInTheDocument()
+    expect(screen.queryByText(/unusable entries/)).not.toBeInTheDocument()
+    // The sum agrees with the total and every line was accounted for
+    expect(screen.queryByText(/add up to/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/could not be read/)).not.toBeInTheDocument()
+  })
+
+  it('says the items do not add up to the receipt total', async () => {
+    mockApi(
+      receipt({
+        completeness: {
+          ...COMPLETE,
+          text_lines: null,
+          model_lines: 1,
+          recovered_by_retry: 0,
+          items_sum: 30,
+          receipt_total: 42.1,
+        },
+      })
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(
+      screen.getByText(
+        'The items add up to 30.00 but the receipt total is 42.10 — something may be missing.'
+      )
+    ).toBeInTheDocument()
+    // A photo receipt has no text lines to count
+    expect(screen.queryByText(/not read by the model/)).not.toBeInTheDocument()
+  })
+
+  it('lets a small rounding difference pass', async () => {
+    mockApi(
+      receipt({
+        completeness: {
+          ...COMPLETE,
+          recovered_by_retry: 0,
+          // Within 1% of the total
+          items_sum: 99.5,
+          receipt_total: 100,
+        },
+      })
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(screen.queryByText(/add up to/)).not.toBeInTheDocument()
+  })
+
+  it('says how many lines could still not be read', async () => {
+    mockApi(receipt({ completeness: { ...COMPLETE, recovered_by_retry: 0, unaccounted_lines: 2 } }))
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(
+      screen.getByText('2 lines could not be read — see the receipt text.')
+    ).toBeInTheDocument()
+  })
+
+  it('shows no banner when nothing was recovered', async () => {
+    mockApi(
+      receipt({
+        completeness: { ...COMPLETE, text_lines: 1, model_lines: 1, recovered_by_retry: 0 },
+      })
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(screen.queryByText(/not read by the model/)).not.toBeInTheDocument()
+    expect(screen.queryByText('recovered')).not.toBeInTheDocument()
+  })
+
+  it('shows no banner for an older receipt without completeness', async () => {
+    mockApi(receipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(screen.queryByText(/not read by the model/)).not.toBeInTheDocument()
+  })
+
+  it('counts both kinds of recovery and mentions unusable entries', async () => {
+    mockApi(
+      shortReceipt({
+        ...COMPLETE,
+        recovered_by_retry: 7,
+        recovered_raw_lines: 2,
+        invalid_entries: 3,
+      })
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 14')
+    expect(screen.getByText(/^9 of 15 lines were not read by the model/)).toBeInTheDocument()
+    expect(screen.getByText("The model's answer had 3 unusable entries.")).toBeInTheDocument()
+  })
+
+  it('a line taken from the receipt text starts skipped until it has a category', async () => {
+    const confirms = mockApi(
+      receipt(
+        {
+          completeness: {
+            ...COMPLETE,
+            text_lines: 2,
+            model_lines: 1,
+            recovered_by_retry: 0,
+            recovered_raw_lines: 1,
+          },
+        },
+        [
+          item(0),
+          item(1, {
+            name: 'KG BANAANI',
+            generic_name: null,
+            suggested_category: null,
+            recovered: 'raw_line',
+          }),
+        ]
+      )
+    )
+    renderPage()
+
+    await screen.findByText('KG BANAANI')
+    const [first, second] = rows()
+    expect(within(second).getByText('recovered')).toBeInTheDocument()
+    expect(
+      within(second).getByText('from the receipt text — pick a category')
+    ).toBeInTheDocument()
+    expect(within(first).queryByText(/from the receipt text/)).not.toBeInTheDocument()
+    expect(within(second).getByRole('checkbox')).not.toBeChecked()
+    expect(addButton()).toHaveAccessibleName(/add 1 item$/i)
+
+    fireEvent.change(within(second).getByLabelText('Category'), { target: { value: 'meat' } })
+    expect(within(second).getByRole('checkbox')).toBeChecked()
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items[1]).toEqual({
+      index: 1,
+      line_id: 'line-1',
+      name: 'KG BANAANI',
+      category: 'meat',
+      quantity: 1,
+      unit: 'pcs',
+      purchase_date: isoDaysAgo(3),
+    })
+  })
+})
+
+describe('ReceiptReviewPage missed items (Q27)', () => {
+  const addToList = () => screen.getByRole('button', { name: 'Add to list' })
+
+  function fillMissed(name: string, category = 'dairy', quantity = '2', unit = 'dl') {
+    fireEvent.change(screen.getByLabelText('Missed item name'), { target: { value: name } })
+    fireEvent.change(screen.getByLabelText('Missed item category'), {
+      target: { value: category },
+    })
+    fireEvent.change(screen.getByLabelText('Missed item quantity'), {
+      target: { value: quantity },
+    })
+    const unitGroup = screen.getByRole('radiogroup', { name: 'Missed item unit' })
+    fireEvent.click(within(unitGroup).getByLabelText(unit))
+  }
+
+  it('sends a hand-added item as a free line', async () => {
+    const confirms = mockApi(receipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fillMissed('Cream')
+    fireEvent.click(addToList())
+
+    expect(screen.getByText('Cream')).toBeInTheDocument()
+    // The form is ready for the next one
+    expect(screen.getByLabelText('Missed item name')).toHaveValue('')
+    expect(addButton()).toHaveAccessibleName(/add 2 items$/i)
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect(confirms[0]).toEqual({
+      non_food_indexes: [],
+      items: [
+        { index: 0, line_id: 'line-0', name: 'Generic 0', category: 'dairy', quantity: 1, unit: 'pcs', purchase_date: isoDaysAgo(3) },
+        { name: 'Cream', category: 'dairy', quantity: 2, unit: 'dl', purchase_date: isoDaysAgo(3) },
+      ],
+    })
+  })
+
+  it('cannot add an item without a name', async () => {
+    mockApi(receipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fillMissed('   ')
+    expect(addToList()).toBeDisabled()
+    fireEvent.click(addToList())
+    expect(addButton()).toHaveAccessibleName(/add 1 item$/i)
+  })
+
+  it('cannot add an item without a category', async () => {
+    mockApi(receipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fillMissed('Cream', '')
+    expect(addToList()).toBeDisabled()
+  })
+
+  it('drops a hand-added item that is removed before confirming', async () => {
+    const confirms = mockApi(receipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fillMissed('Cream')
+    fireEvent.click(addToList())
+    fillMissed('Butter', 'dairy', '1', 'pcs')
+    fireEvent.click(addToList())
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Cream' }))
+
+    expect(screen.queryByText('Cream')).not.toBeInTheDocument()
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    const sent = (confirms[0] as { items: Record<string, unknown>[] }).items
+    expect(sent).toHaveLength(2)
+    expect(sent[1]).toEqual({
+      name: 'Butter',
+      category: 'dairy',
+      quantity: 1,
+      unit: 'pcs',
+      purchase_date: isoDaysAgo(3),
+    })
+  })
+
+  it('a receipt with only a hand-added item confirms it rather than dismissing', async () => {
+    const confirms = mockApi(receipt({}, []))
+    renderPage()
+
+    await screen.findByRole('button', { name: /^dismiss receipt$/i })
+    fillMissed('Cream')
+    fireEvent.click(addToList())
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items).toHaveLength(1)
+  })
+})
+
+describe('ReceiptReviewPage receipt text (Q28)', () => {
+  it('keeps the receipt text folded until asked for', async () => {
+    mockApi(receipt({ ocr_raw_text: 'K-CITYMARKET\nKG BANAANI 1,20' }))
+    renderPage()
+
+    const toggle = await screen.findByRole('button', { name: 'Show receipt text' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText(/KG BANAANI 1,20/)).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(screen.getByText(/KG BANAANI 1,20/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide receipt text' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+  })
+
+  it('offers no receipt text when there is none', async () => {
+    mockApi(receipt({ ocr_raw_text: null }))
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(screen.queryByRole('button', { name: /receipt text/i })).not.toBeInTheDocument()
+  })
+})
