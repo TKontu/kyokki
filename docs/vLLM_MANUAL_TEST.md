@@ -1250,3 +1250,22 @@ the heuristic parser, and its truncated answer is now stored on the receipt as
 answer was captured here (the measure script stores a failed read's answer only since the
 final pass). Whether it is a reasoning run-away or a repetition loop is not known; raising
 `LLM_MAX_TOKENS` or capping the reasoning is a decision for the operator.
+
+### After the PR #131 review fixes (2026-09-27)
+
+One short check on `c2.muse-glimmer` (reworded wording, empty catalog, `--runs 1`, strictly
+sequential) that correct reads stay clean after the stricter sums (F1).
+
+| fixture | code | found | after | categories | raw rows | re-reads | sum vs total | first read s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| K-Citymarket | F1 fix | 15/15 | 15/15 | 12 | 0 | 0 | 73.07 = 73.07 | 46 |
+| S-kaupat | F1 fix | 49/49 | 49/49 | 41 | 0 | **1** | 173.92 = 173.92 | 108 |
+| K-Citymarket | + cited discount | 15/15 | 15/15 | **1** | 0 | 0 | 73.07 = 73.07 | 54 |
+| S-kaupat | + cited discount | 49/49 | 49/49 | 41 | 0 | 0 | 173.92 = 173.92 | 120 |
+
+- The first S-kaupat read was correct but re-read `BONUSTA KERRYTTÄVÄT OSTOK 173,92`: its
+  `NORM.`/`ALENNUS` pairs are cited in the products' `l` and also listed as discounts, so the
+  strict sum took them off twice and ruled nothing out. A discount line a product cites is now
+  inside that line total; the replayed answer and the second live read make no re-read.
+- The "1 of 15 categories" signal recurred once on K (all 15 rows read and priced, 0 raw rows).
+  The raw answer was not captured on this run (`--raw-dir` was not set).
