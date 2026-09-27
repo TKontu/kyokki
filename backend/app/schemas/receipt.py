@@ -140,7 +140,11 @@ class Completeness(BaseModel):
     """How completely the model read a receipt, and whether its sums agree (Q27)."""
 
     text_lines: int | None = Field(
-        None, description="Numbered text lines the model was shown; null for an image"
+        None,
+        description=(
+            "Final product rows on a text receipt (model + re-read + raw lines); null "
+            "for an image. The banner reads '{recovered} of {text_lines}'"
+        ),
     )
     model_lines: int = Field(0, description="Products the first model read returned")
     recovered_by_retry: int = Field(
@@ -153,10 +157,18 @@ class Completeness(BaseModel):
         0, description="Entries the model returned that could not be used"
     )
     unaccounted_lines: int = Field(
-        0, description="Numbered lines the first read did not account for"
+        0,
+        description=(
+            "Priced lines still neither a product row nor a listed non-product after "
+            "recovery; normally 0"
+        ),
     )
     items_sum: float | None = Field(
-        None, description="Line totals plus discounts, deposits and fees"
+        None,
+        description=(
+            "Line totals plus discounts, deposits and fees; compared with the total in "
+            "whole cents, within max(5 cents, 1 %)"
+        ),
     )
     receipt_total: float | None = Field(None, description="The printed total")
     profile: str | None = Field(

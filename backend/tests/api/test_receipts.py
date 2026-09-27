@@ -976,12 +976,12 @@ class TestKCitymarketReview:
         assert len(items) == 15
         assert [item["recovered"] for item in items] == [None] * 6 + ["model_retry"] * 9
         assert body["completeness"] == {
-            "text_lines": 53,
+            "text_lines": 15,
             "model_lines": 6,
             "recovered_by_retry": 9,
             "recovered_raw_lines": 0,
             "invalid_entries": 0,
-            "unaccounted_lines": 12,
+            "unaccounted_lines": 0,
             "items_sum": 73.07,
             "receipt_total": None,
             "profile": "fi",

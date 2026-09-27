@@ -1275,13 +1275,13 @@ class TestKCitymarketCompleteness:
         assert [line.recovered for line in lines].count("model_retry") == 9
         assert all(line.recovered is None for line in lines[:6])
         assert outcome.completeness == {
-            # every non-blank line, the total and VAT lines included
-            "text_lines": 53,
+            # contract ruling 1: product rows, and what is left over after recovery
+            "text_lines": 15,
             "model_lines": 6,
             "recovered_by_retry": 9,
             "recovered_raw_lines": 0,
             "invalid_entries": 0,
-            "unaccounted_lines": 12,
+            "unaccounted_lines": 0,
             "items_sum": 73.07,
             # the total line is left out of the prompt on Finnish receipts
             "receipt_total": None,
@@ -1323,6 +1323,9 @@ class TestKCitymarketCompleteness:
         assert len(outcome.extraction.lines) == 15
         assert outcome.completeness["recovered_raw_lines"] == 9
         assert outcome.completeness["recovered_by_retry"] == 0
+        # a raw row accounts for its lines
+        assert outcome.completeness["unaccounted_lines"] == 0
+        assert outcome.completeness["text_lines"] == 15
         assert outcome.raw_completions == {"raw_completion": '{"p": ["six products"]}'}
 
     async def test_a_full_answer_makes_no_extra_call(self, no_unplanned_re_read):
@@ -1735,7 +1738,7 @@ class TestSuspectAndUnpricedLines:
 
         no_unplanned_re_read.assert_awaited_once()
         assert [p.name for p in outcome.extraction.lines] == ["MAITO"]
-        assert outcome.completeness["unaccounted_lines"] == 1
+        assert outcome.completeness["unaccounted_lines"] == 0
         assert outcome.completeness["recovered_raw_lines"] == 0
 
     async def test_lines_without_an_amount_need_no_accounting(
@@ -1751,6 +1754,21 @@ class TestSuspectAndUnpricedLines:
 
         no_unplanned_re_read.assert_not_awaited()
         assert outcome.completeness["unaccounted_lines"] == 0
+        assert len(outcome.extraction.lines) == 1
+
+    @pytest.mark.parametrize(
+        "line", ["Datum: 27.09.2026 Uhrzeit: 18:05", "Racun br: 5/6 26.9.2026 10:15"]
+    )
+    async def test_a_date_is_not_an_amount(self, no_unplanned_re_read, line):
+        """Measured: "27.09" of a date read as a price and came back as a junk row."""
+        text = f"SHOP\nMAITO 1,20\n{line}\n"
+        answer = ReceiptExtraction(
+            method="text", lines=[ExtractedLine(name="MAITO", source_lines=[2])]
+        )
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
         assert len(outcome.extraction.lines) == 1
 
     async def test_an_unpriced_neighbour_goes_to_the_re_read_with_its_partner(
@@ -1770,7 +1788,8 @@ class TestSuspectAndUnpricedLines:
             (3, "JUUSTO GOUDA"),
             (4, "1 kpl 4,50"),
         ]
-        assert outcome.completeness["unaccounted_lines"] == 1
+        # the raw row took the line, so nothing is left over
+        assert outcome.completeness["unaccounted_lines"] == 0
         (row,) = [p for p in outcome.extraction.lines if p.recovered]
         assert (row.name, row.source_lines) == ("JUUSTO GOUDA", [3, 4])
 
@@ -1796,11 +1815,22 @@ class TestReceiptArithmetic:
             (100.0, 101.5, True),
             (1.0, 1.04, False),
             (1.0, 1.1, True),
+            # whole cents on both sides: 0.95 against 1.00 is inside 5 cents
+            (1.0, 0.95, False),
+            (1.0, 0.94, True),
+            (73.07, 73.07 + 1e-9, False),
         ],
     )
     def test_tolerance_is_five_cents_or_one_percent(self, total, items, off):
         products = [ExtractedLine(name="A", price=items)]
         assert receipt_arithmetic(products, [], total)[1] is off
+
+    def test_the_sum_is_whole_cents(self):
+        products = [
+            ExtractedLine(name="A", price=0.1),
+            ExtractedLine(name="B", price=0.2),
+        ]
+        assert receipt_arithmetic(products, [], 0.3) == (0.3, False)
 
     def test_without_prices_there_is_no_sum(self):
         assert receipt_arithmetic([ExtractedLine(name="A")], [], 3.0) == (None, False)
@@ -1883,8 +1913,9 @@ class TestCompletenessIsPersisted:
         await db_session.refresh(pdf_receipt)
         completeness = pdf_receipt.ocr_structured["completeness"]
         assert completeness["model_lines"] == 0
-        # every line is in the prompt now, the total included (Q27)
-        assert completeness["text_lines"] == completeness["unaccounted_lines"] == 4
+        # contract ruling 1: the fallback's product rows; nothing left unaccounted
+        assert completeness["text_lines"] == 2
+        assert completeness["unaccounted_lines"] == 0
 
 
 class TestPrintedPackSizeWins:

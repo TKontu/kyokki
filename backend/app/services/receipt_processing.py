@@ -104,18 +104,19 @@ def _line_id_for(name: str, previous: dict[str, list[str]]) -> str:
 # profile adds evidence and never decides alone. The receipt's own arithmetic (line totals
 # against the printed total) is checked on the text and vision paths.
 
-# A price-like amount in any currency: digits with a two-digit `.` or `,` decimal part.
-_AMOUNT = re.compile(r"(?<![\d.,])[-−]?\d+[.,]\d{2}(?!\d)")
+# A price-like amount in any currency: digits with a two-digit `.` or `,` decimal part,
+# not part of a longer number such as a date (27.09.2026 is not 27.09)
+_AMOUNT = re.compile(r"(?<![\d.,])[-−]?\d+[.,]\d{2}(?![\d]|[.,]\d)")
 # The same with an optional currency symbol or three-letter code, and a trailing minus
 _AMOUNT_TEXT = re.compile(
-    r"(?:[€$£¥]\s*)?(?<![\d.,])[-−]?\d+[.,]\d{2}(?!\d)-?"
+    r"(?:[€$£¥]\s*)?(?<![\d.,])[-−]?\d+[.,]\d{2}(?![\d]|[.,]\d)-?"
     r"(?:\s*(?:[€$£¥]|[A-Z]{3}\b))?"
 )
 # A run of four or more letters in any script: something a name has and a detail line
 # ("0,523 KG 1,99 €/KG", "2 x 1,49", "3 kom x 1,29") does not
 _WORD = re.compile(r"[^\W\d_]{4,}")
-# Beyond this difference the line totals do not add up to the printed total
-_SUM_TOLERANCE = 0.05
+# Beyond this difference, in cents, the line totals do not add up to the printed total
+_SUM_TOLERANCE_CENTS = 5
 _FUZZY_NAME = 90
 # Kinds whose amount the receipt adds to or takes from the product lines
 _SIGNED_KINDS = ("discount", "deposit", "fee")
@@ -271,10 +272,14 @@ def receipt_arithmetic(
     ]
     if not prices:
         return None, False
-    items_sum = round(sum(prices) + sum(signed), 2)
+    # Compared in whole cents, so float noise never decides a mismatch
+    sum_cents = round((sum(prices) + sum(signed)) * 100)
+    items_sum = sum_cents / 100
     if total is None:
         return items_sum, False
-    return items_sum, abs(items_sum - total) > max(_SUM_TOLERANCE, abs(total) / 100)
+    total_cents = round(total * 100)
+    tolerance = max(_SUM_TOLERANCE_CENTS, abs(total_cents) / 100)
+    return items_sum, abs(sum_cents - total_cents) > tolerance
 
 
 @dataclass
@@ -467,6 +472,9 @@ async def reconcile_text_read(
     )
     final = first + recovered + raw_rows
     extraction.lines = final
+    # After recovery a priced line is left over only if no row took it (normally none)
+    in_rows = {n for row in raw_rows for n in row.source_lines}
+    left_over = {n for n in still if n in priced and n not in in_rows}
     missed = len(recovered) + len(raw_rows)
     note = _join_notes(
         f"{missed} of {len(final)} lines were not read by the model and were recovered"
@@ -482,7 +490,8 @@ async def reconcile_text_read(
                 "model_lines": len(first),
                 "recovered_by_retry": len(recovered),
                 "recovered_raw_lines": len(raw_rows),
-                "unaccounted_lines": len(unaccounted),
+                "unaccounted_before_recovery": len(unaccounted),
+                "unaccounted_lines": len(left_over),
                 "items_sum": items_sum,
                 "receipt_total": extraction.receipt_total,
             },
@@ -492,13 +501,14 @@ async def reconcile_text_read(
         extraction=extraction,
         note=note,
         completeness=_completeness(
-            text_lines=len(lines),
+            # contract ruling 1: product rows, not text lines; "9 of 15" on the K receipt
+            text_lines=len(final),
             model_lines=len(first),
             recovered_by_retry=len(recovered),
             recovered_raw_lines=len(raw_rows),
             invalid_entries=extraction.invalid_entries
             + (retry.invalid_entries if retry else 0),
-            unaccounted_lines=len(unaccounted),
+            unaccounted_lines=len(left_over),
             items_sum=items_sum,
             receipt_total=extraction.receipt_total,
             profile=profile,
@@ -615,7 +625,6 @@ class ReceiptProcessingService:
         stands and the receipt fails as before (MVP-R3b). A model answer that leaves lines
         out is completed by `reconcile_text_read` (Q27).
         """
-        text_lines = len([n for n, _ in number_receipt_lines(text) if n is not None])
         try:
             with timings.llm():
                 extraction = await extract_from_text(text, categories, known_products)
@@ -632,7 +641,7 @@ class ReceiptProcessingService:
                 extraction=fallback,
                 note=f"Model unavailable: {exc}"[:MAX_ERROR_CHARS],
                 completeness=_completeness(
-                    text_lines=text_lines, model_lines=0, unaccounted_lines=text_lines
+                    text_lines=len(fallback.lines), model_lines=0
                 ),
             )
 
@@ -648,10 +657,9 @@ class ReceiptProcessingService:
                     extraction=fallback,
                     note="Model found no products",
                     completeness=_completeness(
-                        text_lines=text_lines,
+                        text_lines=len(fallback.lines),
                         model_lines=0,
                         invalid_entries=extraction.invalid_entries,
-                        unaccounted_lines=text_lines,
                     ),
                     raw_completions=_raw(extraction, "raw_completion"),
                 )
