@@ -138,12 +138,19 @@ class Settings(BaseSettings):
     def receipt_stale_minutes(self) -> int:
         """Minutes a receipt may stay `processing` before `fail_stale` fails it.
 
-        A receipt makes up to three sequential model calls (the first read, one targeted
-        re-read and the product selection), each allowed LLM_TIMEOUT, so a healthy but slow
-        receipt can take 3 x LLM_TIMEOUT. The window is never below that plus 5 minutes of
-        slack for OCR and the database, whatever an older stack.env says (Q27 verdict #1).
+        The per-receipt budget (PR #131 F11): OCR of an image (MINERU_TIMEOUT), then up to
+        three sequential model calls - the first read and one targeted re-read, each allowed
+        LLM_TIMEOUT, and the product selection, which runs inside receipt processing and is
+        allowed LLM_ESTIMATE_TIMEOUT. The budget takes the larger of 3 x LLM_TIMEOUT and
+        2 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT, so it also covers a stack where selection
+        still took LLM_TIMEOUT. The catalog estimates run after confirm, outside receipt
+        processing, and are not counted. The window is never below the budget plus 5
+        minutes of slack for the database, whatever an older stack.env says (verdict #1).
         """
-        budget = math.ceil(3 * self.LLM_TIMEOUT / 60) + 5
+        models = max(
+            3 * self.LLM_TIMEOUT, 2 * self.LLM_TIMEOUT + self.LLM_ESTIMATE_TIMEOUT
+        )
+        budget = math.ceil((self.MINERU_TIMEOUT + models) / 60) + 5
         return max(self.RECEIPT_STALE_MINUTES or 0, budget)
 
     TELEGRAM_BOT_TOKEN: SecretStr | None = None

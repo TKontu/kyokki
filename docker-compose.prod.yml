@@ -41,7 +41,7 @@ x-backend-env: &backend-env
   OPENFOODFACTS_API_URL: ${OPENFOODFACTS_API_URL:-https://world.openfoodfacts.org/api/v2}
   FUZZY_MATCH_THRESHOLD: ${FUZZY_MATCH_THRESHOLD:-80}
   RECEIPT_WORKER_POLL_SECONDS: ${RECEIPT_WORKER_POLL_SECONDS:-2}
-  # Empty: the window follows the model budget (26 minutes at LLM_TIMEOUT=420)
+  # Empty: the window follows the per-receipt budget (28 minutes with the defaults)
   RECEIPT_STALE_MINUTES: ${RECEIPT_STALE_MINUTES:-}
   # Containers default to UTC; the cook reads Helsinki dates.
   TZ: ${TZ:-Europe/Helsinki}

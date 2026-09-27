@@ -69,13 +69,20 @@ def test_llm_defaults_target_the_llama_swap_gateway(
 
 
 def test_receipt_worker_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("RECEIPT_WORKER_POLL_SECONDS", "RECEIPT_STALE_MINUTES", "LLM_TIMEOUT"):
+    for key in (
+        "RECEIPT_WORKER_POLL_SECONDS",
+        "RECEIPT_STALE_MINUTES",
+        "LLM_TIMEOUT",
+        "LLM_ESTIMATE_TIMEOUT",
+        "MINERU_TIMEOUT",
+    ):
         monkeypatch.delenv(key, raising=False)
     settings = _settings(monkeypatch)
     assert settings.RECEIPT_WORKER_POLL_SECONDS == 2.0
-    # Unset, the stale window follows the model budget: ceil(3 x 420 s / 60) + 5
+    # Unset, the stale window follows the per-receipt budget (PR #131 F11): OCR 120 s,
+    # then max(3 x 420 s, 2 x 420 s + 180 s) = 1380 s -> ceil(23) + 5
     assert settings.RECEIPT_STALE_MINUTES is None
-    assert settings.receipt_stale_minutes == 26
+    assert settings.receipt_stale_minutes == 28
 
 
 @pytest.mark.parametrize("value", ["", "10"])
@@ -84,9 +91,15 @@ def test_the_stale_window_never_falls_below_the_model_budget(
 ) -> None:
     """Q27 verdict #1: three 420 s model calls fit in 21 minutes, and a 10-minute window
     failed a slow but healthy receipt. An old stack.env still says 10."""
-    settings = _settings(monkeypatch, RECEIPT_STALE_MINUTES=value, LLM_TIMEOUT="420")
-    assert settings.receipt_stale_minutes == 26
-    assert settings.receipt_stale_minutes * 60 > 3 * settings.LLM_TIMEOUT
+    settings = _settings(
+        monkeypatch,
+        RECEIPT_STALE_MINUTES=value,
+        LLM_TIMEOUT="420",
+        LLM_ESTIMATE_TIMEOUT="180",
+        MINERU_TIMEOUT="120",
+    )
+    assert settings.receipt_stale_minutes == 28
+    assert settings.receipt_stale_minutes * 60 > 3 * settings.LLM_TIMEOUT + 120
 
 
 def test_a_longer_stale_window_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -97,8 +110,31 @@ def test_a_longer_stale_window_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_the_stale_window_follows_a_shorter_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = _settings(monkeypatch, RECEIPT_STALE_MINUTES="", LLM_TIMEOUT="60")
-    assert settings.receipt_stale_minutes == 8
+    settings = _settings(
+        monkeypatch,
+        RECEIPT_STALE_MINUTES="",
+        LLM_TIMEOUT="60",
+        LLM_ESTIMATE_TIMEOUT="60",
+        MINERU_TIMEOUT="60",
+    )
+    # 60 s OCR + 3 x 60 s = 240 s -> 4 + 5
+    assert settings.receipt_stale_minutes == 9
+
+
+def test_a_long_selection_timeout_widens_the_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PR #131 F11: product selection runs inside receipt processing with
+    LLM_ESTIMATE_TIMEOUT. With 180 s reads and a 600 s selection the worst case is
+    120 s OCR + 2 x 180 s + 600 s = 18 minutes; the old 3 x LLM_TIMEOUT gave 14."""
+    settings = _settings(
+        monkeypatch,
+        RECEIPT_STALE_MINUTES="",
+        LLM_TIMEOUT="180",
+        LLM_ESTIMATE_TIMEOUT="600",
+        MINERU_TIMEOUT="120",
+    )
+    assert settings.receipt_stale_minutes == 23
 
 
 def test_estimates_and_selection_have_their_own_shorter_timeout(
