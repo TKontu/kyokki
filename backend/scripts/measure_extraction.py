@@ -40,6 +40,7 @@ from app.parsers.base import ExtractedLine
 from app.services import llm_extractor
 from app.services.llm_extractor import (
     CategoryOption,
+    LLMExtractionError,
     build_instructions,
     extract_from_text,
     format_numbered,
@@ -493,9 +494,20 @@ async def main(argv: list[str] | None = None) -> int:
                 "catalog": len(catalog),
                 "wording": wording,
             }
-            row.update(
-                await measure(text, options, catalog, expected, not args.no_reconcile)
-            )
+            started = time.monotonic()
+            try:
+                row.update(
+                    await measure(
+                        text, options, catalog, expected, not args.no_reconcile
+                    )
+                )
+            except LLMExtractionError as exc:
+                # A failed read is a result too (a timeout is what production sees)
+                row.update(error=str(exc), model_s=round(time.monotonic() - started, 1))
+                results.append(row)
+                if not args.json:
+                    print(f"\n{row['fixture']} run {run}: FAILED {exc}")
+                continue
             results.append(row)
             if args.json:
                 continue
