@@ -1,6 +1,6 @@
 /**
  * The drawn parts of the fridge (Q17-M; shared with the production fridge since Q17-B):
- * chrome, glass shelves, drawers, door bins and the odd bottle. All decoration - they sit inside a drawing that is `aria-hidden` - and
+ * chrome, glass shelves, drawers, door bins, the bread basket, Other's crate and the odd bottle. All decoration - they sit inside a drawing that is `aria-hidden` - and
  * all coloured through Tailwind classes, so each has a light and a dark finish.
  */
 
@@ -196,12 +196,22 @@ export function Eggs({ x, base, count, gap = 20 }: { x: number; base: number; co
   )
 }
 
-/** A wicker basket for Other, standing on `box`'s bottom edge. */
-export function Basket({ box }: { box: Box }) {
+/**
+ * A wicker basket standing on `box`'s bottom edge. The production fridge keeps bread in one on
+ * the larder (Q23); the mocks use it for Other. `loaves` puts a loaf and a baguette in it,
+ * peeking over the rim.
+ */
+export function Basket({ box, loaves = false }: { box: Box; loaves?: boolean }) {
   const { x, y, w, h } = box
   const inset = w * 0.08
   return (
     <g>
+      {loaves && (
+        <g className="fill-[#e0a560] stroke-[#b97a3a] dark:fill-[#a7743f] dark:stroke-[#7a5228]" strokeWidth={1.5}>
+          <path d={`M${x + w * 0.12},${y + h * 0.36} L${x + w * 0.5},${y + h * 0.02} L${x + w * 0.6},${y + h * 0.12} L${x + w * 0.26},${y + h * 0.4} Z`} strokeLinejoin="round" />
+          <ellipse cx={x + w * 0.66} cy={y + h * 0.3} rx={w * 0.2} ry={h * 0.17} />
+        </g>
+      )}
       <path
         d={`M${x + w * 0.2},${y + h * 0.3} Q${x + w / 2},${y - h * 0.35} ${x + w * 0.8},${y + h * 0.3}`}
         className="fill-none stroke-[#b58b5a] dark:stroke-[#7d5f3e]"
@@ -225,6 +235,21 @@ export function Basket({ box }: { box: Box }) {
           strokeWidth={2}
         />
       ))}
+    </g>
+  )
+}
+
+/** A wooden crate standing on `box`'s bottom edge: Other, at the larder's foot. */
+export function Crate({ box }: { box: Box }) {
+  const { x, y, w, h } = box
+  const slat = h / 3
+  return (
+    <g className="fill-[#dcc39a] stroke-[#a8875a] dark:fill-[#6e5a3e] dark:stroke-[#4f3f2a]" strokeWidth={2}>
+      {[0, 1, 2].map((row) => (
+        <rect key={row} x={x} y={y + row * slat + 1} width={w} height={slat - 3} rx={2} />
+      ))}
+      <rect x={x + 4} y={y} width={8} height={h} rx={1} />
+      <rect x={x + w - 12} y={y} width={8} height={h} rx={1} />
     </g>
   )
 }

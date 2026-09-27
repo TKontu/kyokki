@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import handle_integrity_errors
 from app.crud import inventory_item as crud_inventory
+from app.crud.product_master import MovedInventoryItem
 from app.db.session import get_db
 from app.schemas.consume import ConsumeRequest
 from app.schemas.inventory_item import (
@@ -31,6 +32,7 @@ from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest
 from app.services.item_status import ItemEvent, ItemFrozen
 from app.services.quick_add import quick_add
+from app.services.shelf_life_learning import update_item
 from app.services.shelf_life_on_create import schedule_estimates
 
 router = APIRouter()
@@ -213,11 +215,12 @@ async def update_inventory_item(
     """
     try:
         async with handle_integrity_errors():
-            item = await crud_inventory.update_inventory_item(db, item_id, item_update)
+            result = await update_item(db, item_id, item_update)
     except ItemFrozen as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
+    item = result.item
     if not item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -231,8 +234,25 @@ async def update_inventory_item(
         status=item.status,
         product_name=item.product_name,
     )
+    # A date set by hand may have taught the product a shelf life (Q24), moving its items
+    # dated from the shelf life (`expiry_source='calculated'`) with it
+    await _announce_moved(result.moved, item.product_name)
 
     return item
+
+
+async def _announce_moved(
+    items: list[MovedInventoryItem], product_name: str | None
+) -> None:
+    """Tell every open iPad that these items now expire on a different day."""
+    for moved in items:
+        await broadcast_inventory_update(
+            inventory_item_id=moved.id,
+            action="updated",
+            current_quantity=moved.current_quantity,
+            status=moved.status,
+            product_name=product_name,
+        )
 
 
 async def _move_many(

@@ -3,7 +3,17 @@
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +24,11 @@ from app.crud import product_master as crud_product
 from app.crud import store_product_alias as crud_alias
 from app.crud.product_master import MovedInventoryItem
 from app.db.session import get_db
+from app.models.product_master import IconStatus
 from app.schemas.product_master import (
     CatalogEstimateChange,
     CatalogEstimateResponse,
+    IconRedrawRequest,
     ProductMasterCreate,
     ProductMasterResponse,
     ProductMasterUpdate,
@@ -29,7 +41,7 @@ from app.schemas.product_names import (
     ProductNamesResponse,
 )
 from app.schemas.stock import ResolveResponse, TeachNameRequest
-from app.services import product_lookup
+from app.services import product_icons, product_lookup
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
     broadcast_product_update,
@@ -117,28 +129,37 @@ async def get_product(
     "", response_model=ProductMasterResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_product(
-    product: ProductMasterCreate, db: AsyncSession = Depends(get_db)
+    product: ProductMasterCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
 ) -> ProductMasterResponse:
     """Create a new product.
 
     Its shelf life is one somebody typed, so it is stored as the cook's (Q19) and no
-    estimate is scheduled: no estimate path may replace it.
+    estimate is scheduled: no estimate path may replace it. Its icon is drawn in the
+    background (Q18), like every other new product's.
     """
     async with handle_integrity_errors():
-        return await crud_product.create_product(db, product)
+        created = await crud_product.create_product(db, product)
+    product_icons.schedule_icons(background_tasks, [UUID(str(created.id))])
+    return created
 
 
 @router.patch("/{product_id}", response_model=ProductMasterResponse)
 async def update_product(
     product_id: UUID,
     product_update: ProductMasterUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> ProductMasterResponse:
     """Update a product.
 
     Correcting a shelf life moves the stock that was dated by the old one (Q12): a date
     the cook typed is left alone, and so is anything already gone from the kitchen.
+    A new name redraws the icon (Q18), unless the cook chose the category emoji.
     """
+    before = await crud_product.get_product(db, product_id)
+    old_name = None if before is None else str(before.canonical_name)
     async with handle_integrity_errors():
         product = await crud_product.update_product(db, product_id, product_update)
     if not product:
@@ -153,8 +174,104 @@ async def update_product(
         await db.commit()
         await _announce(moved, str(product.canonical_name))
 
+    renamed = str(product.canonical_name) != old_name
+    if renamed and product.icon_status != IconStatus.CLEARED:
+        async with handle_integrity_errors():
+            await product_icons.request_redraw(db, product_id)
+        product_icons.schedule_icons(background_tasks, [product_id])
+
     await broadcast_product_update(
         product_id, action="updated", product_name=str(product.canonical_name)
+    )
+    return product
+
+
+# No clash with `GET /{product_id}` above: that path has one segment, this one two.
+@router.get(
+    "/{product_id}/icon.svg",
+    response_class=Response,
+    responses={
+        200: {"content": {"image/svg+xml": {}}, "description": "The drawn icon"},
+        304: {"description": "The copy the client has is current"},
+        404: {"description": "No drawing: show the category emoji"},
+    },
+)
+async def get_product_icon(
+    product_id: UUID,
+    if_none_match: str | None = Header(None),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """The product's drawn icon (Q18), for an `<img src>`; 404 when it has none.
+
+    The markup was sanitised when it was stored. It is served under a policy that loads and
+    runs nothing, in case something ever slips through, and cached by its version: the
+    iPad asks for `?v=<icon_version>`, so a redraw is a new URL.
+    """
+    stored = await product_icons.stored_icon(db, product_id)
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This product has no drawn icon",
+        )
+    svg, updated_at = stored
+    etag = f'"{int(updated_at.timestamp())}"'
+    headers = {
+        "Content-Security-Policy": "default-src 'none'",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, max-age=86400",
+        "ETag": etag,
+    }
+    if if_none_match == etag:
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    return Response(content=svg, media_type="image/svg+xml", headers=headers)
+
+
+@router.post(
+    "/{product_id}/icon",
+    response_model=ProductMasterResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def redraw_product_icon(
+    product_id: UUID,
+    background_tasks: BackgroundTasks,
+    request: IconRedrawRequest | None = Body(None),
+    db: AsyncSession = Depends(get_db),
+) -> ProductMasterResponse:
+    """Draw the product's icon again (Q18), optionally with a hint from the cook.
+
+    Answers at once with `icon_status: pending`; the drawing lands in the background, a few
+    seconds to a few minutes later. Any earlier drawing stays on the tile until then, and
+    stays if the new one fails.
+    """
+    async with handle_integrity_errors():
+        product = await product_icons.request_redraw(db, product_id)
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with ID '{product_id}' not found",
+        )
+    hint = request.hint if request else None
+    product_icons.schedule_icons(background_tasks, [product_id], hint)
+    await broadcast_product_update(
+        product_id, action="icon_updated", product_name=str(product.canonical_name)
+    )
+    return product
+
+
+@router.delete("/{product_id}/icon", response_model=ProductMasterResponse)
+async def clear_product_icon(
+    product_id: UUID, db: AsyncSession = Depends(get_db)
+) -> ProductMasterResponse:
+    """Use the category emoji instead of a drawing (Q18). Only Redraw draws it again."""
+    async with handle_integrity_errors():
+        product = await product_icons.clear_icon(db, product_id)
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with ID '{product_id}' not found",
+        )
+    await broadcast_product_update(
+        product_id, action="icon_updated", product_name=str(product.canonical_name)
     )
     return product
 
@@ -432,6 +549,7 @@ async def merge_product(
 
 @router.post("/enrich")
 async def enrich_product(
+    background_tasks: BackgroundTasks,
     barcode: str = Query(
         ..., description="Product barcode to look up in Open Food Facts"
     ),
@@ -461,6 +579,8 @@ async def enrich_product(
         ).model_dump(mode="json")
 
         if created:
+            # A new product gets its icon drawn (Q18), after the response has gone.
+            product_icons.schedule_icons(background_tasks, [UUID(str(product.id))])
             return JSONResponse(
                 content=response_data, status_code=status.HTTP_201_CREATED
             )

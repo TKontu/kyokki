@@ -8,6 +8,7 @@ import {
   isAPIError,
   isNetworkError,
 } from '../index'
+import type { IconRedrawRequest, IconStatus } from '../product'
 
 describe('TypeScript Types', () => {
   describe('Type Compilation', () => {
@@ -62,6 +63,20 @@ describe('TypeScript Types', () => {
         updated_at: '2024-01-01T00:00:00Z',
       }
       expect(product.id).toBeDefined()
+    })
+
+    it('should carry the drawn icon fields (Q18)', () => {
+      const status: IconStatus[] = ['pending', 'ready', 'failed', 'cleared']
+      const product: Pick<ProductMaster, 'icon_status' | 'icon_version'> = {
+        icon_status: 'ready',
+        icon_version: 1790000000,
+      }
+      const item: Pick<InventoryItem, 'product_icon_version'> = { product_icon_version: null }
+      const redraw: IconRedrawRequest = { hint: 'oval rye pastry' }
+      expect(status).toHaveLength(4)
+      expect(product.icon_version).toBe(1790000000)
+      expect(item.product_icon_version).toBeNull()
+      expect(redraw.hint).toBe('oval rye pastry')
     })
 
     it('should compile Category type', () => {

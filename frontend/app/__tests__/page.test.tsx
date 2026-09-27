@@ -26,6 +26,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 function mockApi() {
   server.use(
     http.get(`${API_URL}/inventory`, () => HttpResponse.json([])),
+    http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null)),
     http.get(`${API_URL}/receipts`, () => HttpResponse.json([]))
   )
 }
@@ -36,6 +37,18 @@ describe('Home Page', () => {
     render(<Home />, { wrapper })
     expect(document.body).toBeInTheDocument()
     // Let both queries settle inside the test, so nothing is still in flight at teardown
+    await screen.findByText(/no items found/i)
+  })
+
+  it('names the page for screen readers only, so the fridge gets the room (Q20)', async () => {
+    mockApi()
+    render(<Home />, { wrapper })
+
+    const title = screen.getByRole('heading', { level: 1, name: 'Kyokki' })
+    expect(title).toHaveClass('sr-only')
+    // Undo and + Add stay on the page, not in the app's bar
+    expect(screen.getByRole('button', { name: '+ Add' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Undo/ })).toBeInTheDocument()
     await screen.findByText(/no items found/i)
   })
 

@@ -1,7 +1,8 @@
 /**
  * The production fridge on `/` (Q17-B): Cielo redrawn for the portrait iPad. It keeps
  * FridgeView's contract (held there) and adds what the mocks lacked: a region that holds more
- * dots than it has room for says so with a visible marker, and no two areas overlap.
+ * dots than it has room for says so with a visible marker, and no two areas overlap. Since
+ * Q23 bread sits in a basket on the larder and Other in a crate at the larder's foot.
  */
 
 import React from 'react'
@@ -24,10 +25,35 @@ function area(name: string) {
 }
 
 describe('CieloFridge', () => {
-  it('is drawn for the box the upright iPad leaves under the strip, not for a tall frame', () => {
-    // At 810×1080 portrait the fridge gets about 778×763 px under the bar, the header and the
-    // strip: near-square. Drawn to that box it fills it; a taller drawing would leave bands.
-    expect(CIELO_WIDTH / CIELO_HEIGHT).toBeCloseTo(PORTRAIT_BOX.w / PORTRAIT_BOX.h, 1)
+  it('is drawn to the shape of the box the upright iPad leaves under the strip', () => {
+    // PORTRAIT_BOX is measured in Chromium at 810×1080 on the sample stock, with the strip's
+    // names on one line. Drawn to its shape the fridge fills it, where a tall frame would leave
+    // bands; a wrapped strip leaves a few pixels less height and letterboxes slightly.
+    expect(CIELO_WIDTH / CIELO_HEIGHT).toBeCloseTo(PORTRAIT_BOX.w / PORTRAIT_BOX.h, 2)
+    expect(CIELO_WIDTH).toBeGreaterThanOrEqual(PORTRAIT_BOX.w)
+  })
+
+  it('puts bread in a basket on the larder, above the pantry, out of the fridge (Q23)', () => {
+    const { bread, pantry, other, ready_meals, meat } = CIELO_BOX
+    // The larder stands to the right of the fridge body; every fridge shelf ends left of it
+    for (const inside of [ready_meals, meat]) expect(bread.x).toBeGreaterThan(inside.x + inside.w)
+    expect(bread.y + bread.h).toBeLessThanOrEqual(pantry.y)
+    // Other is a crate at the larder's foot, under the pantry
+    expect(other.x).toBeGreaterThanOrEqual(pantry.x)
+    expect(other.y).toBeGreaterThanOrEqual(pantry.y + pantry.h)
+    // The top glass shelf bread left behind goes to ready meals
+    expect(ready_meals.y).toBeLessThan(60)
+  })
+
+  it('always draws the bread basket, and the crate only for Other', () => {
+    const { container, rerender } = render(<CieloFridge items={[item()]} />)
+    expect(container.querySelector('[data-part="bread-basket"]')).not.toBeNull()
+    expect(container.querySelector('[data-part="other-crate"]')).toBeNull()
+
+    rerender(<CieloFridge items={[item({ category: 'household' })]} />)
+    expect(container.querySelector('[data-part="bread-basket"]')).not.toBeNull()
+    expect(container.querySelector('[data-part="other-crate"]')).not.toBeNull()
+    expect(screen.getByRole('region', { name: 'Other' })).toBeInTheDocument()
   })
 
   it('lays every area inside the drawing, none over another', () => {
@@ -99,6 +125,10 @@ describe('CieloFridge', () => {
   it.each([
     ['Freezer', 'freezer'],
     ['Pantry', 'pantry'],
+    ['Bread', 'bread'],
+    ['Other', 'other'],
+    ['Ready meals', 'ready_meals'],
+    ['Meat & fish', 'meat'],
   ] as const)('draws the %s "+" marker inside its box on a crowded fridge (review F8)', (label, id) => {
     render(<CieloFridge items={crowdedItems()} />)
 

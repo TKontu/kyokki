@@ -29,7 +29,8 @@ describe('describeUndo', () => {
     [step({ action: 'use_full' }), 'Finished · Apples'],
     [step({ action: 'discard' }), 'Thrown away · Apples'],
     [step({ action: 'restore' }), 'Put back · Apples'],
-    [step({ action: 'correct' }), 'Correction · Apples'],
+    // A grey "used today" tile tapped back is logged as a correction (Q22)
+    [step({ action: 'correct', quantity_consumed: 6 }), 'Put back · Apples'],
   ])('names one change by what happened to the food', (only, text) => {
     expect(describeUndo(preview(only))).toBe(text)
   })
@@ -42,6 +43,15 @@ describe('describeUndo', () => {
     )
 
     expect(describeUndo(shelf)).toBe('Thrown away · 3 items')
+  })
+
+  it('counts several tiles put back', () => {
+    const two = preview(
+      step({ action: 'correct' }),
+      step({ action: 'correct', product_name: 'Milk' })
+    )
+
+    expect(describeUndo(two)).toBe('Put back · 2 items')
   })
 
   it('shows an action this build has never heard of rather than hiding it', () => {

@@ -106,6 +106,16 @@ class Settings(BaseSettings):
     def empty_reasoning_strength_means_none(cls, v: object) -> object:
         return None if v == "" else v
 
+    # Product icons (Q18): the model draws each product a flat 48x48 SVG in the background.
+    # qwen3.8-27b, measured on the spike's 20 products (2026-09-26): ~17 clear against ~4-6 for
+    # muse-glimmer, at ~50 s a drawing. It is not the receipt model, so llama-swap may swap
+    # muse-glimmer out while an icon is drawn and the next receipt waits for it to load again.
+    # Set it to c2.muse-glimmer to trade icon quality for no swap.
+    ICON_MODEL: str = "c2.qwen3.8-27b"
+    # Seconds per request. qwen3.8-27b took 20-89 s a drawing here (2026-09-26); the spike
+    # saw 273 s on a busy GPU. A `pending` older than twice this counts as stale.
+    ICON_TIMEOUT: float = 600.0
+
     # Telegram receipt drop-in bot (MVP-T1). The bot is disabled while no token is set.
     # Receipt queue worker (python -m app.worker, MVP-R3)
     RECEIPT_WORKER_POLL_SECONDS: float = 2.0  # idle wait between queue checks

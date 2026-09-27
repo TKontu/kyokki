@@ -1,5 +1,6 @@
 /**
- * ItemEditSheet: correct quantity, expiry and location, mark as gone, delete (MVP-S4).
+ * ItemEditSheet: correct expiry and location, mark as gone, delete (MVP-S4), and reach the
+ * product's own details - its category among them - from the item (Q25).
  */
 
 import React from 'react'
@@ -10,6 +11,7 @@ import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
 import { ItemEditSheet } from '../ItemEditSheet'
 import type { InventoryItem } from '@/types/inventory'
+import type { ProductMaster } from '@/types/product'
 
 const OAT: InventoryItem = {
   id: 'item-oat',
@@ -318,5 +320,162 @@ describe('while the item moves underneath the sheet (H25)', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'Expiry changed to 2026-10-02 while this was open'
     )
+  })
+})
+
+const OAT_PRODUCT: ProductMaster = {
+  id: 'prod-oat',
+  canonical_name: 'Oat drink',
+  category: 'beverages',
+  storage_type: 'refrigerator',
+  default_shelf_life_days: 14,
+  opened_shelf_life_days: 5,
+  frozen_shelf_life_days: null,
+  avg_piece_grams: null,
+  pack_grams: null,
+  shelf_life_source: 'category',
+  unit_type: 'volume',
+  default_unit: 'dl',
+  default_quantity: 10,
+  min_stock_quantity: null,
+  reorder_quantity: null,
+  off_product_id: null,
+  off_data: null,
+  created_at: '2026-09-01T00:00:00Z',
+  updated_at: '2026-09-01T00:00:00Z',
+}
+
+describe('ItemEditSheet: the product behind the item (Q25)', () => {
+  function mockProduct() {
+    const fetched: string[] = []
+    server.use(
+      http.get(`${API_URL}/products/prod-oat`, () => {
+        fetched.push('prod-oat')
+        return HttpResponse.json(OAT_PRODUCT)
+      }),
+      http.get(`${API_URL}/products/prod-oat/names`, () =>
+        HttpResponse.json({ names: [], printed: [] })
+      ),
+      http.get(`${API_URL}/categories`, () => HttpResponse.json([]))
+    )
+    return fetched
+  }
+
+  it('shows the category the item is filed under', () => {
+    mockApi()
+    renderSheet()
+
+    expect(screen.getByText('Category: Beverages')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Change…' })).toBeInTheDocument()
+  })
+
+  it.each([['Change…'], ['Change product details…']])(
+    'opens the product sheet from "%s"',
+    async (button) => {
+      mockApi()
+      const fetched = mockProduct()
+      renderSheet()
+
+      fireEvent.click(screen.getByRole('button', { name: button }))
+
+      expect(
+        await screen.findByRole('heading', { name: 'Edit Oat drink' })
+      ).toBeInTheDocument()
+      expect(fetched).toEqual(['prod-oat'])
+      // The item's own sheet has made way for the product's
+      expect(screen.queryByRole('button', { name: 'Mark as gone' })).not.toBeInTheDocument()
+    }
+  )
+
+  it('gives both ways to the product sheet a full touch target', () => {
+    mockApi()
+    renderSheet()
+
+    // 44 px (`min-h-touch`), not the 36 px of a small button
+    for (const name of ['Change…', 'Change product details…']) {
+      expect(screen.getByRole('button', { name })).toHaveClass('min-h-touch')
+    }
+  })
+
+  it('says "No category" rather than an id when the item has no category name', () => {
+    mockApi()
+    renderSheet({ ...OAT, category_name: '' })
+
+    expect(screen.getByText('Category: No category')).toBeInTheDocument()
+    expect(screen.queryByText(/beverages/)).not.toBeInTheDocument()
+  })
+
+  it('says it is loading the product rather than showing nothing', async () => {
+    mockApi()
+    let release: () => void = () => {}
+    const released = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get(`${API_URL}/products/prod-oat`, async () => {
+        await released
+        return HttpResponse.json(OAT_PRODUCT)
+      }),
+      http.get(`${API_URL}/products/prod-oat/names`, () =>
+        HttpResponse.json({ names: [], printed: [] })
+      ),
+      http.get(`${API_URL}/categories`, () => HttpResponse.json([]))
+    )
+    renderSheet()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change…' }))
+
+    expect(await screen.findByText('Loading product details…')).toBeInTheDocument()
+    release()
+    expect(await screen.findByRole('heading', { name: 'Edit Oat drink' })).toBeInTheDocument()
+  })
+
+  it('says so when the product cannot be loaded, and leads back to the item', async () => {
+    mockApi()
+    server.use(
+      http.get(`${API_URL}/products/prod-oat`, () =>
+        HttpResponse.json({ detail: 'boom' }, { status: 500 })
+      )
+    )
+    renderSheet()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change…' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not load the product details for Oat drink.'
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Back to Oat drink' }))
+    expect(screen.getByRole('button', { name: 'Mark as gone' })).toBeInTheDocument()
+    expect(screen.getByText('Category: Beverages')).toBeInTheDocument()
+  })
+
+  it('holds both Change buttons while a save is in flight', async () => {
+    let releasePatch: () => void = () => {}
+    const patched = new Promise<void>((resolve) => {
+      releasePatch = resolve
+    })
+    mockApi()
+    // The save stays in flight until the test lets it land
+    server.use(
+      http.patch(`${API_URL}/inventory/item-oat`, async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>
+        await patched
+        return HttpResponse.json({ ...OAT, ...body })
+      })
+    )
+    // A landed save refreshes the header's Undo
+    server.use(http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(null)))
+    const onClose = renderSheet()
+
+    fireEvent.click(screen.getByText('Freezer'))
+    fireEvent.click(save())
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Change…' })).toBeDisabled()
+    )
+    expect(screen.getByRole('button', { name: 'Change product details…' })).toBeDisabled()
+    releasePatch()
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled()
   })
 })

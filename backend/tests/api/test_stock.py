@@ -4,7 +4,7 @@ import asyncio
 from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -18,7 +18,9 @@ from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
 from app.models.store_product_alias import StoreProductAlias
+from app.services import shelf_life_on_create
 from app.services import stock as stock_service
+from app.services.catalog_estimates import Estimate, EstimateRequest
 
 TODAY = date.today()
 
@@ -625,3 +627,112 @@ class TestStockConsume:
             await _quantity(seeded_db, later),
         }
         assert restored in ({Decimal("5"), Decimal("8")}, {Decimal("0"), Decimal("10")})
+
+
+class TestStockAddLearnsFromATypedDate:
+    """Q24: an agent's add with an expiry date teaches the product, as quick add does."""
+
+    BODY = {
+        "name": "Tortillas",
+        "category": "bread",
+        "quantity": 8,
+        "unit": "pcs",
+        "location": "pantry",
+        "purchase_date": str(TODAY),
+        "expiry_date": str(TODAY + timedelta(days=60)),
+    }
+
+    @pytest.fixture(autouse=True)
+    def _own_session(self, monkeypatch: pytest.MonkeyPatch, session_factory) -> None:
+        """The background estimate opens its own session; here it is the test's."""
+        monkeypatch.setattr(shelf_life_on_create, "open_session", session_factory)
+
+    @pytest.fixture
+    def sibling_broadcast(self):
+        with patch(
+            "app.services.quick_add.broadcast_inventory_update", new_callable=AsyncMock
+        ) as mock:
+            yield mock
+
+    async def _product(self, db: AsyncSession, product_id: str) -> ProductMaster:
+        product = await db.get(ProductMaster, UUID(product_id), populate_existing=True)
+        assert product is not None
+        return product
+
+    async def test_a_new_product_keeps_the_learned_days_through_its_estimate(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        async def answer(products: list[EstimateRequest]) -> list[Estimate]:
+            return [
+                Estimate(id=p.id, shelf_life_days=7, opened_shelf_life_days=None)
+                for p in products
+            ]
+
+        estimated = AsyncMock(wraps=shelf_life_on_create.estimate_new_products)
+        with (
+            patch(
+                "app.services.catalog_estimates.estimate_shelf_lives",
+                new=AsyncMock(side_effect=answer),
+            ),
+            patch.object(shelf_life_on_create, "estimate_new_products", estimated),
+        ):
+            response = await client.post("/api/stock/add", json=self.BODY)
+
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["product_created"] is True
+        estimated.assert_awaited_once_with([UUID(body["item"]["product_master_id"])])
+        product = await self._product(seeded_db, body["item"]["product_master_id"])
+        assert (product.default_shelf_life_days, product.shelf_life_source) == (
+            60,
+            "cook",
+        )
+
+    async def test_a_calculated_sibling_moves_and_is_announced(
+        self, client: AsyncClient, seeded_db, sibling_broadcast
+    ) -> None:
+        older = (
+            await client.post(
+                "/api/stock/add",
+                json={
+                    **self.BODY,
+                    "purchase_date": str(TODAY - timedelta(days=5)),
+                    "expiry_date": None,
+                },
+            )
+        ).json()["item"]
+
+        response = await client.post("/api/stock/add", json=self.BODY)
+
+        assert response.status_code == 201, response.text
+        moved = await seeded_db.get(
+            InventoryItem, UUID(older["id"]), populate_existing=True
+        )
+        assert moved is not None
+        assert moved.expiry_date == TODAY + timedelta(days=55)
+        announced = [
+            c.kwargs["inventory_item_id"] for c in sibling_broadcast.await_args_list
+        ]
+        assert list(map(str, announced)) == [older["id"]]
+
+    async def test_a_replay_learns_nothing_new(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        headers = {"Idempotency-Key": "learn-1"}
+        first = await client.post("/api/stock/add", json=self.BODY, headers=headers)
+        product_id = first.json()["item"]["product_master_id"]
+        # The cook has since typed another number on the Products screen
+        product = await self._product(seeded_db, product_id)
+        product.default_shelf_life_days = 30
+        await seeded_db.commit()
+
+        replay = await client.post("/api/stock/add", json=self.BODY, headers=headers)
+
+        assert replay.status_code == 201
+        assert replay.json() == first.json()
+        assert await _count(seeded_db, InventoryItem) == 1
+        product = await self._product(seeded_db, product_id)
+        assert (product.default_shelf_life_days, product.shelf_life_source) == (
+            30,
+            "cook",
+        )

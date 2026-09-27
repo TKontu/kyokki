@@ -14,7 +14,14 @@
  * H52 adds what the operator asked for on 2026-09-24: the category (a placeholder shelf
  * life follows it server-side), a frozen life of the product's own with the category's
  * as the fallback, and the names that make receipt lines land here.
+ *
+ * Q18 adds the product's icon: the model's drawing, or the category emoji when there is none.
+ * **Redraw** queues a new drawing, optionally with the cook's words ("oval rye pastry with rice
+ * filling"), and **Use category emoji** drops the drawing. Neither waits for Save: they act on
+ * the icon at once, and the drawing lands minutes later. The drawing loads only as an <img>.
  */
+
+import { useState } from 'react'
 
 import BottomSheet from '@/components/ui/BottomSheet'
 import Button from '@/components/ui/Button'
@@ -27,7 +34,12 @@ import {
 import { ProductNamesList } from '@/components/products/ProductNamesList'
 import { useCategories } from '@/hooks/useCategories'
 import { useToast } from '@/hooks/useToast'
-import { useUpdateProduct } from '@/hooks/useProducts'
+import {
+  useClearProductIcon,
+  useRedrawProductIcon,
+  useUpdateProduct,
+} from '@/hooks/useProducts'
+import { iconUrl } from '@/lib/api/products'
 import { isAPIError } from '@/lib/api/errors'
 import type { Unit } from '@/types/inventory'
 import { useFieldEdit } from '@/hooks/useFieldEdit'
@@ -63,6 +75,18 @@ export function ProductEditSheet({
   const toast = useToast()
   const save = useUpdateProduct()
   const categories = useCategories()
+  const redraw = useRedrawProductIcon()
+  const clearIcon = useClearProductIcon()
+  const [hint, setHint] = useState('')
+  // What the last icon action answered, until the product itself catches up with it.
+  const [iconAnswer, setIconAnswer] = useState<ProductMaster | null>(null)
+  const [brokenIcon, setBrokenIcon] = useState<number | null>(null)
+  const iconProduct =
+    iconAnswer && Date.parse(iconAnswer.updated_at) >= Date.parse(product.updated_at)
+      ? iconAnswer
+      : product
+  const iconVersion = iconProduct.icon_version ?? null
+  const iconStatus = iconProduct.icon_status ?? null
 
   // Each field follows the product until the cook touches it, and says so if what they are
   // editing moves underneath them (H25) - two cooks on two screens is the case this is for.
@@ -121,6 +145,40 @@ export function ProductEditSheet({
   )
   const categoryFrozen = sortedCategories.find((c) => c.id === category)
     ?.frozen_shelf_life_days
+  const categoryEmoji = sortedCategories.find((c) => c.id === product.category)?.icon ?? ''
+
+  const iconError = (error: unknown, fallback: string) => {
+    const readable = isAPIError(error) && error.status < 500 && error.message
+    toast.error(readable ? error.message : fallback)
+  }
+  const redrawIcon = () => {
+    redraw.mutate(
+      { id: product.id, hint },
+      {
+        onSuccess: (updated) => {
+          setIconAnswer(updated)
+          setHint('')
+        },
+        onError: (error) => iconError(error, 'Could not ask for a new drawing'),
+      }
+    )
+  }
+  const chooseEmoji = () => {
+    clearIcon.mutate(product.id, {
+      onSuccess: (updated) => setIconAnswer(updated),
+      onError: (error) => iconError(error, 'Could not change the icon'),
+    })
+  }
+  const iconNote =
+    iconStatus === 'pending'
+      ? 'Drawing… this takes a few minutes'
+      : iconStatus === 'failed'
+        ? 'The model could not draw it this time. Try again, perhaps with a hint.'
+        : iconStatus === 'cleared'
+          ? 'Showing the category emoji'
+          : iconStatus === null
+            ? 'Not drawn yet'
+            : null
 
   const submit = () => {
     save.mutate(
@@ -161,6 +219,63 @@ export function ProductEditSheet({
         </div>
       }
     >
+      <fieldset className="mb-4">
+        <legend className={fieldLabelClass}>Icon</legend>
+        <div className="mt-1 flex items-center gap-3">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-ui border border-ui-border dark:border-ui-dark-border">
+            {iconVersion !== null && iconVersion !== brokenIcon ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={iconUrl(product.id, iconVersion)}
+                alt=""
+                aria-hidden="true"
+                width={40}
+                height={40}
+                className="h-10 w-10"
+                onError={() => setBrokenIcon(iconVersion)}
+              />
+            ) : (
+              <span aria-hidden="true" className="text-3xl leading-none">
+                {categoryEmoji}
+              </span>
+            )}
+          </div>
+          {iconNote && <p className={fieldHintClass}>{iconNote}</p>}
+        </div>
+        <label htmlFor="product-icon-hint" className={`${fieldLabelClass} mt-2`}>
+          Hint for the drawing
+        </label>
+        <input
+          id="product-icon-hint"
+          type="text"
+          maxLength={200}
+          placeholder="optional, e.g. oval rye pastry with rice filling"
+          value={hint}
+          onChange={(event) => setHint(event.target.value)}
+          className={`${fieldInputClass} mt-1`}
+        />
+        <div className="mt-2 flex gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={redraw.isPending}
+            onClick={redrawIcon}
+          >
+            Redraw
+          </Button>
+          {iconStatus !== 'cleared' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={clearIcon.isPending}
+              onClick={chooseEmoji}
+            >
+              Use category emoji
+            </Button>
+          )}
+        </div>
+      </fieldset>
+
       <label htmlFor="product-name" className={fieldLabelClass}>
         Name
       </label>

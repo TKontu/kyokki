@@ -407,3 +407,93 @@ describe('matching names (H52)', () => {
     await waitFor(() => expect(removed).toEqual(['a-1']))
   })
 })
+
+// Q18: the product's own drawing, redrawn on request (with the cook's words) or dropped for
+// the category emoji. The drawing only ever loads as an <img>.
+describe('ProductEditSheet icon', () => {
+  const DRAWN: ProductMaster = { ...PRODUCT, icon_status: 'ready', icon_version: 1790000000 }
+
+  function iconSection() {
+    return screen.getByRole('group', { name: 'Icon' })
+  }
+
+  it('shows the category emoji when there is no drawing', async () => {
+    renderSheet()
+
+    await waitFor(() => expect(iconSection()).toHaveTextContent('🥩'))
+    expect(iconSection().querySelector('img')).toBeNull()
+  })
+
+  it('shows the drawing when there is one', () => {
+    renderSheet(DRAWN)
+
+    const img = iconSection().querySelector('img')
+    expect(img?.getAttribute('src')).toMatch(/\/products\/p-1\/icon\.svg\?v=1790000000$/)
+    expect(img).toHaveAttribute('alt', '')
+  })
+
+  it('redraws with the hint and says it is drawing', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.post(`${API_URL}/products/p-1/icon`, async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ ...DRAWN, icon_status: 'pending' }, { status: 202 })
+      })
+    )
+    renderSheet(DRAWN)
+
+    fireEvent.change(screen.getByLabelText('Hint for the drawing'), {
+      target: { value: 'dark loaf with seeds' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Redraw' }))
+
+    await waitFor(() => expect(bodies).toEqual([{ hint: 'dark loaf with seeds' }]))
+    expect(await screen.findByText('Drawing… this takes a few minutes')).toBeInTheDocument()
+  })
+
+  it('says a pending drawing is on its way', () => {
+    renderSheet({ ...PRODUCT, icon_status: 'pending' })
+
+    expect(screen.getByText('Drawing… this takes a few minutes')).toBeInTheDocument()
+  })
+
+  it('says when the last drawing failed', () => {
+    renderSheet({ ...PRODUCT, icon_status: 'failed' })
+
+    expect(iconSection()).toHaveTextContent(/could not draw/i)
+  })
+
+  it('drops the drawing for the category emoji', async () => {
+    let deleted = false
+    server.use(
+      http.delete(`${API_URL}/products/p-1/icon`, () => {
+        deleted = true
+        return HttpResponse.json({ ...PRODUCT, icon_status: 'cleared', icon_version: null })
+      })
+    )
+    renderSheet(DRAWN)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use category emoji' }))
+
+    await waitFor(() => expect(deleted).toBe(true))
+    await waitFor(() => expect(iconSection().querySelector('img')).toBeNull())
+    expect(iconSection()).toHaveTextContent('🥩')
+  })
+
+  it('offers no emoji button when the emoji is already what shows', () => {
+    renderSheet({ ...PRODUCT, icon_status: 'cleared' })
+
+    expect(screen.queryByRole('button', { name: 'Use category emoji' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Redraw' })).toBeEnabled()
+  })
+
+  it('does not count the hint as an unsaved product change', () => {
+    renderSheet()
+
+    fireEvent.change(screen.getByLabelText('Hint for the drawing'), {
+      target: { value: 'round' },
+    })
+
+    expect(save()).toBeDisabled()
+  })
+})
