@@ -25,6 +25,7 @@ CATEGORY_STORAGE: dict[str, StorageType] = {
     "pantry": "pantry",
     "beverages": "pantry",
     "condiments": "pantry",
+    "spices": "pantry",
     "snacks": "pantry",
 }
 

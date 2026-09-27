@@ -87,6 +87,7 @@ class TestTheSeed:
             "frozen": 90,
             "pantry": 365,
             "condiments": 180,
+            "spices": 720,
         }
 
 

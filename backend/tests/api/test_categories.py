@@ -82,9 +82,9 @@ class TestCreateCategory:
     ) -> None:
         """POST /api/categories should create a new category."""
         new_category = {
-            "id": "spices",
-            "display_name": "Spices & Herbs",
-            "icon": "🌿",
+            "id": "baby_food",
+            "display_name": "Baby Food",
+            "icon": "🍼",
             "default_shelf_life_days": 180,
             "sort_order": 130,
         }
@@ -93,8 +93,8 @@ class TestCreateCategory:
 
         assert response.status_code == 201
         category = response.json()
-        assert category["id"] == "spices"
-        assert category["display_name"] == "Spices & Herbs"
+        assert category["id"] == "baby_food"
+        assert category["display_name"] == "Baby Food"
 
     async def test_create_category_duplicate_id(
         self, client: AsyncClient, seeded_db: AsyncSession
