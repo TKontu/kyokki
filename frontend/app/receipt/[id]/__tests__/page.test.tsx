@@ -699,19 +699,21 @@ describe('ReceiptReviewPage', () => {
 })
 
 describe('ReceiptReviewPage completeness (Q27)', () => {
-  // The K-Citymarket receipt: 15 product lines, the model returned 6, nine were put back
-  const COMPLETE: NonNullable<Receipt['completeness']> = {
+  // The K-Citymarket receipt as the backend reports it (contract ruling 1): 15 product rows in
+  // the end, the model's first read returned 6, the targeted re-read put back the other 9, and
+  // after recovery every amount-bearing line is accounted for.
+  const K_RECEIPT: NonNullable<Receipt['completeness']> = {
     text_lines: 15,
     model_lines: 6,
     recovered_by_retry: 9,
     recovered_raw_lines: 0,
-    invalid_entries: 0,
     unaccounted_lines: 0,
-    items_sum: 42.1,
-    receipt_total: 42.1,
+    invalid_entries: 0,
+    items_sum: 73.07,
+    receipt_total: 73.07,
   }
 
-  function shortReceipt(completeness = COMPLETE): Receipt {
+  function kReceipt(completeness = K_RECEIPT): Receipt {
     const read = Array.from({ length: 6 }, (_, index) => item(index))
     const recovered = Array.from({ length: 9 }, (_, n) =>
       item(6 + n, { recovered: 'model_retry' })
@@ -720,7 +722,7 @@ describe('ReceiptReviewPage completeness (Q27)', () => {
   }
 
   it('says how many lines the model missed and marks the recovered ones', async () => {
-    mockApi(shortReceipt())
+    mockApi(kReceipt())
     renderPage()
 
     await screen.findByText('PRINTED 14')
@@ -735,16 +737,53 @@ describe('ReceiptReviewPage completeness (Q27)', () => {
     // The header counts every row, recovered ones included
     expect(screen.getByText('15 items read, 0 already known')).toBeInTheDocument()
     expect(screen.queryByText(/unusable entries/)).not.toBeInTheDocument()
-    // The sum agrees with the total and every line was accounted for
+    // The sum agrees with the total and every line was accounted for after recovery
     expect(screen.queryByText(/add up to/)).not.toBeInTheDocument()
     expect(screen.queryByText(/could not be read/)).not.toBeInTheDocument()
+  })
+
+  it('says how many lines are still unread after recovery', async () => {
+    mockApi(kReceipt({ ...K_RECEIPT, unaccounted_lines: 1 }))
+    renderPage()
+
+    await screen.findByText('PRINTED 14')
+    expect(screen.getByText(/^9 of 15 lines were not read by the model/)).toBeInTheDocument()
+    expect(
+      screen.getByText('1 line could not be read — see the receipt text.')
+    ).toBeInTheDocument()
+  })
+
+  it('says nothing is missing when the fallback parser read the receipt', async () => {
+    // The model failed; the fallback read all 15 rows and says so in its own note
+    const rowsRead = Array.from({ length: 15 }, (_, index) => item(index))
+    mockApi(
+      receipt(
+        {
+          extraction_method: 'heuristic',
+          completeness: {
+            ...K_RECEIPT,
+            model_lines: 0,
+            recovered_by_retry: 0,
+            recovered_raw_lines: 0,
+            unaccounted_lines: 0,
+          },
+        },
+        rowsRead
+      )
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 14')
+    expect(screen.getByText(/Read without the AI model/)).toBeInTheDocument()
+    expect(screen.queryByText(/could not be read/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/not read by the model/)).not.toBeInTheDocument()
   })
 
   it('says the items do not add up to the receipt total', async () => {
     mockApi(
       receipt({
         completeness: {
-          ...COMPLETE,
+          ...K_RECEIPT,
           text_lines: null,
           model_lines: 1,
           recovered_by_retry: 0,
@@ -765,15 +804,18 @@ describe('ReceiptReviewPage completeness (Q27)', () => {
     expect(screen.queryByText(/not read by the model/)).not.toBeInTheDocument()
   })
 
-  it('lets a small rounding difference pass', async () => {
+  it.each([
+    ['within 1% of the total', 99.5, 100],
+    ['exactly five cents apart', 0.95, 1.0],
+    ['within five cents on a small total', 3.1, 3.14],
+  ])('lets a rounding difference pass: %s', async (_, itemsSum, receiptTotal) => {
     mockApi(
       receipt({
         completeness: {
-          ...COMPLETE,
+          ...K_RECEIPT,
           recovered_by_retry: 0,
-          // Within 1% of the total
-          items_sum: 99.5,
-          receipt_total: 100,
+          items_sum: itemsSum,
+          receipt_total: receiptTotal,
         },
       })
     )
@@ -783,20 +825,22 @@ describe('ReceiptReviewPage completeness (Q27)', () => {
     expect(screen.queryByText(/add up to/)).not.toBeInTheDocument()
   })
 
-  it('says how many lines could still not be read', async () => {
-    mockApi(receipt({ completeness: { ...COMPLETE, recovered_by_retry: 0, unaccounted_lines: 2 } }))
+  it('flags a difference of six cents', async () => {
+    mockApi(
+      receipt({
+        completeness: { ...K_RECEIPT, recovered_by_retry: 0, items_sum: 0.94, receipt_total: 1.0 },
+      })
+    )
     renderPage()
 
     await screen.findByText('PRINTED 0')
-    expect(
-      screen.getByText('2 lines could not be read — see the receipt text.')
-    ).toBeInTheDocument()
+    expect(screen.getByText(/add up to 0.94 but the receipt total is 1.00/)).toBeInTheDocument()
   })
 
   it('shows no banner when nothing was recovered', async () => {
     mockApi(
       receipt({
-        completeness: { ...COMPLETE, text_lines: 1, model_lines: 1, recovered_by_retry: 0 },
+        completeness: { ...K_RECEIPT, text_lines: 1, model_lines: 1, recovered_by_retry: 0 },
       })
     )
     renderPage()
@@ -814,10 +858,31 @@ describe('ReceiptReviewPage completeness (Q27)', () => {
     expect(screen.queryByText(/not read by the model/)).not.toBeInTheDocument()
   })
 
+  it('treats the nulls the API sends like an older receipt', async () => {
+    const confirms = mockApi(receipt({ completeness: null }, [item(0, { recovered: null })]))
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(screen.queryByText(/not read by the model/)).not.toBeInTheDocument()
+    expect(screen.queryByText('recovered')).not.toBeInTheDocument()
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items).toHaveLength(1)
+  })
+
+  it('says nothing about unusable entries when nothing else is wrong', async () => {
+    mockApi(receipt({ completeness: { ...K_RECEIPT, recovered_by_retry: 0, invalid_entries: 2 } }))
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(screen.queryByText(/unusable entries/)).not.toBeInTheDocument()
+  })
+
   it('counts both kinds of recovery and mentions unusable entries', async () => {
     mockApi(
-      shortReceipt({
-        ...COMPLETE,
+      kReceipt({
+        ...K_RECEIPT,
         recovered_by_retry: 7,
         recovered_raw_lines: 2,
         invalid_entries: 3,
@@ -830,12 +895,73 @@ describe('ReceiptReviewPage completeness (Q27)', () => {
     expect(screen.getByText("The model's answer had 3 unusable entries.")).toBeInTheDocument()
   })
 
+  it('words a single recovered line in the singular', async () => {
+    mockApi(
+      receipt(
+        { completeness: { ...K_RECEIPT, text_lines: 2, model_lines: 1, recovered_by_retry: 1 } },
+        [item(0), item(1, { recovered: 'model_retry' })]
+      )
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 1')
+    expect(
+      screen.getByText(
+        '1 of 2 lines was not read by the model — it is recovered below, please check it.'
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('leaves out "of N" when there is no text to count lines in', async () => {
+    mockApi(
+      receipt(
+        { completeness: { ...K_RECEIPT, text_lines: null, model_lines: 1, recovered_by_retry: 1 } },
+        [item(0), item(1, { recovered: 'model_retry' })]
+      )
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 1')
+    expect(
+      screen.getByText('1 line was not read by the model — it is recovered below, please check it.')
+    ).toBeInTheDocument()
+  })
+
+  it('opens the household fold when a recovered line is in it', async () => {
+    const confirms = mockApi(
+      receipt(
+        { completeness: { ...K_RECEIPT, text_lines: 2, model_lines: 1, recovered_by_retry: 1 } },
+        [
+          item(0),
+          item(1, {
+            generic_name: 'Detergent',
+            suggested_category: null,
+            non_food: true,
+            recovered: 'model_retry',
+          }),
+        ]
+      )
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 1')
+    // The banner says "recovered below", so the row has to be there to check
+    expect(rows()).toHaveLength(2)
+    expect(within(rows()[1]).getByText('recovered')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hide' })).toBeInTheDocument()
+    fireEvent.click(addButton())
+
+    // Shown, so it counts as seen and its non-food judgement is taught (H08)
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect(confirms[0].non_food_indexes).toEqual([1])
+  })
+
   it('a line taken from the receipt text starts skipped until it has a category', async () => {
     const confirms = mockApi(
       receipt(
         {
           completeness: {
-            ...COMPLETE,
+            ...K_RECEIPT,
             text_lines: 2,
             model_lines: 1,
             recovered_by_retry: 0,
@@ -867,6 +993,8 @@ describe('ReceiptReviewPage completeness (Q27)', () => {
 
     fireEvent.change(within(second).getByLabelText('Category'), { target: { value: 'meat' } })
     expect(within(second).getByRole('checkbox')).toBeChecked()
+    // Once it has a category there is nothing left to ask for
+    expect(within(second).getByText('from the receipt text')).toBeInTheDocument()
     fireEvent.click(addButton())
 
     await waitFor(() => expect(confirms).toHaveLength(1))
@@ -880,6 +1008,27 @@ describe('ReceiptReviewPage completeness (Q27)', () => {
       purchase_date: isoDaysAgo(3),
     })
   })
+
+  it('does not ask for a category on a raw line that matched a product', async () => {
+    mockApi(
+      receipt({}, [
+        item(0, {
+          name: 'KG BANAANI',
+          generic_name: null,
+          suggested_category: null,
+          product_id: 'p-milk',
+          product_name: 'Milk',
+          match_source: 'alias',
+          recovered: 'raw_line',
+        }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('→ Milk')
+    expect(screen.getByText('from the receipt text')).toBeInTheDocument()
+    expect(screen.queryByText(/pick a category/)).not.toBeInTheDocument()
+  })
 })
 
 describe('ReceiptReviewPage missed items (Q27)', () => {
@@ -890,12 +1039,24 @@ describe('ReceiptReviewPage missed items (Q27)', () => {
     fireEvent.change(screen.getByLabelText('Missed item category'), {
       target: { value: category },
     })
-    fireEvent.change(screen.getByLabelText('Missed item quantity'), {
+    fireEvent.change(screen.getByLabelText('Missed item amount'), {
       target: { value: quantity },
     })
     const unitGroup = screen.getByRole('radiogroup', { name: 'Missed item unit' })
     fireEvent.click(within(unitGroup).getByLabelText(unit))
   }
+
+  it('labels its fields with real labels', async () => {
+    mockApi(receipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    const name = screen.getByLabelText('Missed item name')
+    expect(document.querySelector(`label[for="${name.id}"]`)).toHaveTextContent('Missed item name')
+    // The read rows' own fields still resolve to exactly one element each
+    expect(screen.getByLabelText('Category')).toHaveValue('dairy')
+    expect(screen.getByLabelText('Product name')).toHaveValue('Generic 0')
+  })
 
   it('sends a hand-added item as a free line', async () => {
     const confirms = mockApi(receipt())
@@ -921,6 +1082,24 @@ describe('ReceiptReviewPage missed items (Q27)', () => {
     })
   })
 
+  it('takes a decimal comma in the amount', async () => {
+    const confirms = mockApi(receipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fillMissed('Cream', 'dairy', '1,5')
+    expect(addToList()).toBeEnabled()
+    fireEvent.click(addToList())
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items[1]).toMatchObject({
+      name: 'Cream',
+      quantity: 1.5,
+      unit: 'dl',
+    })
+  })
+
   it('cannot add an item without a name', async () => {
     mockApi(receipt())
     renderPage()
@@ -938,6 +1117,15 @@ describe('ReceiptReviewPage missed items (Q27)', () => {
 
     await screen.findByText('PRINTED 0')
     fillMissed('Cream', '')
+    expect(addToList()).toBeDisabled()
+  })
+
+  it.each(['0', '-1', 'abc'])('cannot add an item with an amount of %s', async (amount) => {
+    mockApi(receipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fillMissed('Cream', 'dairy', amount)
     expect(addToList()).toBeDisabled()
   })
 
@@ -979,6 +1167,53 @@ describe('ReceiptReviewPage missed items (Q27)', () => {
     await waitFor(() => expect(confirms).toHaveLength(1))
     expect((confirms[0] as { items: unknown[] }).items).toHaveLength(1)
   })
+
+  it('includes a filled-in item the cook did not add to the list', async () => {
+    // Tapping the footer instead of "Add to list" must not lose what was typed
+    const confirms = mockApi(receipt())
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fillMissed('Cream')
+    expect(addButton()).toHaveAccessibleName(/add 2 items$/i)
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items[1]).toEqual({
+      name: 'Cream',
+      category: 'dairy',
+      quantity: 2,
+      unit: 'dl',
+      purchase_date: isoDaysAgo(3),
+    })
+  })
+
+  it('a filled-in item turns "Dismiss receipt" into adding it', async () => {
+    const confirms = mockApi(receipt({}, []))
+    renderPage()
+
+    await screen.findByRole('button', { name: /^dismiss receipt$/i })
+    fillMissed('Cream')
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect((confirms[0] as { items: unknown[] }).items).toHaveLength(1)
+  })
+
+  it('will not confirm while a started item is incomplete', async () => {
+    const confirms = mockApi(receipt({}, []))
+    renderPage()
+
+    await screen.findByRole('button', { name: /^dismiss receipt$/i })
+    fillMissed('Cream', '')
+    fireEvent.click(dismissButton())
+
+    expect(
+      await screen.findByText('Finish the missed item or clear its name before confirming')
+    ).toBeInTheDocument()
+    expect(confirms).toHaveLength(0)
+    expect(push).not.toHaveBeenCalled()
+  })
 })
 
 describe('ReceiptReviewPage receipt text (Q28)', () => {
@@ -988,11 +1223,14 @@ describe('ReceiptReviewPage receipt text (Q28)', () => {
 
     const toggle = await screen.findByRole('button', { name: 'Show receipt text' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByText(/KG BANAANI 1,20/)).not.toBeInTheDocument()
+    // The region exists while collapsed so aria-controls resolves, but is hidden
+    const region = document.getElementById(toggle.getAttribute('aria-controls') ?? '')
+    expect(region).not.toBeNull()
+    expect(region).not.toBeVisible()
 
     fireEvent.click(toggle)
 
-    expect(screen.getByText(/KG BANAANI 1,20/)).toBeInTheDocument()
+    expect(screen.getByText(/KG BANAANI 1,20/)).toBeVisible()
     expect(screen.getByRole('button', { name: 'Hide receipt text' })).toHaveAttribute(
       'aria-expanded',
       'true'

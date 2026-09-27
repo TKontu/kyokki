@@ -38,14 +38,19 @@ export type MatchSource = 'alias' | 'name' | 'selected' | 'none'
  */
 export type RecoveredBy = 'model_retry' | 'raw_line'
 
-/** How much of the receipt the read accounted for (Q27). */
+/**
+ * How much of the receipt the read accounted for (Q27). Counts are of products, not text
+ * lines, unless the name says otherwise (contract ruling 1).
+ */
 export interface ReceiptCompleteness {
-  text_lines: number | null // Product lines in the receipt text; null when read from a photo
+  // Final number of product rows (model + retry + raw lines); null when read from a photo
+  text_lines: number | null
   model_lines: number // Lines the model's first answer returned
   recovered_by_retry: number
   recovered_raw_lines: number
   invalid_entries: number // Entries in the model's answer that could not be used
-  unaccounted_lines: number // Lines still not read after recovery
+  // After recovery: amount-bearing lines in no product row and not listed as non-products
+  unaccounted_lines: number
   items_sum: number | null // What the read lines add up to
   receipt_total: number | null // The total printed on the receipt
 }
@@ -95,7 +100,7 @@ export interface Receipt {
   extraction_method: ExtractionMethod | null
   fallback_reason: string | null // Why the heuristic parser was used instead of the model
   items: ExtractedItem[]
-  // Null or absent for older receipts and for receipts read from a photo (Q27)
+  // Null or absent for older receipts; a photo receipt has one with text_lines null (Q27)
   completeness?: ReceiptCompleteness | null
   created_at: string // ISO datetime
 }
