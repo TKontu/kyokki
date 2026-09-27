@@ -1055,8 +1055,11 @@ for the loss, not a proven cause: no run below reproduced 6 of 15. The fix makes
 receipt, in a way that does not depend on the receipt's format (operator ruling: receipts from
 any shop, country and language). The prompt numbers the lines. Each product cites its lines in
 `l` (name line or lines plus any count or weight line, before or after the name) and its line
-total in `p`, and every other line goes in `x` with a kind. The answer also carries the printed
-total `t` and the receipt's `lc`/`cc`. A line in neither `l` nor `x` is unaccounted. Unaccounted
+total in `p`, and every other *priced* line goes in `x` with a kind and its amount `a`. The answer
+also carries the printed total `t`, whether the line totals leave tax out (`te`), and the
+receipt's `lc`/`cc`. A priced line (one ending in an amount) that is neither cited in `l` nor
+listed in `x` is unaccounted, unless the receipt's own sums rule it out (see
+`docs/ARCHITECTURE.md`, "Line accounting"); unpriced lines need no accounting. Unaccounted
 lines get one targeted re-read without the catalog block, and whatever is still unaccounted and
 priced becomes a `raw_line` row for the cook. An optional profile for the detected country or
 language (only `fi`, the MVP-R3b parser) adds evidence. The line totals are checked against the

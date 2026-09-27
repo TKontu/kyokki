@@ -261,30 +261,54 @@ receipt from any shop, country or language, and nothing in the core knows a rece
    normalised to ISO 639-1 and 3166-1 alpha-2). On an image there are no line numbers, but
    `x` still carries the amounts.
 2. *Accounting* (`services/receipt_processing.py`). A line that carries an amount at its
-   end (`parsers/amounts.py`: any currency, with or without cents, never a date, a time or a
-   code) must be cited by a product or listed in `x`. A count or weight line belongs to a
-   product only when it is cited, or when its numbers multiply to that product's line total;
-   identical lines ("MAITO 1,29" twice) resolve to the right count. A priced line listed as
-   `other` is re-read unless the model's own arithmetic matches the total it read.
+   end (`parsers/amounts.py`: structural, any currency symbol or short trailing marker, with
+   or without cents, 3 decimals only when the model's total has 3; never a date, a time
+   after a date, a masked card number, a unit this receipt prints in its own count lines, or,
+   on a receipt without cents, a spaced phone-like digit group) must be cited by a product or
+   listed in `x`. A count or weight line belongs to a product only when it is cited, or when
+   it has no line total of its own and its numbers multiply to that product's line total; a
+   line with its own total ("7UP 1,5L 2,49", "2 x 0,99 1,98") is always an item of its own.
+   Identical lines ("MAITO 1,29" twice) resolve to the right count. Documented exemptions,
+   each a planner-approved tolerance:
+   - *The sums.* When the model's strict arithmetic (below, without the either-way
+     tolerance) matches `t` and `t` is listed in `x` as kind `total`, an uncited priced line,
+     or one listed as `other`, whose amount would break that match is not a missed product
+     (a loyalty sum, a card slip, a VAT row). Still re-read: a line whose amount is the gap
+     the sums lack, a line whose amount equals a discount or a tax the match relied on, and
+     a 0,00 line (a free item; only a 0,00 line listed in `x` is accounted for). Without a
+     listed total nothing is ruled out.
+   - *Clock times.* A time after one short word ("KLO 11.49") is structurally also a price
+     ("KIWI 0.59"). Between the first and the last line the model cited for a product it is
+     an item; before or after them (a header or footer time) it needs accounting only when
+     the strict sums miss a listed total.
+   - *Units.* "Tuote 2,49 KPL" has no amount when this receipt prints KPL as a unit.
 3. *One targeted re-read.* The unaccounted priced lines, with their unpriced neighbours as
    context, go to one more model call without the catalog block. A failed or unusable re-read
    never fails the receipt. What is still unaccounted becomes a `raw_line` row as printed,
-   keeping its amount and, where a count line proves it, its quantity.
+   keeping its amount, the first half of a wrapped name (lower-case continuation, or both
+   halves in capitals on an all-caps till) and, where a count line proves it, its quantity.
 4. *Profiles.* An optional country or language profile (`parsers/profiles.py`; `fi` wraps the
    MVP-R3b parser) may add only lines the model neither cited nor listed. It never overrides
    the model and never decides alone.
 5. *Arithmetic.* Σ line totals, raw rows included, ± discounts, deposits and fees (and the
-   tax when `te`) is compared with `t` in whole cents within max(5 cents, 1 %), tolerating a
-   discount already inside a line total. A mismatch becomes the receipt's note.
+   tax when `te`) is compared with `t` in whole cents within max(5 cents, 1 %). Once no
+   priced line is left unaccounted, the match may also hold either way: with or without the
+   discounts (a discount already inside a line total), and on a receipt marked `te` with or
+   without the tax (a planner-approved tolerance for a mis-set `te`, seen on the Croatian
+   receipt). Before that only the strict sum counts, so the tolerance never hides a missed
+   product priced like a discount or the tax. A mismatch becomes the receipt's note.
 6. *Record.* `completeness` on the receipt (read by the review screen) counts the product
    rows, the model's rows, those recovered by the re-read or as raw rows, unusable entries,
    the sums and the profile's evidence; the raw model answers (capped at 64 KB, never logged
    at INFO) are stored for diagnosis, including answers that failed.
 
-The stale window of the queue follows this budget: a first read, a re-read and the product
-selection may each take their timeout, so `RECEIPT_STALE_MINUTES` is never below
-`ceil(3 x LLM_TIMEOUT / 60) + 5`, and a receipt failed as stale is not overwritten when its
-read finishes late.
+The stale window of the queue follows the per-receipt budget: OCR (`MINERU_TIMEOUT`), a
+first read and a re-read (`LLM_TIMEOUT` each) and the product selection
+(`LLM_ESTIMATE_TIMEOUT`; the catalog estimates run after confirm and are not counted). So
+`RECEIPT_STALE_MINUTES` is never below the budget, rounded up to minutes, plus 5. The worker's
+final write, and its failure write, lock the row and check its own claim (the
+`processing_started_at` it ran under), so a receipt failed as stale, or requeued and claimed
+again, is not overwritten when a read finishes late.
 
 Generality principle: the LLM path must work for a store the system has never seen.
 Store-specific accelerators (learned templates, `ADAPTIVE_PARSER_SPEC.md`) and digital
