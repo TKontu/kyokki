@@ -1990,7 +1990,10 @@ not rulings.
 - [ ] Q27 triage: give the homelab API address and a read token, or open `GET /api/receipts/{id}`
   for today's receipt, so the missing lines can be traced to extraction, household or non-food.
 - [x] Q18 storage: **the SVG in the database** (ruling 2026-09-26).
-- [ ] Run `backend/scripts/backfill_icons.py` after round 2026-09-26-9 deploys (icons for existing products).
+- [ ] Deploy round 2026-09-26-9 (`alembic upgrade head` for the icon columns), then run
+  `backend/scripts/backfill_icons.py --dry-run` and without it (about 50 s per product on qwen).
+- [ ] Correct a few packed items' dates on the iPad (tortillas, cream, spread) and check that the
+  next pack of each arrives with a sensible date.
 
 **Rulings at planning (2026-09-26):** a learned shelf life is stored as `shelf_life_source='cook'`
 ("set by you"), so estimates never overwrite it; no separate "learned" label for now.
@@ -2003,6 +2006,43 @@ Round 2026-09-26-9 (base `49ff0c5`):
 - A3: layout pass **Q20** (no title label), **Q23** (a bread basket on the larder), **Q22** wording
   ("Put back" / "Corrected"), **Q25** (category row on the item sheet) (`feat/fridge-layout-pass`).
 - Deferred: **Q26** receipt provenance (a migration and `ItemEditSheet`, both taken this round).
+
+**Round 2026-09-26-9 is merged** (2026-09-27; #119 Q24, #120 layout pass, #121 Q18 step 1; docs #117,
+#118). Each PR had a verdict panel and one fix-up pass. **Not yet deployed.**
+- **Q24 done (#119).** A date the cook types or corrects teaches the product (stored as `'cook'`):
+  dates on or before purchase are ignored; with 1-2 stated dates the latest wins, with 3+ the median
+  of the last 5 (mean of the middle two for an even count). The product's `calculated` items are
+  re-dated. A thawed item (`expiry_source='frozen'`) keeps the cook's date but never teaches. Locks
+  are product-first (a deadlock found in review). A slow background estimate no longer overwrites a
+  learned value (`catalog_estimates.py` re-checks under a row lock).
+- **Q18 step 1 done (#121).** The local model draws each product's icon in the background (new
+  products, renames, `POST /products`, OFF enrich, the backfill script); the SVG is sanitised and
+  stored in `product_master.icon_svg` (migration `e4b8c1d7a236`), served at
+  `/api/products/{id}/icon.svg` (`default-src 'none'`, `nosniff`, ETag), shown on the tile with the
+  category emoji as fallback; Redraw (with a hint) and "Use category emoji" on the product sheet.
+  Drawings run one at a time across processes (a Postgres advisory lock).
+  - **Model:** `ICON_MODEL` defaults to `c2.qwen3.8-27b`. Measured on the spike's 20 products:
+    qwen ~17/20 recognisable (19 usable, ~50 s each) vs muse-glimmer ~4/20 (13 usable, ~10 s).
+    qwen is a second model on the c2 GPU; switching back cost the next receipt call 5-10 s.
+  - **Planner rulings at review:** `icon_status='cleared'` records the cook's "use category emoji"
+    so renames and the backfill never undo it; the last good drawing stays on the tile during a
+    redraw.
+- **Layout pass done (#120).** No title label on `/` (sr-only h1); bread is a basket on the larder,
+  Other a crate at its foot; ready meals and meat got the freed shelf. The undo for a put-back reads
+  "Put back" (planner ruling at review: the backend stores corrections unsigned, so the spec's
+  "Corrected" could never appear). The item sheet shows "Category: X · Change…". The operator
+  merged it with the italic "Kyokki" script on the freezer front kept.
+- Follow-ups from the round:
+  - [ ] The undo preview carries no direction for `correct` (`crud/consumption_log.py` stores
+    `abs(quantity)`); a downward correction made through the API reads "Put back".
+  - [ ] Q24: sibling broadcasts run before `stock/add` stores its idempotency record, so a crash in a
+    Redis hang could duplicate on retry (plausible, not reproduced).
+  - [ ] Q18: the cook's hinted Redraw waits behind the whole queue (one drawing at a time); the
+    scanner's OFF rescan rename does not redraw; the new TS icon fields are optional although the
+    backend always sends them.
+  - [ ] Q18 escalation steps 2-3 (a vision check, reference pictures) only if the drawings fall
+    short on the iPad.
+  - [ ] `IngredientTile`'s own "…" button is still 32 px outside the stale strip.
 
 ---
 
@@ -2154,7 +2194,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [ ] Q24 learn from dates  [ ] Q18 icons step 1  [ ] Q20/Q23/Q22/Q25 layout pass
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Next: Q27 triage, then Q26 + Q28 (receipt provenance and audit)
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery

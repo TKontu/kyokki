@@ -1,41 +1,37 @@
 # Handoff
-Generated-UTC: 2026-09-26T16:15:00Z
-Base-SHA: 41478a9d2ff4bbc2442d29f876c224bf6ac652a3
+Generated-UTC: 2026-09-27T00:00:00Z
+Base-SHA: 693f88dfe020dc8c3256c8af646344ae5bcad846
 
 ## Round delta
-- Round 2026-09-26-3 is merged, reconciled and **deployed** (2026-09-26):
-  - #113 Q17-B: the Cielo fridge on `/` for the portrait iPad;
-  - #111 AG3: the `kyokki shopping` commands;
-  - #112 agent API follow-ups;
-  - docs #109.
-- Each PR had a verdict panel and one fix-up pass. Rulings and follow-ups are in `docs/TODO.md`
-  (the Q17 section) and in the rulings list of `docs/agent_TODO.md`.
-- The mypy baseline is refreshed; `endpoints/shopping.py` went from 8 to 6.
+- Round 2026-09-26-9 is merged, reconciled and **not deployed**:
+  - #119 Q24: corrected dates teach the product;
+  - #121 Q18 step 1: model-drawn product icons (migration `e4b8c1d7a236`);
+  - #120: layout pass (Q20, Q23, Q22 wording, Q25);
+  - docs #117, #118.
+- Results, rulings and follow-ups are in `docs/TODO.md`, under the Q20-Q28 friction section.
+- Q27 (receipt lines lost without a trace) and Q28 (receipts not auditable) are logged. They are untriaged.
 
 ## Active PRs and conflicts
-- None.
+- Only this reconcile's docs PR (`docs/reconcile-2026-09-26-9`).
 
 ## Non-obvious decisions or blockers
-- **Rulings at review (2026-09-26):**
-  - The larder sits beside the freezer drawer, not under the fridge.
-  - `shopping add --product-id` requires AMOUNT UNIT.
-  - The per-minute derived idempotency key is accepted for now: a flip and flip back within one
-    minute replays.
-- **The CLI matches two backend error strings verbatim** (`Shopping list item <id> not found`,
-  `Referenced record does not exist.`). Reword either and the CLI falls back to exit 1. Coding
-  the shopping 404s is a follow-up.
-- **The main checkout's `frontend/node_modules` is empty** (since 11:37 UTC, before this round).
-  Run `(cd frontend && npm ci)` before any frontend work here.
+- **Rulings made at review:**
+  - The Q24 rule: ignore dates on or before purchase; the latest date wins for 1-2 dates, and the median of the last 5 for 3 or more.
+  - A thawed item never teaches.
+  - The put-back undo always reads "Put back".
+  - `icon_status='cleared'` keeps the cook's emoji choice.
+- **`ICON_MODEL` defaults to `c2.qwen3.8-27b`** (quality: about 17/20 recognisable, against about 4/20 for muse-glimmer). It shares the c2 GPU with the receipt model; switching back costs 5-10 s.
+- **The shared `backend/.venv` lacks `defusedxml`** (new in `requirements.txt`). Backend tests here need `pip install -r backend/requirements.txt` into it first.
+- **Q26 needs a migration.** The next round's alembic head belongs to whichever lane takes Q26 or Q28.
 - **Environment carried over:**
-  - Merges and force-pushes are the operator's.
-  - At most about three verdict panels at a time.
-  - Never symlink the shared `node_modules` into a worktree.
+  - Merges are the operator's.
+  - At most about three verdict panels at a time; panels must not draft lens reports themselves.
+  - Never symlink the shared `frontend/node_modules`; it is empty here, so run `npm ci` before frontend work.
   - Do not stage `.claude/README.md` or `.claude/templates/profiles/python-fastapi.md`.
-  - The six agent worktrees under `.claude/worktrees/` can be removed once no session holds them.
-- **Still awaiting operator rulings:**
-  - the Q18 icon route and the spike's icon-column design;
-  - #105's catalog apply marking agreed answers as `model`.
+- **Still awaiting the operator:**
+  - the homelab API address and a read token, for the Q27 triage;
+  - the #105 `model`-marking nod.
 
 ## Next action
-Look at `/` on the iPad and log any friction in `docs/TODO.md`, then rule
-on Q18 so the next round (`/plan-round`) can take Q18 and the portrait pass on the other screens.
+Deploy (`docs/DEPLOY.md`, then `alembic upgrade head`) and run `backend/scripts/backfill_icons.py`.
+Then triage Q27 from `GET /api/receipts/{id}`, and `/plan-round` for Q26 + Q28 (+ the Q27 fix).
