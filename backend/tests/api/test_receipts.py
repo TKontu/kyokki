@@ -920,7 +920,7 @@ K_MISSED = [
     ("Pirkka tamponi 32kpl sup", [22], 3.39),
 ]
 # Everything else the model listed as not a product: header, footer, tax, payment
-K_OTHER = [*range(1, 7), *range(28, 44)]
+K_OTHER = [*range(1, 7), *range(28, 54)]
 
 
 def _k_lines(rows) -> list[ExtractedLine]:
@@ -976,7 +976,7 @@ class TestKCitymarketReview:
         assert len(items) == 15
         assert [item["recovered"] for item in items] == [None] * 6 + ["model_retry"] * 9
         assert body["completeness"] == {
-            "text_lines": 43,
+            "text_lines": 53,
             "model_lines": 6,
             "recovered_by_retry": 9,
             "recovered_raw_lines": 0,

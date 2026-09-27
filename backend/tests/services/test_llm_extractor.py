@@ -119,9 +119,14 @@ def _mock_client(response_json: dict | None = None, status: int = 200, raises=No
 
 
 class TestPrefilter:
-    def test_drops_totals_payment_vat_discount_and_fee_lines(self):
+    def test_keeps_totals_payment_vat_discount_and_fee_lines(self):
+        """Q27: the Finnish skip patterns no longer decide what any receipt's model sees.
+
+        The total must reach the model for the arithmetic check, and a line one country
+        skips can be a product in another.
+        """
         filtered = prefilter_receipt_text(RECEIPT_TEXT)
-        for dropped in (
+        for kept in (
             "YHTEENSÄ",
             "VÄLISUMMA",
             "BONUSTA",
@@ -138,7 +143,12 @@ class TestPrefilter:
             "*****",
             "-----",
         ):
-            assert dropped not in filtered, dropped
+            assert kept in filtered, kept
+
+    def test_drops_only_blank_lines(self):
+        assert prefilter_receipt_text("A 1,00\n\n   \nYHTEENSÄ 1,00\n") == (
+            "A 1,00\nYHTEENSÄ 1,00"
+        )
 
     def test_keeps_header_products_and_quantity_lines(self):
         filtered = prefilter_receipt_text(RECEIPT_TEXT)
@@ -406,7 +416,8 @@ class TestExtractFromText:
         prompt = post.call_args.kwargs["json"]["messages"][0]["content"]
         assert isinstance(prompt, str)
         assert "KEVYTMAITOJUOMA LAKTON 1,28" in prompt
-        assert "YHTEENSÄ" not in prompt
+        # the printed total reaches the model now, for the arithmetic check (Q27)
+        assert "YHTEENSÄ 173,92" in prompt
         assert "dairy (Dairy & Eggs)" in prompt
 
     async def test_known_products_reach_the_prompt(self):
@@ -662,20 +673,20 @@ class TestLanguageNeutralRules:
 
     def test_asks_to_account_for_every_numbered_line(self):
         text = " ".join(build_instructions(CATEGORIES).split())
-        assert "Account for every numbered line" in text
+        assert "Every line that carries an amount" in text
+        assert "lines without any amount need not be listed" in text
         assert "whether that line comes before or after the name" in text
         assert "never the unit price" in text
         assert "lc = the receipt's language" in text
 
 
 class TestNumberedLines:
-    def test_prompt_lines_are_numbered_and_skipped_lines_are_not(self):
+    def test_every_non_blank_line_is_numbered(self):
         numbered = number_receipt_lines(RECEIPT_TEXT)
 
         assert numbered[0] == (1, "S-KAUPAT")
-        assert (None, "YHTEENSÄ 173,92") in numbered
-        numbers = [n for n, _ in numbered if n is not None]
-        assert numbers == list(range(1, len(numbers) + 1))
+        assert (16, "YHTEENSÄ 173,92") in numbered
+        assert [n for n, _ in numbered] == list(range(1, len(numbered) + 1))
 
     async def test_the_prompt_shows_the_numbers(self):
         patcher, post = _mock_client()
@@ -684,7 +695,7 @@ class TestNumberedLines:
 
         prompt = post.call_args.kwargs["json"]["messages"][0]["content"]
         assert "\n1: S-KAUPAT\n" in prompt
-        assert "5: BARISTA KAURAJUOMA 4,50\n6: 3 KPL 1,88 €/KPL" in prompt
+        assert "6: BARISTA KAURAJUOMA 4,50\n7: 3 KPL 1,88 €/KPL" in prompt
 
 
 class TestAccountingFields:

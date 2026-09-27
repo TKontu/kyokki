@@ -407,17 +407,28 @@ async def reconcile_text_read(
     profile, profile_lines, profile_only = _profile_evidence(
         extraction, numbered, cited, receipt_id
     )
+    # Only a line with an amount on it has to be accounted for; the model lists no other
+    # non-product line, which keeps its answer short (a 49-line read ran past 180 s)
+    priced = {n for n, line in lines.items() if _has_amount(line)}
     unaccounted = _attach_details(
-        (set(lines) - accounted) | profile_lines, cited, lines, layout
+        (priced - accounted) | profile_lines, cited, lines, layout
     )
+    # An unpriced neighbour - a wrapped name, a name above its price line - goes to the
+    # re-read with its partner, though on its own it needs no accounting
+    context = unaccounted | {
+        m
+        for n in unaccounted
+        for m in (n - 1, n + 1)
+        if m in lines and m not in priced and m not in accounted
+    }
 
     retry: ReceiptExtraction | None = None
     recovered: list[ExtractedLine] = []
-    still = set(unaccounted)
+    still = set(context)
     if any(_has_amount(lines[n]) for n in unaccounted):
         try:
             retry = await extract_unaccounted_lines(
-                [(n, lines[n]) for n in sorted(unaccounted)], categories
+                [(n, lines[n]) for n in sorted(context)], categories
             )
         except LLMExtractionError as exc:
             logger.warning(
@@ -450,7 +461,7 @@ async def reconcile_text_read(
 
     others = list(extraction.other_lines)
     if retry is not None:
-        others += [o for o in retry.other_lines if o.line in unaccounted]
+        others += [o for o in retry.other_lines if o.line in context]
     items_sum, off = receipt_arithmetic(
         first + recovered, others, extraction.receipt_total
     )

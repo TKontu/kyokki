@@ -33,7 +33,6 @@ from app.parsers.base import (
     OtherLine,
     ReceiptExtraction,
 )
-from app.parsers.receipt_lines import is_skip_line
 
 logger = get_logger(__name__)
 
@@ -78,9 +77,10 @@ CATALOG_BLOCK = (
 _INSTRUCTIONS = """Extract every purchased product from this receipt. It may come from any shop, country and language.
 
 Rules:
-- The receipt lines are numbered ("12: ..."). Account for every numbered line: each one is
-  either part of a product in p or listed in x. On an image there are no numbers: answer
-  l = [] and x = [].
+- The receipt lines are numbered ("12: ..."). Every line that carries an amount (a number
+  with decimals, such as a price) is either part of a product in p or listed in x; lines
+  without any amount need not be listed. On an image there are no numbers: answer l = []
+  and x = [].
 - One entry per product. n = the product name exactly as written, without the price.
 - l = the numbers of all the lines the product was read from: its name line, or both lines
   when a long name wraps, and any line that gives its count, weight or unit price, whether
@@ -118,10 +118,10 @@ Rules:
 - lc = the receipt's language as an ISO 639-1 code; cc = the shop's country as an ISO 3166-1
   alpha-2 code. Use null when unsure.
 - The store header, totals, subtotals, tax lines, payment, discounts, deposits and fees are
-  not products. List each such numbered line in x as {{"l": line number, "k": kind, "a":
-  amount}}, where k is one of header, total, subtotal, tax, payment, discount, deposit, fee,
-  other, and a is the amount printed on it as a signed number (negative for a discount), or
-  null. Examples: UKUPNO, SUMME and TOTAL are totals; PDV and MwSt are tax; POPUST and
+  not products. List each such numbered line that carries an amount in x as {{"l": line
+  number, "k": kind, "a": amount}}, where k is one of header, total, subtotal, tax, payment,
+  discount, deposit, fee, other, and a is the amount printed on it as a signed number
+  (negative for a discount), or null. Examples: UKUPNO, SUMME and TOTAL are totals; PDV and MwSt are tax; POPUST and
   Rabatt are discounts; Pfand is a deposit.
 - t = the receipt's grand total as a number, or null if none is printed.
 - Examples of Finnish words often misread: TUMMA RYPÄLE -> "Grape" (RUSINA is "Raisin");
@@ -138,24 +138,16 @@ other one of these lines in x."""
 
 
 def number_receipt_lines(text: str) -> list[tuple[int | None, str]]:
-    """Every non-blank line of the receipt with its number in the prompt.
+    """Every non-blank line of the receipt, numbered from 1 in receipt order.
 
-    Lines that can never be products (totals, VAT, payment, discounts, fees) are left out of
-    the prompt and get None; the rest are numbered from 1 in receipt order. The prompt shows
-    the numbers, and the model cites them (Q27).
+    The prompt shows the numbers and the model cites them (Q27). Nothing but blank lines is
+    left out: the Finnish skip patterns used to drop totals, VAT and discount lines here for
+    every receipt, which hid the printed total from the arithmetic check and applied one
+    country's format to all of them. The type keeps None for a line a caller leaves out
+    (a receipt profile may be handed such lines).
     """
-    numbered: list[tuple[int | None, str]] = []
-    count = 0
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-        if is_skip_line(line):
-            numbered.append((None, line))
-            continue
-        count += 1
-        numbered.append((count, line))
-    return numbered
+    lines = (raw.strip() for raw in text.splitlines())
+    return [(n, line) for n, line in enumerate(filter(None, lines), start=1)]
 
 
 def prompt_lines(text: str) -> list[str]:
@@ -164,10 +156,7 @@ def prompt_lines(text: str) -> list[str]:
 
 
 def prefilter_receipt_text(text: str) -> str:
-    """Drop lines that can never be products, keeping the header, product and quantity lines.
-
-    Shrinks the prompt and removes totals and VAT numbers the model might mistake for items.
-    """
+    """The receipt text as the prompt carries it: every line but the blank ones."""
     return "\n".join(prompt_lines(text))
 
 

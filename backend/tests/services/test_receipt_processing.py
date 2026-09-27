@@ -74,8 +74,11 @@ YHTEENSÄ                   7.48
 
 
 def _extraction(
-    method: str = "text", lines: list[ExtractedLine] | None = None
+    method: str = "text",
+    lines: list[ExtractedLine] | None = None,
+    total_line: int = 4,
 ) -> ReceiptExtraction:
+    """The model's answer; by default for OCR_TEXT, whose line 4 is the total (Q27)."""
     return ReceiptExtraction(
         method=method,
         store_chain="S-MARKET",
@@ -86,6 +89,7 @@ def _extraction(
             ExtractedLine(name="Valio Whole Milk 1L", quantity=1, category="dairy"),
             ExtractedLine(name="Arla Butter 500g", quantity=1, category="dairy"),
         ],
+        other_lines=[OtherLine(line=total_line, kind="total", amount=7.48)],
     )
 
 
@@ -502,9 +506,10 @@ class TestPersistence:
     async def test_empty_extraction_still_completes(
         self, service, pdf_receipt, sample_category, db_session
     ):
+        empty = _extraction(lines=[], total_line=3)
         with (
             patch(OCR, new_callable=AsyncMock, return_value=UNREADABLE_TEXT),
-            patch(TEXT, new_callable=AsyncMock, return_value=_extraction(lines=[])),
+            patch(TEXT, new_callable=AsyncMock, return_value=empty),
         ):
             result = await service.process_receipt(pdf_receipt)
 
@@ -1262,6 +1267,7 @@ class TestKCitymarketCompleteness:
         assert (10, "Naudan Entrecote Palana 22,83") in asked
         assert (11, "0,913 KG 25,00 €/KG") in asked
         assert [n for n, _ in asked] == [7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22]
+        # line 6 "K004 M000000/0000 11.49 26.9.2026" is priced-looking but in x
         # and the catalog is not offered to it
         assert retry.await_args.args[1] == CATEGORY_OPTIONS
         lines = outcome.extraction.lines
@@ -1269,7 +1275,8 @@ class TestKCitymarketCompleteness:
         assert [line.recovered for line in lines].count("model_retry") == 9
         assert all(line.recovered is None for line in lines[:6])
         assert outcome.completeness == {
-            "text_lines": 43,
+            # every non-blank line, the total and VAT lines included
+            "text_lines": 53,
             "model_lines": 6,
             "recovered_by_retry": 9,
             "recovered_raw_lines": 0,
@@ -1731,9 +1738,10 @@ class TestSuspectAndUnpricedLines:
         assert outcome.completeness["unaccounted_lines"] == 1
         assert outcome.completeness["recovered_raw_lines"] == 0
 
-    async def test_unaccounted_lines_without_an_amount_are_counted_not_re_read(
+    async def test_lines_without_an_amount_need_no_accounting(
         self, no_unplanned_re_read
     ):
+        """The model lists only priced non-product lines in x, to keep its answer short."""
         text = "SHOP\nWelcome back\nMAITO 1,20\n"
         answer = ReceiptExtraction(
             method="text", lines=[ExtractedLine(name="MAITO", source_lines=[3])]
@@ -1742,8 +1750,29 @@ class TestSuspectAndUnpricedLines:
         outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
 
         no_unplanned_re_read.assert_not_awaited()
-        assert outcome.completeness["unaccounted_lines"] == 2
+        assert outcome.completeness["unaccounted_lines"] == 0
         assert len(outcome.extraction.lines) == 1
+
+    async def test_an_unpriced_neighbour_goes_to_the_re_read_with_its_partner(
+        self, no_unplanned_re_read
+    ):
+        """A name printed above its price line: only the price line needs accounting,
+        but the re-read must see the name too."""
+        text = "SHOP\nMAITO 1,20\nJUUSTO GOUDA\n1 kpl 4,50\n"
+        answer = ReceiptExtraction(
+            method="text", lines=[ExtractedLine(name="MAITO", source_lines=[2])]
+        )
+        no_unplanned_re_read.side_effect = LLMExtractionError("down")
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        assert no_unplanned_re_read.await_args.args[0] == [
+            (3, "JUUSTO GOUDA"),
+            (4, "1 kpl 4,50"),
+        ]
+        assert outcome.completeness["unaccounted_lines"] == 1
+        (row,) = [p for p in outcome.extraction.lines if p.recovered]
+        assert (row.name, row.source_lines) == ("JUUSTO GOUDA", [3, 4])
 
 
 class TestReceiptArithmetic:
@@ -1854,7 +1883,8 @@ class TestCompletenessIsPersisted:
         await db_session.refresh(pdf_receipt)
         completeness = pdf_receipt.ocr_structured["completeness"]
         assert completeness["model_lines"] == 0
-        assert completeness["text_lines"] == completeness["unaccounted_lines"] == 3
+        # every line is in the prompt now, the total included (Q27)
+        assert completeness["text_lines"] == completeness["unaccounted_lines"] == 4
 
 
 class TestPrintedPackSizeWins:
