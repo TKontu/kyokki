@@ -1959,8 +1959,36 @@ not rulings.
      licence questions about the source photo.
   Storage (the spike's open question) is not yet ruled; recommended: the SVG in the database.
 
+- **Q27 — a receipt's items went missing without a trace (2026-09-26).** A receipt from today
+  with about 10-12 items came through with only 6 on the review screen; not offered at all were
+  chocolate ice cream, entrecôte (beef), eggs and parsnip. Where a line can disappear, from the
+  code on `49ff0c5` (not yet confirmed for this receipt):
+  1. **OCR or extraction missed it:** the lines are never in `receipt.ocr_structured.lines`
+     (`services/receipt_processing.py`, `services/llm_extractor.py`); the model call has
+     `LLM_MAX_TOKENS=8192`.
+  2. **The model called it household:** such lines are folded under "N household items" on the
+     review page (`app/receipt/[id]/page.tsx:211-212, 338-341`), collapsed by default.
+  3. **A remembered non-food name:** `known_non_food` (`services/non_food.py`) marks any line whose
+     printed name the cook once confirmed as not food, at every chain.
+  **Triage first:** read `GET /api/receipts/{id}` for that receipt (it returns `ocr_raw_text` and
+  `ocr_structured`) and see which of 1-3 it is; needs the homelab API address and a read token.
+  Whatever the cause, the review screen must never lose a line silently: every extracted line is
+  shown (household ones folded but counted), and lines the OCR text has but the extraction lacks
+  are flagged ("3 lines on the receipt were not read").
+- **Q28 — the receipt and what the model made of it cannot be audited.** After processing, the iPad
+  shows only the extracted rows. There is no way to see the receipt image or PDF, the OCR text,
+  or the model's raw answer, and no way back to a confirmed receipt's contents. The API already
+  returns `ocr_raw_text` and `ocr_structured` (`schemas/receipt.py:250-254`), but nothing shows
+  them; no route serves the stored image (`receipt.image_path`); the iPad Receipts list reopens
+  only unconfirmed receipts (MVP-R8). Direction: a receipt detail view reachable for every receipt
+  (confirmed too) with the original image or PDF, the OCR text, each extracted line with what it
+  became (product, household, skipped) and a link to the inventory items it created. Pairs with
+  Q26 (an item's own receipt line).
+
 **Operator actions and rulings still needed:**
 - [ ] Run "Re-estimate all (keeps yours)" on `/products`: dry run, read the proposal, apply.
+- [ ] Q27 triage: give the homelab API address and a read token, or open `GET /api/receipts/{id}`
+  for today's receipt, so the missing lines can be traced to extraction, household or non-food.
 - [x] Q18 storage: **the SVG in the database** (ruling 2026-09-26).
 - [ ] Run `backend/scripts/backfill_icons.py` after round 2026-09-26-9 deploys (icons for existing products).
 
