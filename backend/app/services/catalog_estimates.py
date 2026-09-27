@@ -177,7 +177,7 @@ async def _complete(batch: list[EstimateRequest]) -> str:
         }
 
     try:
-        async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=settings.LLM_ESTIMATE_TIMEOUT) as client:
             response = await client.post(
                 f"{settings.LLM_BASE_URL}/chat/completions",
                 json=payload,

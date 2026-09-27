@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -99,6 +100,9 @@ class Settings(BaseSettings):
     # seconds; receipts are background jobs, and the Q27 line-accounting contract made a
     # 49-line read take up to ~240 s on muse-glimmer (docs/vLLM_MANUAL_TEST.md)
     LLM_TIMEOUT: float = 420.0
+    # seconds; the catalog estimate and product selection calls answer a short list, and
+    # "Re-estimate all" waits for them synchronously, so they do not get the receipt budget
+    LLM_ESTIMATE_TIMEOUT: float = 180.0
     # Sent as chat_template_kwargs.reasoning_strength (Muse Glimmer accepts only these values).
     # Set to an empty value for models whose template has no such argument.
     LLM_REASONING_STRENGTH: Literal["xhigh", "high", "medium", "low"] | None = "low"
@@ -121,7 +125,26 @@ class Settings(BaseSettings):
     # Telegram receipt drop-in bot (MVP-T1). The bot is disabled while no token is set.
     # Receipt queue worker (python -m app.worker, MVP-R3)
     RECEIPT_WORKER_POLL_SECONDS: float = 2.0  # idle wait between queue checks
-    RECEIPT_STALE_MINUTES: int = 10  # processing longer than this is treated as failed
+    # Processing longer than this is treated as failed. Unset or empty, it follows the model
+    # budget; a value below the budget is raised to it (see `receipt_stale_minutes`).
+    RECEIPT_STALE_MINUTES: int | None = None
+
+    @field_validator("RECEIPT_STALE_MINUTES", mode="before")
+    @classmethod
+    def empty_stale_minutes_means_derived(cls, v: object) -> object:
+        return None if v == "" else v
+
+    @property
+    def receipt_stale_minutes(self) -> int:
+        """Minutes a receipt may stay `processing` before `fail_stale` fails it.
+
+        A receipt makes up to three sequential model calls (the first read, one targeted
+        re-read and the product selection), each allowed LLM_TIMEOUT, so a healthy but slow
+        receipt can take 3 x LLM_TIMEOUT. The window is never below that plus 5 minutes of
+        slack for OCR and the database, whatever an older stack.env says (Q27 verdict #1).
+        """
+        budget = math.ceil(3 * self.LLM_TIMEOUT / 60) + 5
+        return max(self.RECEIPT_STALE_MINUTES or 0, budget)
 
     TELEGRAM_BOT_TOKEN: SecretStr | None = None
     # Chats the bot serves; comma-separated ids. Send /start to the bot to learn yours.

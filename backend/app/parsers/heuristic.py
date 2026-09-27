@@ -7,15 +7,16 @@ review. It reads the grammar shared by Finnish receipts (ARCHITECTURE.md appendi
     3 KPL 1,88 €/KPL  |  2 x 2,89 EUR    quantity of the product above
     0,386 KG 3,89 €/KG | 0,436 kg x ...  weight of the product above
 
-Discounts (negative prices), totals, fees, deposits and payment lines are skipped, and reading
-stops at the first total: what follows it is loyalty, payment and VAT (Q27). A quantity or
-weight line belongs only to a product directly above it, so the `1 KPL` under a skipped deposit
-line stays with the deposit. Names stay as printed; there are no generic names or categories
-without the model.
+Discounts (negative prices), totals, fees, deposits and payment lines are skipped. Names stay
+as printed; there are no generic names or categories without the model.
 
 These are Finnish receipt formats. Besides the last-resort fallback, the parser is used only
 as the `fi` receipt profile (`app.parsers.profiles`), which adds evidence to the
-format-agnostic completeness check and never decides alone (Q27).
+format-agnostic completeness check and never decides alone (Q27). Two rules apply to the
+profile only (``profile_rules``), so the fallback keeps reading the whole receipt: reading stops
+at the first total, since what follows it is loyalty, payment and VAT; and a quantity or weight
+line belongs only to a product directly above it, so the `1 KPL` under a skipped deposit line
+stays with the deposit.
 """
 
 import re
@@ -98,23 +99,29 @@ class ProductBlock:
 
 def parse_receipt_blocks(
     numbered: Sequence[tuple[int | None, str]],
+    *,
+    profile_rules: bool = False,
 ) -> list[ProductBlock]:
     """The product lines of a receipt, each with the numbers of its source lines.
 
     ``numbered`` is every line of the receipt with the number it was given in the model's
     prompt, or None for a line the prompt left out; a block only cites numbered lines.
+    ``profile_rules`` (the `fi` profile) stops at the first total and lets a skipped line
+    break the chain between a product and a following KPL or KG line; the last-resort
+    fallback reads on past a mid-receipt total (Q27 verdict #12).
     """
     blocks: list[ProductBlock] = []
-    # The product a following KPL or KG line belongs to; a skipped line breaks the chain
+    # The product a following KPL or KG line belongs to
     current: ProductBlock | None = None
     for number, raw in numbered:
         line = _normalise(raw)
         if not line:
             continue
-        if _TOTAL.match(line):
+        if profile_rules and _TOTAL.match(line):
             break
         if is_skip_line(line):
-            current = None
+            if profile_rules:
+                current = None
             continue
         quantity = _QUANTITY.match(line)
         weight = None if quantity else _WEIGHT.match(line)

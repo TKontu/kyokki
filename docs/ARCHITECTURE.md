@@ -9,14 +9,15 @@
 >   the LAN (17301 frontend, 17300 API). Images are published to GHCR by CI and the homelab
 >   deploys `docker-compose.prod.yml` straight from GitHub (Portainer), building nothing.
 >   Runbook: [DEPLOY.md](./DEPLOY.md).
-> - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images) → one LLM
->   extraction call (OpenAI-compatible endpoint, vLLM or Ollama) → RapidFuzz match against
->   `product_master.canonical_name` → review → confirm. If the model fails or finds nothing on a
->   text receipt, a deterministic line parser supplies the rows (MVP-R3b, method `heuristic`).
->   Since MVP-R3 uploads are queued in
->   Postgres and the `kyokki-worker` service (`python -m app.worker`) reads them one at a time;
->   no request waits for extraction. Celery is not used.
->   No store parsers, no learned templates, no alias lookup, no Ollama vision fallback.
+> - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images; the vision
+>   model reads the image when OCR is unavailable) → an LLM extraction call
+>   (OpenAI-compatible endpoint, vLLM or Ollama) → line accounting, with at most one targeted
+>   re-read (Q27, §4.1) → product resolution → review → confirm. If the model fails or finds
+>   nothing on a text receipt, a deterministic line parser supplies the rows (MVP-R3b, method
+>   `heuristic`). Since MVP-R3 uploads are queued in Postgres and the `kyokki-worker` service
+>   (`python -m app.worker`) reads them one at a time; no request waits for extraction.
+>   Celery is not used. No store parsers in the core: country or language receipt profiles
+>   (only `fi` today) are optional evidence that never decides alone. No learned templates.
 > - **Not built:** Celery worker (removed in MVP-F2; it crash-looped on a missing module),
 >   `/api/receipts/batch`, `/api/inventory/reconcile`,
 >   `/api/scanner/input` (the real endpoint is `/api/scanner/scan`), GS1 parsing, shopping
@@ -238,13 +239,52 @@ category (
 ```
 Photo or PDF
   → text          pdfplumber for PDF (digital e-receipts), MinerU OCR for images
-  → extraction    LLM, store-agnostic (vision model directly from the image under
-                  evaluation, MVP-R0); generic heuristic line parser as fallback (MVP-R3b)
+  → extraction    LLM, store-agnostic (vision model directly from the image when OCR is
+                  unavailable); generic heuristic line parser as fallback (MVP-R3b)
+  → accounting    every priced line cited or listed; one targeted re-read; raw rows;
+                  optional country profiles as evidence; the receipt's arithmetic (Q27)
   → matching      store_product_alias exact hit first, then RapidFuzz on canonical names
                   and alias names; unmatched items get an LLM category suggestion
   → review        per-item edit / re-match / skip on the iPad
   → confirm       creates products for new items, inventory items, and alias rows
 ```
+
+**Extraction and line accounting (Q27).** A read must never lose lines silently, on a
+receipt from any shop, country or language, and nothing in the core knows a receipt format:
+
+1. *Numbered prompt.* Every non-blank text line is numbered. The model answers each product
+   with the lines it was read from (`l`: its name line, a wrapped second half, and any count
+   or weight line before or after it) and its line total (`p`); each priced line that is not
+   a product (header, total, subtotal, tax, payment, discount, deposit, fee, other) in `x`
+   with its kind and amount; the printed total `t`; whether the tax is added on top of the
+   line totals (`te`, as on US receipts); and the receipt's language and country (`lc`, `cc`,
+   normalised to ISO 639-1 and 3166-1 alpha-2). On an image there are no line numbers, but
+   `x` still carries the amounts.
+2. *Accounting* (`services/receipt_processing.py`). A line that carries an amount at its
+   end (`parsers/amounts.py`: any currency, with or without cents, never a date, a time or a
+   code) must be cited by a product or listed in `x`. A count or weight line belongs to a
+   product only when it is cited, or when its numbers multiply to that product's line total;
+   identical lines ("MAITO 1,29" twice) resolve to the right count. A priced line listed as
+   `other` is re-read unless the model's own arithmetic matches the total it read.
+3. *One targeted re-read.* The unaccounted priced lines, with their unpriced neighbours as
+   context, go to one more model call without the catalog block. A failed or unusable re-read
+   never fails the receipt. What is still unaccounted becomes a `raw_line` row as printed,
+   keeping its amount and, where a count line proves it, its quantity.
+4. *Profiles.* An optional country or language profile (`parsers/profiles.py`; `fi` wraps the
+   MVP-R3b parser) may add only lines the model neither cited nor listed. It never overrides
+   the model and never decides alone.
+5. *Arithmetic.* Σ line totals, raw rows included, ± discounts, deposits and fees (and the
+   tax when `te`) is compared with `t` in whole cents within max(5 cents, 1 %), tolerating a
+   discount already inside a line total. A mismatch becomes the receipt's note.
+6. *Record.* `completeness` on the receipt (read by the review screen) counts the product
+   rows, the model's rows, those recovered by the re-read or as raw rows, unusable entries,
+   the sums and the profile's evidence; the raw model answers (capped at 64 KB, never logged
+   at INFO) are stored for diagnosis, including answers that failed.
+
+The stale window of the queue follows this budget: a first read, a re-read and the product
+selection may each take their timeout, so `RECEIPT_STALE_MINUTES` is never below
+`ceil(3 x LLM_TIMEOUT / 60) + 5`, and a receipt failed as stale is not overwritten when its
+read finishes late.
 
 Generality principle: the LLM path must work for a store the system has never seen.
 Store-specific accelerators (learned templates, `ADAPTIVE_PARSER_SPEC.md`) and digital

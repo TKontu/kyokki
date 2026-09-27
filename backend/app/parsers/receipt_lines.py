@@ -1,4 +1,4 @@
-"""Receipt lines that are never products, shared by the LLM prefilter and the heuristic parser.
+"""Receipt lines that are never products, for the heuristic parser and the `fi` receipt profile.
 
 Covers the formats in the ARCHITECTURE.md appendix (S-Group, K-Group, Lidl): separators,
 totals, payment and VAT rows, discounts, fees, deposits and loyalty lines.

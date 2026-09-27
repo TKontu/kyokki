@@ -15,7 +15,7 @@ from app.models.non_food_name import NonFoodName
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
 from app.parsers.base import ExtractedLine, OtherLine, ReceiptExtraction
-from app.parsers.profiles import FinnishProfile
+from app.parsers.profiles import FinnishProfile, ProfileLine
 from app.schemas.receipt import ReceiptStatus
 from app.services import receipt_processing
 from app.services.llm_extractor import (
@@ -29,6 +29,7 @@ from app.services.receipt_processing import (
     ReceiptProcessingService,
     receipt_arithmetic,
     reconcile_text_read,
+    vision_outcome,
 )
 
 
@@ -591,7 +592,7 @@ class TestFailures:
         ):
             result = await service.process_receipt(pdf_receipt)
 
-        assert result.success is False
+        assert result.success is False, result.error
         assert "timed out" in (result.error or "")
         await db_session.refresh(pdf_receipt)
         assert pdf_receipt.processing_status == ReceiptStatus.FAILED
@@ -605,10 +606,58 @@ class TestFailures:
         ):
             result = await service.process_receipt(image_receipt)
 
-        assert result.success is False
+        assert result.success is False, result.error
         vision.assert_not_awaited()
         await db_session.refresh(image_receipt)
         assert image_receipt.processing_status == ReceiptStatus.FAILED
+
+
+class TestStaleRace:
+    """Q27 verdict #1: `fail_stale` and the worker's last write must agree."""
+
+    async def test_a_receipt_failed_as_stale_is_not_overwritten_to_completed(
+        self, service, pdf_receipt, sample_category, db_session, caplog
+    ):
+        from sqlalchemy import update
+
+        from app.services.receipt_queue import stale_error
+
+        async def read_while_marked_stale(*_args, **_kwargs):
+            # fail_stale ran (on an iPad poll) while the model was still reading
+            await db_session.execute(
+                update(Receipt)
+                .where(Receipt.id == pdf_receipt.id)
+                .values(processing_status=ReceiptStatus.FAILED, error=stale_error())
+            )
+            await db_session.commit()
+            return _extraction()
+
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, side_effect=read_while_marked_stale),
+        ):
+            result = await service.process_receipt(pdf_receipt)
+
+        assert result.success is False, result.error
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.processing_status == ReceiptStatus.FAILED
+        assert pdf_receipt.error == stale_error()
+        assert any("no longer processing" in r.getMessage() for r in caplog.records), (
+            result.error
+        )
+
+    async def test_a_healthy_receipt_still_completes(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_extraction()),
+        ):
+            result = await service.process_receipt(pdf_receipt)
+
+        assert result.success is True
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.processing_status == ReceiptStatus.COMPLETED
 
 
 class TestHeuristicFallback:
@@ -708,7 +757,7 @@ class TestHeuristicFallback:
         ):
             result = await service.process_receipt(image_receipt)
 
-        assert result.success is False
+        assert result.success is False, result.error
         parser.assert_not_called()
         await db_session.refresh(image_receipt)
         assert image_receipt.processing_status == ReceiptStatus.FAILED
@@ -815,7 +864,7 @@ class TestTimingLog:
         ):
             result = await service.process_receipt(pdf_receipt)
 
-        assert result.success is False
+        assert result.success is False, result.error
         line = self._read_line(caplog)
         assert line.receipt_id == str(pdf_receipt.id)
         assert "MinerU is down" in line.error
@@ -1026,6 +1075,7 @@ FIXTURES = Path(__file__).parent.parent / "fixtures" / "receipts"
 K_TEXT = (FIXTURES / "k_citymarket_sello.txt").read_text(encoding="utf-8")
 HR_TEXT = (FIXTURES / "konzum_hr_synthetic.txt").read_text(encoding="utf-8")
 DE_TEXT = (FIXTURES / "rewe_de_synthetic.txt").read_text(encoding="utf-8")
+US_TEXT = (FIXTURES / "us_synthetic.txt").read_text(encoding="utf-8")
 CATEGORY_OPTIONS = [CategoryOption(id="produce", name="Vegetables")]
 
 
@@ -1044,6 +1094,24 @@ def _line(text: str, name: str, *starts: str, **fields) -> ExtractedLine:
     return ExtractedLine(name=name, source_lines=_at(text, *starts), **fields)
 
 
+def _others(
+    text: str,
+    kinds: dict[str, tuple[str, float | None]],
+    skip: set[int] = frozenset(),
+    missed: tuple[str, ...] = (),
+) -> list[OtherLine]:
+    """`x` as the model shapes it: only the priced non-product lines, each named in
+    ``kinds`` by how it begins (kind, amount). Lines without an amount are not listed."""
+    others = []
+    for n, line in _prompt_lines(text).items():
+        if n in skip or (missed and line.startswith(missed)):
+            continue
+        kind = next((v for start, v in kinds.items() if line.startswith(start)), None)
+        if kind is not None:
+            others.append(OtherLine(line=n, kind=kind[0], amount=kind[1]))
+    return others
+
+
 def _answer(
     text: str,
     products: list[ExtractedLine],
@@ -1051,27 +1119,20 @@ def _answer(
     missed: tuple[str, ...] = (),
     **fields,
 ) -> ReceiptExtraction:
-    """The model's answer: its products, and every other line in `x`.
-
-    ``kinds`` names a line's kind and amount by how it begins (default: header). Lines
-    beginning with one of ``missed`` are in neither: the model left them out.
-    """
+    """The model's answer in the production shape (Q27 verdict #15): its products, and in
+    `x` only the priced lines named in ``kinds``. Lines beginning with one of ``missed``
+    are in neither: the model left them out."""
     cited = {n for p in products for n in p.source_lines}
-    others = []
-    for n, line in _prompt_lines(text).items():
-        if n in cited or line.startswith(missed or ("\0",)):
-            continue
-        kind, amount = next(
-            (v for start, v in (kinds or {}).items() if line.startswith(start)),
-            ("header", None),
-        )
-        others.append(OtherLine(line=n, kind=kind, amount=amount))
     return ReceiptExtraction(
-        method="text", lines=products, other_lines=others, **fields
+        method="text",
+        lines=products,
+        other_lines=_others(text, kinds or {}, cited, missed),
+        **fields,
     )
 
 
 K_FOOTER = {
+    "YHTEENSÄ": ("total", 73.07),
     "PLUSSAA": ("subtotal", 73.07),
     "Käyttötavaraostokset": ("subtotal", 8.37),
     "Ruokaostokset": ("subtotal", 64.7),
@@ -1228,6 +1289,9 @@ K_MISSED = (
     "Parsakaali",
     "Pirkka tamponi",
 )
+# What the re-read of the K receipt is shown: the nine missed items, their weight and count
+# lines, and line 6 above the first of them, an unpriced neighbour
+K_ASKED = [6, 7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22]
 
 
 def _k_first_read(**fields) -> ReceiptExtraction:
@@ -1238,15 +1302,58 @@ def _k_first_read(**fields) -> ReceiptExtraction:
         missed=K_MISSED,
         language="fi",
         country="FI",
+        # the total line is in the prompt since Q27, and the model reads it
+        receipt_total=73.07,
         raw_completion='{"p": ["six products"]}',
         **fields,
     )
 
 
-def _retry_answer(lines: list[ExtractedLine]) -> ReceiptExtraction:
+def _retry_answer(
+    lines: list[ExtractedLine], others: list[OtherLine] | None = None
+) -> ReceiptExtraction:
+    """A re-read's answer: its products and, like any answer, its `x`."""
     return ReceiptExtraction(
-        method="text", lines=lines, raw_completion='{"p": ["the rest"]}'
+        method="text",
+        lines=lines,
+        other_lines=others or [],
+        raw_completion='{"p": ["the rest"]}',
     )
+
+
+def _k_retry() -> ReceiptExtraction:
+    # Line 6 ("K004 M000000/0000 11.49 26.9.2026") carries no amount, but a model may
+    # still list it; that is harmless
+    return _retry_answer(_k_nine(), [OtherLine(line=6, kind="header", amount=None)])
+
+
+class TestProductionShapedStubs:
+    """Q27 verdict #14/#15: the stubs list exactly the priced lines the prompt asks for."""
+
+    @pytest.mark.parametrize(
+        ("text", "products", "kinds"),
+        [
+            (K_TEXT, lambda: _k_six() + _k_nine(), K_FOOTER),
+            (HR_TEXT, lambda: _hr_all(), lambda: HR_KINDS),
+            (DE_TEXT, lambda: _de_all(), lambda: DE_KINDS),
+            (US_TEXT, lambda: _us_all(), lambda: US_KINDS),
+        ],
+    )
+    def test_every_priced_line_is_a_product_or_in_x(self, text, products, kinds):
+        from app.parsers.amounts import amount_style, line_amount
+
+        kinds = kinds() if callable(kinds) else kinds
+        answer = _answer(text, products(), kinds)
+        lines = _prompt_lines(text)
+        style = amount_style(lines.values())
+        priced = {
+            n for n, line in lines.items() if line_amount(line, style) is not None
+        }
+        cited = {n for p in answer.lines for n in p.source_lines}
+        listed = {o.line for o in answer.other_lines}
+        assert priced - cited == listed - cited
+        # nothing unpriced is listed
+        assert listed <= priced
 
 
 class TestKCitymarketCompleteness:
@@ -1257,7 +1364,7 @@ class TestKCitymarketCompleteness:
     ):
         retry = no_unplanned_re_read
         retry.side_effect = None
-        retry.return_value = _retry_answer(_k_nine())
+        retry.return_value = _k_retry()
 
         outcome = await reconcile_text_read(K_TEXT, _k_first_read(), CATEGORY_OPTIONS)
 
@@ -1266,8 +1373,7 @@ class TestKCitymarketCompleteness:
         # a name line and its weight line go to the re-read together
         assert (10, "Naudan Entrecote Palana 22,83") in asked
         assert (11, "0,913 KG 25,00 €/KG") in asked
-        assert [n for n, _ in asked] == [7, 8, 9, 10, 11, 16, 17, 18, 19, 20, 21, 22]
-        # line 6 "K004 M000000/0000 11.49 26.9.2026" is priced-looking but in x
+        assert [n for n, _ in asked] == K_ASKED
         # and the catalog is not offered to it
         assert retry.await_args.args[1] == CATEGORY_OPTIONS
         lines = outcome.extraction.lines
@@ -1283,8 +1389,7 @@ class TestKCitymarketCompleteness:
             "invalid_entries": 0,
             "unaccounted_lines": 0,
             "items_sum": 73.07,
-            # the total line is left out of the prompt on Finnish receipts
-            "receipt_total": None,
+            "receipt_total": 73.07,
             "profile": "fi",
             "profile_only_lines": 9,
         }
@@ -1304,33 +1409,48 @@ class TestKCitymarketCompleteness:
         outcome = await reconcile_text_read(K_TEXT, _k_first_read(), CATEGORY_OPTIONS)
 
         rows = [line for line in outcome.extraction.lines if line.recovered]
-        assert [row.name for row in rows] == [
-            "Bakerika suol suklaahipkeksita",
-            "Pingviini jäätelö 1l suklaa la",
-            "Pirkka rypäle tumma 500g",
-            "Naudan Entrecote Palana",
-            "Nikulan vapaa L15 1020g",
-            "Palsternakka",
-            "Palmolive Vaahtosaippua 250ml",
-            "Parsakaali 250g luomu",
-            "Pirkka tamponi 32kpl sup",
+        assert [(row.name, row.price) for row in rows] == [
+            ("Bakerika suol suklaahipkeksita", 4.27),
+            ("Pingviini jäätelö 1l suklaa la", 2.99),
+            ("Pirkka rypäle tumma 500g", 2.79),
+            ("Naudan Entrecote Palana", 22.83),
+            ("Nikulan vapaa L15 1020g", 4.59),
+            ("Palsternakka", 1.04),
+            ("Palmolive Vaahtosaippua 250ml", 4.98),
+            ("Parsakaali 250g luomu", 3.97),
+            ("Pirkka tamponi 32kpl sup", 3.39),
         ]
         assert all(row.recovered == "raw_line" for row in rows)
         assert all(row.generic_name is None and row.category is None for row in rows)
-        # the weight line is part of its product's row, not a row of its own
+        # the weight line is part of its product's row, not a row of its own, and the
+        # unpriced line 6 above Bakerika is not glued into its name
         entrecote = rows[3]
         assert entrecote.source_lines == [10, 11]
+        assert rows[0].source_lines == [7]
+        # "2 KPL 2,49 €/KPL" under the soap makes 4,98: two of them
+        assert (rows[6].source_lines, rows[6].quantity) == ([19, 20], 2)
         assert len(outcome.extraction.lines) == 15
         assert outcome.completeness["recovered_raw_lines"] == 9
         assert outcome.completeness["recovered_by_retry"] == 0
-        # a raw row accounts for its lines
+        # a raw row accounts for its lines and keeps its amount (verdict #10)
         assert outcome.completeness["unaccounted_lines"] == 0
         assert outcome.completeness["text_lines"] == 15
+        assert outcome.completeness["items_sum"] == 73.07
+        assert "add up" not in outcome.note
         assert outcome.raw_completions == {"raw_completion": '{"p": ["six products"]}'}
 
-    async def test_a_full_answer_makes_no_extra_call(self, no_unplanned_re_read):
+    async def test_a_perfect_read_makes_no_extra_call_and_no_row(
+        self, no_unplanned_re_read
+    ):
+        """Q27 verdict #4: the clock time 11.49 on line 6 cost a re-read and a junk row
+        `www.k-citymarket.fi K004 ...` on a read that added up."""
         full = _answer(
-            K_TEXT, _k_six() + _k_nine(), K_FOOTER, language="fi", country="FI"
+            K_TEXT,
+            _k_six() + _k_nine(),
+            K_FOOTER,
+            language="fi",
+            country="FI",
+            receipt_total=73.07,
         )
 
         outcome = await reconcile_text_read(K_TEXT, full, CATEGORY_OPTIONS)
@@ -1343,29 +1463,38 @@ class TestKCitymarketCompleteness:
         assert outcome.completeness["recovered_raw_lines"] == 0
         assert outcome.completeness["unaccounted_lines"] == 0
         assert outcome.completeness["profile_only_lines"] == 0
+        assert outcome.completeness["items_sum"] == 73.07
 
-    async def test_the_profile_catches_lines_the_model_called_non_products(
+    async def test_the_profile_never_overrides_lines_the_model_listed(
         self, no_unplanned_re_read
     ):
-        """The model may list a product line in x; only the `fi` profile then knows."""
+        """Q27 verdict #2: only a line the model neither cited nor listed may come from
+        the profile. Listed as not products, the nine lines stay the model's call; the
+        arithmetic is what says something is missing."""
         hidden = _answer(
-            K_TEXT, _k_six(), K_FOOTER, language="fi", country="FI"
-        )  # every missed line listed as a header
-        no_unplanned_re_read.side_effect = None
-        no_unplanned_re_read.return_value = _retry_answer(_k_nine())
+            K_TEXT,
+            _k_six(),
+            {**K_FOOTER, **{start: ("header", None) for start in K_MISSED}},
+            language="fi",
+            country="FI",
+            receipt_total=73.07,
+        )
 
         outcome = await reconcile_text_read(K_TEXT, hidden, CATEGORY_OPTIONS)
 
-        no_unplanned_re_read.assert_awaited_once()
-        assert len(outcome.extraction.lines) == 15
+        no_unplanned_re_read.assert_not_awaited()
+        assert len(outcome.extraction.lines) == 6
         assert outcome.completeness["profile"] == "fi"
-        assert outcome.completeness["profile_only_lines"] == 9
+        assert outcome.completeness["profile_only_lines"] == 0
+        assert "Line totals add up to 22.22 but the receipt total is 73.07" in (
+            outcome.note
+        )
 
     async def test_without_a_detected_country_or_language_no_profile_runs(
         self, no_unplanned_re_read
     ):
         no_unplanned_re_read.side_effect = None
-        no_unplanned_re_read.return_value = _retry_answer(_k_nine())
+        no_unplanned_re_read.return_value = _k_retry()
         first = _k_first_read()
         first.language = first.country = None
 
@@ -1380,7 +1509,7 @@ class TestKCitymarketCompleteness:
         self, no_unplanned_re_read, caplog
     ):
         no_unplanned_re_read.side_effect = None
-        no_unplanned_re_read.return_value = _retry_answer(_k_nine())
+        no_unplanned_re_read.return_value = _k_retry()
 
         with patch.object(
             FinnishProfile, "product_lines", side_effect=RuntimeError("bad grammar")
@@ -1392,6 +1521,59 @@ class TestKCitymarketCompleteness:
         assert len(outcome.extraction.lines) == 15
         assert outcome.completeness["profile"] is None
         assert any("profile failed" in r.getMessage() for r in caplog.records)
+
+
+class TestTheProfileNeverOverridesTheModel:
+    """Q27 verdict #2: `PULLOPANTTI 0,40`, correctly a deposit in `x`, cost a re-read,
+    a junk row and a sum of 3.09 against 2.69."""
+
+    TEXT = "K-MARKET\nMAITO 1,29\nLEIPÄ 1,00\nPULLOPANTTI 0,40\nYHTEENSÄ 2,69\n"
+
+    async def test_a_deposit_the_model_listed_is_accounted_for(
+        self, no_unplanned_re_read
+    ):
+        answer = ReceiptExtraction(
+            method="text",
+            lines=[
+                ExtractedLine(name="MAITO", source_lines=[2], price=1.29),
+                ExtractedLine(name="LEIPÄ", source_lines=[3], price=1.0),
+            ],
+            other_lines=[
+                OtherLine(line=4, kind="deposit", amount=0.4),
+                OtherLine(line=5, kind="total", amount=2.69),
+            ],
+            receipt_total=2.69,
+            language="fi",
+            country="FI",
+        )
+
+        outcome = await reconcile_text_read(self.TEXT, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
+        assert [p.name for p in outcome.extraction.lines] == ["MAITO", "LEIPÄ"]
+        assert outcome.completeness["items_sum"] == 2.69
+        assert outcome.completeness["profile"] == "fi"
+        assert outcome.completeness["profile_only_lines"] == 0
+        assert outcome.note is None
+
+    async def test_a_line_the_model_never_mentioned_still_comes_from_the_profile(
+        self, no_unplanned_re_read
+    ):
+        """The profile adds evidence about lines the model left out altogether."""
+        text = "K-MARKET\nMAITO 1,29\nLEIPÄ\n"
+        answer = ReceiptExtraction(
+            method="text",
+            lines=[ExtractedLine(name="MAITO", source_lines=[2], price=1.29)],
+            language="fi",
+        )
+        with patch.object(
+            FinnishProfile,
+            "product_lines",
+            return_value=[ProfileLine(line_numbers=(3,), name="LEIPÄ")],
+        ):
+            outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        assert outcome.completeness["profile_only_lines"] == 1
 
 
 def _hr_all() -> list[ExtractedLine]:
@@ -1423,7 +1605,7 @@ def _hr_all() -> list[ExtractedLine]:
 
 HR_KINDS = {
     "UKUPNO": ("total", 14.74),
-    "PDV": ("tax", None),
+    "PDV": ("tax", 0.4),
     "Gotovina": ("payment", 20.0),
     "Povrat": ("payment", -5.26),
 }
@@ -1486,9 +1668,11 @@ class TestCroatianReceipt:
         assert outcome.completeness["items_sum"] == 14.74
         assert "add up" not in (outcome.note or "")
 
-    async def test_when_nothing_recovers_it_the_arithmetic_flags_the_gap(
+    async def test_raw_rows_keep_their_amounts_so_the_sums_still_agree(
         self, no_unplanned_re_read
     ):
+        """Q27 verdict #10: raw rows without a price read as "22.22 against 73.07,
+        something may be missing" although every line was on screen."""
         read = [p for p in _hr_all() if not p.name.startswith(("Jabuke", "Čokolada"))]
         answer = _answer(
             HR_TEXT,
@@ -1505,12 +1689,24 @@ class TestCroatianReceipt:
         assert asked == [10, 11, 12, 13]
         rows = [p for p in outcome.extraction.lines if p.recovered == "raw_line"]
         # one row per item: the weight line and the wrapped half join their names
-        assert [(row.name, row.source_lines) for row in rows] == [
-            ("Jabuke Zlatni delišes", [10, 11]),
-            ("Čokolada mliječna s lješnjacima i grožđicama 100g", [12, 13]),
+        assert [(row.name, row.source_lines, row.price) for row in rows] == [
+            ("Jabuke Zlatni delišes", [10, 11], 1.68),
+            ("Čokolada mliječna s lješnjacima i grožđicama 100g", [12, 13], 2.19),
         ]
-        assert outcome.completeness["items_sum"] == 10.87
-        assert "Line totals add up to 10.87 but the receipt total is 14.74" in (
+        assert outcome.completeness["items_sum"] == 14.74
+        assert outcome.note == (
+            "2 of 8 lines were not read by the model and were recovered"
+        )
+
+    async def test_a_real_gap_is_still_flagged(self, no_unplanned_re_read):
+        products = _hr_all()
+        products[1].price = 0.49  # the model misread 1,49
+        answer = _answer(HR_TEXT, products, HR_KINDS, receipt_total=14.74)
+
+        outcome = await reconcile_text_read(HR_TEXT, answer, CATEGORY_OPTIONS)
+
+        assert outcome.completeness["items_sum"] == 13.74
+        assert "Line totals add up to 13.74 but the receipt total is 14.74" in (
             outcome.note
         )
 
@@ -1533,11 +1729,22 @@ DE_KINDS = {
     "Pfand": ("deposit", 0.25),
     "SUMME": ("total", 13.86),
     "Geg. Karte": ("payment", 13.86),
-    "Steuer": ("tax", None),
     "A=": ("tax", 0.3),
     "B=": ("tax", 0.78),
     "Gesamtbetrag": ("tax", 13.86),
 }
+
+
+def _single_line_cites(products: list[ExtractedLine]) -> list[ExtractedLine]:
+    """The same answer citing each product's name line only: no multi-line product."""
+    for product in products:
+        product.source_lines = [
+            n for n in product.source_lines if not DE_LINES[n][:1].isdigit()
+        ]
+    return products
+
+
+DE_LINES = _prompt_lines(DE_TEXT)
 
 
 class TestGermanReceipt:
@@ -1561,20 +1768,19 @@ class TestGermanReceipt:
         assert outcome.completeness["items_sum"] == 13.86
         assert outcome.note is None
 
-    async def test_a_count_line_the_model_did_not_cite_stays_with_its_product(
+    async def test_an_uncited_count_line_its_arithmetic_proves_stays_with_its_product(
         self, no_unplanned_re_read
     ):
-        """Cited only by name, the `2 x 1,49` above it is still that milk's detail."""
-        products = _de_all()
-        products[0].source_lines = _at(DE_TEXT, "Vollmilch")
+        """Cited only by name, the `2 x 1,49` above it makes the milk's 2,98."""
         answer = _answer(
-            DE_TEXT, products, DE_KINDS, missed=("2 x 1,49",), receipt_total=13.86
+            DE_TEXT, _single_line_cites(_de_all()), DE_KINDS, receipt_total=13.86
         )
 
         outcome = await reconcile_text_read(DE_TEXT, answer, CATEGORY_OPTIONS)
 
         no_unplanned_re_read.assert_not_awaited()
         assert outcome.completeness["unaccounted_lines"] == 0
+        assert outcome.extraction.lines[0].source_lines == [6, 7]
 
     async def test_a_missed_count_and_name_are_re_read_together(
         self, no_unplanned_re_read
@@ -1589,9 +1795,175 @@ class TestGermanReceipt:
 
         assert [n for n, _ in no_unplanned_re_read.await_args.args[0]] == [11, 12]
         (row,) = [p for p in outcome.extraction.lines if p.recovered]
-        assert (row.name, row.source_lines) == ("Joghurt Natur 150g B", [11, 12])
-        assert outcome.completeness["items_sum"] == 11.19
-        assert "add up to 11.19" in outcome.note
+        assert (row.name, row.source_lines, row.quantity, row.price) == (
+            "Joghurt Natur 150g",
+            [11, 12],
+            3,
+            2.67,
+        )
+        assert outcome.completeness["items_sum"] == 13.86
+        assert "add up" not in outcome.note
+
+    @pytest.mark.parametrize("single_line_cites", [False, True])
+    async def test_a_missed_item_with_its_count_above_comes_back_as_two(
+        self, no_unplanned_re_read, single_line_cites
+    ):
+        """Q27 verdict #11: with no multi-line product cited, `2 x 1,49` went to the
+        product above it and the missed Vollmilch came back as one."""
+        read = [p for p in _de_all() if not p.name.startswith("Vollmilch")]
+        if single_line_cites:
+            read = _single_line_cites(read)
+        answer = _answer(
+            DE_TEXT,
+            read,
+            DE_KINDS,
+            missed=("2 x 1,49", "Vollmilch"),
+            receipt_total=13.86,
+        )
+        no_unplanned_re_read.side_effect = LLMExtractionError("gateway down")
+
+        outcome = await reconcile_text_read(DE_TEXT, answer, CATEGORY_OPTIONS)
+
+        asked = [n for n, _ in no_unplanned_re_read.await_args.args[0]]
+        assert {6, 7} <= set(asked)
+        (row,) = [p for p in outcome.extraction.lines if p.recovered]
+        assert (row.name, row.source_lines, row.quantity, row.price) == (
+            "Vollmilch 3,5% 1L",
+            [6, 7],
+            2,
+            2.98,
+        )
+
+    async def test_the_re_read_of_that_item_keeps_its_count(self, no_unplanned_re_read):
+        read = _single_line_cites(
+            [p for p in _de_all() if not p.name.startswith("Vollmilch")]
+        )
+        answer = _answer(
+            DE_TEXT,
+            read,
+            DE_KINDS,
+            missed=("2 x 1,49", "Vollmilch"),
+            receipt_total=13.86,
+        )
+        no_unplanned_re_read.side_effect = None
+        no_unplanned_re_read.return_value = _retry_answer(
+            [
+                _line(
+                    DE_TEXT,
+                    "Vollmilch 3,5% 1L",
+                    "2 x 1,49",
+                    "Vollmilch",
+                    quantity=2,
+                    price=2.98,
+                )
+            ]
+        )
+
+        outcome = await reconcile_text_read(DE_TEXT, answer, CATEGORY_OPTIONS)
+
+        (milk,) = [p for p in outcome.extraction.lines if p.recovered]
+        assert (milk.recovered, milk.quantity, milk.source_lines) == (
+            "model_retry",
+            2,
+            [6, 7],
+        )
+        assert outcome.completeness["items_sum"] == 13.86
+
+
+def _us_all() -> list[ExtractedLine]:
+    t = US_TEXT
+    return [
+        _line(t, "WHOLE MILK 1 GAL", "WHOLE MILK", price=3.49),
+        _line(t, "BANANAS", "BANANAS", "2.12 lb", weight_kg=0.962, price=1.25),
+        _line(t, "BREAD WHEAT", "BREAD", price=1.74),
+    ]
+
+
+US_KINDS = {
+    "SUBTOTAL": ("subtotal", 6.48),
+    "TAX": ("tax", 0.52),
+    "TOTAL": ("total", 7.0),
+    "VISA": ("payment", 7.0),
+    "CHANGE DUE": ("payment", 0.0),
+}
+
+
+class TestUSReceipt:
+    """Q27 verdict #18: tax added on top of the line totals, as US receipts print it."""
+
+    async def test_a_tax_exclusive_receipt_adds_up_with_its_tax(
+        self, no_unplanned_re_read
+    ):
+        answer = _answer(
+            US_TEXT,
+            _us_all(),
+            US_KINDS,
+            language="en",
+            country="US",
+            receipt_total=7.0,
+            tax_exclusive=True,
+        )
+
+        outcome = await reconcile_text_read(US_TEXT, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
+        assert outcome.completeness["items_sum"] == 7.0
+        assert outcome.note is None
+        assert outcome.completeness["recovered_raw_lines"] == 0
+
+    async def test_without_te_the_tax_is_not_counted(self, no_unplanned_re_read):
+        answer = _answer(US_TEXT, _us_all(), US_KINDS, receipt_total=7.0)
+
+        outcome = await reconcile_text_read(US_TEXT, answer, CATEGORY_OPTIONS)
+
+        assert outcome.completeness["items_sum"] == 6.48
+        assert "add up to 6.48" in outcome.note
+
+
+class TestWholeCurrencyReceipt:
+    """Q27 verdict #16: on a receipt without cents no line counted as priced, so a
+    missed product was never noticed."""
+
+    TEXT = "SHOP\nMILK 198\nBREAD 1,280\nCHEESE 1.299\nTOTAL 2,777\nNo. 0042\n"
+
+    async def test_a_missed_whole_amount_line_is_re_read(self, no_unplanned_re_read):
+        answer = ReceiptExtraction(
+            method="text",
+            lines=[
+                ExtractedLine(name="MILK", source_lines=[2], price=198),
+                ExtractedLine(name="BREAD", source_lines=[3], price=1280),
+            ],
+            other_lines=[OtherLine(line=5, kind="total", amount=2777)],
+            receipt_total=2777,
+        )
+        no_unplanned_re_read.side_effect = LLMExtractionError("down")
+
+        outcome = await reconcile_text_read(self.TEXT, answer, CATEGORY_OPTIONS)
+
+        assert no_unplanned_re_read.await_args.args[0] == [(4, "CHEESE 1.299")]
+        (row,) = [p for p in outcome.extraction.lines if p.recovered]
+        assert (row.name, row.price) == ("CHEESE", 1299)
+        assert outcome.completeness["items_sum"] == 2777
+        assert outcome.note == (
+            "1 of 3 lines were not read by the model and were recovered"
+        )
+
+    async def test_a_full_read_needs_nothing(self, no_unplanned_re_read):
+        answer = ReceiptExtraction(
+            method="text",
+            lines=[
+                ExtractedLine(name="MILK", source_lines=[2], price=198),
+                ExtractedLine(name="BREAD", source_lines=[3], price=1280),
+                ExtractedLine(name="CHEESE", source_lines=[4], price=1299),
+            ],
+            other_lines=[OtherLine(line=5, kind="total", amount=2777)],
+            receipt_total=2777,
+        )
+
+        outcome = await reconcile_text_read(self.TEXT, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
+        assert outcome.note is None
 
 
 class TestJoiningAnswersWithoutLineNumbers:
@@ -1603,7 +1975,6 @@ class TestJoiningAnswersWithoutLineNumbers:
         answer = ReceiptExtraction(
             method="text",
             lines=[ExtractedLine(name="MAITO"), ExtractedLine(name="LEIPÄ")],
-            other_lines=[OtherLine(line=1, kind="header")],
         )
         no_unplanned_re_read.side_effect = None
         no_unplanned_re_read.return_value = _retry_answer([ExtractedLine(name="MAITO")])
@@ -1629,7 +2000,6 @@ class TestJoiningAnswersWithoutLineNumbers:
                 ExtractedLine(name="MAITO"),
                 ExtractedLine(name="LEIPÄ"),
             ],
-            other_lines=[OtherLine(line=1, kind="header")],
         )
 
         outcome = await reconcile_text_read(self.TEXT, answer, CATEGORY_OPTIONS)
@@ -1642,7 +2012,6 @@ class TestJoiningAnswersWithoutLineNumbers:
         answer = ReceiptExtraction(
             method="text",
             lines=[ExtractedLine(name="Pirkka miniluumutomaati 250g")],
-            other_lines=[OtherLine(line=1, kind="header")],
         )
 
         outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
@@ -1650,13 +2019,13 @@ class TestJoiningAnswersWithoutLineNumbers:
         no_unplanned_re_read.assert_not_awaited()
         assert outcome.extraction.lines[0].source_lines == [2]
 
-    async def test_a_re_read_product_citing_an_accounted_line_is_not_a_second_copy(
-        self, no_unplanned_re_read
+    async def test_a_re_read_product_citing_an_accounted_line_is_counted_not_kept(
+        self, no_unplanned_re_read, caplog
     ):
+        """Q27 verdict #20: it was discarded without a count or a log line."""
         answer = ReceiptExtraction(
             method="text",
             lines=[ExtractedLine(name="MAITO", source_lines=[2])],
-            other_lines=[OtherLine(line=1, kind="header")],
         )
         no_unplanned_re_read.side_effect = None
         no_unplanned_re_read.return_value = _retry_answer(
@@ -1674,6 +2043,162 @@ class TestJoiningAnswersWithoutLineNumbers:
             ([3], "model_retry"),
             ([4], "model_retry"),
         ]
+        assert outcome.completeness["invalid_entries"] == 1
+        assert any("cites no open line" in r.getMessage() for r in caplog.records)
+
+
+class TestIdenticalLines:
+    """Q27 verdict #7: `MAITO 1,29` printed twice."""
+
+    TEXT = "SHOP\nMAITO 1,29\nMAITO 1,29\nLEIPÄ 2,10\n"
+
+    def _read(self, *products: ExtractedLine) -> ReceiptExtraction:
+        return ReceiptExtraction(
+            method="text", lines=list(products), receipt_total=4.68
+        )
+
+    async def test_both_cited_correctly_give_two_rows(self, no_unplanned_re_read):
+        answer = self._read(
+            ExtractedLine(name="MAITO", source_lines=[2], price=1.29),
+            ExtractedLine(name="MAITO", source_lines=[3], price=1.29),
+            ExtractedLine(name="LEIPÄ", source_lines=[4], price=2.1),
+        )
+
+        outcome = await reconcile_text_read(self.TEXT, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
+        assert [p.source_lines for p in outcome.extraction.lines] == [[2], [3], [4]]
+        assert outcome.note is None
+
+    async def test_one_entry_citing_both_lines_is_two_rows(self, no_unplanned_re_read):
+        answer = self._read(
+            ExtractedLine(name="MAITO", source_lines=[2, 3], quantity=2, price=2.58),
+            ExtractedLine(name="LEIPÄ", source_lines=[4], price=2.1),
+        )
+
+        outcome = await reconcile_text_read(self.TEXT, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
+        assert [
+            (p.name, p.source_lines, p.quantity, p.price)
+            for p in outcome.extraction.lines
+        ] == [
+            ("MAITO", [2], 1, 1.29),
+            ("MAITO", [3], 1, 1.29),
+            ("LEIPÄ", [4], 1, 2.1),
+        ]
+        assert outcome.completeness["items_sum"] == 4.68
+        assert outcome.note is None
+
+    async def test_one_entry_for_one_of_them_re_reads_the_other(
+        self, no_unplanned_re_read
+    ):
+        answer = self._read(
+            ExtractedLine(name="MAITO", source_lines=[2], price=1.29),
+            ExtractedLine(name="LEIPÄ", source_lines=[4], price=2.1),
+        )
+        no_unplanned_re_read.side_effect = None
+        no_unplanned_re_read.return_value = _retry_answer(
+            [ExtractedLine(name="MAITO", source_lines=[3], price=1.29)]
+        )
+
+        outcome = await reconcile_text_read(self.TEXT, answer, CATEGORY_OPTIONS)
+
+        assert no_unplanned_re_read.await_args.args[0] == [(3, "MAITO 1,29")]
+        assert [p.source_lines for p in outcome.extraction.lines] == [[2], [4], [3]]
+        assert outcome.completeness["items_sum"] == 4.68
+
+    async def test_two_entries_citing_the_same_line_take_both_lines(
+        self, no_unplanned_re_read
+    ):
+        """The model cited line 2 twice: that was a re-read and a third MAITO row."""
+        answer = self._read(
+            ExtractedLine(name="MAITO", source_lines=[2], price=1.29),
+            ExtractedLine(name="MAITO", source_lines=[2], price=1.29),
+            ExtractedLine(name="LEIPÄ", source_lines=[4], price=2.1),
+        )
+
+        outcome = await reconcile_text_read(self.TEXT, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
+        assert [p.source_lines for p in outcome.extraction.lines] == [[2], [3], [4]]
+        assert outcome.note is None
+
+
+class TestAMissedItemIsNeverAbsorbed:
+    """Q27 verdict #8: a missed `7UP 1,5L 2,49` passed for the detail line of the
+    product above it; without a printed total it vanished."""
+
+    @pytest.mark.parametrize(
+        ("text", "products"),
+        [
+            (
+                "SHOP\nCOLA 1,99\n7UP 1,5L 2,49\nLEIPÄ 2,10\n",
+                [
+                    ExtractedLine(name="COLA", source_lines=[2], price=1.99),
+                    ExtractedLine(name="LEIPÄ", source_lines=[4], price=2.1),
+                ],
+            ),
+            (
+                "SHOP\nNAUDAN ENTRECOTE 22,83\n0,913 KG 25,00 €/KG\n7UP 1,5L 2,49\n",
+                [
+                    ExtractedLine(
+                        name="NAUDAN ENTRECOTE", source_lines=[2, 3], price=22.83
+                    )
+                ],
+            ),
+        ],
+    )
+    async def test_it_is_re_read_and_kept(self, no_unplanned_re_read, text, products):
+        answer = ReceiptExtraction(method="text", lines=products)
+        no_unplanned_re_read.side_effect = LLMExtractionError("down")
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        asked = no_unplanned_re_read.await_args.args[0]
+        assert asked == [(n, line) for n, line in asked if "7UP" in line]
+        (row,) = [p for p in outcome.extraction.lines if p.recovered]
+        assert (row.name, row.price) == ("7UP 1,5L", 2.49)
+
+
+class TestAFailingReReadNeverFailsTheReceipt:
+    """Q27 verdict #19: a non-JSON re-read answer failed the receipt and threw the good
+    first read away."""
+
+    TEXT = "SHOP\nMAITO 1,20\nLEIPÄ 2,10\n"
+
+    def _read(self) -> ReceiptExtraction:
+        return ReceiptExtraction(
+            method="text",
+            lines=[ExtractedLine(name="MAITO", source_lines=[2], price=1.2)],
+            raw_completion='{"p": ["MAITO"]}',
+        )
+
+    async def test_an_unusable_answer_is_kept_and_the_lines_listed(
+        self, no_unplanned_re_read, caplog
+    ):
+        no_unplanned_re_read.side_effect = LLMExtractionError(
+            "LLM response body is not JSON", raw_completion="<html>restarting</html>"
+        )
+
+        outcome = await reconcile_text_read(self.TEXT, self._read(), CATEGORY_OPTIONS)
+
+        assert [(p.name, p.recovered) for p in outcome.extraction.lines] == [
+            ("MAITO", None),
+            ("LEIPÄ", "raw_line"),
+        ]
+        assert outcome.raw_completions == {
+            "raw_completion": '{"p": ["MAITO"]}',
+            "raw_completion_retry": "<html>restarting</html>",
+        }
+        assert any("re-read failed" in r.getMessage() for r in caplog.records)
+
+    async def test_any_other_error_is_survived_too(self, no_unplanned_re_read):
+        no_unplanned_re_read.side_effect = ValueError("Expecting value: line 1")
+
+        outcome = await reconcile_text_read(self.TEXT, self._read(), CATEGORY_OPTIONS)
+
+        assert [p.recovered for p in outcome.extraction.lines] == [None, "raw_line"]
 
 
 class TestSuspectAndUnpricedLines:
@@ -1682,10 +2207,7 @@ class TestSuspectAndUnpricedLines:
         answer = ReceiptExtraction(
             method="text",
             lines=[ExtractedLine(name="MAITO", source_lines=[2])],
-            other_lines=[
-                OtherLine(line=1, kind="header"),
-                OtherLine(line=3, kind="other", amount=2.1),
-            ],
+            other_lines=[OtherLine(line=3, kind="other", amount=2.1)],
         )
         no_unplanned_re_read.side_effect = LLMExtractionError("down")
 
@@ -1694,17 +2216,68 @@ class TestSuspectAndUnpricedLines:
         assert no_unplanned_re_read.await_args.args[0] == [(3, "KAURAJUOMA 2,10")]
         assert outcome.extraction.lines[-1].name == "KAURAJUOMA"
 
+    async def test_an_other_line_is_re_read_when_the_sums_miss_the_total(
+        self, no_unplanned_re_read
+    ):
+        """The documented rule (verdict #3), first case: the model's own arithmetic does
+        not reach the total it read, so the `other` line may be the missing product."""
+        text = "SHOP\nMAITO 1,20\nKAURAJUOMA 2,10\nTOTAL 3,30\n"
+        answer = ReceiptExtraction(
+            method="text",
+            lines=[ExtractedLine(name="MAITO", source_lines=[2], price=1.2)],
+            other_lines=[
+                OtherLine(line=3, kind="other", amount=2.1),
+                OtherLine(line=4, kind="total", amount=3.3),
+            ],
+            receipt_total=3.3,
+        )
+        no_unplanned_re_read.side_effect = None
+        no_unplanned_re_read.return_value = _retry_answer(
+            [ExtractedLine(name="KAURAJUOMA", source_lines=[3], price=2.1)]
+        )
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        assert no_unplanned_re_read.await_args.args[0] == [(3, "KAURAJUOMA 2,10")]
+        assert outcome.completeness["recovered_by_retry"] == 1
+        assert outcome.completeness["items_sum"] == 3.3
+
+    async def test_a_subtotal_taken_for_the_total_proves_nothing(
+        self, no_unplanned_re_read
+    ):
+        """Q27 verdict #3: a product filed as `other`, with `t` read from a subtotal that
+        its line totals happen to match, was lost without a trace. The total the sums must
+        reach is one the model also listed as a `total` line."""
+        text = "SHOP\nMAITO 1,20\nVÄLISUMMA 1,20\nKAURAJUOMA 2,10\nYHTEENSÄ 3,30\n"
+        answer = ReceiptExtraction(
+            method="text",
+            lines=[ExtractedLine(name="MAITO", source_lines=[2], price=1.2)],
+            other_lines=[
+                OtherLine(line=3, kind="subtotal", amount=1.2),
+                OtherLine(line=4, kind="other", amount=2.1),
+                OtherLine(line=5, kind="total", amount=3.3),
+            ],
+            receipt_total=1.2,
+        )
+        no_unplanned_re_read.side_effect = LLMExtractionError("down")
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        assert no_unplanned_re_read.await_args.args[0] == [(4, "KAURAJUOMA 2,10")]
+        assert [p.name for p in outcome.extraction.lines] == ["MAITO", "KAURAJUOMA"]
+
     async def test_when_the_money_adds_up_an_other_line_is_not_suspect(
         self, no_unplanned_re_read
     ):
-        """Measured on the K receipt: loyalty lines such as "Ruokaostokset 64,70" came
+        """The documented rule, second case: the model's arithmetic matches the total it
+        read, so the money is all in the products and the `other` line is not a product.
+        Measured on the K receipt: loyalty lines such as "Ruokaostokset 64,70" came
         back as `other`, and re-reading them found nothing in two minutes."""
         text = "SHOP\nMAITO 1,20\nRuokaostokset 1,20\nTOTAL 1,20\n"
         answer = ReceiptExtraction(
             method="text",
             lines=[ExtractedLine(name="MAITO", source_lines=[2], price=1.2)],
             other_lines=[
-                OtherLine(line=1, kind="header"),
                 OtherLine(line=3, kind="other", amount=1.2),
                 OtherLine(line=4, kind="total", amount=1.2),
             ],
@@ -1724,14 +2297,11 @@ class TestSuspectAndUnpricedLines:
         answer = ReceiptExtraction(
             method="text",
             lines=[ExtractedLine(name="MAITO", source_lines=[2])],
-            other_lines=[
-                OtherLine(line=1, kind="header"),
-                OtherLine(line=3, kind="other", amount=2.1),
-            ],
+            other_lines=[OtherLine(line=3, kind="other", amount=2.1)],
         )
         no_unplanned_re_read.side_effect = None
-        no_unplanned_re_read.return_value = ReceiptExtraction(
-            method="text", other_lines=[OtherLine(line=3, kind="other", amount=2.1)]
+        no_unplanned_re_read.return_value = _retry_answer(
+            [], [OtherLine(line=3, kind="other", amount=2.1)]
         )
 
         outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
@@ -1757,9 +2327,23 @@ class TestSuspectAndUnpricedLines:
         assert len(outcome.extraction.lines) == 1
 
     @pytest.mark.parametrize(
-        "line", ["Datum: 27.09.2026 Uhrzeit: 18:05", "Racun br: 5/6 26.9.2026 10:15"]
+        "line",
+        [
+            "Datum: 27.09.2026 Uhrzeit: 18:05",
+            "Racun br: 5/6 26.9.2026 10:15",
+            # Q27 verdict #4: a clock time, a date and codes are not amounts
+            "K004 M000000/0000 11.49 26.9.2026",
+            "26.9.2026 11.49",
+            "Kello 11:49",
+            "09/27/2026 10:15 AM",
+            "Kassa 3 Kuitti 1234",
+            "Viite: 000000000000",
+            "0,523 KG 1,99 €/KG",
+        ],
     )
-    async def test_a_date_is_not_an_amount(self, no_unplanned_re_read, line):
+    async def test_a_date_time_or_code_is_not_an_amount(
+        self, no_unplanned_re_read, line
+    ):
         """Measured: "27.09" of a date read as a price and came back as a junk row."""
         text = f"SHOP\nMAITO 1,20\n{line}\n"
         answer = ReceiptExtraction(
@@ -1791,7 +2375,67 @@ class TestSuspectAndUnpricedLines:
         # the raw row took the line, so nothing is left over
         assert outcome.completeness["unaccounted_lines"] == 0
         (row,) = [p for p in outcome.extraction.lines if p.recovered]
-        assert (row.name, row.source_lines) == ("JUUSTO GOUDA", [3, 4])
+        assert (row.name, row.source_lines, row.price) == ("JUUSTO GOUDA", [3, 4], 4.5)
+
+    async def test_unpriced_neighbours_join_only_an_unaccounted_line_and_no_name(
+        self, no_unplanned_re_read
+    ):
+        """Q27 verdict #4/#5: header and card lines were glued into raw-row names."""
+        text = "SHOP\nWelcome\nMAITO 1,20\nKORTTI: 0000\nLEIPÄ 2,10\nBye\n"
+        answer = ReceiptExtraction(
+            method="text", lines=[ExtractedLine(name="MAITO", source_lines=[3])]
+        )
+        no_unplanned_re_read.side_effect = LLMExtractionError("down")
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        asked = [n for n, _ in no_unplanned_re_read.await_args.args[0]]
+        # the neighbours of LEIPÄ, which is unaccounted, and not those of MAITO
+        assert asked == [4, 5, 6]
+        (row,) = [p for p in outcome.extraction.lines if p.recovered]
+        assert (row.name, row.source_lines) == ("LEIPÄ", [5])
+
+    async def test_a_wrapped_name_joins_only_as_its_own_first_half(
+        self, no_unplanned_re_read
+    ):
+        text = "SHOP\nMAITO 1,20\nSUKLAA MAITO\nja pähkinä 200g 2,49\n"
+        answer = ReceiptExtraction(
+            method="text", lines=[ExtractedLine(name="MAITO", source_lines=[2])]
+        )
+        no_unplanned_re_read.side_effect = LLMExtractionError("down")
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        (row,) = [p for p in outcome.extraction.lines if p.recovered]
+        assert (row.name, row.source_lines) == ("SUKLAA MAITO ja pähkinä 200g", [3, 4])
+
+
+class TestVisionArithmetic:
+    """Q27 verdict #6: `x` on a photo has no line numbers but still carries amounts."""
+
+    def test_a_deposit_on_a_photo_adds_up(self):
+        extraction = ReceiptExtraction(
+            method="vision",
+            lines=[ExtractedLine(name="BEER", price=1.99)],
+            other_lines=[OtherLine(line=None, kind="deposit", amount=0.15)],
+            receipt_total=2.14,
+        )
+
+        outcome = vision_outcome(extraction)
+
+        assert outcome.completeness["items_sum"] == 2.14
+        assert outcome.note is None
+
+    def test_tax_on_top_adds_up_on_a_photo_too(self):
+        extraction = ReceiptExtraction(
+            method="vision",
+            lines=[ExtractedLine(name="MILK", price=6.48)],
+            other_lines=[OtherLine(line=None, kind="tax", amount=0.52)],
+            receipt_total=7.0,
+            tax_exclusive=True,
+        )
+
+        assert vision_outcome(extraction).note is None
 
 
 class TestReceiptArithmetic:
@@ -1860,7 +2504,7 @@ class TestCompletenessIsPersisted:
         self, service, pdf_receipt, sample_category, db_session, no_unplanned_re_read
     ):
         no_unplanned_re_read.side_effect = None
-        no_unplanned_re_read.return_value = _retry_answer(_k_nine())
+        no_unplanned_re_read.return_value = _k_retry()
         with (
             patch(OCR, new_callable=AsyncMock, return_value=K_TEXT),
             patch(TEXT, new_callable=AsyncMock, return_value=_k_first_read()),
@@ -1967,3 +2611,66 @@ class TestPrintedPackSizeWins:
         (line,) = pdf_receipt.ocr_structured["lines"]
         assert line["product_id"] == str(tomato.id)
         assert line["pack_grams"] == 200.0
+
+
+class TestFailedAnswersArePersisted:
+    """Q27 verdict #13/#19: the answers most worth diagnosing reach the receipt."""
+
+    async def test_a_truncated_first_read_is_kept_when_the_fallback_reads_it(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                side_effect=LLMExtractionError(
+                    "LLM response was truncated", raw_completion='{"p": [{"n": "VAL'
+                ),
+            ),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.processing_status == ReceiptStatus.COMPLETED
+        assert pdf_receipt.ocr_structured["method"] == "heuristic"
+        assert pdf_receipt.ocr_structured["raw_completion"] == '{"p": [{"n": "VAL'
+
+    async def test_an_unparseable_first_read_is_kept_on_the_failed_receipt(
+        self, service, pdf_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=UNREADABLE_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                side_effect=LLMExtractionError(
+                    "LLM response contains no JSON object", raw_completion="Sorry, no."
+                ),
+            ),
+        ):
+            result = await service.process_receipt(pdf_receipt)
+
+        assert result.success is False
+        await db_session.refresh(pdf_receipt)
+        assert pdf_receipt.processing_status == ReceiptStatus.FAILED
+        assert pdf_receipt.ocr_structured == {"raw_completion": "Sorry, no."}
+
+    async def test_a_bad_re_read_is_kept_and_the_receipt_completes(
+        self, service, pdf_receipt, sample_category, db_session, no_unplanned_re_read
+    ):
+        no_unplanned_re_read.side_effect = LLMExtractionError(
+            "LLM response body is not JSON", raw_completion="<html>502</html>"
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=K_TEXT),
+            patch(TEXT, new_callable=AsyncMock, return_value=_k_first_read()),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        await db_session.refresh(pdf_receipt)
+        structured = pdf_receipt.ocr_structured
+        assert pdf_receipt.processing_status == ReceiptStatus.COMPLETED
+        assert len(structured["lines"]) == 15
+        assert structured["raw_completion_retry"] == "<html>502</html>"
+        assert structured["completeness"]["recovered_raw_lines"] == 9

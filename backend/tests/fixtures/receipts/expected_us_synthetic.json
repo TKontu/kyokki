@@ -1,0 +1,13 @@
+{
+ "synthetic": true,
+ "note": "Invented US receipt for Kyokki tests (Q27 verdict #18): tax added on top of the line totals; not a real purchase",
+ "store_chain": "FRESH MART",
+ "purchase_date": "2026-09-27",
+ "total": 7.0,
+ "tax_exclusive": true,
+ "lines": [
+  {"name": "WHOLE MILK 1 GAL", "quantity": 1, "weight_kg": null, "price": 3.49},
+  {"name": "BANANAS", "quantity": 1, "weight_kg": 0.962, "price": 1.25},
+  {"name": "BREAD WHEAT", "quantity": 1, "weight_kg": null, "price": 1.74}
+ ]
+}

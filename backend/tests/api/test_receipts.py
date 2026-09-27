@@ -12,6 +12,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.main import app
 from app.parsers.base import ExtractedLine, OtherLine, ReceiptExtraction
@@ -499,7 +500,9 @@ class TestProcessReceipt:
             test_db,
             receipt_id,
             "processing",
-            processing_started_at=datetime.now(UTC) - timedelta(minutes=11),
+            # past the window, which the model budget now sets (Q27 verdict #1)
+            processing_started_at=datetime.now(UTC)
+            - timedelta(minutes=settings.receipt_stale_minutes + 1),
         )
 
         receipt = (await client.get(f"/api/receipts/{receipt_id}")).json()
@@ -919,8 +922,18 @@ K_MISSED = [
     ("Parsakaali 250g luomu", [21], 3.97),
     ("Pirkka tamponi 32kpl sup", [22], 3.39),
 ]
-# Everything else the model listed as not a product: header, footer, tax, payment
-K_OTHER = [*range(1, 7), *range(28, 54)]
+# The priced lines the model listed as not products (Q27 verdict #15: `x` holds only lines
+# that carry an amount): the totals, the loyalty sums, the card payment and the VAT table
+K_OTHER = [
+    (29, "total", 73.07),
+    (32, "subtotal", 73.07),
+    (33, "subtotal", 8.37),
+    (34, "subtotal", 64.7),
+    (43, "payment", 73.07),
+    (45, "tax", 8.1),
+    (46, "tax", 1.01),
+    (47, "total", 73.07),
+]
 
 
 def _k_lines(rows) -> list[ExtractedLine]:
@@ -945,14 +958,18 @@ class TestKCitymarketReview:
         first = ReceiptExtraction(
             method="text",
             lines=_k_lines(K_READ),
-            other_lines=[OtherLine(line=n, kind="header") for n in K_OTHER],
+            other_lines=[OtherLine(line=n, kind=k, amount=a) for n, k, a in K_OTHER],
+            receipt_total=73.07,
             language="fi",
             country="FI",
             raw_completion='{"p": [...]}',
         )
         no_unplanned_re_read.side_effect = None
         no_unplanned_re_read.return_value = ReceiptExtraction(
-            method="text", lines=_k_lines(K_MISSED), raw_completion='{"p": [...]}'
+            method="text",
+            lines=_k_lines(K_MISSED),
+            other_lines=[OtherLine(line=6, kind="header", amount=None)],
+            raw_completion='{"p": [...]}',
         )
         with (
             patch(
@@ -983,7 +1000,7 @@ class TestKCitymarketReview:
             "invalid_entries": 0,
             "unaccounted_lines": 0,
             "items_sum": 73.07,
-            "receipt_total": None,
+            "receipt_total": 73.07,
             "profile": "fi",
             "profile_only_lines": 9,
         }
@@ -996,6 +1013,103 @@ class TestKCitymarketReview:
         (summary,) = (await client.get("/api/receipts")).json()
         assert "raw_completion" not in str(summary)
         assert "completeness" not in summary
+
+    async def test_a_raw_completion_travels_to_the_review_screen(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        session_factory,
+        no_unplanned_re_read,
+    ) -> None:
+        """Q27 verdict #23: from the model's raw answer, through `parse_completion` and
+        the reconciliation, to `GET /api/receipts/{id}`, with nothing stubbed between."""
+        import json
+
+        import httpx
+
+        answer = {
+            "s": "K-Citymarket",
+            "d": "2026-09-26",
+            # codes as a model may write them (verdict #26)
+            "lc": "fin",
+            "cc": "fi-FI",
+            "t": 73.07,
+            "te": False,
+            "p": [
+                {
+                    "n": name,
+                    "l": lines,
+                    "p": price,
+                    "g": name,
+                    "q": 1,
+                    "w": None,
+                    "c": None,
+                    "pw": None,
+                    "sl": None,
+                    "os": None,
+                }
+                for name, lines, price in sorted(
+                    K_READ + K_MISSED, key=lambda row: row[1]
+                )
+            ],
+            "x": [{"l": n, "k": k, "a": a} for n, k, a in K_OTHER],
+        }
+        content = "<think>every numbered line</think>" + json.dumps(
+            answer, ensure_ascii=False
+        )
+        asked: list[str] = []
+
+        def gateway(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            schema = body.get("response_format", {}).get("json_schema", {})
+            if schema.get("name") != "receipt":
+                return httpx.Response(500)
+            asked.append(body["messages"][0]["content"])
+            completion = {"message": {"content": content}, "finish_reason": "stop"}
+            return httpx.Response(200, json={"choices": [completion]})
+
+        real_client = httpx.AsyncClient
+
+        def client_on_the_stub(*_args, **kwargs):
+            return real_client(
+                transport=httpx.MockTransport(gateway), timeout=kwargs.get("timeout")
+            )
+
+        files = {"file": ("k.pdf", BytesIO(b"%PDF k"), "application/pdf")}
+        receipt_id = (await client.post("/api/receipts/scan", files=files)).json()["id"]
+        with (
+            patch(
+                "app.services.receipt_processing.extract_text_from_receipt",
+                new_callable=AsyncMock,
+                return_value=K_TEXT,
+            ),
+            patch(
+                "app.services.llm_extractor.httpx.AsyncClient",
+                side_effect=client_on_the_stub,
+            ),
+        ):
+            await run_once(session_factory)
+
+        body = (await client.get(f"/api/receipts/{receipt_id}")).json()
+
+        assert len(asked) == 1
+        assert "\n6: K004 M000000/0000 11.49 26.9.2026\n" in asked[0]
+        assert body["processing_status"] == "completed"
+        assert body["items_extracted"] == 15
+        assert [item["recovered"] for item in body["items"]] == [None] * 15
+        assert body["completeness"] == {
+            "text_lines": 15,
+            "model_lines": 15,
+            "recovered_by_retry": 0,
+            "recovered_raw_lines": 0,
+            "invalid_entries": 0,
+            "unaccounted_lines": 0,
+            "items_sum": 73.07,
+            "receipt_total": 73.07,
+            "profile": "fi",
+            "profile_only_lines": 0,
+        }
+        assert body["fallback_reason"] is None
 
     async def test_older_receipts_have_no_completeness(
         self, client: AsyncClient, test_db: AsyncSession

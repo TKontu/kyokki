@@ -126,6 +126,26 @@ Two honest limits:
 > left `processing` for more than `RECEIPT_STALE_MINUTES` (default 10), for example after the
 > worker was restarted mid-read, is shown as `failed` and can be queued again the same way.
 
+> **Receipt line accounting (Q27, 2026-09): check `LLM_TIMEOUT` and `RECEIPT_STALE_MINUTES`.**
+> A receipt read now accounts for every priced line and may make one targeted re-read, so a
+> long receipt needs more model time. The compose file defaults `LLM_TIMEOUT` to 420 s, but a
+> Portainer stack created from an older `stack.env.example` sets `LLM_TIMEOUT=180` explicitly,
+> and an explicit value wins over the default: long receipts then still time out. In the
+> stack's environment:
+>
+> - set `LLM_TIMEOUT=420`;
+> - clear `RECEIPT_STALE_MINUTES` (leave it empty) or delete it. Empty, the stale window
+>   follows the model budget, `ceil(3 x LLM_TIMEOUT / 60) + 5` minutes (26 at 420 s): a first
+>   read, a re-read and the product selection can each take up to their timeout, and the old
+>   window of 10 minutes failed a slow but healthy receipt. A value below the budget is raised
+>   to it, and a receipt that was failed as stale is no longer overwritten when its read
+>   finishes late;
+> - optionally set `LLM_ESTIMATE_TIMEOUT` (default 180 s), which now limits the catalog
+>   estimate and product selection calls instead of `LLM_TIMEOUT`, so "Re-estimate all" does
+>   not wait 7 minutes a batch.
+>
+> Then **Pull and redeploy**. No migration is involved.
+
 > **Unit migration (MVP-U1, revision `a4f8c2d91e37`):** `alembic upgrade head` converts stored
 > quantities to `dl | tsp | tbsp | g | pcs` (e.g. 1000 ml becomes 10 dl). It prints a warning for
 > rows with units it does not know and leaves them unchanged. Downgrading only turns `dl` back

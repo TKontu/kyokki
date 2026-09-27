@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
+from app.core.config import settings
 from app.models.receipt import Receipt
 from app.schemas.receipt import ReceiptStatus
 from app.services import receipt_queue
@@ -130,15 +131,16 @@ class TestClaim:
 
 class TestStale:
     async def test_only_old_processing_receipts_fail(self, db_session, broadcasts):
+        window = settings.receipt_stale_minutes
         stale = await _receipt(
             db_session,
             ReceiptStatus.PROCESSING,
-            processing_started_at=NOW - timedelta(minutes=11),
+            processing_started_at=NOW - timedelta(minutes=window + 1),
         )
         fresh = await _receipt(
             db_session,
             ReceiptStatus.PROCESSING,
-            processing_started_at=NOW - timedelta(minutes=9),
+            processing_started_at=NOW - timedelta(minutes=window - 1),
         )
         done = await _receipt(
             db_session,
@@ -151,11 +153,29 @@ class TestStale:
         for receipt in (stale, fresh, done):
             await db_session.refresh(receipt)
         assert stale.processing_status == ReceiptStatus.FAILED
-        assert "did not finish within 10 minutes" in stale.error
+        assert f"did not finish within {window} minutes" in stale.error
         assert fresh.processing_status == ReceiptStatus.PROCESSING
         assert done.processing_status == ReceiptStatus.COMPLETED
         broadcasts.assert_awaited_once()
         assert broadcasts.await_args.kwargs["status"] == "failed"
+
+    async def test_a_receipt_inside_the_model_budget_is_never_stale(
+        self, db_session, broadcasts, monkeypatch
+    ):
+        """Q27 verdict #1: a first read, a re-read and the product selection may each
+        run to LLM_TIMEOUT; an explicit old window of 10 minutes must not cut that off."""
+        monkeypatch.setattr(settings, "RECEIPT_STALE_MINUTES", 10)
+        monkeypatch.setattr(settings, "LLM_TIMEOUT", 420.0)
+        slow = await _receipt(
+            db_session,
+            ReceiptStatus.PROCESSING,
+            processing_started_at=NOW - timedelta(seconds=3 * 420),
+        )
+
+        assert await receipt_queue.fail_stale(db_session, now=NOW) == 0
+
+        await db_session.refresh(slow)
+        assert slow.processing_status == ReceiptStatus.PROCESSING
 
     async def test_nothing_stale_does_nothing(self, db_session, broadcasts):
         assert await receipt_queue.fail_stale(db_session, now=NOW) == 0

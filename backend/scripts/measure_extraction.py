@@ -12,12 +12,16 @@ fixtures' own generic names - the case in which a whole receipt lost 9 of 15 lin
 Completeness (Q27): with an `expected_*.json` beside the fixture, the expected printed names
 the model found are counted (exact after `normalize_receipt_name`), for the first read and
 after reconciliation - the targeted re-read, printed-line rows and any receipt profile. The
-receipt's own arithmetic (line totals against the printed total) is reported too.
+receipt's own arithmetic (line totals against the printed total) is reported too, with
+whether the re-read was called and how long the first read took. `--raw-dir DIR` stores the
+raw answer of any read whose categories cover less than half of its rows, the "1 of 15
+categories" signal, for a look at what the model answered.
 
     python -m scripts.measure_extraction --runs 2 --fixture tests/fixtures/receipts/s_kaupat_order.txt
     python -m scripts.measure_extraction --catalog 20 ...
     python -m scripts.measure_extraction --catalog-overlap --old-catalog-wording ...
     python -m scripts.measure_extraction --json ...
+    python -m scripts.measure_extraction --raw-dir /tmp/raw ...
 
 Model calls run one after another: the gateway serves one request at a time.
 """
@@ -37,7 +41,7 @@ from typing import Any
 from app.core.config import settings
 from app.db.seed_categories import SEED_CATEGORIES
 from app.parsers.base import ExtractedLine
-from app.services import llm_extractor
+from app.services import llm_extractor, receipt_processing
 from app.services.llm_extractor import (
     CategoryOption,
     LLMExtractionError,
@@ -356,12 +360,30 @@ def found(
     return sum((wanted & got).values())
 
 
+# How many targeted re-reads the reconciliation called in the current measurement
+_RE_READS: list[float] = []
+_extract_unaccounted_lines = receipt_processing.extract_unaccounted_lines
+
+
+async def _counted_re_read(*args: Any, **kwargs: Any) -> Any:
+    started = time.monotonic()
+    try:
+        return await _extract_unaccounted_lines(*args, **kwargs)
+    finally:
+        _RE_READS.append(round(time.monotonic() - started, 1))
+
+
+receipt_processing.extract_unaccounted_lines = _counted_re_read  # type: ignore[assignment]
+
+
 async def measure(
     text: str,
     options: list[CategoryOption],
     catalog: Sequence[str],
     expected: dict[str, Any] | None,
     reconcile: bool,
+    raw_dir: Path | None = None,
+    label: str = "",
 ) -> dict[str, Any]:
     numbered = [(n, line) for n, line in number_receipt_lines(text) if n is not None]
     prompt_chars = len(
@@ -386,6 +408,7 @@ async def measure(
         "cited": sum(1 for x in lines if x.source_lines),
         "x": len(result.other_lines),
         "t": result.receipt_total,
+        "te": result.tax_exclusive,
         "lc": result.language,
         "cc": result.country,
         "invalid": result.invalid_entries,
@@ -399,8 +422,14 @@ async def measure(
             if any(term in x.name.upper() for term in WATCH)
         ],
     }
+    if raw_dir is not None and lines and row["category"] < len(lines) / 2:
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        path = raw_dir / f"{label}.json"
+        path.write_text(result.raw_completion or "", encoding="utf-8")
+        row["raw_saved"] = str(path)
     if not reconcile:
         return row
+    _RE_READS.clear()
     started = time.monotonic()
     outcome = await reconcile_text_read(text, result, options)
     final = outcome.extraction.lines
@@ -411,6 +440,8 @@ async def measure(
         after_lines=len(final),
         after_found=found(final, expected),
         after_category=sum(1 for x in final if x.category),
+        re_reads=len(_RE_READS),
+        re_read_s=sum(_RE_READS),
         retry=completeness.get("recovered_by_retry"),
         raw=completeness.get("recovered_raw_lines"),
         unaccounted=completeness.get("unaccounted_lines"),
@@ -459,6 +490,11 @@ async def main(argv: list[str] | None = None) -> int:
         help="first read only: no targeted re-read (one model call per run)",
     )
     parser.add_argument("--json", action="store_true", help="print raw numbers as JSON")
+    parser.add_argument(
+        "--raw-dir",
+        type=Path,
+        help="store the raw answer of a read whose categories cover < half its rows",
+    )
     args = parser.parse_args(argv)
     fixtures = args.fixtures or [DEFAULT_FIXTURE]
     options = categories()
@@ -498,7 +534,13 @@ async def main(argv: list[str] | None = None) -> int:
             try:
                 row.update(
                     await measure(
-                        text, options, catalog, expected, not args.no_reconcile
+                        text,
+                        options,
+                        catalog,
+                        expected,
+                        not args.no_reconcile,
+                        args.raw_dir,
+                        f"{path.stem}-{len(catalog)}-{wording}-run{run}",
                     )
                 )
             except LLMExtractionError as exc:
@@ -518,14 +560,20 @@ async def main(argv: list[str] | None = None) -> int:
                 f"generic {row['generic']}, category {row['category']} "
                 f"(household {row['non_food']}), sl {row['sl']}, os {row['os']}, "
                 f"pw {row['pw']}, cited {row['cited']}, x {row['x']}, t {row['t']}, "
-                f"lc {row['lc']}, cc {row['cc']}, invalid {row['invalid']}"
+                f"te {row['te']}, lc {row['lc']}, cc {row['cc']}, "
+                f"invalid {row['invalid']}"
             )
+            if row.get("raw_saved"):
+                print(
+                    f"  categories under half the rows: raw answer {row['raw_saved']}"
+                )
             if "after_lines" in row:
                 print(
                     f"  after reconciliation ({row['reconcile_s']} s): lines "
                     f"{row['after_lines']}, found {row['after_found']}/{row['expected']}, "
                     f"category {row['after_category']}, unaccounted {row['unaccounted']}, "
-                    f"re-read {row['retry']}, raw {row['raw']}, profile {row['profile']} "
+                    f"re-reads {row['re_reads']} ({row['re_read_s']} s), "
+                    f"recovered {row['retry']}, raw {row['raw']}, profile {row['profile']} "
                     f"(+{row['profile_only']}), sum {row['items_sum']} vs total "
                     f"{row['t']} (expected {row['expected_total']})"
                 )

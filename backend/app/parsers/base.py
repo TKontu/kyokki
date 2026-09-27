@@ -78,7 +78,11 @@ class ExtractedLine(BaseModel):
 class OtherLine(BaseModel):
     """A numbered receipt line the model says is not part of any product (Q27)."""
 
-    line: int = Field(..., ge=1, description="The line's number in the prompt")
+    line: int | None = Field(
+        ...,
+        ge=1,
+        description="The line's number in the prompt; None on an image, which has none",
+    )
     kind: OtherLineKind = Field(..., description="What the line is")
     amount: float | None = Field(
         default=None, description="Signed amount printed on the line, if any"
@@ -105,6 +109,10 @@ class ReceiptExtraction(BaseModel):
     )
     receipt_total: float | None = Field(
         default=None, description="The receipt's grand total as printed (Q27)"
+    )
+    tax_exclusive: bool = Field(
+        default=False,
+        description="The line totals leave the tax out; it is added before the total (Q27)",
     )
     language: str | None = Field(
         default=None, description="ISO 639-1 language of the receipt, as detected"
