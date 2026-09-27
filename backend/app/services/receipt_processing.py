@@ -11,7 +11,7 @@ Pipeline:
 """
 
 import time
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -261,24 +261,59 @@ def _attach_details(
     return attached
 
 
+def _ruled_out_by_the_sums(
+    extraction: ReceiptExtraction,
+    first: list[ExtractedLine],
+    receipt: _Receipt,
+) -> Callable[[int], bool]:
+    """Whether the receipt's own arithmetic proves a priced line is not a missed product.
+
+    The rule (Q27 verdict #3): the model's arithmetic - its line totals with its discounts,
+    deposits and fees, and its tax on a tax-exclusive receipt - must match the printed total
+    it read, and that total must be one it also listed in `x` as a line of kind `total` (a
+    subtotal or a loyalty sum read as `t` proves nothing). Then the money on the receipt is
+    in the products, and a line is not a missed product when adding its amount would break
+    that match (a loyalty sum, a card slip, a VAT row). A line whose amount is what the sums
+    lack, within the tolerance, is still re-read: on a large receipt the 1 % tolerance
+    could otherwise hide a missed 0,52. Without a total, with a total the sums miss, or with
+    `t` read from a line the model did not call the total, nothing is ruled out.
+    """
+    total = extraction.receipt_total
+    items_sum, off = receipt_arithmetic(
+        first, extraction.other_lines, total, extraction.tax_exclusive
+    )
+    listed_totals = {
+        round(o.amount * 100)
+        for o in extraction.other_lines
+        if o.kind == "total" and o.amount is not None and o.line in receipt.lines
+    }
+    if items_sum is None or total is None or off:
+        return lambda _n: False
+    if round(total * 100) not in listed_totals:
+        return lambda _n: False
+    gap = total - items_sum
+    tolerance = max(_SUM_TOLERANCE_CENTS / 100, abs(total) / 100)
+
+    def ruled_out(n: int) -> bool:
+        amount = receipt.amounts.get(n)
+        return amount is not None and abs(amount - gap) > tolerance
+
+    return ruled_out
+
+
 def _accounted_others(
-    others: list[OtherLine], receipt: _Receipt, adds_up: bool
+    others: list[OtherLine], receipt: _Receipt, ruled_out: Callable[[int], bool]
 ) -> set[int]:
     """Lines the answer listed as not products.
 
-    The rule for a priced line listed as kind `other` (Q27 verdict #3): it is re-read unless
-    the model's own arithmetic - its line totals with its discounts, deposits and fees, and
-    its tax on a tax-exclusive receipt - matches the printed total it read, a total it also
-    listed in `x` as a line of kind `total`. Then the money on the receipt is all in the
-    products, so the `other` line (a loyalty sum, a card slip) is not a product by
-    construction. Without a total, with a total the sums miss, or with `t` read from a line
-    the model did not call the total, it is re-read.
+    A priced line listed as kind `other` is re-read unless the receipt's arithmetic rules it
+    out as a product (`_ruled_out_by_the_sums`).
     """
     return {
         o.line
         for o in others
         if o.line in receipt.lines
-        and (adds_up or o.kind != "other" or o.line not in receipt.amounts)
+        and (o.kind != "other" or o.line not in receipt.amounts or ruled_out(o.line))
     }
 
 
@@ -378,7 +413,8 @@ def receipt_arithmetic(
     discount that is already taken off the line total (S-kaupat's NORM./ALENNUS pair),
     others take it off at the end; a receipt matching either way is not a mismatch. Tax
     lines count only when the model says the line totals leave the tax out (`te`, as on a
-    US receipt); elsewhere the tax is already inside every line total.
+    US receipt); elsewhere the tax is already inside every line total, and a receipt the
+    model wrongly marked tax-exclusive still matches without it.
     """
     prices = [p.price for p in products if p.price is not None]
     if not prices:
@@ -386,18 +422,29 @@ def receipt_arithmetic(
     kinds = _SIGNED_KINDS + (("tax",) if tax_exclusive else ())
     amounts = [o for o in others if o.kind in kinds and o.amount is not None]
     discounts = sum(-abs(o.amount or 0) for o in amounts if o.kind == "discount")
-    charges = sum(o.amount or 0 for o in amounts if o.kind != "discount")
+    charges = sum(o.amount or 0 for o in amounts if o.kind not in ("discount", "tax"))
+    taxes = sum(o.amount or 0 for o in amounts if o.kind == "tax")
     # Compared in whole cents, so float noise never decides a mismatch
-    sum_cents = round((sum(prices) + charges + discounts) * 100)
+    sum_cents = round((sum(prices) + charges + taxes + discounts) * 100)
     if total is None:
         return sum_cents / 100, False
     total_cents = round(total * 100)
     tolerance = max(_SUM_TOLERANCE_CENTS, abs(total_cents) / 100)
-    if abs(sum_cents - total_cents) <= tolerance:
-        return sum_cents / 100, False
-    net_cents = round((sum(prices) + charges) * 100)
-    if discounts and abs(net_cents - total_cents) <= tolerance:
-        return net_cents / 100, False
+    # A discount or (on a receipt marked tax-exclusive) the tax may already be inside the
+    # line totals; a receipt that matches either way is not a mismatch
+    for with_discounts in (True, False) if discounts else (True,):
+        for with_taxes in (True, False) if taxes else (True,):
+            cents = round(
+                (
+                    sum(prices)
+                    + charges
+                    + (taxes if with_taxes else 0)
+                    + (discounts if with_discounts else 0)
+                )
+                * 100
+            )
+            if abs(cents - total_cents) <= tolerance:
+                return cents / 100, False
     return sum_cents / 100, True
 
 
@@ -572,31 +619,16 @@ async def reconcile_text_read(
 
     cited = _cite(first, receipt, set())
     listed = {o.line for o in extraction.other_lines if o.line in lines}
-    first_sum, first_off = receipt_arithmetic(
-        first,
-        extraction.other_lines,
-        extraction.receipt_total,
-        extraction.tax_exclusive,
-    )
-    # The total the sums must reach is one the model also listed as a `total` line: a
-    # subtotal or a loyalty sum read as `t` proves nothing (verdict #3)
-    listed_totals = {
-        round(o.amount * 100)
-        for o in extraction.other_lines
-        if o.kind == "total" and o.amount is not None and o.line in lines
-    }
-    adds_up = (
-        first_sum is not None
-        and extraction.receipt_total is not None
-        and not first_off
-        and round(extraction.receipt_total * 100) in listed_totals
-    )
-    accounted = cited | _accounted_others(extraction.other_lines, receipt, adds_up)
+    ruled_out = _ruled_out_by_the_sums(extraction, first, receipt)
+    accounted = cited | _accounted_others(extraction.other_lines, receipt, ruled_out)
     # Only a line with an amount on it has to be accounted for; the model lists no other
     # non-product line, which keeps its answer short (a 49-line read ran past 180 s)
     open_priced = priced - accounted
     attached = _attach_details(first, receipt, open_priced)
     open_priced -= attached
+    # A priced line the model left out of `x` that the matching sums rule out as a product
+    # needs no re-read (measured: S-kaupat's `BONUSTA KERRYTTÄVÄT OSTOK 173,92`)
+    open_priced = {n for n in open_priced if not ruled_out(n)}
     cited |= attached
     accounted |= attached
     profile, profile_lines, profile_only = _profile_evidence(

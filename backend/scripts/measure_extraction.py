@@ -362,11 +362,14 @@ def found(
 
 # How many targeted re-reads the reconciliation called in the current measurement
 _RE_READS: list[float] = []
+# The lines each re-read was asked about, to see why it ran
+_RE_READ_LINES: list[list[str]] = []
 _extract_unaccounted_lines = receipt_processing.extract_unaccounted_lines
 
 
 async def _counted_re_read(*args: Any, **kwargs: Any) -> Any:
     started = time.monotonic()
+    _RE_READ_LINES.append([f"{n}: {line}" for n, line in args[0]])
     try:
         return await _extract_unaccounted_lines(*args, **kwargs)
     finally:
@@ -430,6 +433,7 @@ async def measure(
     if not reconcile:
         return row
     _RE_READS.clear()
+    _RE_READ_LINES.clear()
     started = time.monotonic()
     outcome = await reconcile_text_read(text, result, options)
     final = outcome.extraction.lines
@@ -442,6 +446,9 @@ async def measure(
         after_category=sum(1 for x in final if x.category),
         re_reads=len(_RE_READS),
         re_read_s=sum(_RE_READS),
+        re_read_lines=[line for asked in _RE_READ_LINES for line in asked],
+        x_lines=[(o.line, o.kind, o.amount) for o in result.other_lines],
+        first_prices=[(x.source_lines, x.price) for x in lines],
         retry=completeness.get("recovered_by_retry"),
         raw=completeness.get("recovered_raw_lines"),
         unaccounted=completeness.get("unaccounted_lines"),

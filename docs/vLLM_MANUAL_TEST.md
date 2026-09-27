@@ -1049,8 +1049,9 @@ drink 10 then 14), as Q11 recorded; the dry run shows those before anything is s
 
 ## Every line accounted for (Q27, 2026-09-27)
 
-On a K-Citymarket e-receipt with a 15-product text, the model returned only the 6 products its
-catalog block listed, and the review screen gave no sign of the other 9. The fix makes the model account for every line of the
+On a K-Citymarket e-receipt with a 15-product text, the model returned only 6 products, and the
+review screen gave no sign of the other 9. The catalog block of that time is the prime suspect
+for the loss, not a proven cause: no run below reproduced 6 of 15. The fix makes the model account for every line of the
 receipt, in a way that does not depend on the receipt's format (operator ruling: receipts from
 any shop, country and language). The prompt numbers the lines. Each product cites its lines in
 `l` (name line or lines plus any count or weight line, before or after the name) and its line
@@ -1097,7 +1098,8 @@ is the same count after reconciliation.
 | | 220 overlap, old | 6 / 6 | 6 / 6 | 5 / 5 | 13.86 = 13.86 | 0 / 0 | 35, 34 |
 | | 220 overlap, reworded | 6 / 6 | 6 / 6 | 5 / 5 | 13.86 = 13.86 | 0 / 0 | 33, 29 |
 
-\* On Finnish receipts the existing prefilter drops `YHTEENSÄ`, so the model cannot see the
+\* (Superseded: the prefilter was removed before release, see below.) On Finnish receipts the
+prefilter of that time dropped `YHTEENSÄ`, so the model cannot see the
 total and on S-kaupat answers `t = null`, and no check is possible. On K the model took 73.07 from the
 loyalty and payment lines that survive the prefilter. The S-kaupat sums also leave out the
 prefiltered discounts and fees.
@@ -1127,8 +1129,9 @@ runs is not known, and a base-prompt control run was stopped to free the gateway
 operator, so the size of the slowdown is not isolated. Still, 6 of the 10 S-kaupat first reads
 took longer than the production `LLM_TIMEOUT` of 180 s, and the first matrix attempt timed out
 at exactly that. With the production timeout, a long receipt would often fall back to the
-heuristic parser (Finnish) or fail (elsewhere). Before release, raise `LLM_TIMEOUT` (for
-example to 360 s) or trim `x` to only the lines that carry an amount, then re-measure S-kaupat.
+heuristic parser (Finnish) or fail (elsewhere). (Done before release: `x` lists only lines
+that carry an amount and `LLM_TIMEOUT` is 420 s; see the next section and the Q27 hardening
+re-measure below.)
 
 ### After the latency changes (operator decision, 2026-09-27)
 

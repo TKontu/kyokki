@@ -2242,6 +2242,53 @@ class TestSuspectAndUnpricedLines:
         assert outcome.completeness["recovered_by_retry"] == 1
         assert outcome.completeness["items_sum"] == 3.3
 
+    async def test_a_priced_line_the_matching_sums_rule_out_needs_no_re_read(
+        self, no_unplanned_re_read
+    ):
+        """Measured on S-kaupat: a correct read left `BONUSTA KERRYTTÄVÄT OSTOK 173,92`
+        out of `x`, and a 11 s re-read found nothing. With the sums matching a listed
+        total, a line whose amount would break that match cannot be a missed product."""
+        text = "SHOP\nMAITO 1,20\nLEIPÄ 2,10\nYHTEENSÄ 3,30\nBONUS OSTOT 3,30\n"
+        answer = ReceiptExtraction(
+            method="text",
+            lines=[
+                ExtractedLine(name="MAITO", source_lines=[2], price=1.2),
+                ExtractedLine(name="LEIPÄ", source_lines=[3], price=2.1),
+            ],
+            other_lines=[OtherLine(line=4, kind="total", amount=3.3)],
+            receipt_total=3.3,
+        )
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
+        assert outcome.note is None
+        assert len(outcome.extraction.lines) == 2
+
+    async def test_a_small_line_the_tolerance_could_hide_is_still_re_read(
+        self, no_unplanned_re_read
+    ):
+        """On a 173.92 receipt the 1 % tolerance is 1.74: a missed 0,52 would still
+        "match". Its amount is exactly the gap, so it is re-read."""
+        lines = "\n".join(f"TUOTE {i} 10,00" for i in range(1, 18))
+        text = f"SHOP\n{lines}\nPUNASIPULI 0,52\nKASSI 3,40\nYHTEENSÄ 173,92\n"
+        products = [
+            ExtractedLine(name=f"TUOTE {i}", source_lines=[i + 1], price=10.0)
+            for i in range(1, 18)
+        ] + [ExtractedLine(name="KASSI", source_lines=[20], price=3.4)]
+        answer = ReceiptExtraction(
+            method="text",
+            lines=products,
+            other_lines=[OtherLine(line=21, kind="total", amount=173.92)],
+            receipt_total=173.92,
+        )
+        no_unplanned_re_read.side_effect = LLMExtractionError("down")
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        assert no_unplanned_re_read.await_args.args[0] == [(19, "PUNASIPULI 0,52")]
+        assert outcome.extraction.lines[-1].name == "PUNASIPULI"
+
     async def test_a_subtotal_taken_for_the_total_proves_nothing(
         self, no_unplanned_re_read
     ):
@@ -2481,6 +2528,29 @@ class TestReceiptArithmetic:
         assert receipt_arithmetic(products, others, 5.36) == (5.36, False)
         # and a real gap is still a gap
         assert receipt_arithmetic(products, others, 9.0) == (5.36, True)
+
+    def test_tax_counts_only_on_a_tax_exclusive_receipt(self):
+        products = [ExtractedLine(name="A", price=6.48)]
+        others = [OtherLine(line=9, kind="tax", amount=0.52)]
+        assert receipt_arithmetic(products, others, 7.0, tax_exclusive=True) == (
+            7.0,
+            False,
+        )
+        assert receipt_arithmetic(products, others, 7.0) == (6.48, True)
+
+    def test_a_wrong_te_on_a_tax_inclusive_receipt_is_no_mismatch(self):
+        """Measured on the Croatian receipt: the model once answered te = true, and the
+        PDV lines turned a matching 14.74 into a false 16.41. Like a discount, the tax
+        may already be inside the line totals; a receipt matching either way is fine."""
+        products = [ExtractedLine(name="A", price=14.74)]
+        others = [
+            OtherLine(line=21, kind="tax", amount=0.4),
+            OtherLine(line=22, kind="tax", amount=1.27),
+        ]
+        assert receipt_arithmetic(products, others, 14.74, tax_exclusive=True) == (
+            14.74,
+            False,
+        )
 
     def test_the_sum_is_whole_cents(self):
         products = [
