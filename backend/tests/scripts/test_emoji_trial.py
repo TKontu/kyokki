@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from scripts import emoji_trial
 from scripts.emoji_trial import Product, Result
@@ -117,6 +118,21 @@ class TestReadNames:
             Product("Grapes", None),
         ]
 
+    def test_a_bare_header_line_is_skipped(self, tmp_path: Path) -> None:
+        path = tmp_path / "names.txt"
+        path.write_text("name\nBroccoli\n", encoding="utf-8")
+
+        assert emoji_trial.read_names(path) == [Product("Broccoli", None)]
+
+    def test_duplicate_names_are_reported(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = tmp_path / "names.csv"
+        path.write_text("Rye bread,bread\nrye bread,snacks\n", encoding="utf-8")
+
+        assert emoji_trial.read_names(path) == [Product("Rye bread", "bread")]
+        assert "rye bread" in capsys.readouterr().out.lower()
+
 
 class TestFromDb:
     async def test_it_reads_names_and_categories_read_only(self) -> None:
@@ -144,6 +160,54 @@ class TestFromDb:
         assert "READ ONLY" in executed[0].upper()
         assert "product_master" in executed[1]
         assert "canonical_name" in executed[1]
+
+    async def test_a_limit_caps_the_query(self) -> None:
+        executed: list[tuple[str, Any]] = []
+
+        class FakeResult:
+            def all(self) -> list[tuple[str, str]]:
+                return []
+
+        class FakeSession:
+            async def execute(self, statement: Any, params: Any = None) -> FakeResult:
+                executed.append((str(statement), params))
+                return FakeResult()
+
+        @asynccontextmanager
+        async def sessions():  # type: ignore[no-untyped-def]
+            yield FakeSession()
+
+        await emoji_trial.load_from_db(sessions, limit=5)
+
+        assert "LIMIT" in executed[1][0].upper()
+        assert executed[1][1] == {"limit": 5}
+
+    def test_the_default_sessions_come_from_the_app(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import app.db.session as app_session
+
+        sentinel = object()
+        monkeypatch.setattr(app_session, "AsyncSessionLocal", lambda: sentinel)
+
+        assert emoji_trial._default_sessions() is sentinel
+
+    async def test_dispose_engine_disposes_the_app_engine(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import app.db.session as app_session
+
+        disposed: list[bool] = []
+
+        class FakeEngine:
+            async def dispose(self) -> None:
+                disposed.append(True)
+
+        monkeypatch.setattr(app_session, "engine", FakeEngine())
+
+        await emoji_trial._dispose_engine()
+
+        assert disposed == [True]
 
 
 class TestPrompt:
@@ -238,12 +302,42 @@ class TestParseAnswers:
         assert result.emoji == "\U0001f56f️"
         assert result.match == "exact"
 
-    def test_an_unanswered_product_is_missing(self) -> None:
+    def test_a_partial_answer_rejects_the_whole_batch(self) -> None:
+        """Numbering must be exactly 1..n: a gap means the rows cannot be trusted."""
         text = _answer([{"i": 1, "e": "🥦", "m": "exact", "why": "broccoli"}])
 
         results = emoji_trial.parse_answers(text, self.BATCH[:2], REFERENCE)
 
-        assert [r.match for r in results] == ["exact", "missing"]
+        assert [r.match for r in results] == ["invalid", "invalid"]
+        assert all(r.emoji is None for r in results)
+        assert "1..2" in results[0].why
+
+    def test_zero_based_numbering_rejects_the_batch(self) -> None:
+        """Review: 0-based answers shifted onto other products (Parsnip -> grapes, exact)."""
+        text = _answer(
+            [
+                {"i": 0, "e": "🥦", "m": "exact", "why": "broccoli"},
+                {"i": 1, "e": "🍇", "m": "exact", "why": "grapes"},
+                {"i": 2, "e": None, "m": "none", "why": "x"},
+            ]
+        )
+
+        results = emoji_trial.parse_answers(text, self.BATCH, REFERENCE)
+
+        assert {r.match for r in results} == {"invalid"}
+        assert all(r.emoji is None for r in results)
+
+    def test_a_duplicate_index_rejects_the_batch(self) -> None:
+        text = _answer(
+            [
+                {"i": 1, "e": "🥦", "m": "exact", "why": "a"},
+                {"i": 1, "e": None, "m": "none", "why": "b"},
+            ]
+        )
+
+        results = emoji_trial.parse_answers(text, self.BATCH[:2], REFERENCE)
+
+        assert {r.match for r in results} == {"invalid"}
 
     def test_text_that_is_not_json_makes_every_product_missing(self) -> None:
         results = emoji_trial.parse_answers("I think broccoli", self.BATCH, REFERENCE)
@@ -298,6 +392,66 @@ class TestRun:
 
         assert [r.match for r in results] == ["missing", "exact"]
         assert "timed out" in results[0].why
+
+    def test_each_finished_batch_is_handed_over(self) -> None:
+        products = [Product(f"P{n}", None) for n in range(3)]
+        seen: list[int] = []
+
+        def complete(batch: list[Product]) -> str:
+            return _answer(
+                [
+                    {"i": i + 1, "e": None, "m": "none", "why": "x"}
+                    for i in range(len(batch))
+                ]
+            )
+
+        emoji_trial.run(
+            products,
+            REFERENCE,
+            complete,
+            batch_size=2,
+            on_batch=lambda so_far: seen.append(len(so_far)),
+        )
+
+        assert seen == [2, 3]
+
+
+class TestPostChat:
+    def _post(self, handler: Any) -> str:
+        return emoji_trial.post_chat(
+            {"model": "m"},
+            url="http://gateway/v1",
+            api_key="k",
+            timeout=5.0,
+            transport=httpx.MockTransport(handler),
+        )
+
+    def test_it_returns_the_message_content(self) -> None:
+        content = self._post(
+            lambda request: httpx.Response(
+                200, json={"choices": [{"message": {"content": "hi"}}]}
+            )
+        )
+
+        assert content == "hi"
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"choices": [{"message": None}]},
+            {"choices": []},
+            {"choices": None},
+            {},
+            [],
+        ],
+    )
+    def test_a_malformed_reply_is_a_gateway_error(self, body: Any) -> None:
+        with pytest.raises(emoji_trial.GatewayError):
+            self._post(lambda request: httpx.Response(200, json=body))
+
+    def test_an_http_error_is_a_gateway_error(self) -> None:
+        with pytest.raises(emoji_trial.GatewayError):
+            self._post(lambda request: httpx.Response(503, text="busy"))
 
 
 class TestOutput:
@@ -378,3 +532,82 @@ class TestMain:
     def test_names_and_from_db_are_exclusive(self) -> None:
         with pytest.raises(SystemExit):
             emoji_trial.main(["--names", "x", "--from-db"])
+
+    def test_the_timeout_follows_llm_timeout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core.config import settings
+
+        names = tmp_path / "names.txt"
+        names.write_text("Broccoli\n", encoding="utf-8")
+        timeouts: list[float] = []
+
+        def fake_post(payload: dict[str, Any], **kwargs: Any) -> str:
+            timeouts.append(kwargs["timeout"])
+            return _answer([{"i": 1, "e": "🥦", "m": "exact", "why": "b"}])
+
+        monkeypatch.setattr(emoji_trial, "post_chat", fake_post)
+
+        emoji_trial.main(["--names", str(names), "--out", str(tmp_path / "o.md")])
+
+        assert timeouts == [settings.LLM_TIMEOUT]
+
+    def test_finished_batches_survive_a_crash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        names = tmp_path / "names.txt"
+        names.write_text("Broccoli\nParsnip\n", encoding="utf-8")
+        out = tmp_path / "out.md"
+        calls: list[int] = []
+
+        def fake_post(payload: dict[str, Any], **_: Any) -> str:
+            calls.append(1)
+            if len(calls) == 2:
+                raise RuntimeError("console closed")
+            return _answer([{"i": 1, "e": "🥦", "m": "exact", "why": "b"}])
+
+        monkeypatch.setattr(emoji_trial, "post_chat", fake_post)
+
+        with pytest.raises(RuntimeError):
+            emoji_trial.main(
+                ["--names", str(names), "--out", str(out), "--batch-size", "1"]
+            )
+
+        assert "| Broccoli |" in out.read_text(encoding="utf-8")
+
+    def test_from_db_mode_reads_the_catalog_and_disposes_the_engine(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class FakeResult:
+            def all(self) -> list[tuple[str, str]]:
+                return [("Broccoli", "produce")]
+
+        class FakeSession:
+            async def execute(self, statement: Any, params: Any = None) -> FakeResult:
+                return FakeResult()
+
+        @asynccontextmanager
+        async def sessions():  # type: ignore[no-untyped-def]
+            yield FakeSession()
+
+        disposed: list[bool] = []
+
+        async def dispose() -> None:
+            disposed.append(True)
+
+        monkeypatch.setattr(emoji_trial, "_default_sessions", sessions)
+        monkeypatch.setattr(emoji_trial, "_dispose_engine", dispose)
+        monkeypatch.setattr(
+            emoji_trial,
+            "post_chat",
+            lambda payload, **_: _answer(
+                [{"i": 1, "e": "🥦", "m": "exact", "why": "b"}]
+            ),
+        )
+        out = tmp_path / "db.md"
+
+        code = emoji_trial.main(["--from-db", "--out", str(out), "--limit", "10"])
+
+        assert code == 0
+        assert disposed == [True]
+        assert "| Broccoli | produce | 🥦 |" in out.read_text(encoding="utf-8")

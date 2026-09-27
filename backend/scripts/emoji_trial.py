@@ -13,10 +13,15 @@ This is a spike tool, not part of the app: it changes nothing in the database.
     python -m scripts.emoji_trial --from-db --out /tmp/emoji.md
     python -m scripts.emoji_trial --build-reference emoji-test.txt
 
-`--names` reads `name,category` CSV (a header row is optional) or one bare name per line.
-`--from-db` reads `product_master.canonical_name` and `category` in a read-only transaction.
+`--names` reads `name,category` CSV or one bare name per line (a `name` header row is
+skipped, repeated names are reported and skipped).
+`--from-db` reads `product_master.canonical_name` and `category` in a read-only transaction
+(`--limit N` for a trial on part of the catalog).
 `--build-reference` regenerates the reference JSON from Unicode's `emoji-test.txt`.
-Requests go one at a time to `LLM_BASE_URL` with `LLM_MODEL` (override with --url/--model).
+Requests go one at a time to `LLM_BASE_URL` with `LLM_MODEL` and `LLM_API_KEY` (override the
+first two with --url/--model), each with `LLM_TIMEOUT` (--timeout). The output files are
+rewritten after every batch, so an interrupted run keeps the batches it finished. A batch
+whose answer numbering is not exactly 1..n is rejected as `invalid`.
 """
 
 from __future__ import annotations
@@ -186,25 +191,37 @@ def write_reference(data: dict[str, Any], path: Path = REFERENCE_FILE) -> None:
 
 
 def _dedupe(products: list[Product]) -> list[Product]:
+    """Drop repeated names (case-insensitive), keeping the first, and say which went."""
     seen: set[str] = set()
     unique = []
+    dropped = []
     for product in products:
         key = product.name.strip().lower()
-        if key and key not in seen:
-            seen.add(key)
-            unique.append(product)
+        if not key:
+            continue
+        if key in seen:
+            dropped.append(product)
+            continue
+        seen.add(key)
+        unique.append(product)
+    for product in dropped:
+        print(
+            f"  duplicate name skipped: {product.name}"
+            + (f" ({product.category})" if product.category else "")
+        )
     return unique
 
 
 def read_names(path: Path) -> list[Product]:
     products = []
     with path.open(encoding="utf-8", newline="") as handle:
-        for row in csv.reader(handle):
+        for number, row in enumerate(csv.reader(handle)):
             if not row or not row[0].strip():
                 continue
             name = row[0].strip()
             category = row[1].strip() if len(row) > 1 and row[1].strip() else None
-            if name.lower() == "name" and (category or "").lower() == "category":
+            # A header row: `name` alone or `name,category`.
+            if number == 0 and name.lower() == "name":
                 continue
             products.append(Product(name, category))
     return _dedupe(products)
@@ -213,16 +230,20 @@ def read_names(path: Path) -> list[Product]:
 SessionFactory = Callable[[], AbstractAsyncContextManager[Any]]
 
 
-async def load_from_db(sessions: SessionFactory) -> list[Product]:
+async def load_from_db(
+    sessions: SessionFactory, limit: int | None = None
+) -> list[Product]:
     """Every catalog product's name and category, read in a read-only transaction."""
+    query = (
+        "SELECT canonical_name, category FROM product_master "
+        "ORDER BY lower(canonical_name)"
+    )
     async with sessions() as db:
         await db.execute(text("SET TRANSACTION READ ONLY"))
-        result = await db.execute(
-            text(
-                "SELECT canonical_name, category FROM product_master "
-                "ORDER BY lower(canonical_name)"
-            )
-        )
+        if limit is None:
+            result = await db.execute(text(query))
+        else:
+            result = await db.execute(text(query + " LIMIT :limit"), {"limit": limit})
         rows = result.all()
     return _dedupe([Product(str(name), category) for name, category in rows])
 
@@ -231,6 +252,20 @@ def _default_sessions() -> AbstractAsyncContextManager[Any]:
     import app.db.session as app_session
 
     return app_session.AsyncSessionLocal()
+
+
+async def _dispose_engine() -> None:
+    """Close the app engine's pool inside the loop, so exit prints no loop-closed noise."""
+    import app.db.session as app_session
+
+    await app_session.engine.dispose()
+
+
+async def _read_catalog(limit: int | None) -> list[Product]:
+    try:
+        return await load_from_db(_default_sessions, limit=limit)
+    finally:
+        await _dispose_engine()
 
 
 # --- the model ---------------------------------------------------------------------------
@@ -314,12 +349,30 @@ def build_payload(
     return payload
 
 
+def _message_content(body: Any) -> str:
+    """The first choice's message content, or GatewayError for any other shape."""
+    choices = body.get("choices") if isinstance(body, dict) else None
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        raise GatewayError(f"reply has no choices: {str(body)[:200]}")
+    message = choices[0].get("message")
+    if not isinstance(message, dict):
+        raise GatewayError(f"reply has no message: {str(choices[0])[:200]}")
+    return str(message.get("content") or "")
+
+
 def post_chat(
-    payload: dict[str, Any], *, url: str, api_key: str, timeout: float
+    payload: dict[str, Any],
+    *,
+    url: str,
+    api_key: str,
+    timeout: float,
+    transport: httpx.BaseTransport | None = None,
 ) -> str:
     """One chat completion. Raises GatewayError on any failure."""
     try:
-        with httpx.Client(timeout=httpx.Timeout(timeout, connect=10.0)) as client:
+        with httpx.Client(
+            timeout=httpx.Timeout(timeout, connect=10.0), transport=transport
+        ) as client:
             response = client.post(
                 f"{url.rstrip('/')}/chat/completions",
                 json=payload,
@@ -327,9 +380,9 @@ def post_chat(
             )
             response.raise_for_status()
             body = response.json()
-        return str(body["choices"][0]["message"].get("content") or "")
-    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
+    except (httpx.HTTPError, ValueError) as exc:
         raise GatewayError(repr(exc)) from exc
+    return _message_content(body)
 
 
 # --- the answers -------------------------------------------------------------------------
@@ -355,19 +408,24 @@ def parse_answers(
     """One Result per product in `batch`, in order. Answers are checked, never trusted."""
     known = {e["e"].replace(VARIATION_SELECTOR, ""): e["e"] for e in reference}
     answer = _answer_object(content)
-    rows: dict[int, dict[str, Any]] = {}
-    for row in (answer or {}).get("r", []):
-        if isinstance(row, dict) and isinstance(row.get("i"), int):
-            rows.setdefault(row["i"], row)
+    if answer is None:
+        return [
+            Result(p.name, p.category, None, "missing", "no JSON answer") for p in batch
+        ]
+    raw_rows = answer["r"]
+    indices = [row.get("i") if isinstance(row, dict) else None for row in raw_rows]
+    expected = list(range(1, len(batch) + 1))
+    numbered = all(isinstance(i, int) and not isinstance(i, bool) for i in indices)
+    if not numbered or sorted(indices) != expected:  # type: ignore[type-var]
+        # The rows are matched to products by number only. Numbering that is not exactly
+        # 1..n (0-based, a gap, a repeat) would put answers on the wrong products.
+        why = f"answer numbering is not 1..{len(batch)}: got {indices}"
+        return [Result(p.name, p.category, None, "invalid", why) for p in batch]
+    rows: dict[int, dict[str, Any]] = {row["i"]: row for row in raw_rows}
 
     results = []
     for number, product in enumerate(batch, start=1):
-        row = rows.get(number)
-        if row is None:
-            results.append(
-                Result(product.name, product.category, None, "missing", "no answer")
-            )
-            continue
+        row = rows[number]
         why = str(row.get("why") or "").strip()
         match = row.get("m")
         raw = row.get("e")
@@ -404,8 +462,13 @@ def run(
     reference: list[dict[str, Any]],
     complete: Callable[[list[Product]], str],
     batch_size: int,
+    on_batch: Callable[[list[Result]], None] | None = None,
 ) -> list[Result]:
-    """Ask about every product, one batch after another (the gateway serves one request)."""
+    """Ask about every product, one batch after another (the gateway serves one request).
+
+    `on_batch` gets the results so far after every batch, so a caller can write them out
+    and a crash or a closed console loses at most the batch in flight.
+    """
     results: list[Result] = []
     for start in range(0, len(products), batch_size):
         batch = products[start : start + batch_size]
@@ -420,6 +483,8 @@ def run(
                 Result(p.name, p.category, None, "missing", f"request failed: {exc}")
                 for p in batch
             )
+            if on_batch:
+                on_batch(results)
             continue
         answered = parse_answers(content, batch, reference)
         results.extend(answered)
@@ -430,6 +495,8 @@ def run(
             + " ".join(f"{k}={v}" for k, v in counts.items() if v),
             flush=True,
         )
+        if on_batch:
+            on_batch(results)
     return results
 
 
@@ -538,9 +605,12 @@ def main(argv: list[str] | None = None) -> int:
         choices=("low", "medium", "high", "xhigh", "off"),
         help="reasoning_strength (default LLM_REASONING_STRENGTH)",
     )
-    parser.add_argument("--batch-size", type=int, default=25)
+    parser.add_argument("--batch-size", type=int, default=20)
     parser.add_argument(
-        "--timeout", type=float, default=180.0, help="seconds a request"
+        "--timeout", type=float, help="seconds a request (default LLM_TIMEOUT)"
+    )
+    parser.add_argument(
+        "--limit", type=int, help="--from-db: read at most this many products"
     )
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--cutoff", default=DEFAULT_CUTOFF, help="newest Emoji version")
@@ -562,7 +632,7 @@ def main(argv: list[str] | None = None) -> int:
     from app.core.config import settings
 
     if args.from_db:
-        products = asyncio.run(load_from_db(_default_sessions))
+        products = asyncio.run(_read_catalog(args.limit))
     else:
         products = read_names(args.names)
     reference = load_reference_file()["emoji"]
@@ -572,9 +642,10 @@ def main(argv: list[str] | None = None) -> int:
         settings.LLM_REASONING_STRENGTH if args.reasoning is None else args.reasoning
     )
     reasoning = None if reasoning == "off" else reasoning
+    timeout = settings.LLM_TIMEOUT if args.timeout is None else args.timeout
     print(
         f"{len(products)} products, {len(reference)} emoji, model {model}, "
-        f"reasoning {reasoning}, batches of {args.batch_size}"
+        f"reasoning {reasoning}, batches of {args.batch_size}, timeout {timeout:.0f}s"
     )
 
     def complete(batch: list[Product]) -> str:
@@ -582,10 +653,17 @@ def main(argv: list[str] | None = None) -> int:
             build_prompt(batch, reference), model, reasoning, args.max_tokens
         )
         return post_chat(
-            payload, url=url, api_key=settings.LLM_API_KEY, timeout=args.timeout
+            payload, url=url, api_key=settings.LLM_API_KEY, timeout=timeout
         )
 
-    results = run(products, reference, complete, args.batch_size)
+    # Written after every batch, so a crash keeps what was finished.
+    results = run(
+        products,
+        reference,
+        complete,
+        args.batch_size,
+        on_batch=lambda so_far: write_outputs(so_far, args.out, args.title),
+    )
     written = write_outputs(results, args.out, args.title)
     print(" ".join(f"{k}={v}" for k, v in count(results).items()))
     print("wrote " + ", ".join(str(p) for p in written))
