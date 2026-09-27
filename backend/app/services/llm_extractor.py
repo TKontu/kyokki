@@ -470,6 +470,7 @@ async def _complete(
         }
 
     started = time.monotonic()
+    response: httpx.Response | None = None
     try:
         async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as client:
             response = await client.post(
@@ -482,10 +483,17 @@ async def _complete(
     except httpx.HTTPError as exc:
         raise LLMExtractionError(f"LLM request failed: {exc!r}") from exc
     except ValueError as exc:
+        if response is None:
+            # The request could not even be built: a header such as the API key holds a
+            # character HTTP headers cannot carry (PR #131 F16)
+            raise LLMExtractionError(
+                "LLM request could not be sent; check LLM_API_KEY for non-ASCII "
+                f"characters ({type(exc).__name__})"
+            ) from exc
         # HTTP 200 with a body that is not JSON (a proxy page, a restarting gateway)
         raise LLMExtractionError(
             f"LLM response body is not JSON: {exc}",
-            raw_completion=_cap(str(getattr(response, "text", "") or "")),
+            raw_completion=_cap(str(response.text or "")),
         ) from exc
 
     try:
@@ -541,8 +549,8 @@ async def extract_unaccounted_lines(
 ) -> ReceiptExtraction:
     """One targeted read of the lines a first read did not account for (Q27).
 
-    Same rules, schema and categories, but no catalog block: the block is what a first
-    read tends to mistake for the list of products to extract.
+    Same rules, schema and categories, but no catalog block: the block is the suspect,
+    not a proven cause, for the first read's lost lines (Q27), so the re-read leaves it out.
     """
     instructions = build_instructions(categories, ())
     prompt = f"{instructions}\n\n{_RETRY}\n\nReceipt lines:\n{format_numbered(lines)}"

@@ -65,13 +65,27 @@ def _completion(content: str) -> dict:
     return {"choices": [{"message": {"role": "assistant", "content": content}}]}
 
 
+# A key to leave out of the answer, as an older model answer did
+_ABSENT = object()
+
+
 def _compact(**overrides) -> str:
+    """A text answer in the production shape (Q27): lines cited, priced, `x`, `t`, `te`.
+
+    PR #131 F21. Pass ``key=_ABSENT`` to leave a key out.
+    """
     body = {
         "s": "S-KAUPAT",
         "d": "2026-01-02",
+        "lc": "fi",
+        "cc": "FI",
+        "t": 2.46,
+        "te": False,
         "p": [
             {
                 "n": "KEVYTMAITOJUOMA LAKTON",
+                "l": [3],
+                "p": 1.29,
                 "g": "Lactose-free milk",
                 "q": 1,
                 "w": None,
@@ -82,6 +96,8 @@ def _compact(**overrides) -> str:
             },
             {
                 "n": "PUNASIPULI",
+                "l": [4, 5],
+                "p": 1.17,
                 "g": "Red onion",
                 "q": 1,
                 "w": 0.33,
@@ -91,8 +107,13 @@ def _compact(**overrides) -> str:
                 "os": None,
             },
         ],
+        "x": [
+            {"l": 1, "k": "header", "a": None},
+            {"l": 6, "k": "total", "a": 2.46},
+        ],
     }
     body.update(overrides)
+    body = {k: v for k, v in body.items() if v is not _ABSENT}
     return json.dumps(body, ensure_ascii=False)
 
 
@@ -228,6 +249,8 @@ class TestParseCompletion:
                 category="dairy",
                 shelf_life_days=10,
                 opened_shelf_life_days=5,
+                source_lines=[3],
+                price=1.29,
             ),
             ExtractedLine(
                 name="PUNASIPULI",
@@ -237,8 +260,15 @@ class TestParseCompletion:
                 piece_grams=110,
                 shelf_life_days=30,
                 category="produce",
+                source_lines=[4, 5],
+                price=1.17,
             ),
         ]
+        assert [(o.line, o.kind, o.amount) for o in result.other_lines] == [
+            (1, "header", None),
+            (6, "total", 2.46),
+        ]
+        assert (result.receipt_total, result.tax_exclusive) == (2.46, False)
 
     @pytest.mark.parametrize(
         ("raw", "expected"),
@@ -737,7 +767,10 @@ class TestAccountingFields:
         assert (result.language, result.country) == ("fi", "FI")
 
     def test_older_answers_without_the_fields_still_parse(self):
-        result = parse_completion(_compact(), CATEGORY_IDS, method="text")
+        older = json.loads(_compact(lc=_ABSENT, cc=_ABSENT, t=_ABSENT, x=_ABSENT))
+        for product in older["p"]:
+            del product["l"], product["p"]
+        result = parse_completion(json.dumps(older), CATEGORY_IDS, method="text")
 
         assert all(line.source_lines == [] for line in result.lines)
         assert result.other_lines == []
@@ -961,7 +994,8 @@ class TestTaxExclusiveTotals:
         assert result.tax_exclusive is expected
 
     def test_an_answer_without_te_is_tax_inclusive(self):
-        assert parse_completion(_compact(), CATEGORY_IDS, "text").tax_exclusive is False
+        answer = _compact(te=_ABSENT)
+        assert parse_completion(answer, CATEGORY_IDS, "text").tax_exclusive is False
 
 
 class TestLanguageAndCountryCodes:
@@ -980,6 +1014,9 @@ class TestLanguageAndCountryCodes:
             ("Finnish", None),
             ("zzz", None),
             ("f", None),
+            # PR #131 F17: only real ISO 639-1 codes
+            ("xx", None),
+            ("qq-FI", None),
             (None, None),
             (7, None),
         ],
@@ -1001,6 +1038,11 @@ class TestLanguageAndCountryCodes:
             ("Finland", None),
             ("XYZ", None),
             ("", None),
+            # PR #131 F17: only real ISO 3166-1 codes; UK is the common alias of GB
+            ("UK", "GB"),
+            ("en-UK", "GB"),
+            ("xx", None),
+            ("QQ", None),
         ],
     )
     def test_country(self, cc, expected):
@@ -1076,3 +1118,26 @@ class TestEstimateTimeout:
             await extract_from_text(RECEIPT_TEXT, CATEGORIES)
 
         assert client_class.call_args.kwargs["timeout"] == settings.LLM_TIMEOUT
+
+
+class TestConfigurationErrors:
+    """PR #131 F16: a non-ASCII API key failed the request before any response, and the
+    error handler read the unbound response: an UnboundLocalError, not a clear message."""
+
+    async def test_a_non_ascii_api_key_is_a_clear_configuration_error(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(settings, "LLM_API_KEY", "avain-öö")
+        transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}))
+        real_client = httpx.AsyncClient
+
+        def client(*_args, **kwargs):
+            return real_client(transport=transport, timeout=kwargs.get("timeout"))
+
+        with (
+            patch("app.services.llm_extractor.httpx.AsyncClient", side_effect=client),
+            pytest.raises(LLMExtractionError, match="LLM_API_KEY") as caught,
+        ):
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        assert caught.value.raw_completion is None
