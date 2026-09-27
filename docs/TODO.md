@@ -1987,6 +1987,14 @@ not rulings.
     wins; the catalog block reworded and measured live on muse-glimmer.
   - B2 (`feat/q27-review-completeness`): a shortfall banner and "recovered" markers on the review
     screen, an "Add a missed item" row, and a "Show receipt text" disclosure (first slice of Q28).
+  **Operator ruling (2026-09-27): receipts from any shop, country and language must work (e.g. a
+  Croatian receipt while travelling); no receipt format may be hardcoded.** The completeness check is
+  therefore format-agnostic: the model is given numbered lines and must account for every one (products
+  cite their source lines; every other line is listed with a kind), unaccounted lines get one targeted
+  retry and are otherwise shown as raw lines, and the receipt's own arithmetic (line prices vs the
+  printed total) flags a shortfall on both the text and photo paths. The Finnish heuristic parser stays
+  only as the last-resort fallback; prompt rules are language-neutral with Finnish strings kept only as
+  examples; synthetic Croatian and German/English fixtures join the measurement.
 - **Q28 — the receipt and what the model made of it cannot be audited.** After processing, the iPad
   shows only the extracted rows. There is no way to see the receipt image or PDF, the OCR text,
   or the model's raw answer, and no way back to a confirmed receipt's contents. The API already
