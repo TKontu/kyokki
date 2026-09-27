@@ -1129,3 +1129,53 @@ took longer than the production `LLM_TIMEOUT` of 180 s, and the first matrix att
 at exactly that. With the production timeout, a long receipt would often fall back to the
 heuristic parser (Finnish) or fail (elsewhere). Before release, raise `LLM_TIMEOUT` (for
 example to 360 s) or trim `x` to only the lines that carry an amount, then re-measure S-kaupat.
+
+### After the latency changes (operator decision, 2026-09-27)
+
+Three changes followed the timing above:
+
+1. `x` lists only non-product lines that carry an amount. A line without an amount needs no
+   accounting, but an unpriced neighbour of an unaccounted priced line joins its re-read.
+2. The Finnish pre-filter is gone from the prompt path. Every non-blank line is numbered, so the
+   printed total reaches the model on Finnish receipts too.
+3. `LLM_TIMEOUT` is 420 s: receipts are background jobs.
+
+With them came contract ruling 1:
+- `text_lines` is the final number of product rows;
+- `unaccounted_lines` is what is left after recovery;
+- the sum is compared in whole cents.
+
+A first re-run showed two false positives, and both were fixed:
+- Dates such as `27.09.2026` read as the amount 27.09 and became junk `raw_line` rows. The
+  amount pattern now refuses a number that continues with `.d` or `,d`.
+- S-kaupat's `NORM.`/`ALENNUS` discount is already taken off the line total, so subtracting it
+  again flagged a 3.12 gap. A receipt now matches if its line totals add up either with or
+  without the listed discounts.
+
+Final code, `c2.muse-glimmer`, reasoning low, reworded wording, 220-name overlap catalog,
+`LLM_TIMEOUT=420`, sequential:
+
+| fixture | found (first read) | after | categories | printed total seen | sum vs total | re-read / raw rows | first read s: before → now |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| K-Citymarket, run 1 | 15/15 | 15/15 | 13 | 73.07 | 73.07 = 73.07 | 0 / 0 | 179, 156 → **48** |
+| K-Citymarket, run 2 | 15/15 | 15/15 | **1** (see below) | 73.07 | 73.07 = 73.07 | 0 / 0 | → **52** |
+| S-kaupat, run 1 | 49/49 | 49/49 | 41 | **173.92** (was null) | 173.92 = 173.92 | 0 / 0 | 176, 240 → **114** |
+| S-kaupat, run 2 | 49/49 | 49/49 | 41 | **173.92** | 173.92 = 173.92 | 0 / 0 | → **128** |
+| Konzum HR (synthetic) | 8/8 | 8/8 | 7 | 14.74 | 14.74 = 14.74 | 0 / 0 | 112, 83 → **32** |
+| REWE DE (synthetic) | 6/6 | 6/6 | 5 | 13.86 | 13.86 = 13.86 | 0 / 0 | 33, 29 → **29** |
+
+The S-kaupat rows come from the run after the discount fix. Before that fix, the same code
+gave 49/49 and 41 categories in 121 s and 107 s, but the sum read 170.80 against 173.92.
+
+Every fixture is now read in full, and the arithmetic check runs and agrees on all four
+receipts, the Finnish ones included. The first read is 2-3.5 times faster on K and roughly
+1.5-2 times faster on S-kaupat. The slowest read in this re-measure was 128 s, well inside
+420 s. Before the latency changes, 6 of 10 S-kaupat reads went past the old 180 s. A
+reconciliation re-read, when one ran, took 7-15 s and found nothing to add.
+
+**One open signal.** Across the re-measure, 2 of 6 K first reads filled a category on only
+1 of 15 products (sl stayed at 13). Two later diagnostic reads of the same receipt gave 13 of 15
+with sensible ids, and S-kaupat held 41 of 49 in all four runs. So this looks like run-to-run
+variance, not a systematic loss, and the 1-of-15 answers were not captured to confirm it.
+Watch it in the operator's next trial. A receipt with no categories still reviews, but each
+new product then needs one picked.

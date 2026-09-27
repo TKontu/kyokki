@@ -262,24 +262,28 @@ def receipt_arithmetic(
     """Σ line totals plus signed discounts, deposits and fees; and whether it misses the total.
 
     Works for any currency and on the vision path. A detail line's unit price is never
-    part of it: only a product's `p`, its line total, is summed.
+    part of it: only a product's `p`, its line total, is summed. Some receipts print a
+    discount that is already taken off the line total (S-kaupat's NORM./ALENNUS pair),
+    others take it off at the end; a receipt matching either way is not a mismatch.
     """
     prices = [p.price for p in products if p.price is not None]
-    signed = [
-        -abs(o.amount) if o.kind == "discount" else o.amount
-        for o in others
-        if o.kind in _SIGNED_KINDS and o.amount is not None
-    ]
     if not prices:
         return None, False
+    amounts = [o for o in others if o.kind in _SIGNED_KINDS and o.amount is not None]
+    discounts = sum(-abs(o.amount or 0) for o in amounts if o.kind == "discount")
+    charges = sum(o.amount or 0 for o in amounts if o.kind != "discount")
     # Compared in whole cents, so float noise never decides a mismatch
-    sum_cents = round((sum(prices) + sum(signed)) * 100)
-    items_sum = sum_cents / 100
+    sum_cents = round((sum(prices) + charges + discounts) * 100)
     if total is None:
-        return items_sum, False
+        return sum_cents / 100, False
     total_cents = round(total * 100)
     tolerance = max(_SUM_TOLERANCE_CENTS, abs(total_cents) / 100)
-    return items_sum, abs(sum_cents - total_cents) > tolerance
+    if abs(sum_cents - total_cents) <= tolerance:
+        return sum_cents / 100, False
+    net_cents = round((sum(prices) + charges) * 100)
+    if discounts and abs(net_cents - total_cents) <= tolerance:
+        return net_cents / 100, False
+    return sum_cents / 100, True
 
 
 @dataclass
