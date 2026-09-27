@@ -1995,6 +1995,11 @@ not rulings.
   printed total) flags a shortfall on both the text and photo paths. The Finnish heuristic parser stays
   only as the last-resort fallback; prompt rules are language-neutral with Finnish strings kept only as
   examples; synthetic Croatian and German/English fixtures join the measurement.
+  **Architecture (operator-approved, 2026-09-27):** country/language-specific parsers may exist as
+  optional, pluggable profiles chosen by the receipt's detected language/country. A profile is an
+  independent second opinion over the format-agnostic core (its extra lines go into the targeted retry;
+  it never decides alone; its failure never fails a receipt). The existing Finnish heuristic is the
+  first profile (`fi`); more are added only where measurement shows the core alone falls short.
 - **Q28 — the receipt and what the model made of it cannot be audited.** After processing, the iPad
   shows only the extracted rows. There is no way to see the receipt image or PDF, the OCR text,
   or the model's raw answer, and no way back to a confirmed receipt's contents. The API already
