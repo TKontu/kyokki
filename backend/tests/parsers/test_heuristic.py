@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.parsers.heuristic import parse_receipt_text
+from app.parsers.heuristic import parse_receipt_blocks, parse_receipt_text
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "receipts"
 
@@ -145,3 +145,110 @@ class TestEdgeCases:
             "JUUSTO",
             "LEIPÄ",
         ]
+
+
+class TestKCitymarketSello:
+    """Q27: the e-receipt whose model answer lost nine of its fifteen products."""
+
+    @pytest.fixture
+    def expected(self) -> dict:
+        return json.loads(_read("expected_k_citymarket_sello.json"))
+
+    @pytest.fixture
+    def result(self):
+        return parse_receipt_text(_read("k_citymarket_sello.txt"))
+
+    def test_reads_exactly_the_fifteen_products(self, result, expected):
+        assert [
+            (line.name, line.quantity, line.weight_kg) for line in result.lines
+        ] == [
+            (line["name"], line["quantity"], line["weight_kg"])
+            for line in expected["lines"]
+        ]
+
+    def test_the_footer_after_the_total_is_not_read_as_products(self, result):
+        joined = " ".join(line.name for line in result.lines)
+        for word in ("PLUSSAA", "Käyttötavaraostokset", "Ruokaostokset", "Credit"):
+            assert word not in joined
+
+    def test_date(self, result):
+        assert result.purchase_date == date(2026, 9, 26)
+
+
+class TestGlossaryReceipt:
+    def test_every_product_and_nothing_else(self):
+        result = parse_receipt_text(_read("glossary_terms.txt"))
+        assert [line.name for line in result.lines] == [
+            "RIISIPIIRAKKA 10KPL",
+            "KARJALANPIIRAKKA",
+            "VALMISRUOKA LIHAPULLAT",
+            "ATERIA KANAKASTIKE",
+            "TÄYSMEHU OMENA 1L",
+            "APPELSIINIMEHU",
+            "RUSINA 250G",
+            "KEVYTMAITO 1L",
+            "RUISLEIPÄ",
+        ]
+
+
+class TestStopsAtTheTotal:
+    @pytest.mark.parametrize("total", ["YHTEENSÄ 5,20", "Yhteensa 5,20", "SUMMA 5,20"])
+    def test_lines_after_the_first_total_are_not_products(self, total):
+        text = f"MAITO 1,20\nLEIPÄ 4,00\n{total}\nPLUSSAA KERRYTTÄVÄT OSTOT 5,20"
+        assert [line.name for line in parse_receipt_text(text).lines] == [
+            "MAITO",
+            "LEIPÄ",
+        ]
+
+    def test_a_name_merely_containing_summa_is_still_a_product(self):
+        text = "VÄLISUMMA 1,20\nSUMMAKALA 3,00\nMAITO 1,20"
+        assert [line.name for line in parse_receipt_text(text).lines] == [
+            "SUMMAKALA",
+            "MAITO",
+        ]
+
+
+class TestDetailLinesAfterASkippedLine:
+    def test_a_deposits_quantity_does_not_land_on_the_product_above(self):
+        """The deposit's own `2 KPL` used to give the beer a quantity of 2."""
+        text = (
+            "Pilsner Urquell 0,5l tlk 3,04\n"
+            "Tolkkipantti 0,30\n"
+            "2 KPL 0,15 €/KPL\n"
+            "Banaani 0,89\n"
+            "0,412 KG 2,15 €/KG"
+        )
+        assert [
+            (line.name, line.quantity, line.weight_kg)
+            for line in parse_receipt_text(text).lines
+        ] == [("Pilsner Urquell 0,5l tlk", 1, None), ("Banaani", 1, 0.412)]
+
+    def test_a_weight_after_a_skipped_line_is_ignored_too(self):
+        text = "OMENA 2,10\nPANTTI 0,10\n0,500 KG 4,20 €/KG"
+        assert [
+            (line.name, line.weight_kg) for line in parse_receipt_text(text).lines
+        ] == [("OMENA", None)]
+
+
+class TestBlocksCiteTheirLines:
+    """Q27: the `fi` profile reports which numbered lines each product came from."""
+
+    def test_a_product_cites_its_own_and_its_detail_lines(self):
+        numbered = [
+            (1, "Naudan Entrecote Palana 22,83"),
+            (2, "0,913 KG 25,00 €/KG"),
+            (None, "YHTEENSÄ 22,83"),
+            (3, "PLUSSAA KERRYTTÄVÄT OSTOT 22,83"),
+        ]
+        (block,) = parse_receipt_blocks(numbered)
+        assert block.line.name == "Naudan Entrecote Palana"
+        assert block.line.weight_kg == 0.913
+        assert block.line_numbers == [1, 2]
+
+    def test_lines_left_out_of_the_prompt_are_not_cited(self):
+        numbered = [
+            (None, "Palmolive Vaahtosaippua 250ml 4,98"),
+            (7, "2 KPL 2,49 €/KPL"),
+        ]
+        (block,) = parse_receipt_blocks(numbered)
+        assert block.line_numbers == [7]

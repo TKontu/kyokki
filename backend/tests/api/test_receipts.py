@@ -3,6 +3,7 @@
 import shutil
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
@@ -13,8 +14,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.main import app
-from app.parsers.base import ExtractedLine, ReceiptExtraction
+from app.parsers.base import ExtractedLine, OtherLine, ReceiptExtraction
 from app.worker.receipt_worker import run_once
+
+
+@pytest.fixture(autouse=True)
+def no_unplanned_re_read():
+    """The targeted re-read (Q27) runs only when a test sets it up, never the gateway."""
+    with patch(
+        "app.services.receipt_processing.extract_unaccounted_lines",
+        new_callable=AsyncMock,
+        side_effect=AssertionError("unexpected targeted re-read"),
+    ) as retry:
+        yield retry
 
 
 @pytest.fixture
@@ -301,7 +313,12 @@ class TestProcessReceipt:
         extraction = ReceiptExtraction(
             method="text",
             store_chain="S-MARKET",
-            lines=[ExtractedLine(name="Valio Milk 1L", quantity=1.0)],
+            lines=[ExtractedLine(name="Valio Milk 1L", quantity=1.0, source_lines=[2])],
+            # Q27: the model accounts for every numbered line, the total included
+            other_lines=[
+                OtherLine(line=1, kind="header"),
+                OtherLine(line=3, kind="total", amount=2.49),
+            ],
         )
 
         with (
@@ -610,6 +627,8 @@ class TestReceiptItems:
             "printed_unit": None,
             "storage_type": "pantry",
             "location": "pantry",
+            # Q27: the first model read found this line itself
+            "recovered": None,
         }
         # No piece weight was read, so a weighed line stays in grams
         assert (onion["quantity"], onion["unit"]) == (330.0, "g")
@@ -874,3 +893,124 @@ class TestWeighedProduceBecomesPieces:
         (mince,) = body["items"]
         assert (mince["quantity"], mince["unit"]) == (1.0, "pcs")
         assert mince["pack_grams"] is None
+
+
+K_TEXT = (
+    Path(__file__).parent.parent / "fixtures" / "receipts" / "k_citymarket_sello.txt"
+).read_text(encoding="utf-8")
+
+# Prompt line numbers of the K-Citymarket fixture: (printed name, lines, line total)
+K_READ = [
+    ("Kiinteä Peruna pesty Jazzy", [12, 13], 0.59),
+    ("Pirkka miniluumutomaatti 250g", [14], 2.29),
+    ("Snäxi minipaprika mix 200g", [15], 1.99),
+    ("Helmitomaatti pikari 200g", [23], 3.99),
+    ("Hapankaali 400g Rasilainen", [24, 25], 5.98),
+    ("Baba punajuuri hummus 225g", [26, 27], 7.38),
+]
+K_MISSED = [
+    ("Bakerika suol suklaahipkeksita", [7], 4.27),
+    ("Pingviini jäätelö 1l suklaa la", [8], 2.99),
+    ("Pirkka rypäle tumma 500g", [9], 2.79),
+    ("Naudan Entrecote Palana", [10, 11], 22.83),
+    ("Nikulan vapaa L15 1020g", [16], 4.59),
+    ("Palsternakka", [17, 18], 1.04),
+    ("Palmolive Vaahtosaippua 250ml", [19, 20], 4.98),
+    ("Parsakaali 250g luomu", [21], 3.97),
+    ("Pirkka tamponi 32kpl sup", [22], 3.39),
+]
+# Everything else the model listed as not a product: header, footer, tax, payment
+K_OTHER = [*range(1, 7), *range(28, 54)]
+
+
+def _k_lines(rows) -> list[ExtractedLine]:
+    return [
+        ExtractedLine(name=name, source_lines=lines, price=price)
+        for name, lines, price in rows
+    ]
+
+
+class TestKCitymarketReview:
+    """Q27: the review screen shows all 15 products and says which were recovered."""
+
+    async def test_fifteen_items_nine_recovered_and_the_completeness_record(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        session_factory,
+        no_unplanned_re_read,
+    ) -> None:
+        files = {"file": ("k.pdf", BytesIO(b"%PDF k"), "application/pdf")}
+        receipt_id = (await client.post("/api/receipts/scan", files=files)).json()["id"]
+        first = ReceiptExtraction(
+            method="text",
+            lines=_k_lines(K_READ),
+            other_lines=[OtherLine(line=n, kind="header") for n in K_OTHER],
+            language="fi",
+            country="FI",
+            raw_completion='{"p": [...]}',
+        )
+        no_unplanned_re_read.side_effect = None
+        no_unplanned_re_read.return_value = ReceiptExtraction(
+            method="text", lines=_k_lines(K_MISSED), raw_completion='{"p": [...]}'
+        )
+        with (
+            patch(
+                "app.services.receipt_processing.extract_text_from_receipt",
+                new_callable=AsyncMock,
+                return_value=K_TEXT,
+            ),
+            patch(
+                "app.services.receipt_processing.extract_from_text",
+                new_callable=AsyncMock,
+                return_value=first,
+            ),
+        ):
+            await run_once(session_factory)
+
+        body = (await client.get(f"/api/receipts/{receipt_id}")).json()
+
+        assert body["processing_status"] == "completed"
+        assert body["items_extracted"] == 15
+        items = body["items"]
+        assert len(items) == 15
+        assert [item["recovered"] for item in items] == [None] * 6 + ["model_retry"] * 9
+        assert body["completeness"] == {
+            "text_lines": 15,
+            "model_lines": 6,
+            "recovered_by_retry": 9,
+            "recovered_raw_lines": 0,
+            "invalid_entries": 0,
+            "unaccounted_lines": 0,
+            "items_sum": 73.07,
+            "receipt_total": None,
+            "profile": "fi",
+            "profile_only_lines": 9,
+        }
+        assert body["fallback_reason"] == (
+            "9 of 15 lines were not read by the model and were recovered"
+        )
+        assert body["extraction_method"] == "text"
+
+        # The list stays light: no raw completion, no completeness, no items
+        (summary,) = (await client.get("/api/receipts")).json()
+        assert "raw_completion" not in str(summary)
+        assert "completeness" not in summary
+
+    async def test_older_receipts_have_no_completeness(
+        self, client: AsyncClient, test_db: AsyncSession
+    ) -> None:
+        from app.models.receipt import Receipt
+
+        receipt = Receipt(
+            image_path="data/receipts/old.pdf",
+            processing_status="completed",
+            ocr_structured={"method": "text", "lines": [{"name": "MAITO"}]},
+        )
+        test_db.add(receipt)
+        await test_db.commit()
+
+        body = (await client.get(f"/api/receipts/{receipt.id}")).json()
+
+        assert body["completeness"] is None
+        assert body["items"][0]["recovered"] is None

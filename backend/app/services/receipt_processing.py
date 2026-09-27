@@ -4,12 +4,15 @@ Pipeline:
 1. Read the receipt: PDF text (pdfplumber) or image OCR (MinerU); when MinerU is unavailable or
    finds no text, the image is read directly by the vision-capable LLM.
 2. Extract product lines, store, date and category suggestions with the LLM.
-3. Fuzzy-match each line to product_master.
-4. Store the structured result on the receipt.
+3. On text, check every numbered line was accounted for and recover what was not (Q27);
+   on text and vision, check the line totals against the printed total.
+4. Resolve each line to a product.
+5. Store the structured result on the receipt.
 """
 
+import re
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,13 +20,15 @@ from typing import Any
 from uuid import uuid4
 
 import anyio
+from rapidfuzz import fuzz
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.crud.category import get_categories
 from app.models.receipt import Receipt
-from app.parsers.base import ReceiptExtraction
+from app.parsers.base import ExtractedLine, OtherLine, ReceiptExtraction
 from app.parsers.heuristic import parse_receipt_text
+from app.parsers.profiles import profile_for
 from app.schemas.receipt import ReceiptStatus
 from app.services.broadcast_helpers import broadcast_receipt_status
 from app.services.llm_extractor import (
@@ -31,6 +36,8 @@ from app.services.llm_extractor import (
     LLMExtractionError,
     extract_from_image,
     extract_from_text,
+    extract_unaccounted_lines,
+    number_receipt_lines,
 )
 from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import known_non_food
@@ -86,6 +93,432 @@ def _line_id_for(name: str, previous: dict[str, list[str]]) -> str:
     return str(uuid4())
 
 
+# --- Completeness (Q27) --------------------------------------------------------------
+#
+# The first model read of a 15-line K-Citymarket receipt returned 6 products and nothing
+# said so. Receipts come from any shop, country and language, so the check does not parse
+# the receipt itself: the model numbers every prompt line to a product (`l`) or to a
+# non-product kind (`x`), and a line in neither is unaccounted. Unaccounted lines get one
+# targeted retry without the catalog block; what is still unaccounted and carries an amount
+# is listed as the printed line for the cook to decide. An optional country or language
+# profile adds evidence and never decides alone. The receipt's own arithmetic (line totals
+# against the printed total) is checked on the text and vision paths.
+
+# A price-like amount in any currency: digits with a two-digit `.` or `,` decimal part,
+# not part of a longer number such as a date (27.09.2026 is not 27.09)
+_AMOUNT = re.compile(r"(?<![\d.,])[-−]?\d+[.,]\d{2}(?![\d]|[.,]\d)")
+# The same with an optional currency symbol or three-letter code, and a trailing minus
+_AMOUNT_TEXT = re.compile(
+    r"(?:[€$£¥]\s*)?(?<![\d.,])[-−]?\d+[.,]\d{2}(?![\d]|[.,]\d)-?"
+    r"(?:\s*(?:[€$£¥]|[A-Z]{3}\b))?"
+)
+# A run of four or more letters in any script: something a name has and a detail line
+# ("0,523 KG 1,99 €/KG", "2 x 1,49", "3 kom x 1,29") does not
+_WORD = re.compile(r"[^\W\d_]{4,}")
+# Beyond this difference, in cents, the line totals do not add up to the printed total
+_SUM_TOLERANCE_CENTS = 5
+_FUZZY_NAME = 90
+# Kinds whose amount the receipt adds to or takes from the product lines
+_SIGNED_KINDS = ("discount", "deposit", "fee")
+
+
+def _has_amount(line: str) -> bool:
+    return bool(_AMOUNT.search(line))
+
+
+def _is_detail(line: str) -> bool:
+    """A count, weight or unit-price line rather than a name, by shape alone."""
+    return line[:1].isdigit() and not _WORD.search(line)
+
+
+def _strip_amounts(line: str) -> str:
+    return " ".join(_AMOUNT_TEXT.sub(" ", line).split())
+
+
+def _layout(products: list[ExtractedLine], lines: dict[int, str]) -> str:
+    """Whether this receipt prints detail lines after the name or before it.
+
+    Read off the model's own multi-line products: no layout is assumed per shop.
+    """
+    after = before = 0
+    for product in products:
+        cited = [n for n in product.source_lines if n in lines]
+        if len(cited) < 2:
+            continue
+        first, last = lines[cited[0]], lines[cited[-1]]
+        if not _is_detail(first) and _is_detail(last):
+            after += 1
+        elif _is_detail(first) and not _is_detail(last):
+            before += 1
+    return "before" if before > after else "after"
+
+
+def _cite_by_name(
+    product: ExtractedLine, lines: dict[int, str], taken: set[int]
+) -> list[int]:
+    """The line an answer without line numbers most likely came from, or none."""
+    target = normalize_receipt_name(product.name)
+    free = [n for n in sorted(lines) if n not in taken]
+    for n in free:
+        if normalize_receipt_name(_strip_amounts(lines[n])) == target:
+            return [n]
+    best, best_score = None, 0.0
+    for n in free:
+        score = fuzz.ratio(normalize_receipt_name(_strip_amounts(lines[n])), target)
+        if score > best_score:
+            best, best_score = n, score
+    return [best] if best is not None and best_score >= _FUZZY_NAME else []
+
+
+def _cite(
+    products: list[ExtractedLine], lines: dict[int, str], taken: set[int]
+) -> set[int]:
+    """Record each product's valid source lines, falling back to its name; return them."""
+    cited: set[int] = set()
+    for product in products:
+        valid = [n for n in product.source_lines if n in lines]
+        if not valid:
+            valid = _cite_by_name(product, lines, taken | cited)
+        product.source_lines = valid
+        cited.update(valid)
+    return cited
+
+
+def _attach_details(
+    open_lines: set[int], cited: set[int], lines: dict[int, str], layout: str
+) -> set[int]:
+    """Detail lines next to a cited product belong to it, not to the unaccounted set."""
+    step = -1 if layout == "after" else 1
+    attached = {
+        n
+        for n in open_lines
+        if _is_detail(lines[n]) and n + step in cited and n + step not in open_lines
+    }
+    return open_lines - attached
+
+
+def _suspect(other: OtherLine, lines: dict[int, str]) -> bool:
+    """An `other` line with an amount on it may well be a product."""
+    return other.kind == "other" and _has_amount(lines[other.line])
+
+
+def _accounted_others(
+    others: list[OtherLine], lines: dict[int, str], trust_other: bool = False
+) -> set[int]:
+    """Lines the answer listed as not products; a suspect one only when trusted."""
+    return {
+        o.line
+        for o in others
+        if o.line in lines and (trust_other or not _suspect(o, lines))
+    }
+
+
+def _raw_groups(
+    still: list[int], lines: dict[int, str], layout: str
+) -> list[list[int]]:
+    """Group leftover lines so a name and its adjacent detail line make one row."""
+    groups: list[list[int]] = []
+    current: list[int] = []
+    previous: int | None = None
+    for n in still:
+        text = lines[n]
+        adjacent = bool(current) and previous == n - 1
+        names = [m for m in current if not _is_detail(lines[m])]
+        # A name line with no amount, last in its group, wraps onto the next line
+        last = lines[current[-1]] if current else ""
+        open_name = bool(last) and not _is_detail(last) and not _has_amount(last)
+        if _is_detail(text):
+            joins = adjacent and (layout == "after" or not names)
+        else:
+            joins = adjacent and (open_name or (layout == "before" and not names))
+        if joins:
+            current.append(n)
+        else:
+            current = [n]
+            groups.append(current)
+        previous = n
+    return groups
+
+
+def _raw_line(group: list[int], lines: dict[int, str]) -> ExtractedLine | None:
+    """A leftover group with an amount on it, as printed, for the cook to decide."""
+    texts = [lines[n] for n in group]
+    if not any(_has_amount(text) for text in texts):
+        return None
+    names = [_strip_amounts(t) for t in texts if not _is_detail(t)]
+    name = " ".join(part for part in names if part) or " ".join(
+        part for part in (_strip_amounts(t) for t in texts) if part
+    )
+    return ExtractedLine(
+        name=name or " ".join(texts),
+        source_lines=group,
+        recovered="raw_line",
+    )
+
+
+def receipt_arithmetic(
+    products: list[ExtractedLine], others: list[OtherLine], total: float | None
+) -> tuple[float | None, bool]:
+    """Σ line totals plus signed discounts, deposits and fees; and whether it misses the total.
+
+    Works for any currency and on the vision path. A detail line's unit price is never
+    part of it: only a product's `p`, its line total, is summed.
+    """
+    prices = [p.price for p in products if p.price is not None]
+    signed = [
+        -abs(o.amount) if o.kind == "discount" else o.amount
+        for o in others
+        if o.kind in _SIGNED_KINDS and o.amount is not None
+    ]
+    if not prices:
+        return None, False
+    # Compared in whole cents, so float noise never decides a mismatch
+    sum_cents = round((sum(prices) + sum(signed)) * 100)
+    items_sum = sum_cents / 100
+    if total is None:
+        return items_sum, False
+    total_cents = round(total * 100)
+    tolerance = max(_SUM_TOLERANCE_CENTS, abs(total_cents) / 100)
+    return items_sum, abs(sum_cents - total_cents) > tolerance
+
+
+@dataclass
+class ReadOutcome:
+    """What reading one receipt produced, beyond the extraction itself (Q27)."""
+
+    ocr_text: str | None
+    extraction: ReceiptExtraction
+    note: str | None = None
+    completeness: dict[str, Any] | None = None
+    raw_completions: dict[str, str] = field(default_factory=dict)
+
+
+def _completeness(
+    *,
+    text_lines: int | None,
+    model_lines: int,
+    recovered_by_retry: int = 0,
+    recovered_raw_lines: int = 0,
+    invalid_entries: int = 0,
+    unaccounted_lines: int = 0,
+    items_sum: float | None = None,
+    receipt_total: float | None = None,
+    profile: str | None = None,
+    profile_only_lines: int = 0,
+) -> dict[str, Any]:
+    return {
+        "text_lines": text_lines,
+        "model_lines": model_lines,
+        "recovered_by_retry": recovered_by_retry,
+        "recovered_raw_lines": recovered_raw_lines,
+        "invalid_entries": invalid_entries,
+        "unaccounted_lines": unaccounted_lines,
+        "items_sum": items_sum,
+        "receipt_total": receipt_total,
+        "profile": profile,
+        "profile_only_lines": profile_only_lines,
+    }
+
+
+def _arithmetic_note(
+    items_sum: float | None, total: float | None, off: bool
+) -> str | None:
+    if not off or items_sum is None or total is None:
+        return None
+    return f"Line totals add up to {items_sum:.2f} but the receipt total is {total:.2f}"
+
+
+def _join_notes(*notes: str | None) -> str | None:
+    kept = [note for note in notes if note]
+    return "; ".join(kept)[:MAX_ERROR_CHARS] if kept else None
+
+
+def vision_outcome(extraction: ReceiptExtraction) -> ReadOutcome:
+    """The vision path has no text to account for; the arithmetic still applies."""
+    items_sum, off = receipt_arithmetic(
+        extraction.lines, extraction.other_lines, extraction.receipt_total
+    )
+    return ReadOutcome(
+        ocr_text=None,
+        extraction=extraction,
+        note=_arithmetic_note(items_sum, extraction.receipt_total, off),
+        completeness=_completeness(
+            text_lines=None,
+            model_lines=len(extraction.lines),
+            invalid_entries=extraction.invalid_entries,
+            items_sum=items_sum,
+            receipt_total=extraction.receipt_total,
+        ),
+        raw_completions=_raw(extraction, "raw_completion"),
+    )
+
+
+def _raw(extraction: ReceiptExtraction | None, key: str) -> dict[str, str]:
+    if extraction is None or extraction.raw_completion is None:
+        return {}
+    return {key: extraction.raw_completion}
+
+
+def _profile_evidence(
+    extraction: ReceiptExtraction,
+    numbered: list[tuple[int | None, str]],
+    cited: set[int],
+    receipt_id: str | None,
+) -> tuple[str | None, set[int], int]:
+    """(profile name, lines it says hold products no model product cites, how many)."""
+    profile = profile_for(extraction.country, extraction.language)
+    if profile is None:
+        return None, set(), 0
+    name = profile.language or profile.country
+    try:
+        found = profile.product_lines(numbered)
+    except Exception as exc:  # a profile is evidence; it must never fail a receipt
+        logger.warning(
+            "Receipt profile failed, continuing without it",
+            extra={"receipt_id": receipt_id, "profile": name, "error": repr(exc)},
+        )
+        return None, set(), 0
+    missing = [p for p in found if not cited.intersection(p.line_numbers)]
+    return name, {n for p in missing for n in p.line_numbers}, len(missing)
+
+
+async def reconcile_text_read(
+    text: str,
+    extraction: ReceiptExtraction,
+    categories: Sequence[CategoryOption],
+    receipt_id: str | None = None,
+) -> ReadOutcome:
+    """Make sure every numbered line of a text receipt is accounted for (Q27).
+
+    Model products the checks cannot place are kept as read; nothing is dropped.
+    """
+    numbered = number_receipt_lines(text)
+    lines = {n: line for n, line in numbered if n is not None}
+    first = list(extraction.lines)
+
+    cited = _cite(first, lines, set())
+    layout = _layout(first, lines)
+    # When the line totals already add up to the printed total, an `other` line with an
+    # amount on it is a loyalty or payment line, not a missing product: the money is
+    # all accounted for. Measured on the K receipt, three such lines otherwise cost a
+    # two-minute re-read that found nothing and three junk rows.
+    first_sum, first_off = receipt_arithmetic(
+        first, extraction.other_lines, extraction.receipt_total
+    )
+    adds_up = (
+        first_sum is not None and extraction.receipt_total is not None and not first_off
+    )
+    accounted = cited | _accounted_others(extraction.other_lines, lines, adds_up)
+    profile, profile_lines, profile_only = _profile_evidence(
+        extraction, numbered, cited, receipt_id
+    )
+    # Only a line with an amount on it has to be accounted for; the model lists no other
+    # non-product line, which keeps its answer short (a 49-line read ran past 180 s)
+    priced = {n for n, line in lines.items() if _has_amount(line)}
+    unaccounted = _attach_details(
+        (priced - accounted) | profile_lines, cited, lines, layout
+    )
+    # An unpriced neighbour - a wrapped name, a name above its price line - goes to the
+    # re-read with its partner, though on its own it needs no accounting
+    context = unaccounted | {
+        m
+        for n in unaccounted
+        for m in (n - 1, n + 1)
+        if m in lines and m not in priced and m not in accounted
+    }
+
+    retry: ReceiptExtraction | None = None
+    recovered: list[ExtractedLine] = []
+    still = set(context)
+    if any(_has_amount(lines[n]) for n in unaccounted):
+        try:
+            retry = await extract_unaccounted_lines(
+                [(n, lines[n]) for n in sorted(context)], categories
+            )
+        except LLMExtractionError as exc:
+            logger.warning(
+                "Targeted re-read failed; listing unaccounted lines as printed",
+                extra={"receipt_id": receipt_id, "error": str(exc)},
+            )
+    if retry is not None:
+        for product in retry.lines:
+            valid = [n for n in product.source_lines if n in still]
+            if not valid and not product.source_lines:
+                valid = _cite_by_name(product, {n: lines[n] for n in still}, set())
+            if not valid:
+                # it cites lines already accounted for: a second copy of a product
+                continue
+            product.source_lines = valid
+            product.recovered = "model_retry"
+            recovered.append(product)
+            still -= set(valid)
+        retry_cited = {n for p in recovered for n in p.source_lines}
+        # A line the re-read, shown it on purpose and without the catalog, still lists
+        # as not a product is accounted for; a profile's line needs a product, though
+        still -= _accounted_others(retry.other_lines, lines, True) - profile_lines
+        still = _attach_details(still, cited | retry_cited, lines, layout)
+
+    raw_rows = [
+        row
+        for group in _raw_groups(sorted(still), lines, layout)
+        if (row := _raw_line(group, lines)) is not None
+    ]
+
+    others = list(extraction.other_lines)
+    if retry is not None:
+        others += [o for o in retry.other_lines if o.line in context]
+    items_sum, off = receipt_arithmetic(
+        first + recovered, others, extraction.receipt_total
+    )
+    final = first + recovered + raw_rows
+    extraction.lines = final
+    # After recovery a priced line is left over only if no row took it (normally none)
+    in_rows = {n for row in raw_rows for n in row.source_lines}
+    left_over = {n for n in still if n in priced and n not in in_rows}
+    missed = len(recovered) + len(raw_rows)
+    note = _join_notes(
+        f"{missed} of {len(final)} lines were not read by the model and were recovered"
+        if missed
+        else None,
+        _arithmetic_note(items_sum, extraction.receipt_total, off),
+    )
+    if missed or off:
+        logger.warning(
+            "Receipt read was incomplete",
+            extra={
+                "receipt_id": receipt_id,
+                "model_lines": len(first),
+                "recovered_by_retry": len(recovered),
+                "recovered_raw_lines": len(raw_rows),
+                "unaccounted_before_recovery": len(unaccounted),
+                "unaccounted_lines": len(left_over),
+                "items_sum": items_sum,
+                "receipt_total": extraction.receipt_total,
+            },
+        )
+    return ReadOutcome(
+        ocr_text=text,
+        extraction=extraction,
+        note=note,
+        completeness=_completeness(
+            # contract ruling 1: product rows, not text lines; "9 of 15" on the K receipt
+            text_lines=len(final),
+            model_lines=len(first),
+            recovered_by_retry=len(recovered),
+            recovered_raw_lines=len(raw_rows),
+            invalid_entries=extraction.invalid_entries
+            + (retry.invalid_entries if retry else 0),
+            unaccounted_lines=len(left_over),
+            items_sum=items_sum,
+            receipt_total=extraction.receipt_total,
+            profile=profile,
+            profile_only_lines=profile_only,
+        ),
+        raw_completions=_raw(extraction, "raw_completion")
+        | _raw(retry, "raw_completion_retry"),
+    )
+
+
 @dataclass
 class ReadTimings:
     """How long the two slow steps took.
@@ -138,8 +571,8 @@ class ReceiptProcessingService:
         categories: list[CategoryOption],
         known_products: list[str],
         timings: ReadTimings,
-    ) -> tuple[str | None, ReceiptExtraction, str | None]:
-        """Return (OCR text if any, extraction, fallback reason), choosing text or vision input."""
+    ) -> ReadOutcome:
+        """Read the receipt, choosing text or vision input."""
         path = str(receipt.image_path)
 
         if is_pdf(path):
@@ -176,7 +609,7 @@ class ReceiptProcessingService:
             extraction = await extract_from_image(
                 image, content_type_for(path), categories, known_products
             )
-        return None, extraction, None
+        return vision_outcome(extraction)
 
     async def _read_text(
         self,
@@ -185,11 +618,12 @@ class ReceiptProcessingService:
         categories: list[CategoryOption],
         known_products: list[str],
         timings: ReadTimings,
-    ) -> tuple[str, ReceiptExtraction, str | None]:
-        """Extract with the model; if it fails or finds nothing, use the heuristic parser.
+    ) -> ReadOutcome:
+        """Extract with the model and account for every line; else use the heuristic parser.
 
         The parser only helps when the text has product lines; otherwise the model's error
-        stands and the receipt fails as before (MVP-R3b).
+        stands and the receipt fails as before (MVP-R3b). A model answer that leaves lines
+        out is completed by `reconcile_text_read` (Q27).
         """
         try:
             with timings.llm():
@@ -202,7 +636,14 @@ class ReceiptProcessingService:
                 "LLM extraction failed, using the heuristic parser",
                 extra={"receipt_id": str(receipt.id), "error": str(exc)},
             )
-            return text, fallback, f"Model unavailable: {exc}"[:MAX_ERROR_CHARS]
+            return ReadOutcome(
+                ocr_text=text,
+                extraction=fallback,
+                note=f"Model unavailable: {exc}"[:MAX_ERROR_CHARS],
+                completeness=_completeness(
+                    text_lines=len(fallback.lines), model_lines=0
+                ),
+            )
 
         if not extraction.lines:
             fallback = parse_receipt_text(text)
@@ -211,8 +652,21 @@ class ReceiptProcessingService:
                     "LLM found no products, using the heuristic parser",
                     extra={"receipt_id": str(receipt.id)},
                 )
-                return text, fallback, "Model found no products"
-        return text, extraction, None
+                return ReadOutcome(
+                    ocr_text=text,
+                    extraction=fallback,
+                    note="Model found no products",
+                    completeness=_completeness(
+                        text_lines=len(fallback.lines),
+                        model_lines=0,
+                        invalid_entries=extraction.invalid_entries,
+                    ),
+                    raw_completions=_raw(extraction, "raw_completion"),
+                )
+        with timings.llm():
+            return await reconcile_text_read(
+                text, extraction, categories, receipt_id=str(receipt.id)
+            )
 
     async def process_receipt(self, receipt: Receipt) -> ProcessingResult:
         """Process a receipt through the full pipeline and update the record."""
@@ -239,9 +693,8 @@ class ReceiptProcessingService:
             catalog = await canonical_names(self.db)
             # Names the cook has already called non-food; they win over a model that wavers
             remembered = await known_non_food(self.db, None)
-            ocr_text, extraction, fallback_reason = await self._read_receipt(
-                receipt, categories, catalog, timings
-            )
+            outcome = await self._read_receipt(receipt, categories, catalog, timings)
+            ocr_text, extraction = outcome.ocr_text, outcome.extraction
 
             chain = normalize_store_chain(
                 str(receipt.store_chain) if receipt.store_chain else None
@@ -276,15 +729,19 @@ class ReceiptProcessingService:
                     # The catalog already knows what one of these weighs; trust it over a
                     # fresh guess from the model (Q2).
                     stored["piece_grams"] = float(product.avg_piece_grams)
-                # What one pack weighs (Q8): the catalog first, then whatever the shop
-                # printed in the name. The model is not asked - it answered a `pk` field
-                # on 1 line of 49 and dragged the other estimates down with it
-                # (docs/vLLM_MANUAL_TEST.md).
-                pack_grams = (
-                    float(product.pack_grams)
-                    if product is not None and product.pack_grams is not None
-                    else grams_from_name(line.name)
-                )
+                # What one pack weighs (Q8): whatever the shop printed in the name, else
+                # the catalog. The printed size is this purchase; the catalog's is a
+                # product's usual pack, and "Helmitomaatti pikari 200g" matched to a
+                # 250 g cherry tomato is still 200 g (Q27). The model is not asked - it
+                # answered a `pk` field on 1 line of 49 and dragged the other estimates
+                # down with it (docs/vLLM_MANUAL_TEST.md).
+                pack_grams = grams_from_name(line.name)
+                if (
+                    pack_grams is None
+                    and product is not None
+                    and product.pack_grams is not None
+                ):
+                    pack_grams = float(product.pack_grams)
                 if pack_grams is not None:
                     stored["pack_grams"] = pack_grams
                 stored.update(
@@ -313,9 +770,13 @@ class ReceiptProcessingService:
                 if extraction.purchase_date
                 else None,
                 "lines": stored_lines,
+                "language": extraction.language,
+                "country": extraction.country,
+                "completeness": outcome.completeness,
+                **outcome.raw_completions,
             }
-            if fallback_reason:
-                row.ocr_structured["fallback_reason"] = fallback_reason
+            if outcome.note:
+                row.ocr_structured["fallback_reason"] = outcome.note
             row.items_extracted = len(extraction.lines)
             row.items_matched = matched
             # Values the user entered at upload win over what was read from the receipt

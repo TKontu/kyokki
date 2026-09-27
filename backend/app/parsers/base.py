@@ -5,11 +5,29 @@ these models before anything else in the pipeline sees it.
 """
 
 from datetime import date
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field
 
 ExtractionMethod = Literal["text", "vision", "heuristic"]
+
+# How a line the first model read left out was put back (Q27): read again by the model in
+# one targeted call, or listed as the printed line itself for the cook to decide.
+RecoveredBy = Literal["model_retry", "raw_line"]
+
+# What a numbered receipt line that is not part of a product is (Q27)
+OtherLineKind = Literal[
+    "header",
+    "total",
+    "subtotal",
+    "tax",
+    "payment",
+    "discount",
+    "deposit",
+    "fee",
+    "other",
+]
+OTHER_LINE_KINDS: tuple[str, ...] = get_args(OtherLineKind)
 
 
 class ExtractedLine(BaseModel):
@@ -43,6 +61,28 @@ class ExtractedLine(BaseModel):
         default=False,
         description="Household or cleaning, not something that belongs in the fridge (Q1)",
     )
+    source_lines: list[int] = Field(
+        default_factory=list,
+        description="Numbers of the receipt lines this product was read from (Q27)",
+    )
+    price: float | None = Field(
+        default=None,
+        description="The line total as printed, never the unit price (Q27)",
+    )
+    recovered: RecoveredBy | None = Field(
+        default=None,
+        description="Set when the first model read missed this line and it was put back (Q27)",
+    )
+
+
+class OtherLine(BaseModel):
+    """A numbered receipt line the model says is not part of any product (Q27)."""
+
+    line: int = Field(..., ge=1, description="The line's number in the prompt")
+    kind: OtherLineKind = Field(..., description="What the line is")
+    amount: float | None = Field(
+        default=None, description="Signed amount printed on the line, if any"
+    )
 
 
 class ReceiptExtraction(BaseModel):
@@ -59,3 +99,26 @@ class ReceiptExtraction(BaseModel):
         default=None, description="Purchase date if printed"
     )
     lines: list[ExtractedLine] = Field(default_factory=list)
+    other_lines: list[OtherLine] = Field(
+        default_factory=list,
+        description="Numbered lines accounted for as not products (Q27)",
+    )
+    receipt_total: float | None = Field(
+        default=None, description="The receipt's grand total as printed (Q27)"
+    )
+    language: str | None = Field(
+        default=None, description="ISO 639-1 language of the receipt, as detected"
+    )
+    country: str | None = Field(
+        default=None,
+        description="ISO 3166-1 alpha-2 country of the receipt, as detected",
+    )
+    invalid_entries: int = Field(
+        default=0,
+        ge=0,
+        description="Entries the model returned that could not be used (Q27)",
+    )
+    raw_completion: str | None = Field(
+        default=None,
+        description="The model's answer as returned, capped; kept for diagnosis (Q27)",
+    )

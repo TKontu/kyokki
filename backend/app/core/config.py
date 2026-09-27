@@ -96,7 +96,9 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.1
     # Reasoning plus a 49-line receipt with generic names took 3758 tokens (MVP-R2 e2e)
     LLM_MAX_TOKENS: int = 8192
-    LLM_TIMEOUT: float = 180.0  # seconds; extraction takes ~40-55 s on muse-glimmer
+    # seconds; receipts are background jobs, and the Q27 line-accounting contract made a
+    # 49-line read take up to ~240 s on muse-glimmer (docs/vLLM_MANUAL_TEST.md)
+    LLM_TIMEOUT: float = 420.0
     # Sent as chat_template_kwargs.reasoning_strength (Muse Glimmer accepts only these values).
     # Set to an empty value for models whose template has no such argument.
     LLM_REASONING_STRENGTH: Literal["xhigh", "high", "medium", "low"] | None = "low"

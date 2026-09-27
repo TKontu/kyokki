@@ -1046,3 +1046,86 @@ behaviour the ruling asked for, and `main` did not have it. The anchors also pul
 chicken fillet strips went from 3 to 5, the same as packed mince, which is plausible for a
 sealed supermarket pack. Beverages still wander between runs (orange juice 180 then 30, oat
 drink 10 then 14), as Q11 recorded; the dry run shows those before anything is saved.
+
+## Every line accounted for (Q27, 2026-09-27)
+
+On a K-Citymarket e-receipt with a 15-product text, the model returned only the 6 products its
+catalog block listed, and the review screen gave no sign of the other 9. The fix makes the model account for every line of the
+receipt, in a way that does not depend on the receipt's format (operator ruling: receipts from
+any shop, country and language). The prompt numbers the lines. Each product cites its lines in
+`l` (name line or lines plus any count or weight line, before or after the name) and its line
+total in `p`, and every other line goes in `x` with a kind. The answer also carries the printed
+total `t` and the receipt's `lc`/`cc`. A line in neither `l` nor `x` is unaccounted. Unaccounted
+lines get one targeted re-read without the catalog block, and whatever is still unaccounted and
+priced becomes a `raw_line` row for the cook. An optional profile for the detected country or
+language (only `fi`, the MVP-R3b parser) adds evidence. The line totals are checked against the
+printed total on both the text and vision paths.
+
+**Setup.** `c2.muse-glimmer`, `LLM_REASONING_STRENGTH=low` (production), 13 seeded categories,
+strictly sequential, 2 runs per cell. The script's `LLM_TIMEOUT` was raised to 600 s (see
+timing below). The catalogs: none; the fixed 20-name `--catalog 20`; and `--catalog-overlap`,
+220 generic names that include every fixture's own generic names. Two wordings of the catalog
+block: *old* ("When an equivalent product is listed here, use its name exactly") and
+*reworded* ("Extract every product line on the receipt, whether or not it is in this list. The
+list only tells you which name to use…"). Both wordings run with the new numbered contract.
+`found` counts expected printed names returned, exact after `normalize_receipt_name`. `after`
+is the same count after reconciliation.
+
+    python -m scripts.measure_extraction --runs 2 --json [--catalog 20 | --catalog-overlap] \
+        [--old-catalog-wording] --fixture tests/fixtures/receipts/<fixture>.txt
+
+| fixture (expected) | catalog, wording | found, runs 1 / 2 | after | categories | sum vs printed total | re-read / raw rows | model s |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| K-Citymarket (15) | none | 15 / 15 | 15 / 15 | 12 / 12 | 73.07 = 73.07 | 0 / 0 | 98, 168 |
+| | 20, old | 15 / 15 | 15 / 15 | 13 / 12 | 73.07 = 73.07 | 0 / 0 | 130, 133 |
+| | 20, reworded | 15 / 15 | 15 / 15 | 13 / 13 | 73.07 = 73.07 | 0 / 0 | 126, 100 |
+| | 220 overlap, old | 15 / 15 | 15 / 15 | 13 / 12 | 73.07 = 73.07 | 0 / 0 | 177, 149 |
+| | 220 overlap, reworded | 15 / 15 | 15 / 15 | 12 / 12 | 73.07 = 73.07 | 0 / 0 | 179, 156 |
+| S-kaupat (49) | none | 49 / 49 | 49 / 49 | 41 / 41 | 159.47, no `t`* | 0 / 0 | 129, 193 |
+| | 20, old | 49 / 49 | 49 / 49 | 41 / 41 | 159.47 / 157.97, no `t`* | 0 / 0 | 184, 177 |
+| | 20, reworded | 49 / 49 | 49 / 49 | 41 / 41 | 159.47, no `t`* | 0 / 0 | 215, 217 |
+| | 220 overlap, old | 49 / 49 | 49 / 49 | 41 / 41 | 159.47, no `t`* | 0 / 0 | 199, 175 |
+| | 220 overlap, reworded | 49 / 49 | 49 / 49 | 41 / 41 | 159.47, no `t`* | 1 line re-read, 0 found / 0 | 176, 240 |
+| Konzum HR, synthetic (8) | none | 8 / 7† | 8 / 7† | 7 / 7 | 14.74 = 14.74 | 0 / 0 | 101, 138 |
+| | 20, old | 8 / 8 | 8 / 8 | 7 / 7 | 14.74 = 14.74 | 0 / 0 | 108, 108 |
+| | 20, reworded | 8 / 8 | 8 / 8 | 7 / 7 | 14.74 = 14.74 | 0 / 0 | 176, 135 |
+| | 220 overlap, old | 7† / 7† | 7† / 7† | 7 / 7 | 14.74 = 14.74 | 0 / 0 | 94, 162 |
+| | 220 overlap, reworded | 8 / 8 | 8 / 8 | 7 / 7 | 14.74 = 14.74 | 0 / 0 | 112, 83 |
+| REWE DE, synthetic (6) | none | 6 / 6 | 6 / 6 | 5 / 5 | 13.86 = 13.86 | run 2: 8 lines re-read, all accounted / 0 | 105, 29 |
+| | 20, old | 6 / 6 | 6 / 6 | 5 / 5 | 13.86 = 13.86 | 0 / 0 | 30, 30 |
+| | 20, reworded | 6 / 6 | 6 / 6 | 5 / 5 | 13.86 = 13.86 | 0 / 0 | 34, 27 |
+| | 220 overlap, old | 6 / 6 | 6 / 6 | 5 / 5 | 13.86 = 13.86 | 0 / 0 | 35, 34 |
+| | 220 overlap, reworded | 6 / 6 | 6 / 6 | 5 / 5 | 13.86 = 13.86 | 0 / 0 | 33, 29 |
+
+\* On Finnish receipts the existing prefilter drops `YHTEENSÄ`, so the model cannot see the
+total and on S-kaupat answers `t = null`, and no check is possible. On K the model took 73.07 from the
+loyalty and payment lines that survive the prefilter. The S-kaupat sums also leave out the
+prefiltered discounts and fees.
+† In these runs the model returned 8 lines, but the wrapped name "Čokolada mliječna s
+lješnjacima / i grožđicama 100g" did not come back exactly as the joined printed text. It was a
+naming difference, not a lost line: the line count was 8 and the sum matched the total. No
+generic name or category was lost.
+
+Every run found every product. No run needed a `raw_line` row. The `fi` profile ran on all 20
+Finnish runs and added nothing (`profile_only_lines` 0), because the model's line citations
+already covered every product. The Croatian and German receipts had no profile, and the core
+alone accounted for their multi-line items: count and weight lines after the name, count and
+weight lines before the name, and a wrapped name. In each of those runs the line totals matched the printed total.
+
+**Conclusion.** With the numbered accounting contract, the 9 lost K lines come back on the
+first read in all 10 runs, with either catalog wording and with a 220-name overlapping catalog.
+The line accounting fixed the loss, not the rewording. The rewording is kept as a clearer
+statement of intent, and the old/reworded columns show no difference. S-kaupat stays at 49/49
+with categories at 41 in every run, against H17's ~40 with the block, so the catalog block
+stays on (`EXTRACTION_OFFERS_CATALOG`). Reconciliation re-read lines twice in 40 runs; each
+time the re-read accounted for them as non-products and added no rows.
+
+**Timing is the cost, and it needs a decision.** The first reads took 27-35 s on the German
+receipt but 98-179 s on K and 129-240 s on S-kaupat. Earlier sections record 40-65 s on
+S-kaupat before the contract grew `l`, `p`, `x`, `t`, `lc` and `cc`. Gateway load during these
+runs is not known, and a base-prompt control run was stopped to free the gateway for the
+operator, so the size of the slowdown is not isolated. Still, 6 of the 10 S-kaupat first reads
+took longer than the production `LLM_TIMEOUT` of 180 s, and the first matrix attempt timed out
+at exactly that. With the production timeout, a long receipt would often fall back to the
+heuristic parser (Finnish) or fail (elsewhere). Before release, raise `LLM_TIMEOUT` (for
+example to 360 s) or trim `x` to only the lines that carry an amount, then re-measure S-kaupat.

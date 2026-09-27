@@ -127,6 +127,77 @@ class ExtractedItem(BaseModel):
     location: StorageLocation = Field(
         ..., description="Default inventory location for this item"
     )
+    recovered: Literal["model_retry", "raw_line"] | None = Field(
+        None,
+        description=(
+            "Set when the first model read left this line out (Q27): `model_retry`, read "
+            "by a second targeted call; `raw_line`, the printed line itself, unread"
+        ),
+    )
+
+
+class Completeness(BaseModel):
+    """How completely the model read a receipt, and whether its sums agree (Q27)."""
+
+    text_lines: int | None = Field(
+        None,
+        description=(
+            "Final product rows on a text receipt (model + re-read + raw lines); null "
+            "for an image. The banner reads '{recovered} of {text_lines}'"
+        ),
+    )
+    model_lines: int = Field(0, description="Products the first model read returned")
+    recovered_by_retry: int = Field(
+        0, description="Products a second, targeted model read found"
+    )
+    recovered_raw_lines: int = Field(
+        0, description="Unread lines listed as printed for the cook to decide"
+    )
+    invalid_entries: int = Field(
+        0, description="Entries the model returned that could not be used"
+    )
+    unaccounted_lines: int = Field(
+        0,
+        description=(
+            "Priced lines still neither a product row nor a listed non-product after "
+            "recovery; normally 0"
+        ),
+    )
+    items_sum: float | None = Field(
+        None,
+        description=(
+            "Line totals plus discounts, deposits and fees; compared with the total in "
+            "whole cents, within max(5 cents, 1 %)"
+        ),
+    )
+    receipt_total: float | None = Field(None, description="The printed total")
+    profile: str | None = Field(
+        None, description="Country or language profile that added evidence, if any"
+    )
+    profile_only_lines: int = Field(
+        0, description="Products only that profile found, sent to the targeted read"
+    )
+
+
+def completeness_from_structured(
+    structured: dict[str, Any] | None,
+) -> Completeness | None:
+    """The stored completeness record; None for receipts read before Q27."""
+    raw = (structured or {}).get("completeness")
+    if not isinstance(raw, dict):
+        return None
+    try:
+        return Completeness.model_validate(raw)
+    except ValueError:
+        return None
+
+
+def _recovered(value: object) -> Literal["model_retry", "raw_line"] | None:
+    if value == "model_retry":
+        return "model_retry"
+    if value == "raw_line":
+        return "raw_line"
+    return None
 
 
 def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedItem]:
@@ -200,6 +271,7 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
                 printed_unit=printed_unit,
                 storage_type=storage,
                 location=location_for_storage(storage),
+                recovered=_recovered(line.get("recovered")),
             )
         )
     return items
@@ -269,7 +341,15 @@ class ReceiptResponse(ReceiptBase):
         description="text or vision: the model; heuristic: the fallback line parser",
     )
     fallback_reason: str | None = Field(
-        None, description="Why the heuristic parser was used instead of the model"
+        None,
+        description=(
+            "Why the heuristic parser was used instead of the model, or what the "
+            "completeness check recovered or found not adding up (Q27)"
+        ),
+    )
+    completeness: Completeness | None = Field(
+        None,
+        description="How completely the model read the receipt; null before Q27",
     )
     items: list[ExtractedItem] = Field(default_factory=list)
     created_at: datetime
@@ -279,6 +359,7 @@ class ReceiptResponse(ReceiptBase):
     @model_validator(mode="after")
     def derive_items(self) -> "ReceiptResponse":
         self.items = items_from_structured(self.ocr_structured)
+        self.completeness = completeness_from_structured(self.ocr_structured)
         self.extraction_method, self.fallback_reason = method_from_structured(
             self.ocr_structured
         )

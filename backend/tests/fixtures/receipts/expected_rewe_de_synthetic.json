@@ -1,0 +1,15 @@
+{
+ "synthetic": true,
+ "note": "Invented German receipt for Kyokki tests (Q27); not a real purchase",
+ "store_chain": "REWE Markt GmbH",
+ "purchase_date": "2026-09-27",
+ "total": 13.86,
+ "lines": [
+  {"name": "Vollmilch 3,5% 1L", "quantity": 2, "weight_kg": null, "price": 2.98},
+  {"name": "Bananen lose", "quantity": 1, "weight_kg": 0.736, "price": 1.83},
+  {"name": "Roggenbrot 500g", "quantity": 1, "weight_kg": null, "price": 2.29},
+  {"name": "Joghurt Natur 150g", "quantity": 3, "weight_kg": null, "price": 2.67},
+  {"name": "Butter 250g", "quantity": 1, "weight_kg": null, "price": 2.19},
+  {"name": "Spülmittel 450ml", "quantity": 1, "weight_kg": null, "price": 1.65}
+ ]
+}

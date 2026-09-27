@@ -1,0 +1,22 @@
+{
+ "store_chain": "k-group",
+ "purchase_date": "2026-09-26",
+ "total": 73.07,
+ "lines": [
+  {"name": "Bakerika suol suklaahipkeksita", "quantity": 1, "weight_kg": null},
+  {"name": "Pingviini jäätelö 1l suklaa la", "quantity": 1, "weight_kg": null},
+  {"name": "Pirkka rypäle tumma 500g", "quantity": 1, "weight_kg": null},
+  {"name": "Naudan Entrecote Palana", "quantity": 1, "weight_kg": 0.913},
+  {"name": "Kiinteä Peruna pesty Jazzy", "quantity": 1, "weight_kg": 0.596},
+  {"name": "Pirkka miniluumutomaatti 250g", "quantity": 1, "weight_kg": null},
+  {"name": "Snäxi minipaprika mix 200g", "quantity": 1, "weight_kg": null},
+  {"name": "Nikulan vapaa L15 1020g", "quantity": 1, "weight_kg": null},
+  {"name": "Palsternakka", "quantity": 1, "weight_kg": 0.523},
+  {"name": "Palmolive Vaahtosaippua 250ml", "quantity": 2, "weight_kg": null},
+  {"name": "Parsakaali 250g luomu", "quantity": 1, "weight_kg": null},
+  {"name": "Pirkka tamponi 32kpl sup", "quantity": 1, "weight_kg": null},
+  {"name": "Helmitomaatti pikari 200g", "quantity": 1, "weight_kg": null},
+  {"name": "Hapankaali 400g Rasilainen", "quantity": 2, "weight_kg": null},
+  {"name": "Baba punajuuri hummus 225g", "quantity": 2, "weight_kg": null}
+ ]
+}

@@ -2,6 +2,7 @@
 
 import base64
 import json
+import logging
 from datetime import date
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -12,12 +13,15 @@ from app.core.config import settings
 from app.parsers.base import ExtractedLine, ReceiptExtraction
 from app.services.llm_extractor import (
     MAX_KNOWN_PRODUCTS,
+    RAW_COMPLETION_LIMIT,
     CategoryOption,
     LLMExtractionError,
     build_instructions,
     build_response_schema,
     extract_from_image,
     extract_from_text,
+    extract_unaccounted_lines,
+    number_receipt_lines,
     parse_completion,
     prefilter_receipt_text,
 )
@@ -115,9 +119,14 @@ def _mock_client(response_json: dict | None = None, status: int = 200, raises=No
 
 
 class TestPrefilter:
-    def test_drops_totals_payment_vat_discount_and_fee_lines(self):
+    def test_keeps_totals_payment_vat_discount_and_fee_lines(self):
+        """Q27: the Finnish skip patterns no longer decide what any receipt's model sees.
+
+        The total must reach the model for the arithmetic check, and a line one country
+        skips can be a product in another.
+        """
         filtered = prefilter_receipt_text(RECEIPT_TEXT)
-        for dropped in (
+        for kept in (
             "YHTEENSÄ",
             "VÄLISUMMA",
             "BONUSTA",
@@ -134,7 +143,12 @@ class TestPrefilter:
             "*****",
             "-----",
         ):
-            assert dropped not in filtered, dropped
+            assert kept in filtered, kept
+
+    def test_drops_only_blank_lines(self):
+        assert prefilter_receipt_text("A 1,00\n\n   \nYHTEENSÄ 1,00\n") == (
+            "A 1,00\nYHTEENSÄ 1,00"
+        )
 
     def test_keeps_header_products_and_quantity_lines(self):
         filtered = prefilter_receipt_text(RECEIPT_TEXT)
@@ -159,11 +173,42 @@ class TestResponseSchema:
             None,
         ]
         assert item["properties"]["g"] == {"type": "string"}
-        assert item["required"] == ["n", "g", "q", "w", "c", "pw", "sl", "os"]
+        # Q27 (amendment 1): every product cites its lines and its line total, and the
+        # answer lists the other lines, the total, and the receipt's language and country
+        assert item["required"] == [
+            "n",
+            "l",
+            "p",
+            "g",
+            "q",
+            "w",
+            "c",
+            "pw",
+            "sl",
+            "os",
+        ]
+        assert item["properties"]["l"] == {
+            "type": "array",
+            "items": {"type": "integer"},
+        }
+        assert item["properties"]["p"] == {"type": ["number", "null"]}
         assert item["properties"]["pw"] == {"type": ["number", "null"]}
         assert item["properties"]["sl"] == {"type": ["integer", "null"]}
         assert item["properties"]["os"] == {"type": ["integer", "null"]}
-        assert schema["required"] == ["s", "d", "p"]
+        assert schema["required"] == ["s", "d", "lc", "cc", "t", "p", "x"]
+        other = schema["properties"]["x"]["items"]
+        assert other["required"] == ["l", "k", "a"]
+        assert other["properties"]["k"]["enum"] == [
+            "header",
+            "total",
+            "subtotal",
+            "tax",
+            "payment",
+            "discount",
+            "deposit",
+            "fee",
+            "other",
+        ]
 
 
 class TestParseCompletion:
@@ -371,7 +416,8 @@ class TestExtractFromText:
         prompt = post.call_args.kwargs["json"]["messages"][0]["content"]
         assert isinstance(prompt, str)
         assert "KEVYTMAITOJUOMA LAKTON 1,28" in prompt
-        assert "YHTEENSÄ" not in prompt
+        # the printed total reaches the model now, for the arithmetic check (Q27)
+        assert "YHTEENSÄ 173,92" in prompt
         assert "dairy (Dairy & Eggs)" in prompt
 
     async def test_known_products_reach_the_prompt(self):
@@ -595,3 +641,216 @@ class TestNonFood:
 
         assert line.category is None
         assert line.non_food is False
+
+
+class TestCatalogIsANamingAidOnly:
+    """Q27: with a warm catalog the model returned only the six listed products."""
+
+    def test_the_block_asks_for_every_line_listed_or_not(self):
+        text = build_instructions(CATEGORIES, ["Potato", "Hummus"])
+
+        assert "whether or not it is in this list" in text
+        assert "only tells you which name to use" in text
+        assert "Known products: Hummus, Potato." in text
+
+    def test_without_a_catalog_there_is_no_block(self):
+        text = build_instructions(CATEGORIES)
+        assert "whether or not it is in this list" not in text
+
+
+class TestLanguageNeutralRules:
+    """Amendment 1: receipts from any country; Finnish strings only as examples."""
+
+    def test_count_and_weight_lines_are_general_rules_with_examples(self):
+        text = " ".join(build_instructions(CATEGORIES).split())
+        assert "gives a count and a unit price means q = that count" in text
+        assert "gives a weight and a price per kg or lb means w = that weight" in text
+        assert 'Examples: "3 KPL 1,88 €/KPL" below the name; "2 x 1,49" above' in text
+
+    def test_the_glossary_is_labelled_as_examples(self):
+        text = " ".join(build_instructions(CATEGORIES).split())
+        assert "Examples of Finnish words often misread: TUMMA RYPÄLE" in text
+
+    def test_asks_to_account_for_every_numbered_line(self):
+        text = " ".join(build_instructions(CATEGORIES).split())
+        assert "Every line that carries an amount" in text
+        assert "lines without any amount need not be listed" in text
+        assert "whether that line comes before or after the name" in text
+        assert "never the unit price" in text
+        assert "lc = the receipt's language" in text
+
+
+class TestNumberedLines:
+    def test_every_non_blank_line_is_numbered(self):
+        numbered = number_receipt_lines(RECEIPT_TEXT)
+
+        assert numbered[0] == (1, "S-KAUPAT")
+        assert (16, "YHTEENSÄ 173,92") in numbered
+        assert [n for n, _ in numbered] == list(range(1, len(numbered) + 1))
+
+    async def test_the_prompt_shows_the_numbers(self):
+        patcher, post = _mock_client()
+        with patcher:
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        prompt = post.call_args.kwargs["json"]["messages"][0]["content"]
+        assert "\n1: S-KAUPAT\n" in prompt
+        assert "6: BARISTA KAURAJUOMA 4,50\n7: 3 KPL 1,88 €/KPL" in prompt
+
+
+class TestAccountingFields:
+    def test_maps_line_numbers_prices_other_lines_total_and_locale(self):
+        content = json.dumps(
+            {
+                "s": "K-Citymarket",
+                "d": None,
+                "lc": "fi",
+                "cc": "FI",
+                "t": 26.82,
+                "p": [
+                    {"n": "Naudan Entrecote Palana", "l": [5, 4, 4], "p": 22.83},
+                    {"n": "Palsternakka", "l": "4", "p": "1,04"},
+                ],
+                "x": [
+                    {"l": 1, "k": "header", "a": None},
+                    {"l": 9, "k": "Discount", "a": -0.5},
+                    {"l": 10, "k": "loyalty", "a": 3.0},
+                    {"l": "x", "k": "total", "a": 26.82},
+                    "junk",
+                ],
+            }
+        )
+
+        result = parse_completion(content, CATEGORY_IDS, method="text")
+
+        entrecote, parsnip = result.lines
+        assert (entrecote.source_lines, entrecote.price) == ([4, 5], 22.83)
+        assert (parsnip.source_lines, parsnip.price) == ([], None)
+        assert [(o.line, o.kind, o.amount) for o in result.other_lines] == [
+            (1, "header", None),
+            (9, "discount", -0.5),
+            (10, "other", 3.0),
+        ]
+        assert result.receipt_total == 26.82
+        assert (result.language, result.country) == ("fi", "FI")
+
+    def test_older_answers_without_the_fields_still_parse(self):
+        result = parse_completion(_compact(), CATEGORY_IDS, method="text")
+
+        assert all(line.source_lines == [] for line in result.lines)
+        assert result.other_lines == []
+        assert result.receipt_total is None
+        assert (result.language, result.country) == (None, None)
+
+
+class TestNothingIsDroppedSilently:
+    def test_unusable_entries_are_counted(self):
+        content = _compact(
+            p=[
+                "not an object",
+                {"n": " ", "q": 1},
+                # a negative quantity fails ExtractedLine validation
+                {"n": "KURKKU", "q": -1},
+                {"n": "PORKKANA", "q": 1},
+            ]
+        )
+
+        result = parse_completion(content, CATEGORY_IDS, method="text")
+
+        assert [line.name for line in result.lines] == ["PORKKANA"]
+        assert result.invalid_entries == 3
+
+    def test_a_validation_error_is_counted_and_logged(self, caplog):
+        content = _compact(p=[{"n": "KURKKU", "q": 1, "w": -0.5}])
+
+        result = parse_completion(content, CATEGORY_IDS, method="text")
+
+        assert result.lines == []
+        assert result.invalid_entries == 1
+        assert any(
+            r.levelname == "WARNING" and "invalid" in r.getMessage().lower()
+            for r in caplog.records
+        )
+
+    def test_a_clean_answer_has_no_invalid_entries(self):
+        result = parse_completion(_compact(), CATEGORY_IDS, method="text")
+        assert result.invalid_entries == 0
+
+    async def test_a_truncated_answer_raises(self):
+        response = _completion(_compact())
+        response["choices"][0]["finish_reason"] = "length"
+        patcher, _ = _mock_client(response_json=response)
+
+        with patcher, pytest.raises(LLMExtractionError, match="truncated"):
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+    async def test_a_finished_answer_is_accepted(self):
+        response = _completion(_compact())
+        response["choices"][0]["finish_reason"] = "stop"
+        patcher, _ = _mock_client(response_json=response)
+
+        with patcher:
+            result = await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        assert len(result.lines) == 2
+
+    async def test_the_raw_completion_is_kept(self):
+        patcher, _ = _mock_client()
+
+        with patcher:
+            result = await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        assert result.raw_completion == _compact()
+
+    async def test_the_raw_completion_is_capped_at_64_kb(self):
+        padded = _compact() + " " * (2 * RAW_COMPLETION_LIMIT)
+        patcher, _ = _mock_client(response_json=_completion(padded))
+
+        with patcher:
+            result = await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        assert RAW_COMPLETION_LIMIT == 64 * 1024
+        assert len(result.raw_completion.encode("utf-8")) <= RAW_COMPLETION_LIMIT
+        assert result.raw_completion.startswith(_compact())
+
+    async def test_the_raw_completion_is_not_logged_at_info(self, caplog):
+        caplog.set_level("DEBUG")
+        patcher, _ = _mock_client()
+
+        with patcher:
+            await extract_from_text(RECEIPT_TEXT, CATEGORIES)
+
+        for record in caplog.records:
+            if record.levelno >= logging.INFO:
+                assert "KEVYTMAITOJUOMA" not in str(record.__dict__)
+
+
+class TestExtractUnaccountedLines:
+    """Q27: one targeted call for the lines the first read left out."""
+
+    MISSING = [(9, "Palsternakka 1,04"), (10, "0,523 KG 1,99 €/KG")]
+
+    async def test_asks_about_these_lines_without_the_catalog(self, monkeypatch):
+        patcher, post = _mock_client()
+
+        with patcher:
+            result = await extract_unaccounted_lines(self.MISSING, CATEGORIES)
+
+        assert len(result.lines) == 2
+        payload = post.call_args.kwargs["json"]
+        prompt = payload["messages"][0]["content"]
+        assert "were not accounted for" in prompt
+        # a name line and its detail line go together, with their own numbers
+        assert "9: Palsternakka 1,04\n10: 0,523 KG 1,99 €/KG" in prompt
+        assert "Known products" not in prompt
+        assert "dairy (Dairy & Eggs)" in prompt
+        # the same contract as the first read
+        assert payload["response_format"]["json_schema"]["schema"] == (
+            build_response_schema(["dairy", "produce"])
+        )
+
+    async def test_failure_raises_like_any_read(self):
+        patcher, _ = _mock_client(status=500)
+
+        with patcher, pytest.raises(LLMExtractionError):
+            await extract_unaccounted_lines(self.MISSING, CATEGORIES)
