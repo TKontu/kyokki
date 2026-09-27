@@ -1825,6 +1825,19 @@ class TestReceiptArithmetic:
         products = [ExtractedLine(name="A", price=items)]
         assert receipt_arithmetic(products, [], total)[1] is off
 
+    def test_a_discount_already_in_the_line_total_is_not_a_mismatch(self):
+        """Measured on S-kaupat: NORM. 5,64 / ALENNUS -1,14 under a 4,50 line."""
+        products = [
+            ExtractedLine(name="A", price=4.5),
+            ExtractedLine(name="B", price=2.0),
+        ]
+        others = [OtherLine(line=3, kind="discount", amount=-1.14)]
+        assert receipt_arithmetic(products, others, 6.5) == (6.5, False)
+        # taken off at the end instead, it adds up with the discount
+        assert receipt_arithmetic(products, others, 5.36) == (5.36, False)
+        # and a real gap is still a gap
+        assert receipt_arithmetic(products, others, 9.0) == (5.36, True)
+
     def test_the_sum_is_whole_cents(self):
         products = [
             ExtractedLine(name="A", price=0.1),
