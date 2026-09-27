@@ -1182,3 +1182,68 @@ with sensible ids, and S-kaupat held 41 of 49 in all four runs. So this looks li
 variance, not a systematic loss, and the 1-of-15 answers were not captured to confirm it.
 Watch it in the operator's next trial. A receipt with no categories still reviews, but each
 new product then needs one picked.
+
+## Q27 hardening re-measure (2026-09-27, round 2026-09-27-3)
+
+The post-merge review of #125 confirmed 26 findings; this re-measures the prompt and the
+reconciliation that shipped with their fixes: `x` lists only priced non-product lines (also on
+an image, with `l = null`), `te` marks a receipt whose line totals leave the tax out, amounts
+are found locale-neutrally at the end of a line (never a date, a time or a code), a count or
+weight line belongs to a product only when cited or when its arithmetic proves it, raw rows
+keep their amounts, and the `fi` profile never overrides a line the model accounted for.
+
+**Setup.** `c2.muse-glimmer`, reasoning low, 13 seeded categories, reworded catalog wording,
+the 220-name overlap catalog, `LLM_TIMEOUT=420`, strictly sequential, 2 runs per fixture and
+1 for the new synthetic US receipt (`us_synthetic.txt`, tax added on top of the line totals).
+
+    python -m scripts.measure_extraction --catalog-overlap --runs 2 --raw-dir <dir> --json \
+        --fixture tests/fixtures/receipts/<fixture>.txt
+
+**First pass, and what it changed.** The first matrix (commit `19cf01b`) read every product
+but showed three false alarms on correct reads, all fixed before the final pass:
+
+- K (both runs), S-kaupat (both) and HR (one) each made one re-read that found nothing (5-12 s).
+  The model had left a priced loyalty, payment or VAT line out of `x` (S-kaupat:
+  `BONUSTA KERRYTTÄVÄT OSTOK 173,92`). Now, when the sums already match a total the model listed
+  as `total`, a line whose amount would break that match is not a missed product; a line the
+  size of the gap is still re-read, so the 1 % tolerance cannot hide a missed 0,52.
+- HR run 1 answered `te = true`, and the PDV lines turned a matching 14.74 into a false 16.41.
+  Like a discount, the tax may already be inside the line totals: either way matches now.
+- One S-kaupat run summed 171.25 against 173.92 (its answer was not captured); the final runs agree.
+- The US receipt's `CHANGE DUE 0.00`, left out of `x`, cost a re-read: a line of 0.00 changes
+  no sum and is ruled out too (final code, US row below).
+
+**Final pass.** Commit `6fd271a` for K, S-kaupat, HR and DE; the final code (0.00 rule) for
+the US row and four more K reads.
+
+| fixture | found (first read) | after | categories | raw rows | re-reads | sum vs total | first read s |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| K-Citymarket, run 1 | **failed: truncated at `max_tokens` 8192** | - | - | - | - | - | 141 |
+| K-Citymarket, run 2 | 15/15 | 15/15 | 12 | 0 | 0 | 73.07 = 73.07 | 57 |
+| K-Citymarket, 4 more reads (final code) | 15/15 | 15/15 | 13, 13, 13, 13 | 0 | 0 | 73.07 = 73.07 | 57, 45, 60, 55 |
+| S-kaupat, run 1 | 49/49 | 49/49 | 41 | 0 | 0 | 173.92 = 173.92 | 101 |
+| S-kaupat, run 2 | 49/49 | 49/49 | 41 | 0 | 0 | 173.92 = 173.92 | 89 |
+| Konzum HR (synthetic), runs 1, 2 | 8 rows (7/8 exact names)† | 8 rows | 7, 7 | 0 | 0 | 14.74 = 14.74 | 34, 37 |
+| REWE DE (synthetic), runs 1, 2 | 6/6 | 6/6 | 5, 5 | 0 | 0 | 13.86 = 13.86 | 32, 28 |
+| US (synthetic, `te = true`) | 3/3 | 3/3 | 3 | 0 | 0 | 7.00 = 7.00 (6.48 + 0.52 tax) | 18 |
+
+† As in the earlier Q27 runs, the wrapped name "Čokolada mliječna s lješnjacima / i
+grožđicama 100g" came back worded differently; the row, its price and the sum are right.
+
+Every completed read found every product, with **0 raw rows and 0 re-reads** and sums that
+agree, the US receipt with its tax. `lc`/`cc` came back as `fi/FI`, `hr/HR`, `de/DE`, `en/US`;
+the `fi` profile ran on every Finnish read and added nothing. The slowest first read was 101 s
+(S-kaupat), and with the stale window at 26 minutes no stale failure is possible under the
+budget (three calls of at most 420 s).
+
+**The "1 of 15 categories" signal** did not recur: no read filled categories on fewer than
+half of its rows (lowest 12 of 15), so `--raw-dir` stored nothing to inspect.
+
+**Open: truncation at `max_tokens`.** 2 of the 9 K first reads of this round (one in a diagnostic
+read, one in the final pass, the latter after 141 s) ran into `LLM_MAX_TOKENS=8192` and were
+failed as truncated; every other K read took 45-60 s. In production such a read falls back to
+the heuristic parser, and its truncated answer is now stored on the receipt as
+`raw_completion` (verdict #13), so the next occurrence can be inspected. Neither truncated
+answer was captured here (the measure script stores a failed read's answer only since the
+final pass). Whether it is a reasoning run-away or a repetition loop is not known; raising
+`LLM_MAX_TOKENS` or capping the reasoning is a decision for the operator.

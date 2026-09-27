@@ -2265,6 +2265,24 @@ class TestSuspectAndUnpricedLines:
         assert outcome.note is None
         assert len(outcome.extraction.lines) == 2
 
+    async def test_a_zero_amount_line_changes_no_sum_and_needs_no_re_read(
+        self, no_unplanned_re_read
+    ):
+        """Measured on the US receipt: `CHANGE DUE 0.00`, left out of `x`, cost a
+        re-read; with the sums matching, a line of 0.00 cannot be missing money."""
+        answer = _answer(
+            US_TEXT,
+            _us_all(),
+            {k: v for k, v in US_KINDS.items() if k != "CHANGE DUE"},
+            receipt_total=7.0,
+            tax_exclusive=True,
+        )
+
+        outcome = await reconcile_text_read(US_TEXT, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
+        assert outcome.note is None
+
     async def test_a_small_line_the_tolerance_could_hide_is_still_re_read(
         self, no_unplanned_re_read
     ):

@@ -553,6 +553,11 @@ async def main(argv: list[str] | None = None) -> int:
             except LLMExtractionError as exc:
                 # A failed read is a result too (a timeout is what production sees)
                 row.update(error=str(exc), model_s=round(time.monotonic() - started, 1))
+                if args.raw_dir is not None and exc.raw_completion:
+                    args.raw_dir.mkdir(parents=True, exist_ok=True)
+                    failed = args.raw_dir / f"{path.stem}-run{run}-failed.txt"
+                    failed.write_text(exc.raw_completion, encoding="utf-8")
+                    row["raw_saved"] = str(failed)
                 results.append(row)
                 if not args.json:
                     print(f"\n{row['fixture']} run {run}: FAILED {exc}")

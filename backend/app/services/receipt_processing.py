@@ -296,7 +296,8 @@ def _ruled_out_by_the_sums(
 
     def ruled_out(n: int) -> bool:
         amount = receipt.amounts.get(n)
-        return amount is not None and abs(amount - gap) > tolerance
+        # a line of 0.00 changes no sum: it cannot be missing money
+        return amount is not None and (amount == 0 or abs(amount - gap) > tolerance)
 
     return ruled_out
 
