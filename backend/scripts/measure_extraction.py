@@ -6,10 +6,17 @@ the others. This runs the real `extract_from_text` with the configured model, th
 categories and, by default, an empty catalog - no database - and counts everything the model
 returns. Production offers the catalog (`EXTRACTION_OFFERS_CATALOG`, H17), and a catalog block
 has silenced the estimates before (Q7), so `--catalog N` offers the first N names of a fixed
-20-name warm catalog.
+20-name warm catalog, and `--catalog-overlap` a ~200-name warm catalog that holds the
+fixtures' own generic names - the case in which a whole receipt lost 9 of 15 lines (Q27).
+
+Completeness (Q27): with an `expected_*.json` beside the fixture, the expected printed names
+the model found are counted (exact after `normalize_receipt_name`), for the first read and
+after reconciliation - the targeted re-read, printed-line rows and any receipt profile. The
+receipt's own arithmetic (line totals against the printed total) is reported too.
 
     python -m scripts.measure_extraction --runs 2 --fixture tests/fixtures/receipts/s_kaupat_order.txt
     python -m scripts.measure_extraction --catalog 20 ...
+    python -m scripts.measure_extraction --catalog-overlap --old-catalog-wording ...
     python -m scripts.measure_extraction --json ...
 
 Model calls run one after another: the gateway serves one request at a time.
@@ -22,18 +29,24 @@ import asyncio
 import json
 import sys
 import time
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
 from app.db.seed_categories import SEED_CATEGORIES
+from app.parsers.base import ExtractedLine
+from app.services import llm_extractor
 from app.services.llm_extractor import (
     CategoryOption,
     build_instructions,
     extract_from_text,
-    prefilter_receipt_text,
+    format_numbered,
+    number_receipt_lines,
 )
+from app.services.matching_service import normalize_receipt_name
+from app.services.receipt_processing import reconcile_text_read
 
 DEFAULT_FIXTURE = "tests/fixtures/receipts/s_kaupat_order.txt"
 
@@ -76,6 +89,243 @@ CATALOG = (
     "Chips",
 )
 
+# `--catalog-overlap`: a warm household catalog of ~200 generic names that includes the
+# generic names of every fixture's products (K-Citymarket, S-kaupat, the synthetic ones), as
+# a catalog grows after months of confirmed receipts. Q27's receipt lost the 9 lines whose
+# products were *not* in a catalog like this. Fixed so runs on different branches compare.
+OVERLAP_CATALOG = (
+    # K-Citymarket fixture
+    "Cookie",
+    "Ice cream",
+    "Grape",
+    "Entrecote",
+    "Potato",
+    "Cherry tomato",
+    "Pepper",
+    "Egg",
+    "Parsnip",
+    "Soap",
+    "Broccoli",
+    "Tampon",
+    "Sauerkraut",
+    "Hummus",
+    # S-kaupat fixture
+    "Lactose-free milk",
+    "Apple sauce",
+    "Mango",
+    "Feta cheese",
+    "Pomegranate",
+    "Cheddar",
+    "Taco sauce",
+    "Sour cream",
+    "Nacho chips",
+    "Bacon",
+    "Cheese",
+    "Oat drink",
+    "Compost bag",
+    "Trash bag",
+    "Rye crisp",
+    "French fries",
+    "Olive oil",
+    "Carrot",
+    "Apple",
+    "Pear",
+    "Laundry vinegar",
+    "Liquid soap",
+    "Sweet chili dip",
+    "Cleaning cloth",
+    "Kitchen spray",
+    "All-purpose cleaner",
+    "Mulled wine",
+    "Turkish yoghurt",
+    "Red onion",
+    "Lettuce",
+    "Tomato puree",
+    "Multivitamin",
+    "Lime",
+    "Chicken fillet",
+    "Mozzarella",
+    "Wheat flour",
+    "Parsley",
+    "Tomato",
+    "Butter",
+    "Banana",
+    "Multivitamin juice",
+    "Cucumber",
+    # Croatian and German synthetic fixtures
+    "Milk",
+    "Bread",
+    "Chocolate",
+    "Yoghurt",
+    "Dish soap",
+    "Rye bread",
+    # the rest of a household's usual shopping
+    "Ground beef",
+    "Minced pork",
+    "Pork chop",
+    "Beef steak",
+    "Chicken thigh",
+    "Whole chicken",
+    "Salmon fillet",
+    "Tuna",
+    "Shrimp",
+    "Fish fingers",
+    "Sausage",
+    "Frankfurter",
+    "Sliced ham",
+    "Salami",
+    "Meatball",
+    "Liver casserole",
+    "Blood sausage",
+    "Cream",
+    "Whipping cream",
+    "Cream cheese",
+    "Cottage cheese",
+    "Quark",
+    "Skyr",
+    "Buttermilk",
+    "Kefir",
+    "Emmental",
+    "Edam",
+    "Gouda",
+    "Parmesan",
+    "Blue cheese",
+    "Halloumi",
+    "Brie",
+    "Margarine",
+    "Oat yoghurt",
+    "Soy drink",
+    "Almond drink",
+    "Orange juice",
+    "Apple juice",
+    "Grape juice",
+    "Coffee",
+    "Tea",
+    "Cocoa",
+    "Mineral water",
+    "Soda",
+    "Beer",
+    "Cider",
+    "Wine",
+    "Oatmeal",
+    "Muesli",
+    "Cornflakes",
+    "Rice",
+    "Pasta",
+    "Spaghetti",
+    "Macaroni",
+    "Noodles",
+    "Couscous",
+    "Quinoa",
+    "Bulgur",
+    "Lentil",
+    "Chickpea",
+    "Kidney bean",
+    "Canned tomato",
+    "Coconut milk",
+    "Ketchup",
+    "Mustard",
+    "Mayonnaise",
+    "Soy sauce",
+    "Pesto",
+    "Salsa",
+    "Honey",
+    "Jam",
+    "Peanut butter",
+    "Nutella",
+    "Sugar",
+    "Salt",
+    "Black pepper",
+    "Paprika powder",
+    "Cinnamon",
+    "Baking powder",
+    "Yeast",
+    "Vanilla sugar",
+    "Rapeseed oil",
+    "Vinegar",
+    "Crispbread",
+    "Toast bread",
+    "Baguette",
+    "Bun",
+    "Karelian pasty",
+    "Tortilla",
+    "Pita bread",
+    "Croissant",
+    "Doughnut",
+    "Biscuit",
+    "Candy",
+    "Liquorice",
+    "Crisps",
+    "Popcorn",
+    "Peanut",
+    "Almond",
+    "Walnut",
+    "Raisin",
+    "Orange",
+    "Lemon",
+    "Mandarin",
+    "Kiwi",
+    "Pineapple",
+    "Melon",
+    "Watermelon",
+    "Strawberry",
+    "Blueberry",
+    "Raspberry",
+    "Lingonberry",
+    "Plum",
+    "Peach",
+    "Avocado",
+    "Onion",
+    "Garlic",
+    "Leek",
+    "Spring onion",
+    "Cabbage",
+    "Cauliflower",
+    "Zucchini",
+    "Eggplant",
+    "Spinach",
+    "Rocket",
+    "Iceberg lettuce",
+    "Celery",
+    "Beetroot",
+    "Swede",
+    "Sweet potato",
+    "Mushroom",
+    "Corn",
+    "Pea",
+    "Green bean",
+    "Frozen vegetables",
+    "Frozen berries",
+    "Pizza",
+    "Lasagne",
+    "Ready meal",
+    "Soup",
+    "Dumpling",
+    "Toilet paper",
+    "Paper towel",
+    "Dishwasher tablet",
+    "Laundry detergent",
+    "Fabric softener",
+    "Shampoo",
+    "Toothpaste",
+    "Deodorant",
+    "Razor",
+    "Diaper",
+    "Cat food",
+    "Dog food",
+    "Aluminium foil",
+    "Cling film",
+    "Baking paper",
+    "Candle",
+    "Battery",
+)
+
+# The catalog block as it read before Q27, for `--old-catalog-wording`
+OLD_CATALOG_BLOCK = (
+    "\n  When an equivalent product is listed here, use its name exactly. "
+    "Known products: {names}."
+)
+
 
 def categories() -> list[CategoryOption]:
     return [
@@ -84,27 +334,60 @@ def categories() -> list[CategoryOption]:
     ]
 
 
+def expected_for(fixture: Path) -> dict[str, Any] | None:
+    """`expected_<stem>.json` beside the fixture (s_kaupat_order -> expected_s_kaupat)."""
+    stems = [fixture.stem, fixture.stem.removesuffix("_order")]
+    for stem in stems:
+        path = fixture.with_name(f"expected_{stem}.json")
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    return None
+
+
+def found(
+    lines: Sequence[ExtractedLine], expected: dict[str, Any] | None
+) -> int | None:
+    """Expected printed names that were read, as a multiset, exact after normalising."""
+    if expected is None:
+        return None
+    wanted = Counter(normalize_receipt_name(x["name"]) for x in expected["lines"])
+    got = Counter(normalize_receipt_name(x.name) for x in lines)
+    return sum((wanted & got).values())
+
+
 async def measure(
-    text: str, options: list[CategoryOption], catalog: Sequence[str]
+    text: str,
+    options: list[CategoryOption],
+    catalog: Sequence[str],
+    expected: dict[str, Any] | None,
+    reconcile: bool,
 ) -> dict[str, Any]:
+    numbered = [(n, line) for n, line in number_receipt_lines(text) if n is not None]
     prompt_chars = len(
-        f"{build_instructions(options, catalog)}\n\n"
-        f"Receipt:\n{prefilter_receipt_text(text)}"
+        f"{build_instructions(options, catalog)}\n\nReceipt:\n{format_numbered(numbered)}"
     )
     started = time.monotonic()
     result = await extract_from_text(text, options, catalog)
     seconds = round(time.monotonic() - started, 1)
-    lines = result.lines
-    return {
+    lines = list(result.lines)
+    row: dict[str, Any] = {
         "prompt_chars": prompt_chars,
         "model_s": seconds,
         "lines": len(lines),
+        "expected": len(expected["lines"]) if expected else None,
+        "found": found(lines, expected),
         "generic": sum(1 for x in lines if x.generic_name),
         "category": sum(1 for x in lines if x.category),
         "non_food": sum(1 for x in lines if x.non_food),
         "sl": sum(1 for x in lines if x.shelf_life_days is not None),
         "os": sum(1 for x in lines if x.opened_shelf_life_days is not None),
         "pw": sum(1 for x in lines if x.piece_grams is not None),
+        "cited": sum(1 for x in lines if x.source_lines),
+        "x": len(result.other_lines),
+        "t": result.receipt_total,
+        "lc": result.language,
+        "cc": result.country,
+        "invalid": result.invalid_entries,
         "watch": [
             {
                 "n": x.name,
@@ -115,6 +398,37 @@ async def measure(
             if any(term in x.name.upper() for term in WATCH)
         ],
     }
+    if not reconcile:
+        return row
+    started = time.monotonic()
+    outcome = await reconcile_text_read(text, result, options)
+    final = outcome.extraction.lines
+    completeness = outcome.completeness or {}
+    expected_total = expected.get("total") if expected else None
+    row.update(
+        reconcile_s=round(time.monotonic() - started, 1),
+        after_lines=len(final),
+        after_found=found(final, expected),
+        after_category=sum(1 for x in final if x.category),
+        retry=completeness.get("recovered_by_retry"),
+        raw=completeness.get("recovered_raw_lines"),
+        unaccounted=completeness.get("unaccounted_lines"),
+        profile=completeness.get("profile"),
+        profile_only=completeness.get("profile_only_lines"),
+        items_sum=completeness.get("items_sum"),
+        expected_total=expected_total,
+        note=outcome.note,
+        raw_names=[x.name for x in final if x.recovered == "raw_line"],
+        missing=sorted(
+            (
+                Counter(normalize_receipt_name(x["name"]) for x in expected["lines"])
+                - Counter(normalize_receipt_name(x.name) for x in final)
+            ).elements()
+        )
+        if expected
+        else [],
+    )
+    return row
 
 
 async def main(argv: list[str] | None = None) -> int:
@@ -128,15 +442,35 @@ async def main(argv: list[str] | None = None) -> int:
         metavar="N",
         help=f"offer the first N of {len(CATALOG)} fixed catalog names (default 0)",
     )
+    parser.add_argument(
+        "--catalog-overlap",
+        action="store_true",
+        help=f"offer the {len(OVERLAP_CATALOG)}-name catalog holding the fixtures' names",
+    )
+    parser.add_argument(
+        "--old-catalog-wording",
+        action="store_true",
+        help="word the catalog block as it was before Q27",
+    )
+    parser.add_argument(
+        "--no-reconcile",
+        action="store_true",
+        help="first read only: no targeted re-read (one model call per run)",
+    )
     parser.add_argument("--json", action="store_true", help="print raw numbers as JSON")
     args = parser.parse_args(argv)
     fixtures = args.fixtures or [DEFAULT_FIXTURE]
     options = categories()
-    catalog = CATALOG[: max(args.catalog, 0)]
+    catalog: Sequence[str] = (
+        OVERLAP_CATALOG if args.catalog_overlap else CATALOG[: max(args.catalog, 0)]
+    )
     if catalog and not settings.EXTRACTION_OFFERS_CATALOG:
         parser.error("--catalog needs EXTRACTION_OFFERS_CATALOG on")
+    if args.old_catalog_wording:
+        llm_extractor.CATALOG_BLOCK = OLD_CATALOG_BLOCK
+    wording = "old" if args.old_catalog_wording else "reworded"
     offered = (
-        f"{len(catalog)}-name catalog ({', '.join(catalog)})"
+        f"{len(catalog)}-name catalog ({wording} wording)"
         if catalog
         else "empty catalog"
     )
@@ -149,24 +483,44 @@ async def main(argv: list[str] | None = None) -> int:
             f"{len(options)} seeded categories, {offered}"
         )
     for fixture in fixtures:
-        text = Path(fixture).read_text(encoding="utf-8")
+        path = Path(fixture)
+        text = path.read_text(encoding="utf-8")
+        expected = expected_for(path)
         for run in range(1, args.runs + 1):
             row: dict[str, Any] = {
-                "fixture": Path(fixture).name,
+                "fixture": path.name,
                 "run": run,
                 "catalog": len(catalog),
+                "wording": wording,
             }
-            row.update(await measure(text, options, catalog))
+            row.update(
+                await measure(text, options, catalog, expected, not args.no_reconcile)
+            )
             results.append(row)
             if args.json:
                 continue
             print(
                 f"\n{row['fixture']} run {run}: prompt {row['prompt_chars']} chars, "
                 f"model {row['model_s']} s, lines {row['lines']}, "
+                f"found {row['found']}/{row['expected']}, "
                 f"generic {row['generic']}, category {row['category']} "
                 f"(household {row['non_food']}), sl {row['sl']}, os {row['os']}, "
-                f"pw {row['pw']}"
+                f"pw {row['pw']}, cited {row['cited']}, x {row['x']}, t {row['t']}, "
+                f"lc {row['lc']}, cc {row['cc']}, invalid {row['invalid']}"
             )
+            if "after_lines" in row:
+                print(
+                    f"  after reconciliation ({row['reconcile_s']} s): lines "
+                    f"{row['after_lines']}, found {row['after_found']}/{row['expected']}, "
+                    f"category {row['after_category']}, unaccounted {row['unaccounted']}, "
+                    f"re-read {row['retry']}, raw {row['raw']}, profile {row['profile']} "
+                    f"(+{row['profile_only']}), sum {row['items_sum']} vs total "
+                    f"{row['t']} (expected {row['expected_total']})"
+                )
+                if row["raw_names"] or row["missing"]:
+                    print(f"  raw rows {row['raw_names']}, missing {row['missing']}")
+                if row["note"]:
+                    print(f"  note: {row['note']}")
             for w in row["watch"]:
                 print(f"  {w['n']} -> {w['g']} ({w['c']})")
     if args.json:

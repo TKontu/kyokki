@@ -7,11 +7,20 @@ review. It reads the grammar shared by Finnish receipts (ARCHITECTURE.md appendi
     3 KPL 1,88 €/KPL  |  2 x 2,89 EUR    quantity of the product above
     0,386 KG 3,89 €/KG | 0,436 kg x ...  weight of the product above
 
-Discounts (negative prices), totals, fees, deposits and payment lines are skipped. Names stay as
-printed; there are no generic names or categories without the model.
+Discounts (negative prices), totals, fees, deposits and payment lines are skipped, and reading
+stops at the first total: what follows it is loyalty, payment and VAT (Q27). A quantity or
+weight line belongs only to a product directly above it, so the `1 KPL` under a skipped deposit
+line stays with the deposit. Names stay as printed; there are no generic names or categories
+without the model.
+
+These are Finnish receipt formats. Besides the last-resort fallback, the parser is used only
+as the `fi` receipt profile (`app.parsers.profiles`), which adds evidence to the
+format-agnostic completeness check and never decides alone (Q27).
 """
 
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import date
 
 from app.parsers.base import ExtractedLine, ReceiptExtraction
@@ -28,6 +37,8 @@ _PRICE_ANYWHERE = re.compile(r"\d+[,.]\d{2}(?!\d)")
 _WORD = re.compile(r"[A-Za-zÅÄÖåäö]{2,}")
 _DATE = re.compile(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b")
 _HEADER_LINES = 8
+# The first total ends the products; the footer's amounts are loyalty and payment (Q27)
+_TOTAL = re.compile(r"^(YHTEENSÄ|YHTEENSA|SUMMA)\b", re.IGNORECASE)
 
 
 def _normalise(line: str) -> str:
@@ -77,29 +88,63 @@ def _product(line: str) -> str | None:
     return name
 
 
-def parse_receipt_text(text: str) -> ReceiptExtraction:
-    lines = [_normalise(raw) for raw in text.splitlines()]
-    lines = [line for line in lines if line]
+@dataclass
+class ProductBlock:
+    """One product line and the numbers of the lines it was read from."""
 
-    products: list[ExtractedLine] = []
-    for line in lines:
+    line: ExtractedLine
+    line_numbers: list[int] = field(default_factory=list)
+
+
+def parse_receipt_blocks(
+    numbered: Sequence[tuple[int | None, str]],
+) -> list[ProductBlock]:
+    """The product lines of a receipt, each with the numbers of its source lines.
+
+    ``numbered`` is every line of the receipt with the number it was given in the model's
+    prompt, or None for a line the prompt left out; a block only cites numbered lines.
+    """
+    blocks: list[ProductBlock] = []
+    # The product a following KPL or KG line belongs to; a skipped line breaks the chain
+    current: ProductBlock | None = None
+    for number, raw in numbered:
+        line = _normalise(raw)
+        if not line:
+            continue
+        if _TOTAL.match(line):
+            break
         if is_skip_line(line):
+            current = None
             continue
-        if quantity := _QUANTITY.match(line):
-            if products:
-                products[-1].quantity = float(quantity[1])
-            continue
-        if weight := _WEIGHT.match(line):
-            if products:
-                products[-1].weight_kg = float(weight[1].replace(",", "."))
+        quantity = _QUANTITY.match(line)
+        weight = None if quantity else _WEIGHT.match(line)
+        if quantity or weight:
+            if current is not None:
+                if quantity:
+                    current.line.quantity = float(quantity[1])
+                elif weight:
+                    current.line.weight_kg = float(weight[1].replace(",", "."))
+                if number is not None:
+                    current.line_numbers.append(number)
             continue
         name = _product(line)
         if name:
-            products.append(ExtractedLine(name=name))
+            current = ProductBlock(
+                line=ExtractedLine(name=name),
+                line_numbers=[number] if number is not None else [],
+            )
+            blocks.append(current)
+    return blocks
+
+
+def parse_receipt_text(text: str) -> ReceiptExtraction:
+    lines = [_normalise(raw) for raw in text.splitlines()]
+    lines = [line for line in lines if line]
+    blocks = parse_receipt_blocks([(None, line) for line in lines])
 
     return ReceiptExtraction(
         method="heuristic",
         store_chain=_store(lines),
         purchase_date=_purchase_date(lines),
-        lines=products,
+        lines=[block.line for block in blocks],
     )

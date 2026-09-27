@@ -4,6 +4,12 @@ The request follows the configuration proven in the MVP-R0 spike (docs/vLLM_MANU
 compact output keys, a strict ``json_schema`` response format, ``max_tokens`` sized for a long
 receipt, and ``chat_template_kwargs.reasoning_strength`` for reasoning models such as
 ``muse-glimmer``. The same instructions serve text (OCR or PDF) and image input.
+
+Receipts come from any shop, country and language, so the rules are general and the Finnish
+strings in them are labelled examples (Q27). On the text path the receipt lines are numbered
+and the model accounts for every one: a product cites its lines in ``l``, every other line is
+listed in ``x`` with its kind. Reconciliation (``receipt_processing``) uses that to find the
+lines the model left out, without knowing anything about the receipt's format.
 """
 
 import base64
@@ -20,7 +26,13 @@ from pydantic import ValidationError
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.parsers.base import ExtractedLine, ExtractionMethod, ReceiptExtraction
+from app.parsers.base import (
+    OTHER_LINE_KINDS,
+    ExtractedLine,
+    ExtractionMethod,
+    OtherLine,
+    ReceiptExtraction,
+)
 from app.parsers.receipt_lines import is_skip_line
 
 logger = get_logger(__name__)
@@ -46,14 +58,35 @@ _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 # Catalog names offered to the model so equivalent products keep one name; bounds the prompt
 MAX_KNOWN_PRODUCTS = 300
 
+# The raw completion is stored on the receipt for diagnosis; a runaway answer is capped
+RAW_COMPLETION_LIMIT = 64 * 1024
+
 # What the model answers for c when a line is not food at all. Deliberately not a category:
 # a category would be a legal pick on the review screen and would put towels into stock (Q1).
 NON_FOOD = "household"
 
-_INSTRUCTIONS = """Extract every purchased product from this grocery receipt.
+# The catalog is a naming aid only. Worded "When an equivalent product is listed here, use
+# its name exactly", a warm catalog read as the list of what to extract: the model returned
+# the 6 listed products of a 15-line receipt and dropped the rest (Q27). H17 measured the
+# block's category benefit, so it stays, reworded; scripts/measure_extraction.py compares.
+CATALOG_BLOCK = (
+    "\n- Extract every product line on the receipt, whether or not it is in this list."
+    " The list only tells you which name to use for an equivalent product: when one is"
+    " listed here, use its name exactly for g. Known products: {names}."
+)
+
+_INSTRUCTIONS = """Extract every purchased product from this receipt. It may come from any shop, country and language.
 
 Rules:
-- One entry per product line. n = the product name exactly as written, without the price.
+- The receipt lines are numbered ("12: ..."). Account for every numbered line: each one is
+  either part of a product in p or listed in x. On an image there are no numbers: answer
+  l = [] and x = [].
+- One entry per product. n = the product name exactly as written, without the price.
+- l = the numbers of all the lines the product was read from: its name line, or both lines
+  when a long name wraps, and any line that gives its count, weight or unit price, whether
+  that line comes before or after the name.
+- p = the line total charged for the product, as a number, never the unit price; null if
+  none is printed.
 - g = the simple generic English name a home cook would write on a shopping list. No brand,
   size, fat content or percentage, or flavour-neutral variant, and the same name for equivalent
   cuts. Examples: SNELLMAN NAUDAN JAUHELIHA 10% -> "Ground beef"; ATRIA KANAN FILEESUIKALE ->
@@ -63,8 +96,10 @@ Rules:
 - Household and cleaning products get an everyday English name too: SIENILIINA ->
   "Cleaning cloth"; PYYKKIETIKKA -> "Laundry vinegar". Answer household for their c - they are
   not food and do not go in the fridge. Food keeps its category as below.{known_products}
-- A following line like "3 KPL 1,88 €/KPL" means q = 3 for the product above it.
-- A following line like "0,386 KG 3,89 €/KG" means w = 0.386 (kg) for the product above it.
+- A line next to a product that gives a count and a unit price means q = that count.
+  Examples: "3 KPL 1,88 €/KPL" below the name; "2 x 1,49" above the name.
+- A line next to a product that gives a weight and a price per kg or lb means w = that
+  weight in kg. Example: "0,386 KG 3,89 €/KG" -> w = 0.386.
 - Otherwise q = 1 and w = null.
 - c = the best category id for the product, or null if none fits (for example household or
   cleaning products). Categories: {categories}.
@@ -80,14 +115,52 @@ Rules:
   anything else that is not opened.
 - s = the store chain or store name from the header; d = the purchase date as YYYY-MM-DD.
   Use null when absent.
-- Skip store header, totals, discounts (NORM., ALENNUS), fees, deposits, payment and VAT
-  lines as products.
-- Finnish words often misread: TUMMA RYPÄLE -> "Grape" (RUSINA is "Raisin"); TIKKUPERUNAT
-  -> "French fries"; TÄYSMEHU OMENA -> "Apple juice" (MEHU is juice); RIISIPIIRAKKA ->
-  "Karelian pasty"; MONIVITAMIINI APPELSIINI -> "Multivitamin juice", but MONIVITAMIINI
-  with no flavour is a vitamin supplement, household; VALMISRUOKA, ATERIA -> c = ready_meals.
+- lc = the receipt's language as an ISO 639-1 code; cc = the shop's country as an ISO 3166-1
+  alpha-2 code. Use null when unsure.
+- The store header, totals, subtotals, tax lines, payment, discounts, deposits and fees are
+  not products. List each such numbered line in x as {{"l": line number, "k": kind, "a":
+  amount}}, where k is one of header, total, subtotal, tax, payment, discount, deposit, fee,
+  other, and a is the amount printed on it as a signed number (negative for a discount), or
+  null. Examples: UKUPNO, SUMME and TOTAL are totals; PDV and MwSt are tax; POPUST and
+  Rabatt are discounts; Pfand is a deposit.
+- t = the receipt's grand total as a number, or null if none is printed.
+- Examples of Finnish words often misread: TUMMA RYPÄLE -> "Grape" (RUSINA is "Raisin");
+  TIKKUPERUNAT -> "French fries"; TÄYSMEHU OMENA -> "Apple juice" (MEHU is juice);
+  RIISIPIIRAKKA -> "Karelian pasty"; MONIVITAMIINI APPELSIINI -> "Multivitamin juice", but
+  MONIVITAMIINI with no flavour is a vitamin supplement, household; VALMISRUOKA, ATERIA ->
+  c = ready_meals.
 
-Return only compact JSON: {{"s": chain, "d": date, "p": [{{"n": name, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null, "pw": grams per piece or null, "sl": shelf life days or null, "os": opened shelf life days or null}}]}}."""
+Return only compact JSON: {{"s": chain, "d": date, "lc": language, "cc": country, "t": total, "p": [{{"n": name, "l": [line numbers], "p": line total or null, "g": generic name, "q": quantity, "w": weight_kg or null, "c": category or null, "pw": grams per piece or null, "sl": shelf life days or null, "os": opened shelf life days or null}}], "x": [{{"l": line number, "k": kind, "a": amount or null}}]}}."""
+
+_RETRY = """These numbered receipt lines were not accounted for in a first reading. Extract any
+products among them with the same rules, citing the same line numbers in l, and list every
+other one of these lines in x."""
+
+
+def number_receipt_lines(text: str) -> list[tuple[int | None, str]]:
+    """Every non-blank line of the receipt with its number in the prompt.
+
+    Lines that can never be products (totals, VAT, payment, discounts, fees) are left out of
+    the prompt and get None; the rest are numbered from 1 in receipt order. The prompt shows
+    the numbers, and the model cites them (Q27).
+    """
+    numbered: list[tuple[int | None, str]] = []
+    count = 0
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if is_skip_line(line):
+            numbered.append((None, line))
+            continue
+        count += 1
+        numbered.append((count, line))
+    return numbered
+
+
+def prompt_lines(text: str) -> list[str]:
+    """The lines the prompt numbers; line ``n`` is ``prompt_lines(text)[n - 1]``."""
+    return [line for number, line in number_receipt_lines(text) if number is not None]
 
 
 def prefilter_receipt_text(text: str) -> str:
@@ -95,9 +168,11 @@ def prefilter_receipt_text(text: str) -> str:
 
     Shrinks the prompt and removes totals and VAT numbers the model might mistake for items.
     """
-    return "\n".join(
-        line for line in text.splitlines() if line.strip() and not is_skip_line(line)
-    )
+    return "\n".join(prompt_lines(text))
+
+
+def format_numbered(lines: Sequence[tuple[int, str]]) -> str:
+    return "\n".join(f"{number}: {line}" for number, line in lines)
 
 
 def build_instructions(
@@ -110,6 +185,7 @@ def build_instructions(
     A name is a key now (H11) and confirm learns the generic name as a synonym, so the
     block was expected to be droppable, but H17 measured the categories the model fills
     in falling from 40 to 30-31 of 49 without it, so it stays; the setting turns it off.
+    It says outright that it is a naming aid, not the list of what to read (Q27).
     """
     listed = ", ".join(f"{c.id} ({c.name})" for c in categories) or "none"
     if not settings.EXTRACTION_OFFERS_CATALOG:
@@ -128,12 +204,7 @@ def build_instructions(
     # therefore fell back to its category's blanket shelf life, which is what Q6 exists
     # to avoid. Estimating for a known product costs a few tokens and is discarded by
     # `_fill_gaps` anyway; not estimating costs the catalog its accuracy.
-    known = (
-        "\n  When an equivalent product is listed here, use its name exactly. "
-        f"Known products: {', '.join(unique)}."
-        if unique
-        else ""
-    )
+    known = CATALOG_BLOCK.format(names=", ".join(unique)) if unique else ""
     return _INSTRUCTIONS.format(categories=listed, known_products=known)
 
 
@@ -144,16 +215,41 @@ def _generic_name(value: Any) -> str | None:
     return tidy[:1].upper() + tidy[1:] if tidy else None
 
 
-def _positive(value: Any) -> float | None:
-    """A rough estimate is welcome; zero, negative and nonsense are not (Q2, Q6)."""
+def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    return float(value) if value > 0 else None
+    return float(value)
+
+
+def _positive(value: Any) -> float | None:
+    """A rough estimate is welcome; zero, negative and nonsense are not (Q2, Q6)."""
+    number = _number(value)
+    return number if number is not None and number > 0 else None
 
 
 def _positive_int(value: Any) -> int | None:
     number = _positive(value)
     return round(number) if number is not None else None
+
+
+def _line_number(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return int(value) if value >= 1 and value == int(value) else None
+
+
+def _line_numbers(value: Any) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    numbers = (_line_number(item) for item in value)
+    return sorted({number for number in numbers if number is not None})
+
+
+def _code(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    tidy = value.strip()
+    return tidy if tidy.isalpha() and len(tidy) == 2 else None
 
 
 def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
@@ -163,12 +259,17 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
         "properties": {
             "s": {"type": ["string", "null"]},
             "d": {"type": ["string", "null"]},
+            "lc": {"type": ["string", "null"]},
+            "cc": {"type": ["string", "null"]},
+            "t": {"type": ["number", "null"]},
             "p": {
                 "type": "array",
                 "items": {
                     "type": "object",
                     "properties": {
                         "n": {"type": "string"},
+                        "l": {"type": "array", "items": {"type": "integer"}},
+                        "p": {"type": ["number", "null"]},
                         "g": {"type": "string"},
                         "q": {"type": "number"},
                         "w": {"type": ["number", "null"]},
@@ -179,11 +280,23 @@ def build_response_schema(category_ids: Sequence[str]) -> dict[str, Any]:
                         "sl": {"type": ["integer", "null"]},
                         "os": {"type": ["integer", "null"]},
                     },
-                    "required": ["n", "g", "q", "w", "c", "pw", "sl", "os"],
+                    "required": ["n", "l", "p", "g", "q", "w", "c", "pw", "sl", "os"],
+                },
+            },
+            "x": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "l": {"type": "integer"},
+                        "k": {"enum": list(OTHER_LINE_KINDS)},
+                        "a": {"type": ["number", "null"]},
+                    },
+                    "required": ["l", "k", "a"],
                 },
             },
         },
-        "required": ["s", "d", "p"],
+        "required": ["s", "d", "lc", "cc", "t", "p", "x"],
     }
 
 
@@ -217,13 +330,37 @@ def _parse_date(value: Any) -> date | None:
         return None
 
 
+def _other_lines(value: Any) -> list[OtherLine]:
+    """The non-product lines the model listed; an entry without a line number is useless."""
+    if not isinstance(value, list):
+        return []
+    others: list[OtherLine] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        number = _line_number(entry.get("l"))
+        if number is None:
+            continue
+        kind = str(entry.get("k") or "").strip().casefold()
+        others.append(
+            OtherLine(
+                line=number,
+                kind=kind if kind in OTHER_LINE_KINDS else "other",  # type: ignore[arg-type]
+                amount=_number(entry.get("a")),
+            )
+        )
+    return others
+
+
 def parse_completion(
     content: str, category_ids: set[str], method: ExtractionMethod
 ) -> ReceiptExtraction:
     """Map the model's compact JSON to a ``ReceiptExtraction``.
 
     Tolerant where a wrong value should not fail a receipt (unknown category, bad date, a
-    price left in a name) and strict where the output is unusable (no product list).
+    price left in a name) and strict where the output is unusable (no product list). A
+    product entry that cannot be used is counted in ``invalid_entries``, never dropped
+    without a trace (Q27).
     """
     data = extract_json_object(content)
     products = data.get("p")
@@ -237,11 +374,14 @@ def parse_completion(
     by_fold = {str(known).casefold(): known for known in category_ids}
 
     lines: list[ExtractedLine] = []
+    invalid = 0
     for entry in products:
         if not isinstance(entry, dict):
+            invalid += 1
             continue
         name = _TRAILING_PRICE.sub("", str(entry.get("n") or "")).strip()
         if not name:
+            invalid += 1
             continue
         raw_category = entry.get("c")
         folded = str(raw_category).casefold() if isinstance(raw_category, str) else ""
@@ -260,12 +400,20 @@ def parse_completion(
                     shelf_life_days=_positive_int(entry.get("sl")),
                     opened_shelf_life_days=_positive_int(entry.get("os")),
                     non_food=non_food,
+                    source_lines=_line_numbers(entry.get("l")),
+                    price=_number(entry.get("p")),
                 )
             )
         except ValidationError as exc:
+            invalid += 1
             logger.warning(
                 "Skipping invalid extracted line", extra={"errors": exc.errors()}
             )
+    if invalid:
+        logger.warning(
+            "Model returned unusable product entries",
+            extra={"invalid_entries": invalid, "method": method},
+        )
 
     store = data.get("s")
     return ReceiptExtraction(
@@ -273,7 +421,20 @@ def parse_completion(
         store_chain=store.strip() if isinstance(store, str) and store.strip() else None,
         purchase_date=_parse_date(data.get("d")),
         lines=lines,
+        other_lines=_other_lines(data.get("x")),
+        receipt_total=_number(data.get("t")),
+        language=_code(data.get("lc")),
+        country=_code(data.get("cc")),
+        invalid_entries=invalid,
     )
+
+
+def _cap(content: str) -> str:
+    """At most RAW_COMPLETION_LIMIT bytes of UTF-8, cut on a character boundary."""
+    encoded = content.encode("utf-8")
+    if len(encoded) <= RAW_COMPLETION_LIMIT:
+        return content
+    return encoded[:RAW_COMPLETION_LIMIT].decode("utf-8", errors="ignore")
 
 
 async def _complete(
@@ -315,18 +476,27 @@ async def _complete(
         raise LLMExtractionError(f"LLM request failed: {exc!r}") from exc
 
     try:
-        message_content = body["choices"][0]["message"]["content"] or ""
+        choice = body["choices"][0]
+        message_content = choice["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMExtractionError("LLM response has no message content") from exc
     logger.debug("LLM raw completion", extra={"chars": len(message_content)})
+    # A cut-off answer can still parse as a shorter list; that is how lines vanish (Q27)
+    if isinstance(choice, dict) and choice.get("finish_reason") == "length":
+        raise LLMExtractionError(
+            f"LLM response was truncated at max_tokens ({settings.LLM_MAX_TOKENS})"
+        )
 
     result = parse_completion(message_content, set(category_ids), method)
+    result.raw_completion = _cap(message_content)
     logger.info(
         "Receipt extracted",
         extra={
             "model": settings.LLM_MODEL,
             "method": method,
             "lines": len(result.lines),
+            "other_lines": len(result.other_lines),
+            "invalid_entries": result.invalid_entries,
             "seconds": round(time.monotonic() - started, 1),
         },
     )
@@ -338,9 +508,23 @@ async def extract_from_text(
     categories: Sequence[CategoryOption],
     known_products: Sequence[str] = (),
 ) -> ReceiptExtraction:
-    """Extract products from OCR or PDF text."""
+    """Extract products from OCR or PDF text, every prompt line numbered."""
     instructions = build_instructions(categories, known_products)
-    prompt = f"{instructions}\n\nReceipt:\n{prefilter_receipt_text(text)}"
+    numbered = [(n, line) for n, line in number_receipt_lines(text) if n is not None]
+    prompt = f"{instructions}\n\nReceipt:\n{format_numbered(numbered)}"
+    return await _complete(prompt, categories, method="text")
+
+
+async def extract_unaccounted_lines(
+    lines: Sequence[tuple[int, str]], categories: Sequence[CategoryOption]
+) -> ReceiptExtraction:
+    """One targeted read of the lines a first read did not account for (Q27).
+
+    Same rules, schema and categories, but no catalog block: the block is what a first
+    read tends to mistake for the list of products to extract.
+    """
+    instructions = build_instructions(categories, ())
+    prompt = f"{instructions}\n\n{_RETRY}\n\nReceipt lines:\n{format_numbered(lines)}"
     return await _complete(prompt, categories, method="text")
 
 

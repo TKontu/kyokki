@@ -1,0 +1,25 @@
+# SYNTHETIC TEST RECEIPT - invented for Kyokki tests, not a real purchase
+KONZUM plus d.d.
+Ulica grada Vukovara 269, 10000 Zagreb
+OIB: 00000000000
+Racun br: 1234/5/6    27.09.2026 10:15
+Artikl                 Kol  Cijena    Iznos
+Mlijeko svježe 2,8% m.m. 1l
+  2 kom x 1,29                  2,58
+Kruh bijeli 500g                1,49
+Jabuke Zlatni delišes
+  0,845 kg x 1,99               1,68
+Čokolada mliječna s lješnjacima
+i grožđicama 100g               2,19
+Rajčica
+  0,512 kg x 2,49               1,27
+Jogurt tekući 1l                1,15
+Sir Gauda narezani 150g         2,39
+Deterdžent za suđe 500ml        1,99
+----------------------------------------
+UKUPNO EUR                     14,74
+PDV 5%    osnovica  7,97  PDV  0,40
+PDV 25%   osnovica  5,10  PDV  1,27
+Gotovina EUR                   20,00
+Povrat EUR                      5,26
+Hvala na kupnji!

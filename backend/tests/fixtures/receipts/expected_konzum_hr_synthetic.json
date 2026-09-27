@@ -1,0 +1,17 @@
+{
+ "synthetic": true,
+ "note": "Invented Croatian receipt for Kyokki tests (Q27); not a real purchase",
+ "store_chain": "KONZUM plus d.d.",
+ "purchase_date": "2026-09-27",
+ "total": 14.74,
+ "lines": [
+  {"name": "Mlijeko svježe 2,8% m.m. 1l", "quantity": 2, "weight_kg": null, "price": 2.58},
+  {"name": "Kruh bijeli 500g", "quantity": 1, "weight_kg": null, "price": 1.49},
+  {"name": "Jabuke Zlatni delišes", "quantity": 1, "weight_kg": 0.845, "price": 1.68},
+  {"name": "Čokolada mliječna s lješnjacima i grožđicama 100g", "quantity": 1, "weight_kg": null, "price": 2.19},
+  {"name": "Rajčica", "quantity": 1, "weight_kg": 0.512, "price": 1.27},
+  {"name": "Jogurt tekući 1l", "quantity": 1, "weight_kg": null, "price": 1.15},
+  {"name": "Sir Gauda narezani 150g", "quantity": 1, "weight_kg": null, "price": 2.39},
+  {"name": "Deterdžent za suđe 500ml", "quantity": 1, "weight_kg": null, "price": 1.99}
+ ]
+}

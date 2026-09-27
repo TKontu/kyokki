@@ -1,0 +1,24 @@
+# SYNTHETIC TEST RECEIPT - invented for Kyokki tests, not a real purchase
+REWE Markt GmbH
+Hauptstrasse 1, 10115 Berlin
+UID Nr.: DE000000000
+                              EUR
+2 x 1,49
+Vollmilch 3,5% 1L            2,98 B
+0,736 kg x 2,49 EUR/kg
+Bananen lose                 1,83 B
+Roggenbrot 500g              2,29 B
+3 x 0,89
+Joghurt Natur 150g           2,67 B
+Butter 250g                  2,19 B
+Spülmittel 450ml             1,65 A
+Pfand                        0,25 A
+--------------------------------------
+SUMME                 EUR   13,86
+Geg. Karte            EUR   13,86
+Steuer %     Netto   Steuer   Brutto
+A= 19,0%      1,60     0,30     1,90
+B=  7,0%     11,18     0,78    11,96
+Gesamtbetrag 12,78     1,08    13,86
+Datum: 27.09.2026   Uhrzeit: 18:05
+Vielen Dank für Ihren Einkauf
