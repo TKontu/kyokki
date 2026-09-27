@@ -2000,6 +2000,42 @@ not rulings.
   independent second opinion over the format-agnostic core (its extra lines go into the targeted retry;
   it never decides alone; its failure never fails a receipt). The existing Finnish heuristic is the
   first profile (`fi`); more are added only where measurement shows the core alone falls short.
+  **Round 2026-09-27-2 is merged (2026-09-27; #125 backend, #124 review screen, #127 follow-up; docs
+  #123).** Text receipts now number every line and the model accounts for each (products cite their
+  lines incl. weight/count detail lines; priced non-product lines are listed with a kind); unaccounted
+  lines get one targeted re-read, then become raw rows; the receipt's arithmetic is checked in cents
+  (discounts already in line totals tolerated, #127); the Finnish pre-filter is gone from the prompt
+  path; the `fi` profile runs as a second opinion; `LLM_TIMEOUT` is 420 s; the raw model answers are
+  stored. The review screen shows a shortfall banner, recovered markers, "Add a missed item" and the
+  receipt text. Live re-measure on the shipped code (muse-glimmer, 220-name catalog): K 15/15, S-kaupat
+  49/49 (41 categories), synthetic HR 8/8 and DE 6/6, sums agree on all four, first reads 29-128 s
+  (1.5-3.5x faster than the first cut). #125 was merged before its verdict; the post-merge review
+  (26 findings, nothing to revert) drives the follow-ups below.
+  - Q27 follow-ups (post-merge verdict on #125, 2026-09-27):
+    - [ ] **(high)** `RECEIPT_STALE_MINUTES` (10) is below three 420 s model calls: derive the stale
+      window from the timeout, or bound per-receipt model time. Operator mitigation until then:
+      `RECEIPT_STALE_MINUTES=25` in the stack env.
+    - [ ] The `fi` profile overrides correct model reads (a deposit re-read into a junk raw row);
+      the unrecorded "suspect `other` line exempt when sums agree" rule; the clock time `11.49` read as
+      an amount (junk header raw row); duplicate identical lines → an extra row; a missed item absorbed
+      as another's detail line; quantity-before-name attaching to the product above; raw rows without
+      a price causing a false mismatch; the vision prompt's empty `x` giving false mismatches on
+      photos with a discount/deposit; a non-JSON retry answer failing the whole receipt.
+    - [ ] Tests whose model stubs have the production shape (only priced lines in `x`; retry stubs
+      with `x`; K stubs with the printed total), and one test from raw completion to the API.
+    - [ ] Amounts other than exactly two decimals (JPY/HUF, `1.299,00`); tax not summed (US-style
+      receipts); truncated answers not persisted; `lc`/`cc` accept only 2-letter codes; the shared
+      timeout slows "Re-estimate all"; the stop-at-total rule leaked into the shared fallback.
+    - [ ] Stale docs: `docs/ARCHITECTURE.md` ("one LLM extraction call", "No store parsers"),
+      docstrings that still describe the pre-filter or "every line in x".
+    - [ ] Watch: 2 of 6 K first reads categorised only 1 of 15 products (not captured; raw answers are
+      now stored).
+  **Round 2026-09-27-3** (base `c051950`): C1 **Q27 hardening** (`fix/q27-hardening`, the follow-ups
+  above); C2 **Q18 exact-emoji trial** (`spike/q18-exact-emoji`: exact-or-none picker, the gap list,
+  runnable `--from-db` by the operator); C3 **Q29-Q36 fridge look and app shell**
+  (`feat/fridge-look-shell`: colours, living window with moon phase, theme toggle on a concealed
+  settings page, no Scan, the door reaching the freezer, larder sections for condiments and a new
+  `spices` category).
 - **Q28 — the receipt and what the model made of it cannot be audited.** After processing, the iPad
   shows only the extracted rows. There is no way to see the receipt image or PDF, the OCR text,
   or the model's raw answer, and no way back to a confirmed receipt's contents. The API already
@@ -2012,6 +2048,12 @@ not rulings.
 
 **Operator actions and rulings still needed:**
 - [ ] Run "Re-estimate all (keeps yours)" on `/products`: dry run, read the proposal, apply.
+- [ ] Set `RECEIPT_STALE_MINUTES=25` (and `LLM_TIMEOUT=420` if the stack sets it explicitly) before
+  deploying round 2026-09-27-2; then re-upload the K-Citymarket PDF and check all 15 lines arrive.
+- [ ] Q18 icons: the LLM-drawn SVGs are rejected (operator, 2026-09-27). Stop them with
+  `ICON_MODEL=none` and clear them (`UPDATE product_master SET icon_svg=NULL, icon_status=NULL,
+  icon_updated_at=NULL`). New direction: exact Apple emoji only (no closest match), the rest
+  generated as emoji-style images through ComfyUI behind llama-swap (details from the operator).
 - [x] Q27 triage: done 2026-09-27 from `GET /api/receipts/{id}` (see Q27).
 - [x] Q18 storage: **the SVG in the database** (ruling 2026-09-26).
 - [ ] Deploy round 2026-09-26-9 (`alembic upgrade head` for the icon columns), then run
@@ -2241,7 +2283,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Next: Q27 triage, then Q26 + Q28 (receipt provenance and audit)
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [ ] C1 Q27 hardening  [ ] C2 exact-emoji trial  [ ] C3 Q29-Q36 fridge look and shell. Then Q18 image generation (ComfyUI), Q26 + Q28
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
