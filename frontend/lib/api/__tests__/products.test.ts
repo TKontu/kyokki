@@ -22,6 +22,25 @@ describe('iconUrl', () => {
   it('is on the default export too', () => {
     expect(productsAPI.iconUrl).toBe(iconUrl)
   })
+
+  it('uses the client base URL, so the two cannot drift', () => {
+    const { API_BASE_URL } = jest.requireActual('../client')
+    expect(iconUrl('p-1', 1).startsWith(`${API_BASE_URL}/products/`)).toBe(true)
+  })
+
+  it('falls back to the same-origin /api path the middleware authenticates', () => {
+    const saved = process.env.NEXT_PUBLIC_API_URL
+    delete process.env.NEXT_PUBLIC_API_URL
+    try {
+      jest.isolateModules(() => {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const fresh = require('../products') as typeof import('../products')
+        expect(fresh.iconUrl('p-1', 7)).toBe('/api/products/p-1/icon.svg?v=7')
+      })
+    } finally {
+      process.env.NEXT_PUBLIC_API_URL = saved
+    }
+  })
 })
 
 describe('redrawIcon', () => {

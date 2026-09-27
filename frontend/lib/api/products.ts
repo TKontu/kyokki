@@ -1,4 +1,4 @@
-import apiClient from './client'
+import apiClient, { API_BASE_URL } from './client'
 import type {
   CatalogEstimateResponse,
   IconRedrawRequest,
@@ -66,10 +66,6 @@ export async function forgetPrintedName(id: string, aliasId: string): Promise<vo
   return apiClient.delete<void>(`/products/${id}/aliases/${aliasId}`)
 }
 
-// The same base the client sends requests to (client.ts): the same-origin `/api` path the
-// Next.js middleware authenticates, unless NEXT_PUBLIC_API_URL points elsewhere.
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
-
 /**
  * Where a product's drawn icon is served (Q18), for an `<img src>`.
  *
@@ -78,7 +74,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api'
  * it server-side to every same-origin `/api` request. Never fetch this into the DOM as markup.
  */
 export function iconUrl(productId: string, version: number): string {
-  return `${API_BASE}/products/${encodeURIComponent(productId)}/icon.svg?v=${version}`
+  return `${API_BASE_URL}/products/${encodeURIComponent(productId)}/icon.svg?v=${version}`
 }
 
 /**

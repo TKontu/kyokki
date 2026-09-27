@@ -7,13 +7,15 @@ time, and a failure leaves the category emoji (or the previous drawing) where it
 """
 
 import asyncio
+import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import httpx
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -21,12 +23,15 @@ from app.models.product_master import ProductMaster
 from app.services import product_icons
 from app.services.product_icons import (
     MAX_SVG_BYTES,
+    IconModelError,
     IconRejected,
     build_prompt,
     draw_icon,
     extract_svg,
     sanitise,
 )
+
+REAL_COMPLETE = product_icons._complete
 
 SVG_NS = "http://www.w3.org/2000/svg"
 GOOD = (
@@ -183,8 +188,10 @@ MALICIOUS = [
 class TestMaliciousInput:
     @pytest.mark.parametrize("inner,needle", MALICIOUS)
     def test_the_dangerous_part_is_dropped(self, inner: str, needle: str) -> None:
+        # A coloured shape beside the attack, so the result stays drawable and coloured.
         clean, changed = sanitise(
-            f'<svg xmlns="{SVG_NS}" viewBox="0 0 48 48">{inner}</svg>'
+            f'<svg xmlns="{SVG_NS}" viewBox="0 0 48 48">{inner}'
+            '<rect width="4" height="4" fill="#FFFFFF"/></svg>'
         )
 
         assert changed is True
@@ -230,6 +237,88 @@ class TestExtractSvg:
 
     def test_no_svg_is_none(self) -> None:
         assert extract_svg("I cannot draw that") is None
+
+    DRAFT = f'<svg xmlns="{SVG_NS}"><rect width="1" height="1" fill="#000000"/></svg>'
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            f"<think>first try: {DRAFT} hmm, no</think>\n{GOOD}",
+            f"<thinking>{DRAFT}</thinking>{GOOD}",
+            f"<THINK>{DRAFT}</THINK>{GOOD}",
+            # The template put the opener in the prompt: only the closer is in the answer.
+            f"let me sketch {DRAFT} ok</think>{GOOD}",
+            f"<think>a</think><think>{DRAFT}</think>{GOOD}",
+        ],
+    )
+    def test_a_draft_inside_the_reasoning_is_never_taken(self, answer: str) -> None:
+        """Review #4: the first <svg> used to be a draft from the model's reasoning."""
+        assert extract_svg(answer) == GOOD
+
+    def test_reasoning_that_never_closes_holds_no_answer(self) -> None:
+        assert extract_svg(f"<think>still thinking {self.DRAFT}") is None
+
+
+class TestColourLoss:
+    """Review #4: fills the sanitiser drops (names, rgb(), style) left black shapes stored."""
+
+    @pytest.mark.parametrize(
+        "inner",
+        [
+            '<circle cx="24" cy="24" r="16" style="fill:#E4453A;stroke:#2B2B2B"/>',
+            '<circle cx="24" cy="24" r="16" fill="red" stroke="black"/>',
+            '<circle cx="24" cy="24" r="16" fill="rgb(228,69,58)"/>',
+            '<circle cx="24" cy="24" r="16" fill="none" stroke="none"/>',
+            '<circle cx="24" cy="24" r="16"/>',
+        ],
+    )
+    def test_no_colour_left_is_not_drawable(self, inner: str) -> None:
+        with pytest.raises(IconRejected, match="no colour"):
+            sanitise(f'<svg xmlns="{SVG_NS}" viewBox="0 0 48 48">{inner}</svg>')
+
+    def test_one_shape_keeping_its_colour_is_enough(self) -> None:
+        clean, changed = sanitise(
+            f'<svg xmlns="{SVG_NS}" viewBox="0 0 48 48">'
+            '<circle cx="24" cy="24" r="16" fill="red"/>'
+            '<path d="M24 10 L26 4" stroke="#5BA84A" stroke-width="2"/></svg>'
+        )
+
+        assert changed is True
+        assert "#5BA84A" in clean
+
+    def test_a_colour_on_a_group_counts(self) -> None:
+        clean, _ = sanitise(
+            f'<svg xmlns="{SVG_NS}"><g fill="#F5D547"><circle r="4"/></g></svg>'
+        )
+
+        assert 'fill="#F5D547"' in clean
+
+    async def test_a_colourless_answer_is_retried_then_failed(self) -> None:
+        colourless = (
+            f'<svg xmlns="{SVG_NS}" viewBox="0 0 48 48">'
+            '<circle cx="24" cy="24" r="16" style="fill:#E4453A"/></svg>'
+        )
+        with patch.object(
+            product_icons, "_complete", new=AsyncMock(side_effect=[colourless, GOOD])
+        ) as model:
+            svg, reasons = await product_icons._attempt("draw it")
+
+        assert model.await_count == 2
+        assert svg is not None and "#E4453A" in svg
+        assert reasons == ["no colour left after sanitising"]
+
+
+class TestDepth:
+    def test_deep_nesting_is_rejected_not_a_recursion_error(self) -> None:
+        """Review #3: a 63 KB nest of <g> raised RecursionError in the sanitiser."""
+        depth = 5000
+        nested = "<g>" * depth + '<circle r="4" fill="#FFFFFF"/>' + "</g>" * depth
+        with pytest.raises(IconRejected, match="nested too deep"):
+            sanitise(f'<svg xmlns="{SVG_NS}">{nested}</svg>')
+
+    def test_ordinary_nesting_is_fine(self) -> None:
+        nested = "<g>" * 5 + '<circle r="4" fill="#FFFFFF"/>' + "</g>" * 5
+        assert "<circle" in _clean(f'<svg xmlns="{SVG_NS}">{nested}</svg>')
 
 
 class TestPrompt:
@@ -467,38 +556,259 @@ class TestOneAtATime:
         assert most == 1
 
 
+def _gateway(monkeypatch: pytest.MonkeyPatch, respond) -> dict:
+    """Route the real `_complete` to a fake gateway; returns what it saw."""
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        seen["headers"] = dict(request.headers)
+        seen["body"] = json.loads(request.content)
+        return respond(request)
+
+    transport = httpx.MockTransport(handler)
+    real = httpx.AsyncClient
+
+    def client(**kwargs):
+        seen["timeout"] = kwargs.get("timeout")
+        return real(transport=transport)
+
+    monkeypatch.setattr(product_icons.httpx, "AsyncClient", client)
+    return seen
+
+
+def _answer(content) -> httpx.Response:
+    return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+
 class TestTheGatewayCall:
-    async def test_it_uses_the_icon_model_and_timeout(
+    """The real `_complete` (the conftest stubs it for every other test)."""
+
+    async def test_it_uses_the_icon_model_timeout_key_and_token_budget(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen: dict = {}
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            import json
-
-            seen["url"] = str(request.url)
-            seen["body"] = json.loads(request.content)
-            return httpx.Response(
-                200, json={"choices": [{"message": {"content": GOOD}}]}
-            )
-
-        transport = httpx.MockTransport(handler)
-        real = httpx.AsyncClient
-
-        def client(**kwargs):
-            seen["timeout"] = kwargs.get("timeout")
-            return real(transport=transport)
-
-        monkeypatch.setattr(product_icons.httpx, "AsyncClient", client)
+        seen = _gateway(monkeypatch, lambda request: _answer(GOOD))
         monkeypatch.setattr(settings, "ICON_MODEL", "c2.some-model")
         monkeypatch.setattr(settings, "ICON_TIMEOUT", 321.0)
+        monkeypatch.setattr(settings, "LLM_API_KEY", "the-key")
+        monkeypatch.setattr(settings, "LLM_MAX_TOKENS", 1234)
 
-        assert await product_icons._complete("draw it") == GOOD
+        assert await REAL_COMPLETE("draw it") == GOOD
         assert seen["url"].endswith("/chat/completions")
+        assert seen["headers"]["authorization"] == "Bearer the-key"
         assert seen["body"]["model"] == "c2.some-model"
         assert seen["body"]["messages"] == [{"role": "user", "content": "draw it"}]
+        assert seen["body"]["max_tokens"] == 1234
+        assert seen["body"]["temperature"] == 0.2
         assert "chat_template_kwargs" not in seen["body"]
         assert seen["timeout"] == 321.0
+
+    async def test_muse_glimmer_gets_its_reasoning_strength(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _gateway(monkeypatch, lambda request: _answer(GOOD))
+        monkeypatch.setattr(settings, "ICON_MODEL", "c2.muse-glimmer")
+        monkeypatch.setattr(settings, "LLM_REASONING_STRENGTH", "medium")
+
+        await REAL_COMPLETE("draw it")
+
+        assert seen["body"]["chat_template_kwargs"] == {"reasoning_strength": "medium"}
+
+    async def test_muse_glimmer_without_a_strength_sends_none(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _gateway(monkeypatch, lambda request: _answer(GOOD))
+        monkeypatch.setattr(settings, "ICON_MODEL", "c2.muse-glimmer")
+        monkeypatch.setattr(settings, "LLM_REASONING_STRENGTH", None)
+
+        await REAL_COMPLETE("draw it")
+
+        assert "chat_template_kwargs" not in seen["body"]
+
+    @pytest.mark.parametrize(
+        "respond",
+        [
+            lambda request: httpx.Response(503, json={"error": "busy"}),
+            lambda request: httpx.Response(200, content=b"not json"),
+            lambda request: httpx.Response(200, json={"choices": []}),
+            lambda request: httpx.Response(200, json={"no": "choices"}),
+            lambda request: httpx.Response(200, json={"choices": [{"message": None}]}),
+        ],
+        ids=["503", "bad-json", "no-choices", "no-choices-key", "no-message"],
+    )
+    async def test_a_bad_response_is_an_icon_model_error(
+        self, monkeypatch: pytest.MonkeyPatch, respond
+    ) -> None:
+        _gateway(monkeypatch, respond)
+
+        with pytest.raises(IconModelError):
+            await REAL_COMPLETE("draw it")
+
+    async def test_an_unreachable_gateway_is_an_icon_model_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def down(request: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("refused", request=request)
+
+        _gateway(monkeypatch, down)
+
+        with pytest.raises(IconModelError):
+            await REAL_COMPLETE("draw it")
+
+    async def test_empty_content_is_an_empty_answer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _gateway(monkeypatch, lambda request: _answer(None))
+
+        assert await REAL_COMPLETE("draw it") == ""
+
+
+class TestTestsNeverReachTheGateway:
+    """Review #1: a test that committed for real sent drawings to the homelab gateway."""
+
+    def test_the_conftest_stubs_the_drawing_call(self) -> None:
+        assert product_icons._complete is not REAL_COMPLETE
+
+    async def test_a_job_without_its_own_stub_sends_nothing(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        attempted: list[str] = []
+
+        async def refuse(self, request, **kwargs):
+            attempted.append(str(request.url))
+            raise AssertionError(f"a test tried to reach {request.url}")
+
+        monkeypatch.setattr(httpx.AsyncClient, "send", refuse)
+        product = await _product(db_session)
+
+        await draw_icon(product.id)
+
+        assert attempted == []
+        assert (await _reload(db_session, product)).icon_status == "failed"
+
+
+class TestNeverPendingForever:
+    """Review #3: anything breaking after `pending` was committed left it there for good."""
+
+    async def test_a_sanitiser_crash_ends_failed(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session)
+
+        with (
+            _answers(GOOD, GOOD),
+            patch.object(product_icons, "sanitise", side_effect=RecursionError()),
+        ):
+            await draw_icon(product.id)  # does not raise
+
+        assert (await _reload(db_session, product)).icon_status == "failed"
+
+    async def test_a_database_error_storing_it_ends_failed_and_keeps_the_old_one(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session)
+        with _answers(GOOD):
+            await draw_icon(product.id)
+        version = (await _reload(db_session, product)).icon_version
+
+        with (
+            _answers(GOOD),
+            patch.object(
+                product_icons.crud_product,
+                "store_icon",
+                side_effect=RuntimeError("connection lost"),
+            ),
+        ):
+            await draw_icon(product.id)
+
+        after = await _reload(db_session, product)
+        assert after.icon_status == "failed"
+        assert after.icon_svg is not None and after.icon_version == version
+
+    async def test_a_stale_pending_is_picked_up_again(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        stale = await _product(db_session, "Stale")
+        fresh = await _product(db_session, "Fresh")
+        long_ago = datetime.now(UTC) - timedelta(seconds=2 * settings.ICON_TIMEOUT + 60)
+        stale.icon_status = "pending"  # type: ignore[assignment]
+        stale.updated_at = long_ago  # type: ignore[assignment]
+        fresh.icon_status = "pending"  # type: ignore[assignment]
+        await db_session.commit()
+
+        picked = await product_icons.products_to_draw(db_session)
+
+        assert [p.id for p in picked] == [stale.id]
+        assert await product_icons.still_needs_drawing(db_session, stale.id)
+        assert not await product_icons.still_needs_drawing(db_session, fresh.id)
+
+    async def test_a_stale_pending_can_be_drawn(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session)
+        product.icon_status = "pending"  # type: ignore[assignment]
+        product.updated_at = datetime.now(UTC) - timedelta(days=1)  # type: ignore[assignment]
+        await db_session.commit()
+
+        with _answers(GOOD):
+            await draw_icon(product.id)
+
+        assert (await _reload(db_session, product)).icon_status == "ready"
+
+
+class TestTheDatabaseLock:
+    """Review #6: two API workers and the backfill script draw one at a time between them."""
+
+    async def test_the_gateway_call_holds_the_advisory_lock(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session)
+        held: list[int] = []
+
+        async def count_locks() -> int:
+            return int(
+                await db_session.scalar(
+                    text(
+                        "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+                        "AND objid = :key AND granted"
+                    ),
+                    {"key": product_icons.ICON_LOCK_KEY},
+                )
+            )
+
+        async def draw(prompt: str) -> str:
+            held.append(await count_locks())
+            return GOOD
+
+        with patch.object(product_icons, "_complete", new=draw):
+            await draw_icon(product.id)
+
+        assert held == [1]
+        assert await count_locks() == 0
+
+    async def test_the_lock_is_released_when_the_call_breaks(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session)
+
+        with patch.object(
+            product_icons, "_attempt", new=AsyncMock(side_effect=RuntimeError("boom"))
+        ):
+            await draw_icon(product.id)
+
+        count = await db_session.scalar(
+            text(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' "
+                "AND objid = :key AND granted"
+            ),
+            {"key": product_icons.ICON_LOCK_KEY},
+        )
+        assert count == 0
+        assert (await _reload(db_session, product)).icon_status == "failed"
 
 
 def test_the_settings_have_defaults() -> None:
@@ -516,12 +826,10 @@ def test_an_aware_timestamp_gives_whole_seconds() -> None:
     )
 
 
-class TestBackfillSelection:
-    async def test_never_drawn_and_failed_are_picked_oldest_first(
+class TestBackfill:
+    async def test_never_drawn_failed_and_stale_are_picked_oldest_first(
         self, db_session: AsyncSession, categories
     ) -> None:
-        from scripts.backfill_icons import products_to_draw
-
         never = await _product(db_session, "Never drawn")
         failed = await _product(db_session, "Failed")
         failed.icon_status = "failed"  # type: ignore[assignment]
@@ -534,16 +842,69 @@ class TestBackfillSelection:
             other.icon_status = status  # type: ignore[assignment]
         await db_session.commit()
 
-        picked = await products_to_draw(db_session)
+        picked = await product_icons.products_to_draw(db_session)
 
-        assert [row[0] for row in picked] == [never.id, failed.id]
+        assert [p.id for p in picked] == [never.id, failed.id]
 
     async def test_the_limit_caps_it(
         self, db_session: AsyncSession, categories
     ) -> None:
-        from scripts.backfill_icons import products_to_draw
-
         for name in ("A", "B", "C"):
             await _product(db_session, name)
 
-        assert len(await products_to_draw(db_session, limit=2)) == 2
+        assert len(await product_icons.products_to_draw(db_session, limit=2)) == 2
+
+    async def test_it_skips_what_changed_since_the_list_was_read(
+        self, db_session: AsyncSession, categories, session_factory
+    ) -> None:
+        """Review #8: the list was read once, so it redrew what the API had just drawn."""
+        from scripts.backfill_icons import backfill
+
+        first = await _product(db_session, "First")
+        drawn_meanwhile = await _product(db_session, "Drawn by the API")
+        cleared_meanwhile = await _product(db_session, "Cleared by the cook")
+        started_meanwhile = await _product(db_session, "Started by the API")
+        drawn: list = []
+
+        async def draw(product_id, hint=None):
+            drawn.append(product_id)
+            # While the first one is drawn, the API and the cook get to the others.
+            for product, status in (
+                (first, "ready"),
+                (drawn_meanwhile, "ready"),
+                (cleared_meanwhile, "cleared"),
+                (started_meanwhile, "pending"),
+            ):
+                product.icon_status = status  # type: ignore[assignment]
+            await db_session.commit()
+
+        with patch.object(product_icons, "draw_icon", new=draw):
+            counts = await backfill(None, False, sessions=session_factory)
+
+        assert drawn == [first.id]
+        assert counts == {"ready": 1, "failed": 0, "skipped": 3}
+
+    async def test_a_dry_run_draws_nothing(
+        self, db_session: AsyncSession, categories, session_factory
+    ) -> None:
+        from scripts.backfill_icons import backfill
+
+        await _product(db_session)
+
+        with patch.object(product_icons, "draw_icon", new=AsyncMock()) as draw:
+            counts = await backfill(None, True, sessions=session_factory)
+
+        draw.assert_not_awaited()
+        assert counts == {"ready": 0, "failed": 0, "skipped": 0}
+
+    async def test_it_counts_a_failed_drawing(
+        self, db_session: AsyncSession, categories, session_factory, broadcast
+    ) -> None:
+        from scripts.backfill_icons import backfill
+
+        product = await _product(db_session)
+
+        counts = await backfill(None, False, sessions=session_factory)  # stub: nothing
+
+        assert counts == {"ready": 0, "failed": 1, "skipped": 0}
+        assert (await _reload(db_session, product)).icon_status == "failed"

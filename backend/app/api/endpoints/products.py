@@ -129,15 +129,20 @@ async def get_product(
     "", response_model=ProductMasterResponse, status_code=status.HTTP_201_CREATED
 )
 async def create_product(
-    product: ProductMasterCreate, db: AsyncSession = Depends(get_db)
+    product: ProductMasterCreate,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
 ) -> ProductMasterResponse:
     """Create a new product.
 
     Its shelf life is one somebody typed, so it is stored as the cook's (Q19) and no
-    estimate is scheduled: no estimate path may replace it.
+    estimate is scheduled: no estimate path may replace it. Its icon is drawn in the
+    background (Q18), like every other new product's.
     """
     async with handle_integrity_errors():
-        return await crud_product.create_product(db, product)
+        created = await crud_product.create_product(db, product)
+    product_icons.schedule_icons(background_tasks, [UUID(str(created.id))])
+    return created
 
 
 @router.patch("/{product_id}", response_model=ProductMasterResponse)
@@ -181,7 +186,7 @@ async def update_product(
     return product
 
 
-# Declared before `/{product_id}` routes that could read "icon.svg" as part of an id.
+# No clash with `GET /{product_id}` above: that path has one segment, this one two.
 @router.get(
     "/{product_id}/icon.svg",
     response_class=Response,
@@ -211,7 +216,7 @@ async def get_product_icon(
     svg, updated_at = stored
     etag = f'"{int(updated_at.timestamp())}"'
     headers = {
-        "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+        "Content-Security-Policy": "default-src 'none'",
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=86400",
         "ETag": etag,
@@ -544,6 +549,7 @@ async def merge_product(
 
 @router.post("/enrich")
 async def enrich_product(
+    background_tasks: BackgroundTasks,
     barcode: str = Query(
         ..., description="Product barcode to look up in Open Food Facts"
     ),
@@ -573,6 +579,8 @@ async def enrich_product(
         ).model_dump(mode="json")
 
         if created:
+            # A new product gets its icon drawn (Q18), after the response has gone.
+            product_icons.schedule_icons(background_tasks, [UUID(str(product.id))])
             return JSONResponse(
                 content=response_data, status_code=status.HTTP_201_CREATED
             )

@@ -112,7 +112,9 @@ class Settings(BaseSettings):
     # muse-glimmer out while an icon is drawn and the next receipt waits for it to load again.
     # Set it to c2.muse-glimmer to trade icon quality for no swap.
     ICON_MODEL: str = "c2.qwen3.8-27b"
-    ICON_TIMEOUT: float = 600.0  # seconds; qwen3.8-27b took up to 273 s for one drawing
+    # Seconds per request. qwen3.8-27b took 20-89 s a drawing here (2026-09-26); the spike
+    # saw 273 s on a busy GPU. A `pending` older than twice this counts as stale.
+    ICON_TIMEOUT: float = 600.0
 
     # Telegram receipt drop-in bot (MVP-T1). The bot is disabled while no token is set.
     # Receipt queue worker (python -m app.worker, MVP-R3)

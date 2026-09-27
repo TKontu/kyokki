@@ -196,9 +196,8 @@ class TestServeTheSvg:
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("image/svg+xml")
         assert response.text == product.icon_svg
-        csp = response.headers["content-security-policy"]
-        assert "default-src 'none'" in csp
-        assert "script" not in csp
+        # Nothing loads or runs: the sanitiser strips every style, so none is allowed (#12).
+        assert response.headers["content-security-policy"] == "default-src 'none'"
         assert response.headers["x-content-type-options"] == "nosniff"
         assert response.headers["etag"] == f'"{product.icon_version}"'
         assert "max-age" in response.headers["cache-control"]
@@ -345,3 +344,137 @@ class TestResponseFields:
         assert by_name["Rye bread"]["product_icon_version"] == product.icon_version
         assert by_name["Plain bread"]["product_icon_version"] is None
         assert by_name["Plain bread"]["category_icon"]
+
+
+NEW_LINE = {
+    "name": "Tomato",
+    "category": "produce",
+    "quantity": 4,
+    "unit": "pcs",
+    "purchase_date": "2026-09-01",
+}
+
+
+async def _stored(db: AsyncSession, product_id: str) -> ProductMaster:
+    stored = await _reload(db, product_id)
+    assert stored.icon_status == "ready", stored.icon_status
+    assert stored.icon_svg is not None and "<circle" in stored.icon_svg
+    return stored
+
+
+class TestEveryCreatePathDrawsTheIcon:
+    """Review #7 and #10: a new product's icon is actually stored, whichever way it came in.
+
+    The drawing call is stubbed and the job's session is the test's (see `_own_session`),
+    as `test_estimate_on_create.py` does for the estimate.
+    """
+
+    async def test_quick_add(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        response = await client.post("/api/inventory/quick-add", json=NEW_LINE)
+
+        assert response.status_code == 201
+        await _stored(seeded_db, response.json()["product_master_id"])
+        assert "Tomato (category: produce)" in model.await_args.args[0]
+
+    async def test_stock_add(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        response = await client.post("/api/stock/add", json=NEW_LINE)
+
+        assert response.status_code == 201
+        assert response.json()["product_created"] is True
+        await _stored(seeded_db, response.json()["item"]["product_master_id"])
+
+    async def test_receipt_confirm_draws_each_new_product(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        from app.models.receipt import Receipt
+
+        receipt = Receipt(
+            image_path="receipts/q18.jpg",
+            processing_status="completed",
+            ocr_structured={"lines": []},
+            items_extracted=0,
+        )
+        seeded_db.add(receipt)
+        await seeded_db.commit()
+        lines = [
+            {**NEW_LINE, "name": "Tomato", "category": "produce", "quantity": 1},
+            {**NEW_LINE, "name": "Orange", "category": "fruits", "quantity": 1},
+        ]
+
+        response = await client.post(
+            f"/api/receipts/{receipt.id}/confirm", json={"items": lines}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["products_created"] == 2
+        items = (
+            (
+                await seeded_db.execute(
+                    select(InventoryItem).where(InventoryItem.receipt_id == receipt.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for item in items:
+            await _stored(seeded_db, str(item.product_master_id))
+        assert model.await_count == 2
+
+    async def test_post_products(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        response = await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "Rye bread",
+                "category": "bread",
+                "storage_type": "pantry",
+                "default_shelf_life_days": 5,
+                "unit_type": "count",
+                "default_unit": "pcs",
+            },
+        )
+
+        assert response.status_code == 201
+        await _stored(seeded_db, response.json()["id"])
+
+    async def test_enrich_creating_a_product(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        enriched = {
+            "canonical_name": "Valio Whole Milk 1L",
+            "category": "dairy",
+            "off_product_id": "5901234123457",
+            "off_data": {"product_name": "Valio Whole Milk"},
+        }
+        with patch(
+            "app.api.endpoints.products.enrich_product_from_off", return_value=enriched
+        ):
+            response = await client.post("/api/products/enrich?barcode=5901234123457")
+
+        assert response.status_code == 201
+        await _stored(seeded_db, response.json()["id"])
+
+    async def test_enrich_updating_a_product_draws_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        existing = await _product(seeded_db, "Old name")
+        existing.off_product_id = "5901234123457"  # type: ignore[assignment]
+        await seeded_db.commit()
+        enriched = {
+            "canonical_name": "Valio Whole Milk 1L",
+            "category": "dairy",
+            "off_product_id": "5901234123457",
+            "off_data": {"product_name": "Valio Whole Milk"},
+        }
+        with patch(
+            "app.api.endpoints.products.enrich_product_from_off", return_value=enriched
+        ):
+            response = await client.post("/api/products/enrich?barcode=5901234123457")
+
+        assert response.status_code == 200
+        model.assert_not_awaited()

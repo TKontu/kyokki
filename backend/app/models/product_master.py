@@ -39,7 +39,7 @@ class ShelfLifeSource(StrEnum):
 class IconStatus(StrEnum):
     """Where a product's drawn icon stands (Q18). NULL in the column: never drawn."""
 
-    PENDING = "pending"  # the model is drawing it, or it is queued
+    PENDING = "pending"  # being drawn, or waiting for the drawing lock
     READY = "ready"
     FAILED = "failed"  # the last drawing failed; any earlier one is kept
     CLEARED = "cleared"  # the cook chose the category emoji; nothing redraws on its own
@@ -105,8 +105,9 @@ class ProductMaster(Base):
     off_product_id = Column(String, nullable=True, index=True)  # OFF barcode
     off_data = Column(JSONB, nullable=True)  # cached nutrition, image, etc.
 
-    # The icon the model drew for it (Q18): sanitised SVG markup, under 1 KB. Deferred, so
-    # listing products does not load it; only GET /products/{id}/icon.svg reads it.
+    # The icon the model drew for it (Q18): sanitised SVG markup, capped at 8 KB (drawings
+    # so far were 0.2-0.6 KB). Deferred, so listing products does not load it; only
+    # GET /products/{id}/icon.svg reads it.
     icon_svg = deferred(Column(Text, nullable=True))
     # pending (drawing), ready, failed (kept any earlier drawing) or cleared (the cook chose
     # the category emoji; nothing redraws it on its own). NULL: never drawn.

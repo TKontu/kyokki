@@ -208,11 +208,15 @@ export class APIClient {
   }
 }
 
+// Where every request goes. Default is the same-origin path proxied by the Next.js
+// rewrite (next.config.mjs) and authenticated by the middleware; NEXT_PUBLIC_API_URL
+// overrides it when the API is served from another origin. Exported for the few URLs a
+// browser element fetches itself, such as a product icon's <img src> (Q18).
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api'
+
 // Create default client instance.
-// Default is the same-origin path proxied by the Next.js rewrite (next.config.mjs);
-// NEXT_PUBLIC_API_URL overrides it when the API is served from another origin.
 const apiClient = new APIClient({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || '/api',
+  baseURL: API_BASE_URL,
 })
 
 export default apiClient

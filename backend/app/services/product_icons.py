@@ -13,9 +13,12 @@ shows it through `<img src>`, which runs no script even if something slipped thr
 `GET /products/{id}/icon.svg` serves it under a `default-src 'none'` policy on top.
 
 Drawing takes seconds to minutes, so it runs as a background job after the response has gone:
-`draw_icon()` opens its own session, never raises, and runs one drawing at a time in the
-process, because the gateway serves one request at a time. A failure keeps the previous drawing
-(or the emoji) and says `failed`; nothing in the receipt or stock path waits for an icon.
+`draw_icon()` opens its own session and never raises. The gateway serves one request at a
+time, so drawings take turns across every process (both API workers and the backfill script)
+on a Postgres advisory lock; a cook's hinted Redraw simply waits its turn. A failure keeps the
+previous drawing (or the emoji) and says `failed`, and a `pending` whose job died counts as
+stale after twice ICON_TIMEOUT, so the backfill draws it again. Nothing in the receipt or stock
+path waits for an icon.
 """
 
 import asyncio
@@ -23,9 +26,9 @@ import re
 import time
 import weakref
 import xml.etree.ElementTree as ET
-from collections.abc import Sequence
-from contextlib import AbstractAsyncContextManager
-from datetime import UTC, datetime
+from collections.abc import AsyncIterator, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -33,12 +36,13 @@ import httpx
 from defusedxml import DefusedXmlException
 from defusedxml.ElementTree import fromstring
 from fastapi import BackgroundTasks
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.db.session as app_session
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.crud import product_master as crud_product
 from app.models.product_master import IconStatus, ProductMaster
 from app.services.broadcast_helpers import broadcast_product_update
 
@@ -47,6 +51,17 @@ logger = get_logger(__name__)
 ATTEMPTS = 2
 MAX_SVG_BYTES = 8192  # the spike's drawings were 239-547 bytes
 MAX_ANSWER_BYTES = 65536  # an answer this long is not a 40 px icon; do not parse it
+# Nesting deeper than this is not a flat icon (and would recurse without end).
+MAX_DEPTH = 16
+# The Postgres advisory lock every process takes around a drawing: any fixed 64-bit number.
+ICON_LOCK_KEY = 0x4B794F18  # "KyO" + Q18
+STALE_AFTER_TIMEOUTS = 2  # a pending older than this many ICON_TIMEOUTs has no live job
+
+_REASONING_BLOCK = re.compile(
+    r"<(think|thinking|reasoning)>.*?</\1>", re.DOTALL | re.IGNORECASE
+)
+_REASONING_CLOSE = re.compile(r"</(?:think|thinking|reasoning)>", re.IGNORECASE)
+_REASONING_OPEN = re.compile(r"<(?:think|thinking|reasoning)>", re.IGNORECASE)
 VIEWBOX = "0 0 48 48"
 SVG_NS = "http://www.w3.org/2000/svg"
 
@@ -189,8 +204,9 @@ def sanitise(svg_text: str) -> tuple[str, bool]:
     is dropped. The viewBox is forced to 48x48.
 
     Raises:
-        IconRejected: not well-formed XML, a DTD or entity, no `<svg>` root, nothing drawable
-            left, or a result over MAX_SVG_BYTES.
+        IconRejected: not well-formed XML, a DTD or entity, no `<svg>` root, nesting deeper
+            than MAX_DEPTH, nothing drawable or no colour left, or a result over
+            MAX_SVG_BYTES.
     """
     if len(svg_text.encode()) > MAX_ANSWER_BYTES:
         raise IconRejected("answer too long to be an icon")
@@ -205,9 +221,11 @@ def sanitise(svg_text: str) -> tuple[str, bool]:
 
     changed = False
 
-    def clean(element: ET.Element, out: ET.Element) -> int:
+    def clean(element: ET.Element, out: ET.Element, depth: int = 0) -> int:
         """Copy what is allowed of `element` into `out`; returns the shapes kept below."""
         nonlocal changed
+        if depth > MAX_DEPTH:
+            raise IconRejected("nested too deep to be an icon")
         for name, value in element.attrib.items():
             if out.tag == "svg" and name == "viewBox":
                 continue
@@ -225,7 +243,7 @@ def sanitise(svg_text: str) -> tuple[str, bool]:
             local = _svg_name(child.tag)
             if local is not None and (local in SHAPES or local in CONTAINERS):
                 kept = ET.SubElement(out, local)
-                below = clean(child, kept)
+                below = clean(child, kept, depth + 1)
                 if local in CONTAINERS and below == 0:
                     out.remove(kept)  # an empty group draws nothing
                     changed = True
@@ -241,6 +259,14 @@ def sanitise(svg_text: str) -> tuple[str, bool]:
         changed = True
     if clean(root, cleaned) == 0:
         raise IconRejected("nothing drawable left after sanitising")
+    # Colours given as names, rgb() or style="fill:..." are dropped, and a drawing that had
+    # only those would be stored as black shapes. With no colour left it is not an icon.
+    if not any(
+        element.get(name, "none") != "none"
+        for element in cleaned.iter()
+        for name in ("fill", "stroke")
+    ):
+        raise IconRejected("no colour left after sanitising")
     cleaned.set("xmlns", SVG_NS)
     markup = ET.tostring(cleaned, encoding="unicode")
     if len(markup.encode()) > MAX_SVG_BYTES:
@@ -248,9 +274,28 @@ def sanitise(svg_text: str) -> tuple[str, bool]:
     return markup, changed
 
 
+def strip_reasoning(text: str) -> str:
+    """The answer without its reasoning, so a draft SVG in there is never taken for the icon.
+
+    Closed `<think>`/`<thinking>`/`<reasoning>` blocks are removed. A closing tag with no
+    opener (templates that put the opener in the prompt) drops everything before it, and an
+    opener that never closes drops everything after it.
+    """
+    text = _REASONING_BLOCK.sub("", text)
+    closers = list(_REASONING_CLOSE.finditer(text))
+    if closers:
+        text = text[closers[-1].end() :]
+    opener = _REASONING_OPEN.search(text)
+    if opener:
+        text = text[: opener.start()]
+    return text
+
+
 def extract_svg(text: str) -> str | None:
-    """The first `<svg>...</svg>` in the answer; reasoning or a code fence around it is fine."""
-    match = re.search(r"<svg\b.*?</svg>", text, re.DOTALL | re.IGNORECASE)
+    """The first `<svg>...</svg>` in the answer after its reasoning; a code fence is fine."""
+    match = re.search(
+        r"<svg\b.*?</svg>", strip_reasoning(text), re.DOTALL | re.IGNORECASE
+    )
     return match.group(0) if match else None
 
 
@@ -325,8 +370,15 @@ def open_session() -> AbstractAsyncContextManager[AsyncSession]:
     return app_session.AsyncSessionLocal()
 
 
-# One lock per event loop; the app runs one, so this is process-wide there. Keyed by loop so
-# a lock never outlives the loop it was bound to (each test has its own).
+def stale_before() -> datetime:
+    """A `pending` older than this has no live job behind it (a restart, a crash)."""
+    return datetime.now(UTC) - timedelta(
+        seconds=STALE_AFTER_TIMEOUTS * settings.ICON_TIMEOUT
+    )
+
+
+# One lock per event loop keeps this process's jobs in order; the app runs one loop, so this is
+# process-wide there. Keyed by loop so a lock never outlives the loop it was bound to.
 _locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock]" = (
     weakref.WeakKeyDictionary()
 )
@@ -338,6 +390,23 @@ def _job_lock() -> asyncio.Lock:
     if lock is None:
         lock = _locks[loop] = asyncio.Lock()
     return lock
+
+
+@asynccontextmanager
+async def _gateway_turn() -> AsyncIterator[None]:
+    """Hold the database-wide drawing lock: one drawing at a time across every process.
+
+    Production runs two API workers, and the backfill script is a third process; the gateway
+    serves one request at a time. A Postgres advisory lock on a session of its own is released
+    by `pg_advisory_unlock`, or by the database when the process holding it dies.
+    """
+    async with open_session() as db:
+        await db.execute(select(func.pg_advisory_lock(ICON_LOCK_KEY)))
+        try:
+            yield
+        finally:
+            await db.execute(select(func.pg_advisory_unlock(ICON_LOCK_KEY)))
+            await db.commit()
 
 
 async def draw_icon(product_id: UUID, hint: str | None = None) -> None:
@@ -370,34 +439,30 @@ def schedule_icons(
 
 async def _draw(product_id: UUID, hint: str | None) -> None:
     async with open_session() as db:
-        product = await db.get(ProductMaster, product_id)
+        product = await crud_product.get_icon_subject(db, product_id)
         if product is None or product.icon_status == IconStatus.CLEARED:
             return
         name, category = str(product.canonical_name), str(product.category)
-        if product.icon_status != IconStatus.PENDING:
-            product.icon_status = IconStatus.PENDING  # type: ignore[assignment]
-            await db.commit()
+        await crud_product.mark_icon_pending(db, product)
 
-    started = time.monotonic()
-    svg, reasons = await _attempt(build_prompt(name, category, hint))
-    seconds = round(time.monotonic() - started, 1)
-
-    async with open_session() as db:
-        product = await db.get(ProductMaster, product_id, populate_existing=True)
-        if product is None or product.icon_status != IconStatus.PENDING:
-            # Deleted, or the cook chose the emoji while it was being drawn: theirs wins.
-            logger.info(
-                "Discarding a product icon nobody wants any more",
-                extra={"product_id": str(product_id)},
-            )
-            return
-        if svg is None:
-            product.icon_status = IconStatus.FAILED  # type: ignore[assignment]
-        else:
-            product.icon_svg = svg
-            product.icon_status = IconStatus.READY  # type: ignore[assignment]
-            product.icon_updated_at = datetime.now(UTC)  # type: ignore[assignment]
-        await db.commit()
+    # From here the row says `pending`, so whatever happens it must end `failed` or better:
+    # an answer that breaks the sanitiser, a database error, anything.
+    try:
+        started = time.monotonic()
+        async with _gateway_turn():
+            svg, reasons = await _attempt(build_prompt(name, category, hint))
+        seconds = round(time.monotonic() - started, 1)
+        kept = await _keep(product_id, svg)
+    except Exception as exc:  # noqa: BLE001 - see above
+        logger.warning(
+            "Drawing a product icon broke; marking it failed",
+            extra={"product_id": str(product_id), "error": repr(exc)},
+        )
+        await _give_up(product_id)
+        await _announce(product_id, name)
+        return
+    if not kept:
+        return
 
     if svg is None:
         logger.warning(
@@ -420,6 +485,42 @@ async def _draw(product_id: UUID, hint: str | None) -> None:
                 "bytes": len(svg),
             },
         )
+    await _announce(product_id, name)
+
+
+async def _keep(product_id: UUID, svg: str | None) -> bool:
+    """Store the result unless nobody wants it any more. Whether anything was written."""
+    async with open_session() as db:
+        product = await crud_product.get_icon_subject(db, product_id)
+        if product is None or product.icon_status != IconStatus.PENDING:
+            # Deleted, or the cook chose the emoji while it was being drawn: theirs wins.
+            logger.info(
+                "Discarding a product icon nobody wants any more",
+                extra={"product_id": str(product_id)},
+            )
+            return False
+        if svg is None:
+            await crud_product.mark_icon_failed(db, product)
+        else:
+            await crud_product.store_icon(db, product, svg)
+    return True
+
+
+async def _give_up(product_id: UUID) -> None:
+    """Mark a broken job's row failed, keeping any earlier drawing. Never raises."""
+    try:
+        async with open_session() as db:
+            product = await crud_product.get_icon_subject(db, product_id)
+            if product is not None and product.icon_status == IconStatus.PENDING:
+                await crud_product.mark_icon_failed(db, product)
+    except Exception as exc:  # noqa: BLE001 - the stale-pending rule is the last resort
+        logger.warning(
+            "Could not mark a broken icon job failed; it will count as stale",
+            extra={"product_id": str(product_id), "error": repr(exc)},
+        )
+
+
+async def _announce(product_id: UUID, name: str) -> None:
     try:
         await broadcast_product_update(
             product_id, action="icon_updated", product_name=name
@@ -431,44 +532,40 @@ async def _draw(product_id: UUID, hint: str | None) -> None:
         )
 
 
-# --- what the endpoints call -----------------------------------------------------------------
+# --- what the endpoints and the backfill call ------------------------------------------------
 
 
 async def request_redraw(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
     """Mark the icon pending, so the editor says "Drawing..." at once. None: no product."""
-    product = await db.get(ProductMaster, product_id)
+    product = await crud_product.get_icon_subject(db, product_id)
     if product is None:
         return None
-    product.icon_status = IconStatus.PENDING  # type: ignore[assignment]
-    await db.commit()
+    await crud_product.mark_icon_pending(db, product)
     return product
 
 
 async def clear_icon(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
     """Drop the drawing: the tile shows the category emoji again. None: no product."""
-    product = await db.get(ProductMaster, product_id)
-    if product is None:
-        return None
-    product.icon_svg = None
-    product.icon_status = IconStatus.CLEARED  # type: ignore[assignment]
-    product.icon_updated_at = None  # type: ignore[assignment]
-    await db.commit()
-    return product
+    return await crud_product.clear_icon(db, product_id)
 
 
 async def stored_icon(
     db: AsyncSession, product_id: UUID
 ) -> tuple[str, datetime] | None:
     """The stored drawing and when it last changed; None when there is none to show."""
-    row = (
-        await db.execute(
-            select(ProductMaster.icon_svg, ProductMaster.icon_updated_at).where(
-                ProductMaster.id == product_id,
-                ProductMaster.icon_svg.is_not(None),
-                ProductMaster.icon_updated_at.is_not(None),
-            )
-        )
-    ).first()
-    if row is None:
-        return None
-    return str(row[0]), row[1]
+    return await crud_product.stored_icon(db, product_id)
+
+
+async def products_to_draw(
+    db: AsyncSession, limit: int | None = None
+) -> list[ProductMaster]:
+    """Never drawn, failed, or stale pending; oldest first."""
+    return await crud_product.products_needing_icons(db, stale_before(), limit)
+
+
+async def still_needs_drawing(db: AsyncSession, product_id: UUID) -> bool:
+    """Re-check one product right before drawing it: another job may have got there first."""
+    product = await crud_product.get_icon_subject(db, product_id)
+    return product is not None and crud_product.icon_needs_drawing(
+        product, stale_before()
+    )
