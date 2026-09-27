@@ -12,11 +12,11 @@ as printed; there are no generic names or categories without the model.
 
 These are Finnish receipt formats. Besides the last-resort fallback, the parser is used only
 as the `fi` receipt profile (`app.parsers.profiles`), which adds evidence to the
-format-agnostic completeness check and never decides alone (Q27). Two rules apply to the
-profile only (``profile_rules``), so the fallback keeps reading the whole receipt: reading stops
-at the first total, since what follows it is loyalty, payment and VAT; and a quantity or weight
-line belongs only to a product directly above it, so the `1 KPL` under a skipped deposit line
-stays with the deposit.
+format-agnostic completeness check and never decides alone (Q27). Reading stops at the
+first total, since what follows it is loyalty, payment and VAT; and a quantity or weight line
+belongs only to a product directly above it, so the `1 KPL` under a skipped deposit line stays
+with the deposit. Both rules hold for the fallback too: it runs only when the model has failed,
+and a mid-receipt SUMMA ending it early is an accepted limit of that last resort (PR #131 F8).
 """
 
 import re
@@ -99,29 +99,23 @@ class ProductBlock:
 
 def parse_receipt_blocks(
     numbered: Sequence[tuple[int | None, str]],
-    *,
-    profile_rules: bool = False,
 ) -> list[ProductBlock]:
     """The product lines of a receipt, each with the numbers of its source lines.
 
     ``numbered`` is every line of the receipt with the number it was given in the model's
     prompt, or None for a line the prompt left out; a block only cites numbered lines.
-    ``profile_rules`` (the `fi` profile) stops at the first total and lets a skipped line
-    break the chain between a product and a following KPL or KG line; the last-resort
-    fallback reads on past a mid-receipt total (Q27 verdict #12).
     """
     blocks: list[ProductBlock] = []
-    # The product a following KPL or KG line belongs to
+    # The product a following KPL or KG line belongs to; a skipped line breaks the chain
     current: ProductBlock | None = None
     for number, raw in numbered:
         line = _normalise(raw)
         if not line:
             continue
-        if profile_rules and _TOTAL.match(line):
+        if _TOTAL.match(line):
             break
         if is_skip_line(line):
-            if profile_rules:
-                current = None
+            current = None
             continue
         quantity = _QUANTITY.match(line)
         weight = None if quantity else _WEIGHT.match(line)

@@ -28,12 +28,15 @@ from app.crud.category import get_categories
 from app.models.receipt import Receipt
 from app.parsers.amounts import (
     amount_style,
-    continues_a_name,
+    clock_time,
     detail_count,
+    end_number,
     explaining_pair,
     is_detail,
     line_amount,
+    receipt_units,
     strip_amount,
+    wraps_onto,
 )
 from app.parsers.base import ExtractedLine, OtherLine, ReceiptExtraction
 from app.parsers.heuristic import parse_receipt_text
@@ -120,6 +123,15 @@ def _line_id_for(name: str, previous: dict[str, list[str]]) -> str:
 # language profile adds evidence only about lines the model neither cited nor listed: a line
 # the model accounted for is the model's call. The receipt's own arithmetic (line totals
 # against the printed total) is checked on the text and vision paths.
+#
+# Documented exemptions (planner-approved tolerances; docs/ARCHITECTURE.md, step 2 and 5):
+# - the sums (`_ruled_out_by_the_sums`): with a strict match against a total listed in `x`,
+#   an uncited or `other` priced line that would break the match is not a missed product,
+#   except the gap's size, a discount's or tax's amount, and 0,00;
+# - clock times after one short word ("KLO 11.49") outside the cited product lines count
+#   only when money is missing;
+# - a trailing unit this receipt prints in its count lines ("2,49 KPL") is not a currency;
+# - the either-way match (discounts, and tax when `te`) only once nothing is unaccounted.
 
 # Beyond this difference, in cents, the line totals do not add up to the printed total
 _SUM_TOLERANCE_CENTS = 5
@@ -134,18 +146,24 @@ class _Receipt:
 
     lines: dict[int, str]
     amounts: dict[int, float]
+    # Priced lines shaped like a clock time after one short word ("KLO 11.49"): they
+    # count only when the sums say money is missing (PR #131 F3)
+    weak: set[int] = field(default_factory=set)
 
     @classmethod
-    def of(cls, text: str) -> "_Receipt":
+    def of(cls, text: str, total: float | None = None) -> "_Receipt":
         numbered = number_receipt_lines(text)
         lines = {n: line for n, line in numbered if n is not None}
-        style = amount_style(lines.values())
+        # The model's total tells a three-decimal currency from thousands (F7)
+        style = amount_style(lines.values(), total)
+        units = receipt_units(lines.values())
         amounts = {
             n: amount
             for n, line in lines.items()
-            if (amount := line_amount(line, style)) is not None
+            if (amount := line_amount(line, style, units)) is not None
         }
-        return cls(lines=lines, amounts=amounts)
+        weak = {n for n in amounts if clock_time(lines[n])}
+        return cls(lines=lines, amounts=amounts, weak=weak)
 
     def name(self, n: int) -> str:
         return normalize_receipt_name(strip_amount(self.lines[n]))
@@ -237,10 +255,13 @@ def _attach_details(
 ) -> set[int]:
     """Uncited count or weight lines whose arithmetic proves they belong to a product.
 
-    A detail line next to a product's cited line is that product's when its numbers
-    multiply to the product's line total ("2 x 1,49" beside a 2,98), or when it carries
-    that line total itself ("0,845 kg x 1,99 1,68" under a name line). The product then
-    cites it. Returns the lines attached.
+    A count or weight line next to a product's cited line is that product's when its
+    numbers multiply to the product's line total ("2 x 1,49" beside a 2,98, "0,913 KG
+    25,00 €/KG" beside a 22,83). Only a line without a line total of its own may attach:
+    if the number at its end is not one of the two factors ("2 x 0,99 1,98", "7UP 1,5L
+    2,49"), it is an item of its own, and uncited it is unaccounted (PR #131 F2). A line
+    that starts with digits glued to letters ("7UP") is a name, never a detail line. The
+    product then cites what attached. Returns the lines attached.
     """
     attached: set[int] = set()
     for product in products:
@@ -251,13 +272,13 @@ def _attach_details(
                 if m not in open_lines or m in attached:
                     continue
                 text = receipt.lines[m]
-                amount = receipt.amounts.get(m)
-                own_total = amount is not None and abs(amount - product.price) < 0.005
-                if is_detail(text) and (
-                    own_total or explaining_pair(text, product.price) is not None
-                ):
-                    attached.add(m)
-                    product.source_lines = sorted({*product.source_lines, m})
+                pair = explaining_pair(text, product.price)
+                if not is_detail(text) or pair is None:
+                    continue
+                if m in receipt.amounts and end_number(text) not in pair:
+                    continue  # it carries a line total of its own
+                attached.add(m)
+                product.source_lines = sorted({*product.source_lines, m})
     return attached
 
 
@@ -268,38 +289,79 @@ def _ruled_out_by_the_sums(
 ) -> Callable[[int], bool]:
     """Whether the receipt's own arithmetic proves a priced line is not a missed product.
 
-    The rule (Q27 verdict #3): the model's arithmetic - its line totals with its discounts,
-    deposits and fees, and its tax on a tax-exclusive receipt - must match the printed total
-    it read, and that total must be one it also listed in `x` as a line of kind `total` (a
-    subtotal or a loyalty sum read as `t` proves nothing). Then the money on the receipt is
-    in the products, and a line is not a missed product when adding its amount would break
-    that match (a loyalty sum, a card slip, a VAT row). A line whose amount is what the sums
-    lack, within the tolerance, is still re-read: on a large receipt the 1 % tolerance
-    could otherwise hide a missed 0,52. Without a total, with a total the sums miss, or with
-    `t` read from a line the model did not call the total, nothing is ruled out.
+    The rule (Q27 verdict #3, PR #131 F1): the model's arithmetic - its line totals with
+    all its discounts, deposits and fees, and its tax on a receipt it marked tax-exclusive
+    - must match the printed total it read *strictly* (not "with or without the
+    discount"), and that total must be one it also listed in `x` as a line of kind
+    `total` (a subtotal or a loyalty sum read as `t` proves nothing). Then the money on the
+    receipt is in the products, and a line is not a missed product when adding its amount
+    would break that match (a loyalty sum, a card slip, a VAT row).
+
+    Exceptions, each re-read like any unaccounted line:
+    - a line whose amount is what the sums lack, within the tolerance: on a large receipt
+      the 1 % tolerance could otherwise hide a missed 0,52;
+    - a line whose amount equals a discount or tax the match relied on: that amount may be
+      the product and the discount or tax line the explanation ("buy 2 pay 1", a missed
+      item priced like the VAT on a receipt wrongly marked tax-exclusive);
+    - a 0,00 line: it changes no sum, and a free product still belongs in the kitchen
+      (F12). Only a 0,00 line the model listed in `x` is accounted for, by `x`.
+    Without a total, with a total the sums miss, or with `t` read from a line the model did
+    not call the total, nothing is ruled out.
     """
     total = extraction.receipt_total
     items_sum, off = receipt_arithmetic(
-        first, extraction.other_lines, total, extraction.tax_exclusive
+        first,
+        extraction.other_lines,
+        total,
+        extraction.tax_exclusive,
+        either_way=False,
     )
-    listed_totals = {
+    if items_sum is None or total is None or off:
+        return lambda _n: False
+    if round(total * 100) not in _listed_totals(extraction, receipt):
+        return lambda _n: False
+    gap = total - items_sum
+    tolerance = max(_SUM_TOLERANCE_CENTS / 100, abs(total) / 100)
+    kinds = ("discount", "tax") if extraction.tax_exclusive else ("discount",)
+    relied_on = {
+        round(abs(o.amount) * 100)
+        for o in extraction.other_lines
+        if o.kind in kinds and o.amount is not None
+    }
+
+    def ruled_out(n: int) -> bool:
+        amount = receipt.amounts.get(n)
+        if amount is None or amount == 0 or round(abs(amount) * 100) in relied_on:
+            return False
+        return abs(amount - gap) > tolerance
+
+    return ruled_out
+
+
+def _listed_totals(extraction: ReceiptExtraction, receipt: _Receipt) -> set[int]:
+    """The totals, in cents, the model listed in `x` on a line of kind `total`."""
+    return {
         round(o.amount * 100)
         for o in extraction.other_lines
         if o.kind == "total" and o.amount is not None and o.line in receipt.lines
     }
-    if items_sum is None or total is None or off:
-        return lambda _n: False
-    if round(total * 100) not in listed_totals:
-        return lambda _n: False
-    gap = total - items_sum
-    tolerance = max(_SUM_TOLERANCE_CENTS / 100, abs(total) / 100)
 
-    def ruled_out(n: int) -> bool:
-        amount = receipt.amounts.get(n)
-        # a line of 0.00 changes no sum: it cannot be missing money
-        return amount is not None and (amount == 0 or abs(amount - gap) > tolerance)
 
-    return ruled_out
+def _money_missing(
+    extraction: ReceiptExtraction, first: list[ExtractedLine], receipt: _Receipt
+) -> bool:
+    """Whether the strict sums miss a total the model listed: money may be missing."""
+    total = extraction.receipt_total
+    if total is None or round(total * 100) not in _listed_totals(extraction, receipt):
+        return False
+    items_sum, off = receipt_arithmetic(
+        first,
+        extraction.other_lines,
+        total,
+        extraction.tax_exclusive,
+        either_way=False,
+    )
+    return items_sum is None or off
 
 
 def _accounted_others(
@@ -354,8 +416,9 @@ def _raw_group(n: int, receipt: _Receipt, free: set[int]) -> list[int]:
                 and explaining_pair(lines[m], amounts[n]) is not None
             ):
                 group.add(m)
-        # Only a name's own first half joins it: a line that the priced line continues
-        if unpriced_name(before) and continues_a_name(lines[n]):
+        # Only a name's own first half joins it: a line that the priced line continues,
+        # in lower case or, on an all-caps till, in capitals (PR #131 F9)
+        if unpriced_name(before) and wraps_onto(lines[before], lines[n]):
             group.add(before)
     return sorted(group)
 
@@ -406,6 +469,7 @@ def receipt_arithmetic(
     others: list[OtherLine],
     total: float | None,
     tax_exclusive: bool = False,
+    either_way: bool = True,
 ) -> tuple[float | None, bool]:
     """Σ line totals plus signed discounts, deposits and fees; and whether it misses the total.
 
@@ -414,8 +478,13 @@ def receipt_arithmetic(
     discount that is already taken off the line total (S-kaupat's NORM./ALENNUS pair),
     others take it off at the end; a receipt matching either way is not a mismatch. Tax
     lines count only when the model says the line totals leave the tax out (`te`, as on a
-    US receipt); elsewhere the tax is already inside every line total, and a receipt the
-    model wrongly marked tax-exclusive still matches without it.
+    US receipt); elsewhere the tax is already inside every line total.
+
+    `either_way` (PR #131 F1): the match with or without the discounts, and - a
+    planner-approved tolerance for a mis-set `te`, measured on the Croatian receipt - with
+    or without the tax on a receipt marked tax-exclusive. It is used only once no priced
+    line is left unaccounted; before that, only the strict sum may rule a line out, so the
+    tolerance never hides a missed product whose price equals a discount or the tax.
     """
     prices = [p.price for p in products if p.price is not None]
     if not prices:
@@ -433,8 +502,8 @@ def receipt_arithmetic(
     tolerance = max(_SUM_TOLERANCE_CENTS, abs(total_cents) / 100)
     # A discount or (on a receipt marked tax-exclusive) the tax may already be inside the
     # line totals; a receipt that matches either way is not a mismatch
-    for with_discounts in (True, False) if discounts else (True,):
-        for with_taxes in (True, False) if taxes else (True,):
+    for with_discounts in (True, False) if discounts and either_way else (True,):
+        for with_taxes in (True, False) if taxes and either_way else (True,):
             cents = round(
                 (
                     sum(prices)
@@ -614,12 +683,20 @@ async def reconcile_text_read(
     Model products the checks cannot place are kept as read; nothing is dropped, and a
     failing re-read never fails the receipt.
     """
-    receipt = _Receipt.of(text)
-    lines, priced = receipt.lines, set(receipt.amounts)
+    receipt = _Receipt.of(text, extraction.receipt_total)
+    lines = receipt.lines
     first = _split_repeats(list(extraction.lines), receipt)
 
     cited = _cite(first, receipt, set())
     listed = {o.line for o in extraction.other_lines if o.line in lines}
+    # A clock-time-shaped line ("KLO 11.49") outside the products the model read (a
+    # header or footer time) needs accounting only when the sums say money is missing;
+    # then a missed "KIWI 0.59" is re-read like any priced line (F3). Between the first
+    # and the last product line it is an item ("MILK 1.29"), total or not
+    priced = set(receipt.amounts)
+    if not _money_missing(extraction, first, receipt):
+        inside = range(min(cited) + 1, max(cited)) if cited else range(0)
+        priced -= {n for n in receipt.weak if n not in inside}
     ruled_out = _ruled_out_by_the_sums(extraction, first, receipt)
     accounted = cited | _accounted_others(extraction.other_lines, receipt, ruled_out)
     # Only a line with an amount on it has to be accounted for; the model lists no other
@@ -677,13 +754,19 @@ async def reconcile_text_read(
     final = first + recovered + raw_rows
     # A raw row keeps the amount it was cut from, so a recovered line alone never reads
     # as "something may be missing" (verdict #10)
-    items_sum, off = receipt_arithmetic(
-        final, others, extraction.receipt_total, extraction.tax_exclusive
-    )
-    extraction.lines = final
     # After recovery a priced line is left over only if no row took it (normally none)
     in_rows = {n for row in raw_rows for n in row.source_lines}
     left_over = {n for n in still if n in priced and n not in in_rows}
+    # With every priced line accounted for, a discount or tax already inside the line
+    # totals may explain the match (F1: never before)
+    items_sum, off = receipt_arithmetic(
+        final,
+        others,
+        extraction.receipt_total,
+        extraction.tax_exclusive,
+        either_way=not left_over,
+    )
+    extraction.lines = final
     missed = len(recovered) + len(raw_rows)
     note = _join_notes(
         f"{missed} of {len(final)} lines were not read by the model and were recovered"
@@ -889,19 +972,34 @@ class ReceiptProcessingService:
                 text, extraction, categories, receipt_id=str(receipt.id)
             )
 
-    async def _still_processing(self, receipt_id: Any) -> bool:
-        """Whether the row is still `processing`, locked until the result is committed.
-
-        The lock makes `fail_stale` wait for this write instead of racing it.
-        """
-        status = (
+    async def _claim(self, receipt_id: Any) -> datetime | None:
+        """This worker's claim on the receipt: the `processing_started_at` it runs under."""
+        started_at: datetime | None = (
             await self.db.execute(
-                select(Receipt.processing_status)
+                select(Receipt.processing_started_at).where(Receipt.id == receipt_id)
+            )
+        ).scalar_one_or_none()
+        return started_at
+
+    async def _owns_claim(self, receipt_id: Any, claim: datetime | None) -> bool:
+        """Whether the row is still `processing` under this worker's claim.
+
+        The row stays locked (`FOR UPDATE`) until the caller commits its write, so
+        `fail_stale` or a requeue waits for that write instead of racing it. The claim is
+        the processing-start timestamp, not the status alone: a receipt failed as stale,
+        queued and claimed again by another worker is `processing` too, but not ours
+        (PR #131 F13). Both the result and the failure path take this lock (F14).
+        """
+        row = (
+            await self.db.execute(
+                select(Receipt.processing_status, Receipt.processing_started_at)
                 .where(Receipt.id == receipt_id)
                 .with_for_update()
             )
-        ).scalar_one_or_none()
-        return status == ReceiptStatus.PROCESSING
+        ).one_or_none()
+        if row is None or row.processing_status != ReceiptStatus.PROCESSING:
+            return False
+        return claim is None or row.processing_started_at == claim
 
     async def process_receipt(self, receipt: Receipt) -> ProcessingResult:
         """Process a receipt through the full pipeline and update the record."""
@@ -909,6 +1007,7 @@ class ReceiptProcessingService:
         receipt_id = receipt.id  # a rollback expires the object; keep its key
         timings = ReadTimings()
         started = time.monotonic()
+        claim: datetime | None = None
         try:
             if receipt.processing_status != ReceiptStatus.PROCESSING:
                 # Called directly rather than through the queue worker, which already claimed it
@@ -918,6 +1017,7 @@ class ReceiptProcessingService:
                 await broadcast_receipt_status(
                     receipt_id=receipt.id, status=ReceiptStatus.PROCESSING
                 )
+            claim = await self._claim(receipt_id)
             logger.info(f"Starting processing for receipt {receipt.id}")
 
             categories = [
@@ -996,12 +1096,13 @@ class ReceiptProcessingService:
                 if product is not None:
                     matched += 1
 
-            if not await self._still_processing(receipt_id):
-                # `fail_stale` failed it while it was being read (or it was queued again):
-                # the cook already sees that status, so this result is not written over it
+            if not await self._owns_claim(receipt_id, claim):
+                # `fail_stale` failed it while it was being read, or it was queued or even
+                # claimed again: that status stands, so this result is not written over it
                 await self.db.rollback()
                 logger.warning(
-                    "Receipt is no longer processing; its read result is not written",
+                    "Receipt is no longer processing under this claim; its read result "
+                    "is not written",
                     extra={
                         "receipt_id": str(receipt_id),
                         "total_seconds": round(time.monotonic() - started, 1),
@@ -1082,21 +1183,23 @@ class ReceiptProcessingService:
 
             # The session may hold a failed flush; start clean before recording the failure
             await self.db.rollback()
-            await self.db.refresh(receipt)
-            if receipt.processing_status == ReceiptStatus.PROCESSING:
+            if await self._owns_claim(receipt_id, claim):
+                await self.db.refresh(receipt)
                 row.processing_status = ReceiptStatus.FAILED
                 row.error = error_msg
                 _keep_failed_answer(row, e)
                 await self.db.commit()
 
                 await broadcast_receipt_status(
-                    receipt_id=receipt.id, status=ReceiptStatus.FAILED, error=error_msg
+                    receipt_id=receipt_id, status=ReceiptStatus.FAILED, error=error_msg
                 )
+            else:
+                await self.db.rollback()
             logger.error(
                 error_msg,
                 exc_info=True,
                 extra={
-                    "receipt_id": str(receipt.id),
+                    "receipt_id": str(receipt_id),
                     "error": error_msg,
                     "ocr_seconds": round(timings.ocr_seconds, 1),
                     "llm_seconds": round(timings.llm_seconds, 1),

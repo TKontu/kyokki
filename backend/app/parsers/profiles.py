@@ -60,7 +60,7 @@ class FinnishProfile:
                 quantity=block.line.quantity,
                 weight_kg=block.line.weight_kg,
             )
-            for block in parse_receipt_blocks(numbered_text, profile_rules=True)
+            for block in parse_receipt_blocks(numbered_text)
             if block.line_numbers
         ]
 
