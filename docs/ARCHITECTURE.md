@@ -291,7 +291,9 @@ receipt from any shop, country or language, and nothing in the core knows a rece
    MVP-R3b parser) may add only lines the model neither cited nor listed. It never overrides
    the model and never decides alone.
 5. *Arithmetic.* Σ line totals, raw rows included, ± discounts, deposits and fees (and the
-   tax when `te`) is compared with `t` in whole cents within max(5 cents, 1 %). Once no
+   tax when `te`) is compared with `t` in whole cents within max(5 cents, 1 %). A discount
+   line that a product cites in `l` (S-kaupat's `NORM.`/`ALENNUS` pair) is inside that
+   product's line total and is not taken off again. Once no
    priced line is left unaccounted, the match may also hold either way: with or without the
    discounts (a discount already inside a line total), and on a receipt marked `te` with or
    without the tax (a planner-approved tolerance for a mis-set `te`, seen on the Croatian

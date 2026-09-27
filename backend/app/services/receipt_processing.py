@@ -490,7 +490,16 @@ def receipt_arithmetic(
     if not prices:
         return None, False
     kinds = _SIGNED_KINDS + (("tax",) if tax_exclusive else ())
-    amounts = [o for o in others if o.kind in kinds and o.amount is not None]
+    # A discount line a product cites in `l` ("NORM. 5,64 / ALENNUS -1,14" under a 4,50)
+    # is inside that product's line total: counting it again would miss the total
+    cited = {n for p in products for n in p.source_lines}
+    amounts = [
+        o
+        for o in others
+        if o.kind in kinds
+        and o.amount is not None
+        and not (o.kind == "discount" and o.line is not None and o.line in cited)
+    ]
     discounts = sum(-abs(o.amount or 0) for o in amounts if o.kind == "discount")
     charges = sum(o.amount or 0 for o in amounts if o.kind not in ("discount", "tax"))
     taxes = sum(o.amount or 0 for o in amounts if o.kind == "tax")

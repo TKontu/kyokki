@@ -2370,6 +2370,36 @@ class TestSuspectAndUnpricedLines:
         assert outcome.note is None
         assert len(outcome.extraction.lines) == 2
 
+    async def test_a_discount_the_product_cites_is_inside_its_line_total(
+        self, no_unplanned_re_read
+    ):
+        """Measured live on S-kaupat after F1: `NORM. 5,64 / ALENNUS -1,14` under a
+        4,50 product, cited in its `l` and also listed in `x` as a discount. The
+        discount is inside that line total, so the strict sums match without the
+        either-way tolerance, and the uncited loyalty sum needs no re-read."""
+        text = (
+            "SHOP\nKAURAJUOMA 4,50\n3 KPL 1,88 €/KPL\nNORM. 5,64\nALENNUS -1,14\n"
+            "LEIPÄ 2,10\nYHTEENSÄ 6,60\nBONUS OSTOT 6,60\n"
+        )
+        answer = ReceiptExtraction(
+            method="text",
+            lines=[
+                ExtractedLine(name="KAURAJUOMA", source_lines=[2, 3, 4, 5], price=4.5),
+                ExtractedLine(name="LEIPÄ", source_lines=[6], price=2.1),
+            ],
+            other_lines=[
+                OtherLine(line=5, kind="discount", amount=-1.14),
+                OtherLine(line=7, kind="total", amount=6.6),
+            ],
+            receipt_total=6.6,
+        )
+
+        outcome = await reconcile_text_read(text, answer, CATEGORY_OPTIONS)
+
+        no_unplanned_re_read.assert_not_awaited()
+        assert outcome.note is None
+        assert outcome.completeness["items_sum"] == 6.6
+
     async def test_a_zero_amount_line_listed_in_x_needs_no_re_read(
         self, no_unplanned_re_read
     ):
