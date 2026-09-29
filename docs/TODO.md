@@ -2036,6 +2036,42 @@ not rulings.
   (`feat/fridge-look-shell`: colours, living window with moon phase, theme toggle on a concealed
   settings page, no Scan, the door reaching the freezer, larder sections for condiments and a new
   `spices` category).
+  **Round 2026-09-27-3 is merged and deployed (2026-09-27; #131, #129, #130; docs #128).**
+  - **Q27 hardening (#131):** all 26 post-merge findings on #125 plus the 21 of #131's own review are
+    fixed: a missed product can no longer hide behind a discount/tax either-way match or be absorbed
+    as a neighbour's detail line; a structural, open amount parser (any currency symbol or code,
+    thousands groups, no-cents receipts, masked card/phone digits rejected, 3 decimals only when the
+    total has 3); the stale window follows the whole per-receipt budget (28 min by default; a lower
+    configured value is raised) and the final/failure writes check the worker's own claim under a row
+    lock; `LLM_ESTIMATE_TIMEOUT` (180) for estimates and product selection; the vision path lists
+    priced non-products; `te` for tax-exclusive totals; real ISO language/country codes; the Finnish
+    fallback keeps its own rules. Live on the final code: K 15/15 and S-kaupat 49/49 with 0 raw rows,
+    0 re-reads and matching totals. #131 merged after its fix pass without a second review panel.
+    Remaining limit: on a receipt with no listed total, a time-shaped line before the first or after
+    the last cited product is not re-read.
+  - **Q18 exact-emoji trial (#129, spike):** 191 names → 167 food (**109 exact, 58 gap** with icon
+    briefs) + 24 non-food (no icon). Operator rulings, decided per product under the principle "It
+    needs to be precise, so it doesn't require cognitive effort" (`docs/spikes/Q18_exact_emoji.md`).
+    The model alone: precision ~0.97, recall ~0.70 against the rulings → the build uses a per-product
+    table seeded with the rulings, the model only for new products, a person confirming.
+  - **Q29-Q36 fridge look and shell (#130):** pastel blue frame, beige background, light wood; the
+    window shows time of day and the moon phase; System/Light/Dark theme on a settings page behind
+    "⋯"; no Scan in the bar; the door reaches the freezer; larder shelves for pantry, sauces and
+    condiments, and a new `spices` category.
+  - Follow-ups:
+    - [ ] Q18 build: `product_master.emoji` + match state, seeded from the ruled table; skip non-food;
+      the 58 gap products (and future ones) get generated emoji-style images via ComfyUI behind
+      llama-swap (waiting for the operator's details); retire the SVG drawing.
+    - [ ] #130 low follow-ups: the "Sauces & condiments" label clips its emoji; "⋯" sits at the
+      bottom of the landscape rail; forced Dark does not recolour the status bar (`themeColor`); the
+      `spices` plausible band (30-1825 d) would reject a correct fresh-herb estimate; the category pin
+      is a hand-kept list; `page.test.tsx` was converted CRLF→LF.
+    - [ ] A pre-existing circular import (`app.services.storage` ↔ `app.schemas.category`) when
+      `test_storage.py` runs alone.
+    - [ ] The "1 of 15 categories" answer recurred once in a live K read (rows and prices right,
+      categories nearly empty); the raw answer is now stored on real receipts — capture one.
+    - [ ] `LLM_MAX_TOKENS` 8192 truncates some long first reads (2 of 9 K reads); the operator to
+      decide whether to raise it to 16384.
 - **Q28 — the receipt and what the model made of it cannot be audited.** After processing, the iPad
   shows only the extracted rows. There is no way to see the receipt image or PDF, the OCR text,
   or the model's raw answer, and no way back to a confirmed receipt's contents. The API already
@@ -2048,16 +2084,17 @@ not rulings.
 
 **Operator actions and rulings still needed:**
 - [ ] Run "Re-estimate all (keeps yours)" on `/products`: dry run, read the proposal, apply.
-- [ ] Set `RECEIPT_STALE_MINUTES=25` (and `LLM_TIMEOUT=420` if the stack sets it explicitly) before
-  deploying round 2026-09-27-2; then re-upload the K-Citymarket PDF and check all 15 lines arrive.
+- [x] ~~Set `RECEIPT_STALE_MINUTES=25`~~ — automatic since #131 (the window follows the timeouts; a
+  lower configured value is raised). Re-upload the K-Citymarket PDF and check all 15 lines arrive.
+- [ ] Decide `LLM_MAX_TOKENS` (8192 now; 16384 recommended against truncated long reads).
 - [ ] Q18 icons: the LLM-drawn SVGs are rejected (operator, 2026-09-27). Stop them with
   `ICON_MODEL=none` and clear them (`UPDATE product_master SET icon_svg=NULL, icon_status=NULL,
   icon_updated_at=NULL`). New direction: exact Apple emoji only (no closest match), the rest
   generated as emoji-style images through ComfyUI behind llama-swap (details from the operator).
 - [x] Q27 triage: done 2026-09-27 from `GET /api/receipts/{id}` (see Q27).
 - [x] Q18 storage: **the SVG in the database** (ruling 2026-09-26).
-- [ ] Deploy round 2026-09-26-9 (`alembic upgrade head` for the icon columns), then run
-  `backend/scripts/backfill_icons.py --dry-run` and without it (about 50 s per product on qwen).
+- [x] ~~Deploy round 2026-09-26-9 … run `backfill_icons.py`~~ — deployed; the backfill is superseded
+  (the SVG icons were rejected).
 - [ ] Correct a few packed items' dates on the iPad (tortillas, cream, spread) and check that the
   next pack of each arrives with a sensible date.
 
@@ -2283,7 +2320,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [ ] C1 Q27 hardening  [ ] C2 exact-emoji trial  [ ] C3 Q29-Q36 fridge look and shell. Then Q18 image generation (ComfyUI), Q26 + Q28
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Next: the Q18 emoji build (+ ComfyUI gaps when the details arrive), Q26 + Q28, #130 follow-ups
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
