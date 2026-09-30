@@ -4,8 +4,9 @@ The operator's rule (2026-09-27): a product shows an Apple emoji only when one n
 that food - its CLDR short name names the same thing a cook means by the product's generic
 name. The closest match is never used; everything without an exact emoji goes on the gap
 list, to get a generated emoji-style image later. This script asks the model, in batches, for
-each product's exact emoji (or none) from the reference list in `scripts/emoji_food.json`,
-checks every answer against that list, and writes a Markdown table plus CSV and JSON.
+each product's exact emoji (or none) from the reference list in
+`app/resources/emoji_reference.json`, checks every answer against that list, and writes a
+Markdown table plus CSV and JSON.
 
 This is a spike tool, not part of the app: it changes nothing in the database.
 
@@ -30,6 +31,7 @@ import argparse
 import asyncio
 import csv
 import json
+import math
 import re
 import sys
 import time
@@ -42,7 +44,16 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 
-REFERENCE_FILE = Path(__file__).resolve().parent / "emoji_food.json"
+# Moved under app/resources for the Q18 build (docs/spikes/Q18_exact_emoji.md,
+# "Recommendation for the build"): the app reads the same file, and its household emoji were
+# dropped there, because the operator ruled non-food gets no icon at all. This script still
+# works unchanged; --build-reference on this cutoff would only regenerate food and plants.
+REFERENCE_FILE = (
+    Path(__file__).resolve().parent.parent
+    / "app"
+    / "resources"
+    / "emoji_reference.json"
+)
 # iPad 8th gen runs iPadOS 17/18. Emoji 15.1 arrived in iPadOS 17.4 and 16.0 only in 18.4,
 # so 15.1 is the newest version every supported iPad renders once it is up to date.
 DEFAULT_CUTOFF = "15.1"
@@ -50,8 +61,10 @@ MATCHES = ("exact", "borderline", "none")
 OUTCOMES = (*MATCHES, "invalid", "missing")
 VARIATION_SELECTOR = "\ufe0f"
 
-# The whole Food & Drink group, the plant subgroups, and the household goods a grocery
-# receipt carries (by CLDR name, from any other group).
+# The whole Food & Drink group, the plant subgroups, and named animals sold as food (by CLDR
+# name, from any other group). No household goods: the operator ruled non-food gets no icon at
+# all (2026-09-27, docs/spikes/Q18_exact_emoji.md "Not applicable: non-food"), so the shipped
+# reference never offers one to propose or pick.
 FOOD_GROUPS = {"Food & Drink"}
 PLANT_SUBGROUPS = {"plant-flower", "plant-other"}
 EXTRA_NAMES = {
@@ -64,27 +77,6 @@ EXTRA_NAMES = {
     "squid",
     "oyster",
     "chicken",
-    # household
-    "soap",
-    "roll of paper",
-    "sponge",
-    "toothbrush",
-    "lotion bottle",
-    "broom",
-    "basket",
-    "bucket",
-    "razor",
-    "bubbles",
-    "safety pin",
-    "wastebasket",
-    "shopping bags",
-    "candle",
-    "light bulb",
-    "battery",
-    "pill",
-    "adhesive bandage",
-    "thermometer",
-    "syringe",
 }
 
 
@@ -360,6 +352,31 @@ def _message_content(body: Any) -> str:
     return str(message.get("content") or "")
 
 
+# A cold start takes 2-5 minutes (the preamble); never below that, whatever --timeout is.
+MIN_GATEWAY_TIMEOUT = 300.0
+# How long to wait out a draining gateway's 503 when it gives no usable Retry-After.
+DEFAULT_RETRY_WAIT = 5.0
+
+
+def _retry_wait(response: httpx.Response) -> float:
+    """Seconds to wait before retrying a 503: `Retry-After` if it is usable, else a default.
+
+    Never below 1s, and never a bad header value: `float()` parses "nan" and "inf" without
+    raising, and a negative wait would retry at once, so both are rejected the same as a
+    header that does not parse at all.
+    """
+    retry_after = response.headers.get("Retry-After")
+    wait = DEFAULT_RETRY_WAIT
+    if retry_after:
+        try:
+            parsed = float(retry_after)
+        except ValueError:
+            parsed = float("nan")
+        if math.isfinite(parsed) and parsed >= 0:
+            wait = parsed
+    return max(wait, 1.0)
+
+
 def post_chat(
     payload: dict[str, Any],
     *,
@@ -368,21 +385,49 @@ def post_chat(
     timeout: float,
     transport: httpx.BaseTransport | None = None,
 ) -> str:
-    """One chat completion. Raises GatewayError on any failure."""
-    try:
-        with httpx.Client(
-            timeout=httpx.Timeout(timeout, connect=10.0), transport=transport
-        ) as client:
-            response = client.post(
-                f"{url.rstrip('/')}/chat/completions",
-                json=payload,
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
+    """One chat completion, retrying a draining gateway's 503 within the timeout budget.
+
+    The gateway requires a key since 2026-09-30 (the preamble): `api_key` is always sent as
+    a bearer token. A timeout is never retried - a cold start already spent most of it - and
+    every request, including a retry after a 503 wait, gets what is left of the budget, not
+    the full timeout again. A 401/403 is reported without the key and raised; every other
+    failure raises GatewayError.
+    """
+    budget = max(timeout, MIN_GATEWAY_TIMEOUT)
+    deadline = time.monotonic() + budget
+    while True:
+        remaining = deadline - time.monotonic()
+        try:
+            with httpx.Client(
+                timeout=httpx.Timeout(remaining, connect=10.0), transport=transport
+            ) as client:
+                response = client.post(
+                    f"{url.rstrip('/')}/chat/completions",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+        except httpx.TimeoutException as exc:
+            raise GatewayError(f"request timed out: {exc!r}") from exc
+        except httpx.HTTPError as exc:
+            raise GatewayError(repr(exc)) from exc
+
+        if response.status_code == 503:
+            wait = _retry_wait(response)
+            if time.monotonic() + wait >= deadline:
+                raise GatewayError("gateway draining (503) with no time left")
+            time.sleep(wait)
+            continue
+
+        if response.status_code in (401, 403):
+            print("the LLM gateway rejected LLM_API_KEY", file=sys.stderr, flush=True)
+            raise GatewayError(f"gateway auth failed: {response.status_code}")
+
+        try:
             response.raise_for_status()
             body = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise GatewayError(repr(exc)) from exc
-    return _message_content(body)
+        except (httpx.HTTPError, ValueError) as exc:
+            raise GatewayError(repr(exc)) from exc
+        return _message_content(body)
 
 
 # --- the answers -------------------------------------------------------------------------

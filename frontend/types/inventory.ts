@@ -22,6 +22,10 @@ export interface InventoryItem {
   // Version of the product's drawn icon (Q18), for productsAPI.iconUrl. Null or absent: no
   // drawing, show category_icon. Optional so fixtures written before Q18 still type-check.
   product_icon_version?: number | null
+  // The product's exact Apple emoji (Q18 build), already gated server-side to an `exact` or
+  // `cook` match; null otherwise, even mid-proposal (lib/productIcon.ts has the precedence).
+  // Optional so fixtures written before this build still type-check.
+  product_emoji?: string | null
   receipt_id: string | null // UUID
   initial_quantity: number // Decimal, sent as a JSON number (DEC-2)
   current_quantity: number // Decimal, sent as a JSON number (DEC-2)

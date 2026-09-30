@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.models.product_master import IconStatus, ShelfLifeSource
+from app.models.product_master import EmojiMatch, IconStatus, ShelfLifeSource
 from app.schemas.types import JsonDecimal, canonicalize_units
 from app.services.units import unit_type_for
 
@@ -125,10 +125,40 @@ class ProductMasterResponse(ProductMasterBase):
         None,
         description="Version for /products/{id}/icon.svg?v=; null: no drawing, show the emoji",
     )
+    emoji: str | None = Field(
+        None,
+        description=(
+            "The exact Apple emoji (Q18 build), one from GET /products/emoji/reference; "
+            "shown on the tile only when emoji_match is exact or cook"
+        ),
+    )
+    emoji_match: EmojiMatch | None = Field(
+        None,
+        description=(
+            "exact (the curated table, or a confirmed proposal), proposed (the model's "
+            "answer, not yet confirmed - never shown), none (the gap list, or rejected), "
+            "cook (set by hand) or cleared (the cook chose no emoji); null: never looked up"
+        ),
+    )
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ProductEmojiRequest(BaseModel):
+    """The cook's own choice for a product's emoji (Q18 build)."""
+
+    emoji: str | None = Field(
+        None, description="One from GET /products/emoji/reference; null clears it"
+    )
+
+
+class EmojiReferenceEntry(BaseModel):
+    """One pickable emoji, for the product edit sheet."""
+
+    emoji: str
+    name: str
 
 
 class IconRedrawRequest(BaseModel):

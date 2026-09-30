@@ -9,7 +9,13 @@ import {
   isAPIError,
   isNetworkError,
 } from '../index'
-import type { IconRedrawRequest, IconStatus } from '../product'
+import type {
+  EmojiMatch,
+  EmojiReferenceEntry,
+  IconRedrawRequest,
+  IconStatus,
+  ProductEmojiRequest,
+} from '../product'
 
 describe('TypeScript Types', () => {
   describe('Type Compilation', () => {
@@ -78,6 +84,22 @@ describe('TypeScript Types', () => {
       expect(product.icon_version).toBe(1790000000)
       expect(item.product_icon_version).toBeNull()
       expect(redraw.hint).toBe('oval rye pastry')
+    })
+
+    it('should carry the exact emoji fields (Q18 build)', () => {
+      const matches: EmojiMatch[] = ['exact', 'proposed', 'none', 'cook', 'cleared']
+      const product: Pick<ProductMaster, 'emoji' | 'emoji_match'> = {
+        emoji: '🧀',
+        emoji_match: 'exact',
+      }
+      const item: Pick<InventoryItem, 'product_emoji'> = { product_emoji: null }
+      const request: ProductEmojiRequest = { emoji: null }
+      const entry: EmojiReferenceEntry = { emoji: '🥦', name: 'broccoli' }
+      expect(matches).toHaveLength(5)
+      expect(product.emoji).toBe('🧀')
+      expect(item.product_emoji).toBeNull()
+      expect(request.emoji).toBeNull()
+      expect(entry.name).toBe('broccoli')
     })
 
     it('should compile Category type', () => {

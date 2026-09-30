@@ -68,11 +68,36 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
-function renderPage(products: ProductMaster[], estimate?: CatalogEstimateResponse) {
+function renderPage(initialProducts: ProductMaster[], estimate?: CatalogEstimateResponse) {
   const calls: string[] = []
+  // Mutable, so confirming or rejecting an emoji (Q18 build) is reflected on the next
+  // refetch, exactly as the real API's write would be.
+  let products = initialProducts
   server.use(
-    http.get(`${API_URL}/products`, () => HttpResponse.json(products)),
+    http.get(`${API_URL}/products`, ({ request }) => {
+      // Mirrors the real filter: the review list asks for `emoji_match=proposed` as a
+      // second, independent query alongside the main list.
+      const emojiMatch = new URL(request.url).searchParams.get('emoji_match')
+      const matching = emojiMatch
+        ? products.filter((p) => p.emoji_match === emojiMatch)
+        : products
+      return HttpResponse.json(matching)
+    }),
     http.get(`${API_URL}/categories`, () => HttpResponse.json(CATEGORIES)),
+    http.post(`${API_URL}/products/:id/emoji/confirm`, ({ params }) => {
+      const updated = { ...products.find((p) => p.id === params.id), emoji_match: 'exact' }
+      products = products.map((p) => (p.id === params.id ? (updated as ProductMaster) : p))
+      return HttpResponse.json(updated)
+    }),
+    http.post(`${API_URL}/products/:id/emoji/reject`, ({ params }) => {
+      const updated = {
+        ...products.find((p) => p.id === params.id),
+        emoji_match: 'none',
+        emoji: null,
+      }
+      products = products.map((p) => (p.id === params.id ? (updated as ProductMaster) : p))
+      return HttpResponse.json(updated)
+    }),
     http.get(`${API_URL}/products/:id/names`, () =>
       HttpResponse.json({ names: [], printed: [] })
     ),
@@ -401,5 +426,57 @@ describe('the shelf-life audit (H58)', () => {
 
     expect(screen.getByRole('heading', { name: 'Meat & Poultry' })).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: 'Shelf-life audit' })).not.toBeInTheDocument()
+  })
+})
+
+// Q18 build: a proposal is never shown on a tile until a person confirms it here.
+describe('Emoji to confirm', () => {
+  function reviewSection() {
+    return screen.getByRole('region', { name: 'Emoji to confirm' })
+  }
+
+  it('lists a product with a proposed emoji', async () => {
+    renderPage([
+      product({ id: 'p-new', canonical_name: 'Brand New Thing', emoji: '🥨', emoji_match: 'proposed' }),
+      product(),
+    ])
+
+    expect(await screen.findByRole('region', { name: 'Emoji to confirm' })).toHaveTextContent(
+      'Brand New Thing'
+    )
+    expect(reviewSection()).toHaveTextContent('🥨')
+  })
+
+  it('is absent when nothing is proposed', async () => {
+    renderPage([product()])
+
+    await screen.findByText('Ground beef')
+    expect(screen.queryByRole('region', { name: 'Emoji to confirm' })).not.toBeInTheDocument()
+  })
+
+  it('confirms with one tap', async () => {
+    renderPage([
+      product({ id: 'p-new', canonical_name: 'Brand New Thing', emoji: '🥨', emoji_match: 'proposed' }),
+    ])
+    await screen.findByRole('region', { name: 'Emoji to confirm' })
+
+    fireEvent.click(within(reviewSection()).getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Emoji to confirm' })).not.toBeInTheDocument()
+    )
+  })
+
+  it('rejects with one tap', async () => {
+    renderPage([
+      product({ id: 'p-new', canonical_name: 'Brand New Thing', emoji: '🥨', emoji_match: 'proposed' }),
+    ])
+    await screen.findByRole('region', { name: 'Emoji to confirm' })
+
+    fireEvent.click(within(reviewSection()).getByRole('button', { name: 'Reject' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('region', { name: 'Emoji to confirm' })).not.toBeInTheDocument()
+    )
   })
 })

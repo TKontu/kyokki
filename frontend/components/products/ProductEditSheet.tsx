@@ -19,6 +19,11 @@
  * **Redraw** queues a new drawing, optionally with the cook's words ("oval rye pastry with rice
  * filling"), and **Use category emoji** drops the drawing. Neither waits for Save: they act on
  * the icon at once, and the drawing lands minutes later. The drawing loads only as an <img>.
+ *
+ * The Q18 build adds the exact Apple emoji, ahead of the drawing in the same preview
+ * (lib/productIcon.ts has the one precedence rule). A `proposed` emoji shows **Confirm** and
+ * **Reject**; otherwise the picker below is limited to `GET /products/emoji/reference`, plus
+ * "No emoji". None of it waits for Save either.
  */
 
 import { useState } from 'react'
@@ -36,11 +41,16 @@ import { useCategories } from '@/hooks/useCategories'
 import { useToast } from '@/hooks/useToast'
 import {
   useClearProductIcon,
+  useConfirmProductEmoji,
+  useEmojiReference,
   useRedrawProductIcon,
+  useRejectProductEmoji,
+  useSetProductEmoji,
   useUpdateProduct,
 } from '@/hooks/useProducts'
 import { iconUrl } from '@/lib/api/products'
 import { isAPIError } from '@/lib/api/errors'
+import { resolveProductIcon } from '@/lib/productIcon'
 import type { Unit } from '@/types/inventory'
 import { useFieldEdit } from '@/hooks/useFieldEdit'
 import { FieldMoved } from '@/components/ui/FieldMoved'
@@ -77,16 +87,23 @@ export function ProductEditSheet({
   const categories = useCategories()
   const redraw = useRedrawProductIcon()
   const clearIcon = useClearProductIcon()
+  const emojiReference = useEmojiReference()
+  const setEmoji = useSetProductEmoji()
+  const confirmEmoji = useConfirmProductEmoji()
+  const rejectEmoji = useRejectProductEmoji()
   const [hint, setHint] = useState('')
-  // What the last icon action answered, until the product itself catches up with it.
-  const [iconAnswer, setIconAnswer] = useState<ProductMaster | null>(null)
+  // What the last icon or emoji action answered, until the product itself catches up (both
+  // act at once, outside Save, so this sheet's own prop is briefly behind the server).
+  const [liveAnswer, setLiveAnswer] = useState<ProductMaster | null>(null)
   const [brokenIcon, setBrokenIcon] = useState<number | null>(null)
-  const iconProduct =
-    iconAnswer && Date.parse(iconAnswer.updated_at) >= Date.parse(product.updated_at)
-      ? iconAnswer
+  const liveProduct =
+    liveAnswer && Date.parse(liveAnswer.updated_at) >= Date.parse(product.updated_at)
+      ? liveAnswer
       : product
-  const iconVersion = iconProduct.icon_version ?? null
-  const iconStatus = iconProduct.icon_status ?? null
+  const iconVersion = liveProduct.icon_version ?? null
+  const iconStatus = liveProduct.icon_status ?? null
+  const emoji = liveProduct.emoji ?? null
+  const emojiMatch = liveProduct.emoji_match ?? null
 
   // Each field follows the product until the cook touches it, and says so if what they are
   // editing moves underneath them (H25) - two cooks on two screens is the case this is for.
@@ -147,7 +164,7 @@ export function ProductEditSheet({
     ?.frozen_shelf_life_days
   const categoryEmoji = sortedCategories.find((c) => c.id === product.category)?.icon ?? ''
 
-  const iconError = (error: unknown, fallback: string) => {
+  const actionError = (error: unknown, fallback: string) => {
     const readable = isAPIError(error) && error.status < 500 && error.message
     toast.error(readable ? error.message : fallback)
   }
@@ -156,17 +173,17 @@ export function ProductEditSheet({
       { id: product.id, hint },
       {
         onSuccess: (updated) => {
-          setIconAnswer(updated)
+          setLiveAnswer(updated)
           setHint('')
         },
-        onError: (error) => iconError(error, 'Could not ask for a new drawing'),
+        onError: (error) => actionError(error, 'Could not ask for a new drawing'),
       }
     )
   }
-  const chooseEmoji = () => {
+  const useCategoryIcon = () => {
     clearIcon.mutate(product.id, {
-      onSuccess: (updated) => setIconAnswer(updated),
-      onError: (error) => iconError(error, 'Could not change the icon'),
+      onSuccess: (updated) => setLiveAnswer(updated),
+      onError: (error) => actionError(error, 'Could not change the icon'),
     })
   }
   const iconNote =
@@ -179,6 +196,36 @@ export function ProductEditSheet({
           : iconStatus === null
             ? 'Not drawn yet'
             : null
+
+  const pickEmoji = (chosen: string | null) => {
+    setEmoji.mutate(
+      { id: product.id, emoji: chosen },
+      {
+        onSuccess: (updated) => setLiveAnswer(updated),
+        onError: (error) => actionError(error, 'Could not change the emoji'),
+      }
+    )
+  }
+  const onConfirmEmoji = () => {
+    confirmEmoji.mutate(product.id, {
+      onSuccess: (updated) => setLiveAnswer(updated),
+      onError: (error) => actionError(error, 'Could not confirm this emoji'),
+    })
+  }
+  const onRejectEmoji = () => {
+    rejectEmoji.mutate(product.id, {
+      onSuccess: (updated) => setLiveAnswer(updated),
+      onError: (error) => actionError(error, 'Could not reject this emoji'),
+    })
+  }
+  const emojiNote =
+    emojiMatch === 'proposed'
+      ? 'A guess, waiting to be confirmed'
+      : emojiMatch === 'cook'
+        ? 'Your own choice'
+        : emojiMatch === 'exact'
+          ? 'Exact match'
+          : null
 
   const submit = () => {
     save.mutate(
@@ -223,22 +270,30 @@ export function ProductEditSheet({
         <legend className={fieldLabelClass}>Icon</legend>
         <div className="mt-1 flex items-center gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-ui border border-ui-border dark:border-ui-dark-border">
-            {iconVersion !== null && iconVersion !== brokenIcon ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={iconUrl(product.id, iconVersion)}
-                alt=""
-                aria-hidden="true"
-                width={40}
-                height={40}
-                className="h-10 w-10"
-                onError={() => setBrokenIcon(iconVersion)}
-              />
-            ) : (
-              <span aria-hidden="true" className="text-3xl leading-none">
-                {categoryEmoji}
-              </span>
-            )}
+            {(() => {
+              const preview = resolveProductIcon({
+                emoji,
+                emojiMatch,
+                iconVersion: iconVersion !== brokenIcon ? iconVersion : null,
+                categoryIcon: categoryEmoji,
+              })
+              return preview.kind === 'drawn' ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={iconUrl(product.id, preview.version)}
+                  alt=""
+                  aria-hidden="true"
+                  width={40}
+                  height={40}
+                  className="h-10 w-10"
+                  onError={() => setBrokenIcon(preview.version)}
+                />
+              ) : (
+                <span aria-hidden="true" className="text-3xl leading-none">
+                  {preview.kind === 'none' ? '' : preview.value}
+                </span>
+              )
+            })()}
           </div>
           {iconNote && <p className={fieldHintClass}>{iconNote}</p>}
         </div>
@@ -268,11 +323,82 @@ export function ProductEditSheet({
               variant="ghost"
               size="sm"
               loading={clearIcon.isPending}
-              onClick={chooseEmoji}
+              onClick={useCategoryIcon}
             >
               Use category emoji
             </Button>
           )}
+        </div>
+      </fieldset>
+
+      <fieldset className="mb-4">
+        <legend className={fieldLabelClass}>Emoji</legend>
+        {emojiMatch === 'proposed' && (
+          <div className="mt-1 flex items-center gap-3">
+            <span aria-hidden="true" className="text-3xl leading-none">
+              {emoji}
+            </span>
+            <p className={fieldHintClass}>{emojiNote}</p>
+            <Button
+              size="sm"
+              loading={confirmEmoji.isPending}
+              onClick={onConfirmEmoji}
+            >
+              Confirm
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={rejectEmoji.isPending}
+              onClick={onRejectEmoji}
+            >
+              Reject
+            </Button>
+          </div>
+        )}
+        {emojiMatch !== 'proposed' && emojiNote && (
+          <p className={`${fieldHintClass} mt-1`}>{emojiNote}</p>
+        )}
+        <div
+          role="group"
+          aria-label="Pick an emoji"
+          className="mt-2 max-h-40 overflow-y-auto rounded-ui border border-ui-border p-2 dark:border-ui-dark-border"
+        >
+          <div className="flex flex-wrap gap-1">
+            <button
+              type="button"
+              title="No emoji"
+              aria-label="No emoji"
+              aria-pressed={emojiMatch === 'cleared'}
+              disabled={setEmoji.isPending}
+              onClick={() => pickEmoji(null)}
+              className={`flex h-9 w-9 items-center justify-center rounded-ui border text-base ${
+                emojiMatch === 'cleared'
+                  ? 'border-ui-text bg-ui-text text-white dark:border-ui-dark-text dark:bg-ui-dark-text dark:text-ui-dark-bg'
+                  : 'border-ui-border text-ui-text dark:border-ui-dark-border dark:text-ui-dark-text'
+              }`}
+            >
+              ∅
+            </button>
+            {(emojiReference.data ?? []).map((entry) => (
+              <button
+                key={entry.emoji}
+                type="button"
+                title={entry.name}
+                aria-label={entry.name}
+                aria-pressed={emoji === entry.emoji && emojiMatch === 'cook'}
+                disabled={setEmoji.isPending}
+                onClick={() => pickEmoji(entry.emoji)}
+                className={`flex h-9 w-9 items-center justify-center rounded-ui border text-xl ${
+                  emoji === entry.emoji && emojiMatch === 'cook'
+                    ? 'border-ui-text bg-ui-text dark:border-ui-dark-text dark:bg-ui-dark-text'
+                    : 'border-ui-border dark:border-ui-dark-border'
+                }`}
+              >
+                {entry.emoji}
+              </button>
+            ))}
+          </div>
         </div>
       </fieldset>
 

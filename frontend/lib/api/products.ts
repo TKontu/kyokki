@@ -1,7 +1,9 @@
 import apiClient, { API_BASE_URL } from './client'
 import type {
   CatalogEstimateResponse,
+  EmojiReferenceEntry,
   IconRedrawRequest,
+  ProductEmojiRequest,
   ProductListParams,
   ProductMaster,
   ProductMasterUpdate,
@@ -91,6 +93,30 @@ export async function clearIcon(id: string): Promise<ProductMaster> {
   return apiClient.delete<ProductMaster>(`/products/${id}/icon`)
 }
 
+/** The pickable emoji (Q18 build): the product edit sheet's picker. */
+export async function emojiReference(): Promise<EmojiReferenceEntry[]> {
+  return apiClient.get<EmojiReferenceEntry[]>('/products/emoji/reference')
+}
+
+/**
+ * The cook's own emoji choice (Q18 build): an emoji sets `cook`, null sets `cleared`.
+ * Neither is ever overwritten by a table lookup or a backfill again.
+ */
+export async function setEmoji(id: string, emoji: string | null): Promise<ProductMaster> {
+  const body: ProductEmojiRequest = { emoji }
+  return apiClient.put<ProductMaster>(`/products/${id}/emoji`, body)
+}
+
+/** Confirm the model's proposal (Q18 build): it becomes exact and shows on the tile. */
+export async function confirmEmoji(id: string): Promise<ProductMaster> {
+  return apiClient.post<ProductMaster>(`/products/${id}/emoji/confirm`, {})
+}
+
+/** Reject the model's proposal (Q18 build): it goes on the gap list. */
+export async function rejectEmoji(id: string): Promise<ProductMaster> {
+  return apiClient.post<ProductMaster>(`/products/${id}/emoji/reject`, {})
+}
+
 const productsAPI = {
   list,
   get,
@@ -102,5 +128,9 @@ const productsAPI = {
   iconUrl,
   redrawIcon,
   clearIcon,
+  emojiReference,
+  setEmoji,
+  confirmEmoji,
+  rejectEmoji,
 }
 export default productsAPI

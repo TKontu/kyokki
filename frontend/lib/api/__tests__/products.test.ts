@@ -1,8 +1,17 @@
 /**
- * The product icon calls (Q18): the image URL, Redraw and Use category emoji.
+ * The product icon calls (Q18): the image URL, Redraw and Use category emoji. Also the
+ * exact emoji calls (Q18 build): the reference list, the cook's own choice, and confirm/reject.
  */
 
-import productsAPI, { clearIcon, iconUrl, redrawIcon } from '../products'
+import productsAPI, {
+  clearIcon,
+  confirmEmoji,
+  emojiReference,
+  iconUrl,
+  redrawIcon,
+  rejectEmoji,
+  setEmoji,
+} from '../products'
 import { server, API_URL } from '@/test/msw/server'
 import { http, HttpResponse } from 'msw'
 
@@ -85,5 +94,78 @@ describe('clearIcon', () => {
     const product = await clearIcon('p-1')
 
     expect(product.icon_status).toBe('cleared')
+  })
+})
+
+describe('emojiReference', () => {
+  it('lists the pickable emoji', async () => {
+    server.use(
+      http.get(`${API_URL}/products/emoji/reference`, () =>
+        HttpResponse.json([{ emoji: '🥦', name: 'broccoli' }])
+      )
+    )
+
+    const entries = await emojiReference()
+
+    expect(entries).toEqual([{ emoji: '🥦', name: 'broccoli' }])
+  })
+})
+
+describe('setEmoji', () => {
+  it('puts the chosen emoji', async () => {
+    let body: unknown
+    server.use(
+      http.put(`${API_URL}/products/p-1/emoji`, async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ id: 'p-1', emoji: '🥨', emoji_match: 'cook' })
+      })
+    )
+
+    const product = await setEmoji('p-1', '🥨')
+
+    expect(body).toEqual({ emoji: '🥨' })
+    expect(product.emoji_match).toBe('cook')
+  })
+
+  it('puts null to clear it', async () => {
+    let body: unknown
+    server.use(
+      http.put(`${API_URL}/products/p-1/emoji`, async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ id: 'p-1', emoji: null, emoji_match: 'cleared' })
+      })
+    )
+
+    await setEmoji('p-1', null)
+
+    expect(body).toEqual({ emoji: null })
+  })
+})
+
+describe('confirmEmoji', () => {
+  it('posts to confirm and returns the product', async () => {
+    server.use(
+      http.post(`${API_URL}/products/p-1/emoji/confirm`, () =>
+        HttpResponse.json({ id: 'p-1', emoji: '🥨', emoji_match: 'exact' })
+      )
+    )
+
+    const product = await confirmEmoji('p-1')
+
+    expect(product.emoji_match).toBe('exact')
+  })
+})
+
+describe('rejectEmoji', () => {
+  it('posts to reject and returns the product', async () => {
+    server.use(
+      http.post(`${API_URL}/products/p-1/emoji/reject`, () =>
+        HttpResponse.json({ id: 'p-1', emoji: null, emoji_match: 'none' })
+      )
+    )
+
+    const product = await rejectEmoji('p-1')
+
+    expect(product.emoji_match).toBe('none')
   })
 })

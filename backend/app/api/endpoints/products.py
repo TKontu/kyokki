@@ -28,7 +28,9 @@ from app.models.product_master import IconStatus
 from app.schemas.product_master import (
     CatalogEstimateChange,
     CatalogEstimateResponse,
+    EmojiReferenceEntry,
     IconRedrawRequest,
+    ProductEmojiRequest,
     ProductMasterCreate,
     ProductMasterResponse,
     ProductMasterUpdate,
@@ -41,7 +43,7 @@ from app.schemas.product_names import (
     ProductNamesResponse,
 )
 from app.schemas.stock import ResolveResponse, TeachNameRequest
-from app.services import product_icons, product_lookup
+from app.services import product_emoji, product_icons, product_lookup
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
     broadcast_product_update,
@@ -75,11 +77,29 @@ TEACH_ROUTE = "POST /api/products/{product_id}/names"
 @router.get("", response_model=list[ProductMasterResponse])
 async def list_products(
     search: str | None = Query(None, description="Search by product name"),
+    emoji_match: str | None = Query(
+        None,
+        description=(
+            "Filter by emoji_match (Q18 build), e.g. `proposed` for the review list"
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> list[ProductMasterResponse]:
     """Get all products with optional search filter."""
-    products = await crud_product.get_products(db, search=search)
+    products = await crud_product.get_products(
+        db, search=search, emoji_match=emoji_match
+    )
     return products
+
+
+# Declared before `/{product_id}`, for the same reason as `/resolve` above.
+@router.get("/emoji/reference", response_model=list[EmojiReferenceEntry])
+async def list_emoji_reference() -> list[EmojiReferenceEntry]:
+    """The pickable emoji (Q18 build): every product's tile and the edit sheet's picker."""
+    return [
+        EmojiReferenceEntry(emoji=entry["e"], name=entry["name"])
+        for entry in product_emoji.load_reference()
+    ]
 
 
 @router.get("/barcode/{barcode}", response_model=ProductMasterResponse)
@@ -265,6 +285,96 @@ async def clear_product_icon(
     """Use the category emoji instead of a drawing (Q18). Only Redraw draws it again."""
     async with handle_integrity_errors():
         product = await product_icons.clear_icon(db, product_id)
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with ID '{product_id}' not found",
+        )
+    await broadcast_product_update(
+        product_id, action="icon_updated", product_name=str(product.canonical_name)
+    )
+    return product
+
+
+@router.put("/{product_id}/emoji", response_model=ProductMasterResponse)
+async def set_product_emoji(
+    product_id: UUID,
+    request: ProductEmojiRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ProductMasterResponse:
+    """The cook's own emoji choice (Q18 build): an emoji sets `cook`, null sets `cleared`.
+
+    Neither the on-create table lookup nor a backfill ever overwrites either state again.
+
+    Returns:
+        - 400: `emoji` is not one of `GET /products/emoji/reference`.
+        - 404: no such product.
+    """
+    try:
+        async with handle_integrity_errors():
+            product = await product_emoji.set_cook_choice(db, product_id, request.emoji)
+    except product_emoji.UnknownEmoji as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with ID '{product_id}' not found",
+        )
+    await broadcast_product_update(
+        product_id, action="icon_updated", product_name=str(product.canonical_name)
+    )
+    return product
+
+
+@router.post("/{product_id}/emoji/confirm", response_model=ProductMasterResponse)
+async def confirm_product_emoji(
+    product_id: UUID, db: AsyncSession = Depends(get_db)
+) -> ProductMasterResponse:
+    """Confirm the model's proposal (Q18 build): it becomes `exact` and shows on the tile.
+
+    The generic name is learned, so the same name is never proposed again.
+
+    Returns:
+        - 404: no such product.
+        - 409: the product's emoji is not `proposed`.
+    """
+    try:
+        async with handle_integrity_errors():
+            product = await product_emoji.confirm(db, product_id)
+    except product_emoji.NotProposed as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+    if product is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Product with ID '{product_id}' not found",
+        )
+    await broadcast_product_update(
+        product_id, action="icon_updated", product_name=str(product.canonical_name)
+    )
+    return product
+
+
+@router.post("/{product_id}/emoji/reject", response_model=ProductMasterResponse)
+async def reject_product_emoji(
+    product_id: UUID, db: AsyncSession = Depends(get_db)
+) -> ProductMasterResponse:
+    """Reject the model's proposal (Q18 build): it becomes `none`, on the gap list.
+
+    Returns:
+        - 404: no such product.
+        - 409: the product's emoji is not `proposed`.
+    """
+    try:
+        async with handle_integrity_errors():
+            product = await product_emoji.reject(db, product_id)
+    except product_emoji.NotProposed as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     if product is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
