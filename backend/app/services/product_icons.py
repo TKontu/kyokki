@@ -45,6 +45,7 @@ from app.core.logging import get_logger
 from app.crud import product_master as crud_product
 from app.models.product_master import IconStatus, ProductMaster
 from app.services.broadcast_helpers import broadcast_product_update
+from app.services.llm_http import LLMAuthError, post_chat
 
 logger = get_logger(__name__)
 
@@ -324,13 +325,11 @@ async def _complete(prompt: str) -> str:
         }
     try:
         async with httpx.AsyncClient(timeout=settings.ICON_TIMEOUT) as client:
-            response = await client.post(
-                f"{settings.LLM_BASE_URL}/chat/completions",
-                json=payload,
-                headers={"Authorization": f"Bearer {settings.LLM_API_KEY}"},
-            )
+            response = await post_chat(client, payload, budget=settings.ICON_TIMEOUT)
             response.raise_for_status()
             body = response.json()
+    except LLMAuthError as exc:
+        raise IconModelError(str(exc)) from exc
     except (httpx.HTTPError, ValueError) as exc:
         raise IconModelError(f"Icon request failed: {exc!r}") from exc
     try:
