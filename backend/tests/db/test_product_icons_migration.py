@@ -39,7 +39,7 @@ class TestTheRevision:
         assert _load_migration().down_revision == "9c91d21d50ed"
 
     def test_history_stays_one_line_through_it(self) -> None:
-        # Was "the only head" until a later revision followed it.
+        # Was "the only head" until Q26's f1a2b3c4d5e6 followed it; that test owns the head now.
         script = _script()
         (head,) = script.get_heads()
         ancestors = {rev.revision for rev in script.walk_revisions("base", head)}
