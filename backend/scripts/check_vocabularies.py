@@ -18,23 +18,27 @@ no TypeScript to disagree with. Add them here when there is.
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from enum import StrEnum
 from pathlib import Path
 
-from app.db.seed_categories import SEED_CATEGORIES
 from app.models.product_master import IconStatus, ShelfLifeSource
 from app.models.product_name import NameSource
 from app.schemas.consumption_log import ConsumptionAction
 from app.schemas.inventory_item import ExpirySource, InventoryStatus, StorageLocation
 from app.schemas.receipt import ReceiptStatus
 
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_ROOT = Path(__file__).resolve().parents[2] / "frontend"
 FRONTEND_TYPES = FRONTEND_ROOT / "types"
 #: The only backend<->frontend category pin (round 2026-09-30-1): `AREAS` in `fridge.ts`
 #: files every seeded category into an area, or it silently lands in "Other".
 FRIDGE_TS = FRONTEND_ROOT / "lib" / "fridge.ts"
+#: Read as source (below), not imported: `seed_categories.py` imports `app.db.session`, which
+#: needs Postgres/Redis settings this script has no other reason to require.
+SEED_CATEGORIES_PY = BACKEND_ROOT / "app" / "db" / "seed_categories.py"
 
 #: python enum -> (TypeScript file, exported type name)
 PAIRS: list[tuple[type[StrEnum], str, str]] = [
@@ -80,6 +84,27 @@ def _frontend_area_categories(source: str) -> set[str] | None:
     return covered
 
 
+def _seeded_category_ids(path: Path) -> set[str] | None:
+    """Every `id` in `SEED_CATEGORIES`, read as source rather than imported (see above)."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(t, ast.Name) and t.id == "SEED_CATEGORIES" for t in node.targets
+        ):
+            continue
+        try:
+            rows = ast.literal_eval(node.value)
+        except ValueError:
+            return None
+        return {row["id"] for row in rows}
+    return None
+
+
 def main() -> int:
     problems: list[str] = []
 
@@ -109,8 +134,13 @@ def main() -> int:
             f"{enum.__name__} vs {filename}:{ts_name} - {'; '.join(detail)}"
         )
 
-    seeded = {category["id"] for category in SEED_CATEGORIES}
-    if not FRIDGE_TS.exists():
+    seeded = _seeded_category_ids(SEED_CATEGORIES_PY)
+    if seeded is None:
+        problems.append(
+            f"{SEED_CATEGORIES_PY.name} has no `SEED_CATEGORIES` list; "
+            "category coverage cannot be checked"
+        )
+    elif not FRIDGE_TS.exists():
         problems.append("lib/fridge.ts is missing; category coverage cannot be checked")
     else:
         covered = _frontend_area_categories(FRIDGE_TS.read_text(encoding="utf-8"))
@@ -135,7 +165,7 @@ def main() -> int:
         return 1
 
     print(
-        f"vocabularies: {len(PAIRS)} checked, {len(seeded)} categories covered, "
+        f"vocabularies: {len(PAIRS)} checked, {len(seeded or ())} categories covered, "
         "backend and frontend agree"
     )
     return 0
