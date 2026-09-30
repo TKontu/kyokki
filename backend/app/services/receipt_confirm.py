@@ -42,6 +42,10 @@ logger = get_logger(__name__)
 
 UNKNOWN_CHAIN = "unknown"
 
+# A sane cap for a printed line, stored alongside the index so the item's sheet reads
+# right even if `ocr_structured` is later re-read differently (Q26).
+RECEIPT_LINE_TEXT_MAX_LENGTH = 500
+
 
 class ReceiptNotFound(LookupError):
     """No receipt with that id."""
@@ -87,33 +91,39 @@ class _Confirmation:
         self.resolver = ProductResolver(db)
         self.aliases: dict[str, StoreProductAlias] = {}
 
-    def line(self, position: int, item: ConfirmedItemCreate) -> dict[str, Any]:
+    def line(
+        self, position: int, item: ConfirmedItemCreate
+    ) -> tuple[int | None, dict[str, Any]]:
         """The receipt line this item refers to, by identity where the client gave one.
 
         `index` is a position among *readable* lines, so an unreadable line anywhere
         shifts every index after it and the wrong printed name gets learned as an alias.
         `line_id` does not move (H12); `index` stays for receipts read before it.
+
+        Returns the line's own stable raw position in `self.lines` alongside it (Q26):
+        by identity that is wherever `line_id` was found, which is not necessarily
+        `item.index`.
         """
         if item.line_id is not None:
             wanted = str(item.line_id)
-            for candidate in self.lines:
+            for raw_index, candidate in enumerate(self.lines):
                 if (
                     isinstance(candidate, dict)
                     and str(candidate.get("line_id") or "") == wanted
                 ):
                     if not candidate.get("name"):
                         break
-                    return candidate
+                    return raw_index, candidate
             raise InvalidConfirmItem(f"Item {position}: receipt has no line {wanted}")
 
         if item.index is None:
-            return {}
+            return None, {}
         line = self.lines[item.index] if item.index < len(self.lines) else None
         if not isinstance(line, dict) or not line.get("name"):
             raise InvalidConfirmItem(
                 f"Item {position}: receipt has no line {item.index}"
             )
-        return line
+        return item.index, line
 
     async def product(
         self, position: int, item: ConfirmedItemCreate, line: dict[str, Any]
@@ -258,7 +268,7 @@ class _Confirmation:
         self.result.aliases_learned += 1
 
     async def add(self, position: int, item: ConfirmedItemCreate) -> None:
-        line = self.line(position, item)
+        line_index, line = self.line(position, item)
         product = await self.product(position, item, line)
         inventory_item = build_inventory_item(
             product,
@@ -268,6 +278,14 @@ class _Confirmation:
             expiry_date=item.expiry_date,
             location=item.location,
             receipt_id=cast(UUID, self.receipt.id),
+        )
+        # Where this item came from on the receipt (Q26); NULL for an item added
+        # without a line (a free line, or a product-id-only item with no `index`).
+        item_row: Any = inventory_item  # Column-typed model: assign plain values
+        item_row.receipt_line_index = line_index
+        line_name = line.get("name") if line else None
+        item_row.receipt_line_text = (
+            str(line_name)[:RECEIPT_LINE_TEXT_MAX_LENGTH] if line_name else None
         )
         self.db.add(inventory_item)
         self.result.inventory_items.append((inventory_item, product))

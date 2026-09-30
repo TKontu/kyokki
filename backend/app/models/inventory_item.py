@@ -2,7 +2,16 @@ import uuid
 from datetime import UTC, datetime
 from decimal import Decimal
 
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import (
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -25,6 +34,14 @@ class InventoryItem(Base):
     receipt_id = Column(
         UUID(as_uuid=True), ForeignKey("receipt.id"), nullable=True, index=True
     )
+    # The receipt line this item was confirmed from (Q26): the stable raw position in
+    # `receipt.ocr_structured`'s line list, not the readable-only position `ExtractedItem.index`
+    # sends. NULL for a hand-added item, or one confirmed before this column existed - those
+    # show the receipt without the line (no backfill).
+    receipt_line_index = Column(Integer, nullable=True)
+    # The printed name as read, capped, kept alongside the index so the item's sheet still
+    # reads right if `ocr_structured` is ever re-read differently.
+    receipt_line_text = Column(Text, nullable=True)
 
     # Quantity (approximate tracking)
     initial_quantity = Column(Numeric(10, 2), nullable=False)

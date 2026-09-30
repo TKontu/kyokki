@@ -18,6 +18,7 @@ import type {
   Unit,
 } from '@/types/inventory'
 import type { UndoPreview, UndoResponse } from '@/types/consumption'
+import type { ItemSource } from '@/types/receipt'
 import type { Vocabulary } from '@/types/vocabulary'
 
 /** Every value of each enum the API shares with us, in the order the schemas declare them. */
@@ -105,6 +106,14 @@ export async function quickAdd(data: QuickAddRequest): Promise<InventoryItem> {
 }
 
 /**
+ * Which receipt line this item was confirmed from, for the item's sheet (Q26). Null for a
+ * hand-added item, or one whose receipt no longer exists.
+ */
+export async function source(id: string): Promise<ItemSource | null> {
+  return apiClient.get<ItemSource | null>(`/inventory/${id}/source`)
+}
+
+/**
  * Update an existing inventory item
  */
 export async function update(id: string, data: InventoryItemUpdate): Promise<InventoryItem> {
@@ -161,6 +170,7 @@ export async function undo(batchId: string): Promise<UndoResponse> {
 const inventoryAPI = {
   list,
   get,
+  source,
   create,
   quickAdd,
   update,

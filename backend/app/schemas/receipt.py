@@ -483,3 +483,82 @@ class ReceiptConfirmResponse(BaseModel):
     products_created: int = Field(0, description="New generic products created")
     aliases_learned: int = Field(0, description="Printed names learned or reinforced")
     error: str | None = Field(None, description="Error message if confirmation failed")
+
+
+class ItemSourceResponse(BaseModel):
+    """Which receipt line an inventory item was confirmed from (Q26).
+
+    `GET /api/inventory/{item_id}/source`; null when the item has no receipt, or the
+    receipt it names is gone. `line_text`/`line_index` are null for an item confirmed
+    before this was tracked, or one added without a line - the sheet then shows the
+    receipt alone.
+    """
+
+    receipt_id: UUID
+    store_chain: str | None = Field(None, description="Chain key or manual value")
+    purchase_date: date | None = Field(None, description="Purchase date")
+    line_text: str | None = Field(None, description="The printed line, as read")
+    line_index: int | None = Field(
+        None, description="The line's stable raw position in ocr_structured"
+    )
+
+    model_config = {"from_attributes": True}
+
+
+# How a receipt line's outcome reads on the audit view (Q28). `pending`: the receipt has
+# not been confirmed yet. `stocked`: it became one or more inventory items. `household`:
+# folded away as non-food. `skipped`: neither - the cook left it out.
+ReceiptLineOutcome = Literal["pending", "stocked", "household", "skipped"]
+
+
+class ReceiptAuditItemRef(BaseModel):
+    """One inventory item this receipt (or receipt line) produced."""
+
+    id: UUID
+    product_id: UUID | None = None
+    product_name: str | None = None
+
+
+class ReceiptAuditLine(BaseModel):
+    """One printed receipt line and what became of it (Q28)."""
+
+    index: int = Field(..., description="The line's stable raw position")
+    name: str = Field(..., description="Product name as printed")
+    price: float | None = Field(None, description="The line total as printed")
+    outcome: ReceiptLineOutcome
+    items: list[ReceiptAuditItemRef] = Field(
+        default_factory=list, description="Set when outcome is 'stocked'"
+    )
+
+
+class ReceiptAuditResponse(BaseModel):
+    """Everything the cook can check about how a receipt became stock (Q28).
+
+    `GET /api/receipts/{id}/audit`, for any processing status. The original file is
+    served separately, at `GET /api/receipts/{id}/file`.
+    """
+
+    id: UUID
+    store_chain: str | None = None
+    purchase_date: date | None = None
+    processing_status: ReceiptStatus
+    created_at: datetime
+    ocr_raw_text: str | None = Field(None, description="Raw OCR or PDF text")
+    model_raw_answer: str | None = Field(
+        None, description="The model's raw completion, when stored (#131)"
+    )
+    file_content_type: str | None = Field(
+        None,
+        description=(
+            "Content-Type GET /file would serve; null if the stored file is gone, so "
+            "the viewer knows whether to render an <img> or a PDF viewer"
+        ),
+    )
+    lines: list[ReceiptAuditLine] = Field(default_factory=list)
+    unlinked_items: list[ReceiptAuditItemRef] = Field(
+        default_factory=list,
+        description=(
+            "Items created from this receipt before its line index was tracked; "
+            "shown as 'created from this receipt (line unknown)'"
+        ),
+    )

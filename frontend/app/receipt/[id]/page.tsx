@@ -288,17 +288,35 @@ function initialRow(item: ExtractedItem): ReviewRow {
 
 const mainClass = 'px-6 py-4'
 
-function Frame({ children }: { children: React.ReactNode }) {
+function Frame({
+  receiptId,
+  children,
+}: {
+  receiptId?: string
+  children: React.ReactNode
+}) {
   return (
     <div>
       <header className="flex items-center justify-between border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
         <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">Receipt</h1>
-        <Link
-          href="/receipts"
-          className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
-        >
-          Back to receipts
-        </Link>
+        <span className="flex items-center gap-4">
+          {/* Everything the audit view shows (Q28) works whatever this screen made of the
+              receipt, so the link does not wait on any particular status. */}
+          {receiptId && (
+            <Link
+              href={`/receipts/${receiptId}`}
+              className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
+            >
+              Audit view
+            </Link>
+          )}
+          <Link
+            href="/receipts"
+            className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
+          >
+            Back to receipts
+          </Link>
+        </span>
       </header>
       <main className={mainClass}>{children}</main>
     </div>
@@ -348,7 +366,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
   if (isLoading) {
     return (
-      <Frame>
+      <Frame receiptId={params.id}>
         <div className="h-24 animate-pulse rounded-ui bg-gray-200 dark:bg-gray-700" aria-label="Loading receipt" />
       </Frame>
     )
@@ -356,7 +374,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
   if (isError || !receipt) {
     return (
-      <Frame>
+      <Frame receiptId={params.id}>
         <p role="alert" className="text-ui-text dark:text-ui-dark-text">
           Receipt not found.
         </p>
@@ -368,7 +386,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
   if (status === 'queued' || status === 'processing') {
     return (
-      <Frame>
+      <Frame receiptId={params.id}>
         <p className="text-ui-text dark:text-ui-dark-text">
           Still reading this receipt… it usually takes about a minute.
         </p>
@@ -378,7 +396,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
   if (status === 'failed') {
     return (
-      <Frame>
+      <Frame receiptId={params.id}>
         <p role="alert" className="mb-4 text-ui-text dark:text-ui-dark-text">
           This receipt could not be read.
         </p>
@@ -407,7 +425,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
     // when stock looks wrong could not tell you whether the model had ever run (Q9).
     const method = readMethod(receipt)
     return (
-      <Frame>
+      <Frame receiptId={params.id}>
         <p className="text-ui-text dark:text-ui-dark-text">
           {`${storeName(receipt)}, ${receiptDate(receipt)}: already added to your stock.`}
         </p>
@@ -435,7 +453,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   // actually going on and offer the one action that can move it along (H04).
   if (status !== 'completed') {
     return (
-      <Frame>
+      <Frame receiptId={params.id}>
         <p role="alert" className="mb-4 text-ui-text dark:text-ui-dark-text">
           {status === 'uploaded'
             ? 'This receipt was never queued to be read.'

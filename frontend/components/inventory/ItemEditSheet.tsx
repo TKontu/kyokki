@@ -11,6 +11,7 @@
  */
 
 import React, { useState } from 'react'
+import Link from 'next/link'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Button from '@/components/ui/Button'
 import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
@@ -19,9 +20,11 @@ import { ProductEditSheet } from '@/components/products/ProductEditSheet'
 import { FieldMoved } from '@/components/ui/FieldMoved'
 import { useDeleteInventoryItem, useUpdateInventoryItem } from '@/hooks/useInventory'
 import { useFieldEdit } from '@/hooks/useFieldEdit'
+import { useItemSource } from '@/hooks/useItemSource'
 import { useProduct } from '@/hooks/useProducts'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
+import { receiptDate, storeName } from '@/lib/receipts'
 import { isInactive, locationOptions } from '@/lib/stock'
 import type { InventoryItem, InventoryItemUpdate } from '@/types/inventory'
 
@@ -49,6 +52,8 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [editingProduct, setEditingProduct] = useState(false)
   const product = useProduct(editingProduct ? item.product_master_id : null)
+  // Nothing to fetch for a hand-added item (Q26): it has no receipt to ask about.
+  const source = useItemSource(item.receipt_id ? item.id : null)
 
   const name = item.product_name
 
@@ -189,6 +194,18 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
       <div className="flex flex-col gap-4">
         {subtitle && (
           <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">{subtitle}</p>
+        )}
+
+        {/* Where this item came from (Q26): traces "fish soup" back to the printed receipt
+            line it was confirmed from, and links to the receipt's audit view. */}
+        {source.data && (
+          <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
+            <Link href={`/receipts/${source.data.receipt_id}`} className="underline">
+              {source.data.line_text
+                ? `From ${storeName(source.data)}, ${receiptDate(source.data)}: ${source.data.line_text}`
+                : `From ${storeName(source.data)}, ${receiptDate(source.data)}`}
+            </Link>
+          </p>
         )}
 
         {/* The category is the product's, so it is changed on the product's sheet (Q25). A new

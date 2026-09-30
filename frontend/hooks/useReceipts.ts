@@ -70,6 +70,19 @@ export function useReceipt(id: string) {
   })
 }
 
+/**
+ * The audit view's data (Q28): the OCR text, the model's raw answer and each line's outcome.
+ * Available for any processing status, so it does not poll - nothing here changes once the
+ * receipt has a status the audit view can show.
+ */
+export function useReceiptAudit(id: string) {
+  return useQuery({
+    queryKey: [...receiptKeys.detail(id), 'audit'] as const,
+    queryFn: () => receiptsAPI.audit(id),
+    enabled: Boolean(id),
+  })
+}
+
 /** Receipts for the home banner and the receipts list; polls faster while one is being read. */
 export function useReceiptList(params?: ReceiptListParams) {
   return useQuery<ReceiptSummary[]>({
