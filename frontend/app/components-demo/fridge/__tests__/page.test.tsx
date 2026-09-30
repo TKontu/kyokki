@@ -7,6 +7,7 @@ import React from 'react'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { InventoryItem } from '@/types/inventory'
 import { FRIDGE_MOCKS } from '@/components/fridge-mocks'
+import { THEME_KEY } from '@/lib/theme'
 import FridgeMocksPage from '../page'
 
 jest.mock('@/hooks/useInventory')
@@ -52,6 +53,7 @@ beforeEach(() => {
   mockUseInventoryList.mockReset()
   window.history.replaceState(null, '', '/components-demo/fridge')
   document.documentElement.classList.remove('dark', 'light')
+  window.localStorage.clear()
 })
 
 describe('fridge mocks page', () => {
@@ -122,6 +124,21 @@ describe('fridge mocks page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Light' }))
     expect(document.documentElement).toHaveClass('light')
     expect(document.documentElement).not.toHaveClass('dark')
+  })
+
+  it('restores the cook\'s own theme on the way out, not the device theme (review)', () => {
+    mockItems([])
+    window.localStorage.setItem(THEME_KEY, 'dark')
+    document.documentElement.classList.add('dark') // as the real app already applied it
+    const { unmount } = render(<FridgeMocksPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Light' }))
+    expect(document.documentElement).toHaveClass('light')
+
+    unmount()
+
+    expect(document.documentElement).toHaveClass('dark')
+    expect(document.documentElement).not.toHaveClass('light')
   })
 
   it('shows the production portrait fridge beside the mocks, on sample stock (Q17-B)', () => {

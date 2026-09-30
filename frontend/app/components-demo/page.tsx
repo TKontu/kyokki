@@ -8,9 +8,14 @@ import Skeleton, { SkeletonInventoryItem, SkeletonCard } from '@/components/ui/S
 import { ExpiryBadge } from '@/components/inventory/ExpiryBadge';
 import BottomSheet from '@/components/ui/BottomSheet';
 import { useToast } from '@/hooks/useToast';
+import { applyTheme, readTheme } from '@/lib/theme';
 
 export default function ComponentsDemo() {
-  const [darkMode, setDarkMode] = useState(false);
+  // Starts from whatever is already on <html> (the cook's own choice, applied before this
+  // page mounted), so opening the demo does not itself strip a forced Dark to Light.
+  const [darkMode, setDarkMode] = useState(
+    () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+  );
   const [sheetOpen, setSheetOpen] = useState(false);
   const toast = useToast();
 
@@ -29,6 +34,9 @@ export default function ComponentsDemo() {
     } else {
       document.documentElement.classList.remove('dark');
     }
+    // Restore the cook's own choice on the way out, rather than leaving the device theme
+    // behind: this demo's local toggle must not outlive the page it was opened from.
+    return () => applyTheme(readTheme());
   }, [darkMode]);
 
   return (

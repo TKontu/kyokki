@@ -2,20 +2,28 @@
  * The theme choice (Q31): System, Light or Dark, per device, applied as a class on <html>.
  */
 
+import { THEME_COLOR_DARK, THEME_COLOR_LIGHT } from '../brand'
 import {
+  THEME_COLOR_META_ID,
   THEME_KEY,
   THEME_SCRIPT,
   applyTheme,
   effectiveTheme,
   readTheme,
   saveTheme,
+  setThemeColor,
 } from '../theme'
 
 const root = () => document.documentElement
 
+function themeColorMeta(): HTMLMetaElement | null {
+  return document.getElementById(THEME_COLOR_META_ID) as HTMLMetaElement | null
+}
+
 beforeEach(() => {
   window.localStorage.clear()
   root().classList.remove('light', 'dark')
+  themeColorMeta()?.remove()
 })
 
 describe('theme', () => {
@@ -73,11 +81,18 @@ describe('theme', () => {
     }
   })
 
-  it('follows the media query when System', () => {
+  it('follows the media query when System: no class survives to override it', () => {
+    // effectiveTheme() is a pure helper - nothing in the app calls it - so it cannot stand
+    // in for "System follows the media query" on its own; the real path is the class (or
+    // its absence) that `:root:not(.light)` / Tailwind's `darkMode` variant actually read.
     expect(effectiveTheme('system', true)).toBe('dark')
     expect(effectiveTheme('system', false)).toBe('light')
     expect(effectiveTheme('light', true)).toBe('light')
     expect(effectiveTheme('dark', false)).toBe('dark')
+
+    applyTheme('dark')
+    applyTheme('system')
+    expect(root().className).toBe('')
   })
 
   it('has a boot script that applies the stored choice before first paint', () => {
@@ -91,5 +106,62 @@ describe('theme', () => {
     new Function(THEME_SCRIPT)()
     expect(root()).not.toHaveClass('dark')
     expect(root()).not.toHaveClass('light')
+  })
+
+  describe('setThemeColor', () => {
+    it('overrides theme-color with the forced choice', () => {
+      setThemeColor('dark')
+      expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_DARK)
+
+      setThemeColor('light')
+      expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_LIGHT)
+    })
+
+    it('removes the override for System, leaving the media-query pair in charge', () => {
+      setThemeColor('dark')
+      setThemeColor('system')
+      expect(themeColorMeta()).toBeNull()
+    })
+
+    it('updates the existing tag in place rather than adding a second one', () => {
+      setThemeColor('dark')
+      setThemeColor('light')
+      expect(document.querySelectorAll(`#${THEME_COLOR_META_ID}`)).toHaveLength(1)
+    })
+  })
+
+  it('moves the status-bar colour with the class when the theme is forced (applyTheme)', () => {
+    applyTheme('dark')
+    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_DARK)
+
+    applyTheme('light')
+    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_LIGHT)
+
+    applyTheme('system')
+    expect(themeColorMeta()).toBeNull()
+  })
+
+  it("moves the status-bar colour on toggle too (saveTheme, the settings page's path)", () => {
+    saveTheme('dark')
+    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_DARK)
+  })
+
+  it('sets the same status-bar override from the boot script, before hydration can', () => {
+    window.localStorage.setItem(THEME_KEY, 'dark')
+    new Function(THEME_SCRIPT)()
+    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_DARK)
+
+    themeColorMeta()?.remove()
+    root().classList.remove('dark')
+    window.localStorage.setItem(THEME_KEY, 'light')
+    new Function(THEME_SCRIPT)()
+    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_LIGHT)
+
+    // System (no stored value): the script must not add an override
+    themeColorMeta()?.remove()
+    root().classList.remove('light')
+    window.localStorage.removeItem(THEME_KEY)
+    new Function(THEME_SCRIPT)()
+    expect(themeColorMeta()).toBeNull()
   })
 })

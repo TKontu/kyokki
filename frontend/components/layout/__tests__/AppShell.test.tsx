@@ -46,6 +46,21 @@ describe('AppShell', () => {
     )
   })
 
+  it('pins the rail to the viewport on the wide layout, so "..." is reachable without scrolling', () => {
+    renderShell()
+
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    // Viewport-high and stuck to the top on `lg`, so its foot ("...") sits at the bottom of
+    // the viewport rather than the bottom of a long page (Products, Gone, Receipts).
+    expect(nav.className).toMatch(/\blg:sticky\b/)
+    expect(nav.className).toMatch(/\blg:top-0\b/)
+    expect(nav.className).toMatch(/\blg:h-screen\b/)
+    expect(nav.className).toMatch(/\blg:self-start\b/)
+    // Portrait (the top bar, below `lg`) is unchanged: no non-`lg` sticky/height override
+    expect(nav.className).not.toMatch(/(?<!lg:)\bsticky\b/)
+    expect(nav.className).not.toMatch(/(?<!lg:)\bh-screen\b/)
+  })
+
   it('has no Scan button: scanning starts from Receipts (Q32)', () => {
     renderShell()
 
