@@ -6,7 +6,14 @@ import httpx
 import pytest
 
 from app.core.config import settings
-from app.services.llm_http import LLMAuthError, post_chat
+from app.services.llm_http import (
+    MAX_DRAIN_RETRIES,
+    MIN_REQUEST_TIMEOUT,
+    MIN_RETRY_WAIT,
+    LLMAuthError,
+    _parse_retry_after,
+    post_chat,
+)
 
 PAYLOAD = {"model": "test-model", "messages": [{"role": "user", "content": "hi"}]}
 
@@ -75,11 +82,12 @@ class TestAuthErrors:
         assert f"HTTP {status}" in message
         assert "sekret-token" not in message
 
+    @pytest.mark.parametrize("status", [401, 403])
     async def test_the_key_never_reaches_the_log_records(
-        self, monkeypatch, caplog
+        self, monkeypatch, caplog, status
     ) -> None:
         monkeypatch.setattr(settings, "LLM_API_KEY", "sekret-token")
-        transport = httpx.MockTransport(lambda request: httpx.Response(401))
+        transport = httpx.MockTransport(lambda request: httpx.Response(status))
         caplog.set_level("DEBUG")
 
         async with httpx.AsyncClient(transport=transport) as client:
@@ -165,6 +173,127 @@ class TestDrainBackoff:
 
         assert response.status_code == 500
         assert client.post.await_count == 1
+
+    async def test_two_drains_in_a_row_then_succeed(self) -> None:
+        """The docstring says "retries", not "retries once" - every consecutive drain
+        gets its own wait while the budget lasts."""
+        ok = httpx.Response(200, json={"done": True})
+        first_drain = httpx.Response(503, headers={"Retry-After": "2"})
+        second_drain = httpx.Response(503, headers={"Retry-After": "3"})
+        client = _client_answering(first_drain, second_drain, ok)
+        clock, sleep = _clock()
+
+        response = await post_chat(
+            client, PAYLOAD, budget=100.0, sleep=sleep, clock=clock
+        )
+
+        assert response.status_code == 200
+        assert client.post.await_count == 3
+        assert clock() == 5.0
+
+
+class TestRetriedRequestTimeout:
+    """Fix pass finding 1: a retry must not run with the client's full timeout again."""
+
+    async def test_the_first_request_gets_the_full_budget(self) -> None:
+        client = _client_answering(httpx.Response(200, json={}))
+
+        await post_chat(client, PAYLOAD, budget=42.0)
+
+        assert client.post.call_args_list[0].kwargs["timeout"] == 42.0
+
+    async def test_a_retry_is_bounded_by_the_remaining_budget_not_the_full_one(
+        self,
+    ) -> None:
+        ok = httpx.Response(200, json={"done": True})
+        drained = httpx.Response(503, headers={"Retry-After": "2"})
+        client = _client_answering(drained, ok)
+        clock, sleep = _clock()
+
+        await post_chat(client, PAYLOAD, budget=10.0, sleep=sleep, clock=clock)
+
+        calls = client.post.call_args_list
+        assert calls[0].kwargs["timeout"] == 10.0  # first attempt: the full budget
+        # after a 2 s drain wait, only 8 s of the 10 s budget remain
+        assert calls[1].kwargs["timeout"] == pytest.approx(8.0)
+
+    async def test_a_retrys_timeout_never_drops_below_the_floor(self) -> None:
+        # budget 2.5s, a 2s drain wait leaves 0.5s - below MIN_REQUEST_TIMEOUT (1.0s)
+        ok = httpx.Response(200, json={"done": True})
+        drained = httpx.Response(503, headers={"Retry-After": "2"})
+        client = _client_answering(drained, ok)
+        clock, sleep = _clock()
+
+        await post_chat(client, PAYLOAD, budget=2.5, sleep=sleep, clock=clock)
+
+        assert client.post.call_args_list[1].kwargs["timeout"] == MIN_REQUEST_TIMEOUT
+
+
+class TestMinimumRetryWait:
+    """Fix pass finding 2: Retry-After: 0 must not be hammered."""
+
+    async def test_a_zero_retry_after_is_floored_to_the_minimum_wait(self) -> None:
+        ok = httpx.Response(200, json={"done": True})
+        drained = httpx.Response(503, headers={"Retry-After": "0"})
+        client = _client_answering(drained, ok)
+        clock, sleep = _clock()
+
+        response = await post_chat(
+            client, PAYLOAD, budget=10.0, sleep=sleep, clock=clock
+        )
+
+        assert response.status_code == 200
+        assert clock() == MIN_RETRY_WAIT
+
+    async def test_a_sub_minimum_retry_after_is_also_floored(self) -> None:
+        ok = httpx.Response(200, json={"done": True})
+        drained = httpx.Response(503, headers={"Retry-After": "0.2"})
+        client = _client_answering(drained, ok)
+        clock, sleep = _clock()
+
+        await post_chat(client, PAYLOAD, budget=10.0, sleep=sleep, clock=clock)
+
+        assert clock() == MIN_RETRY_WAIT
+
+
+class TestDrainRetryCap:
+    """Fix pass finding 2: a persistently draining gateway must still give up."""
+
+    async def test_consecutive_drains_stop_at_the_cap_even_with_budget_to_spare(
+        self,
+    ) -> None:
+        # Always drains, with a huge budget: only the retry cap can stop this.
+        drained = httpx.Response(503, headers={"Retry-After": "0"})
+        client = _client_answering(drained)
+        clock, sleep = _clock()
+
+        response = await post_chat(
+            client, PAYLOAD, budget=1_000_000.0, sleep=sleep, clock=clock
+        )
+
+        assert response.status_code == 503
+        assert client.post.await_count == 1 + MAX_DRAIN_RETRIES
+
+
+class TestNonFiniteRetryAfter:
+    """Fix pass finding 3: float() accepts nan/inf, which must not become a wait."""
+
+    @pytest.mark.parametrize("value", ["nan", "inf", "-inf", "Infinity", "-Infinity"])
+    def test_non_finite_values_do_not_parse(self, value: str) -> None:
+        assert _parse_retry_after(value) is None
+
+    async def test_a_non_finite_retry_after_is_not_retried(self) -> None:
+        drained = httpx.Response(503, headers={"Retry-After": "nan"})
+        client = _client_answering(drained)
+        clock, sleep = _clock()
+
+        response = await post_chat(
+            client, PAYLOAD, budget=10.0, sleep=sleep, clock=clock
+        )
+
+        assert response.status_code == 503
+        assert client.post.await_count == 1
+        assert clock() == 0.0  # never slept
 
 
 class TestTimeout:

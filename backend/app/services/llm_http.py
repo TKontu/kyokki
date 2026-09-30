@@ -8,9 +8,15 @@ sent the request inline. This module is the one place that:
 - turns a 401/403 into a clear, distinct :class:`LLMAuthError` that names ``LLM_API_KEY``
   and never carries the key or any header;
 - waits out a ``503`` that carries ``Retry-After`` (the gateway draining for a redeploy),
-  as long as the wait still fits inside the caller's overall ``timeout``, then retries
-  once more; a ``503`` without ``Retry-After``, and every other status, is returned
-  exactly as httpx gave it, for the caller's own ``raise_for_status()`` to raise;
+  as long as the wait still fits inside the caller's overall ``budget``, then retries -
+  repeatedly, for as many consecutive drains as the budget allows, up to
+  ``MAX_DRAIN_RETRIES``. Each wait is at least ``MIN_RETRY_WAIT``, so a gateway that
+  answers ``Retry-After: 0`` is not hammered. A ``503`` without ``Retry-After``, and every
+  other status, is returned exactly as httpx gave it, for the caller's own
+  ``raise_for_status()`` to raise;
+- bounds every *retried* request by what remains of ``budget`` (never less than
+  ``MIN_REQUEST_TIMEOUT``), so a drain-then-slow-request cannot run to roughly twice the
+  caller's nominal timeout. The first attempt keeps the full budget;
 - never retries a timeout - that is an ``httpx.TimeoutException`` the caller already
   catches, and it propagates from here unchanged.
 
@@ -20,6 +26,7 @@ The sleep and the clock are injectable so tests never wait for real.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -36,6 +43,16 @@ logger = get_logger(__name__)
 SleepFn = Callable[[float], Awaitable[None]]
 ClockFn = Callable[[], float]
 
+# A gateway that answers "Retry-After: 0" repeatedly must not be hammered (refuter: 1,699
+# requests in 0.2 s with no floor).
+MIN_RETRY_WAIT = 1.0
+# A hard ceiling on consecutive drain retries, independent of the budget: a gateway stuck
+# draining for the whole budget must still give up, not retry indefinitely at ~1 s apart.
+MAX_DRAIN_RETRIES = 30
+# A retried request's own timeout is the remaining budget, but never less than this - a
+# retry sent with an near-zero timeout would fail before the gateway could ever answer.
+MIN_REQUEST_TIMEOUT = 1.0
+
 
 class LLMAuthError(httpx.HTTPStatusError):
     """The gateway rejected ``LLM_API_KEY`` (401/403).
@@ -45,12 +62,18 @@ class LLMAuthError(httpx.HTTPStatusError):
 
 
 def _parse_retry_after(value: str) -> float | None:
-    """Seconds, or an HTTP date (RFC 9110 10.2.3); ``None`` if neither parses."""
+    """Seconds, or an HTTP date (RFC 9110 10.2.3); ``None`` if neither parses.
+
+    ``nan``/``inf``/``-inf`` are valid ``float()`` input but not a usable wait, so they
+    count as unparseable (no retry) rather than silently becoming 0 or an endless wait.
+    """
     value = value.strip()
     try:
-        return max(0.0, float(value))
+        seconds = float(value)
     except ValueError:
         pass
+    else:
+        return max(0.0, seconds) if math.isfinite(seconds) else None
     try:
         parsed = parsedate_to_datetime(value)
     except (TypeError, ValueError, IndexError):
@@ -75,7 +98,10 @@ async def post_chat(
 
     ``budget`` is the caller's overall time allowance (the same value it gives
     ``httpx.AsyncClient(timeout=...)``) - not an `asyncio` cancellation timeout, so it is
-    named to keep clear of ASYNC109 rather than to dodge it.
+    named to keep clear of ASYNC109 rather than to dodge it. The first request gets the
+    full budget as its own timeout; a retry after a drain gets only what remains of it
+    (floored at ``MIN_REQUEST_TIMEOUT``), so one call cannot run to roughly twice the
+    caller's nominal timeout.
 
     Raises:
         LLMAuthError: the gateway answered 401 or 403.
@@ -86,9 +112,16 @@ async def post_chat(
     url = f"{settings.LLM_BASE_URL}/chat/completions"
     headers = {"Authorization": f"Bearer {settings.LLM_API_KEY}"}
     started = clock()
+    retries = 0
 
     while True:
-        response = await client.post(url, json=payload, headers=headers)
+        elapsed = clock() - started
+        request_timeout = (
+            budget if retries == 0 else max(MIN_REQUEST_TIMEOUT, budget - elapsed)
+        )
+        response = await client.post(
+            url, json=payload, headers=headers, timeout=request_timeout
+        )
 
         if response.status_code in (401, 403):
             raise LLMAuthError(
@@ -97,15 +130,18 @@ async def post_chat(
                 response=response,
             )
 
-        if response.status_code == 503:
+        if response.status_code == 503 and retries < MAX_DRAIN_RETRIES:
             retry_after = response.headers.get("Retry-After")
             wait = _parse_retry_after(retry_after) if retry_after is not None else None
-            if wait is not None and (clock() - started) + wait < budget:
-                logger.info(
-                    f"gateway draining, retrying in {wait:g} s",
-                    extra={"retry_after_seconds": wait},
-                )
-                await sleep(wait)
-                continue
+            if wait is not None:
+                wait = max(wait, MIN_RETRY_WAIT)
+                if (clock() - started) + wait < budget:
+                    logger.info(
+                        f"gateway draining, retrying in {wait:g} s",
+                        extra={"retry_after_seconds": wait},
+                    )
+                    await sleep(wait)
+                    retries += 1
+                    continue
 
         return response

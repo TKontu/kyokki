@@ -8,12 +8,15 @@ does for icons - so this exercises the real request path, not a fully mocked cli
 
 import json
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 import httpx
 import pytest
 
 from app.core.config import settings
+from app.models.receipt import Receipt
+from app.schemas.receipt import ReceiptStatus
 from app.services import (
     catalog_estimates,
     llm_extractor,
@@ -22,6 +25,7 @@ from app.services import (
 )
 from app.services.llm_extractor import CategoryOption, LLMExtractionError
 from app.services.product_icons import IconModelError
+from app.services.receipt_processing import ReceiptProcessingService
 
 CATEGORIES = [CategoryOption(id="dairy", name="Dairy & Eggs")]
 RECEIPT_TEXT = "MAITO 1,00"
@@ -175,10 +179,11 @@ class TestDrainAtEveryCallSite:
     ) -> None:
         def respond(request: httpx.Request, count: int) -> httpx.Response:
             if count == 1:
-                # A negligible wait keeps the test fast: the call sites use the real,
-                # non-injectable sleep, and the drain-backoff *logic* itself (honouring
-                # Retry-After within the timeout budget) is unit-tested with an
-                # injected clock in test_llm_http.py.
+                # The call sites use the real, non-injectable sleep, so this waits out
+                # llm_http.MIN_RETRY_WAIT for real (a real gateway would not send less
+                # than that either); the drain-backoff *logic* itself (honouring
+                # Retry-After within the timeout budget, the minimum wait, the retry
+                # cap) is unit-tested with an injected clock in test_llm_http.py.
                 return httpx.Response(503, headers={"Retry-After": "0"})
             return ok_response(request, count)
 
@@ -223,3 +228,53 @@ class TestTimeoutIsNeverRetried:
             await run()
 
         assert post.await_count == 1
+
+
+class TestAuthErrorReachesTheStoredReceiptError:
+    """Fix pass finding 4: the operator reads ``receipt.error``, not a lower-level message.
+
+    Drives a mocked gateway 401 through the real extraction call chain and
+    ``ReceiptProcessingService.process_receipt`` end to end, on the text path with no
+    heuristic fallback (no product lines to recover), which is the route where the raw
+    LLM failure reaches the receipt's stored error unfiltered.
+    """
+
+    # No product lines the heuristic parser could recover (same idea as
+    # test_receipt_processing.py's UNREADABLE_TEXT): the auth failure is not masked by a
+    # successful fallback.
+    UNREADABLE_TEXT = "S-MARKET\n~~ blurred ~~\nYHTEENSÄ 7,48"
+
+    async def test_a_401_on_the_text_path_with_no_fallback_reaches_receipt_error(
+        self, monkeypatch, db_session
+    ) -> None:
+        monkeypatch.setattr(settings, "LLM_API_KEY", "top-secret-token")
+        _route(monkeypatch, llm_extractor, lambda request, count: httpx.Response(401))
+
+        receipt = Receipt(
+            id=uuid4(),
+            image_path="/tmp/does-not-need-to-exist.png",
+            processing_status="uploaded",
+            items_extracted=0,
+            items_matched=0,
+        )
+        db_session.add(receipt)
+        await db_session.commit()
+
+        with patch(
+            "app.services.receipt_processing.extract_text_from_receipt",
+            new_callable=AsyncMock,
+            return_value=self.UNREADABLE_TEXT,
+        ):
+            service = ReceiptProcessingService(db_session)
+            result = await service.process_receipt(receipt)
+
+        assert result.success is False
+        assert result.error is not None
+        assert "LLM_API_KEY" in result.error
+        assert "top-secret-token" not in result.error
+
+        await db_session.refresh(receipt)
+        assert receipt.processing_status == ReceiptStatus.FAILED
+        assert receipt.error is not None
+        assert "LLM_API_KEY" in receipt.error
+        assert "top-secret-token" not in receipt.error

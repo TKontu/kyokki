@@ -164,7 +164,8 @@ Two honest limits:
 > - health probes and healthchecks must keep hitting `/health`, not `/v1/*` - `/health` needs
 >   no key;
 > - cold starts take 2 to 5 minutes, longer for a 27B model, so keep `LLM_TIMEOUT` and
->   `LLM_ESTIMATE_TIMEOUT` at 300 s or more (see the Q27 note above for how they are used).
+>   `LLM_ESTIMATE_TIMEOUT` at 300 s or more, preferably 600 s (see the Q27 note above for
+>   how they are used).
 >
 > No migration is involved.
 
