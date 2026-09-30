@@ -10,6 +10,10 @@ exclusive - never both in the same prompt - and each only looks right within its
 strength range:
 - ``emoji``: the 3D emoji look, strength 0.2 to 0.5.
 - ``flat``: the flat icon look, strength 0.7 to 0.8.
+
+Operator ruling (2026-09-30), quoted in full: "Flat. No faces." ``flat`` is therefore the
+default style (``emoji`` stays available for an explicit call), and the negative prompt
+excludes faces and characters in both styles.
 """
 
 from __future__ import annotations
@@ -20,7 +24,12 @@ Style = Literal["emoji", "flat"]
 
 CHECKPOINT = "sd_xl_base_1.0.safetensors"
 LORA_NAME = "SDXL-Emoji-Lora-r4.safetensors"
-NEGATIVE_PROMPT = "blurry, text, watermark"
+# Operator ruling (2026-09-30): "Flat. No faces." The face/character terms apply to both
+# styles - emoji stays available, but nothing generated may show a face or a character.
+NEGATIVE_PROMPT = (
+    "blurry, text, watermark, face, eyes, mouth, smile, cartoon character, mascot, "
+    "anthropomorphic"
+)
 BIREFNET_MODEL = "General.safetensors"
 
 # Canvas and batch are fixed; the spec forbids passing them in (1024x1024 peaks the card,
@@ -39,13 +48,18 @@ LORA_STRENGTH_RANGE: dict[Style, tuple[float, float]] = {
 def build_icon_workflow(
     subject: str,
     *,
-    style: Style,
+    style: Style = "flat",
     seed: int,
     reference_image: str | None = None,
     steps: int = 25,
     lora_strength: float | None = None,
 ) -> dict[str, Any]:
     """The verified icon graph for one product.
+
+    ``style`` defaults to ``"flat"`` (operator ruling, 2026-09-30: "Flat. No faces.");
+    ``"emoji"`` stays available for an explicit call. The negative prompt always excludes
+    faces and characters in both styles, and the flat positive prompt asks for nothing
+    character-like.
 
     ``subject`` is the product's generic name plus the operator's icon brief where there
     is one, e.g. "Tomato puree, a small can or squeeze out tube". ``lora_strength``

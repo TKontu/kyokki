@@ -118,9 +118,60 @@ class TestStyles:
         assert graph["2"]["inputs"]["strength_clip"] == 0.75
 
     def test_negative_prompt_is_always_the_same(self) -> None:
+        expected = build_icon_workflow("Oat drink", style="emoji", seed=1)["4"][
+            "inputs"
+        ]["text"]
         for style in ("emoji", "flat"):
             graph = build_icon_workflow("Oat drink", style=style, seed=1)  # type: ignore[arg-type]
-            assert graph["4"]["inputs"]["text"] == "blurry, text, watermark"
+            assert graph["4"]["inputs"]["text"] == expected
+
+    def test_negative_prompt_excludes_faces_in_both_styles(self) -> None:
+        """Operator ruling (2026-09-30): 'Flat. No faces.'"""
+        face_terms = (
+            "face",
+            "eyes",
+            "mouth",
+            "smile",
+            "cartoon character",
+            "mascot",
+            "anthropomorphic",
+        )
+        for style in ("emoji", "flat"):
+            negative = build_icon_workflow("Oat drink", style=style, seed=1)["4"][  # type: ignore[arg-type]
+                "inputs"
+            ]["text"]
+            assert negative.startswith("blurry, text, watermark")
+            for term in face_terms:
+                assert term in negative, (
+                    f"{term!r} missing from negative prompt: {negative!r}"
+                )
+
+    def test_default_style_is_flat(self) -> None:
+        """Operator ruling (2026-09-30): 'Flat. No faces.'"""
+        graph = build_icon_workflow("Leek", seed=1)
+        assert graph["3"]["inputs"]["text"].startswith("flat,")
+        assert graph["2"]["inputs"]["strength_model"] == 0.75
+        assert graph["2"]["inputs"]["strength_clip"] == 0.75
+
+    def test_emoji_style_is_still_available_explicitly(self) -> None:
+        graph = build_icon_workflow("Leek", style="emoji", seed=1)
+        assert graph["3"]["inputs"]["text"].startswith("emoji,")
+        assert graph["2"]["inputs"]["strength_model"] == 0.35
+
+    def test_flat_positive_prompt_asks_for_nothing_character_like(self) -> None:
+        text = build_icon_workflow("Leek", style="flat", seed=1)["3"]["inputs"][
+            "text"
+        ].lower()
+        for term in (
+            "face",
+            "character",
+            "mascot",
+            "cute",
+            "smile",
+            "eyes",
+            "anthropomorphic",
+        ):
+            assert term not in text
 
     def test_the_two_triggers_never_both_appear_in_one_prompt(self) -> None:
         emoji_text = build_icon_workflow("Leek", style="emoji", seed=1)["3"]["inputs"][

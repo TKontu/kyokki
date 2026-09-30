@@ -2,6 +2,30 @@
 
 Ten gap-list products, each rendered in both LoRA styles at two seeds, so the operator can pick a look before it is wired into the icon queue. The operator chooses; this document does not decide for them.
 
+## Operator ruling (2026-09-30)
+
+> "Flat. No faces."
+
+The style is **flat**, and no generated icon may show a face, eyes or a character, in
+either style (`emoji` stays available in the code for a possible future use, just not as
+the default). `backend/app/services/icon_workflow.py` changed to match:
+
+- `build_icon_workflow`'s `style` parameter now defaults to `"flat"`; passing `style="emoji"`
+  explicitly still works exactly as before.
+- The negative prompt gained face/character terms, applied to **both** styles: `face, eyes,
+  mouth, smile, cartoon character, mascot, anthropomorphic`, alongside the existing `blurry,
+  text, watermark`.
+- The flat positive prompt already asked for nothing character-like ("flat, `<subject>`,
+  simple flat icon, white background"); no wording change was needed there.
+
+This **supersedes** the original "Reading the styles" section below wherever it praises
+`emoji`'s aesthetic (that style is no longer the default, and its 3D-face look is exactly
+what the ruling rejects) or reads a rendered face/character as acceptable. The rest of that
+section's findings — the tiled-pattern failures, the garbled label text, and the Quark
+failure in particular — still apply, since none of them were about faces. A "Flat, no
+faces" recheck (10 products, flat only, one new seed each, rendered with the updated
+template above) is added at the end of the Renders section below.
+
 ## Method
 
 Every render used `app.services.icon_workflow.build_icon_workflow` (the frozen graph),
@@ -15,7 +39,8 @@ Fixed graph parameters:
 - LoRA: `SDXL-Emoji-Lora-r4.safetensors`
 - Canvas: 1024x1024, batch 1
 - Sampler: `dpmpp_2m`, scheduler `karras`, cfg 7.0, denoise 1.0, 25 steps
-- Negative prompt: "blurry, text, watermark"
+- Negative prompt (original trial below): "blurry, text, watermark". The operator ruling
+  above added face/character terms to this for the "Flat, no faces" recheck.
 - Background removal: `LoadRembgByBiRefNetModel` (`General.safetensors`) + `RembgByBiRefNet`
 
 Per style:
@@ -152,11 +177,74 @@ Timings: emoji/20260930 24.7s, emoji/20260931 23.0s, flat/20260930 24.9s, flat/2
 
 Timings: emoji/20260930 24.6s, emoji/20260931 22.3s, flat/20260930 24.9s, flat/20260931 23.0s
 
+### Flat, no faces (recheck, seed 20261001)
+
+Rendered after the operator ruling above, with the updated template (`style` defaulting to
+`flat`, the face/character terms added to the negative prompt): the same 10 products, flat
+only, one new seed each (10 renders, not 40 - no `emoji` and no second seed, since the
+question this recheck answers is only "does the new template keep faces out").
+
+| Product | 256px | 64px |
+| --- | --- | --- |
+| Tomato puree | ![flat seed 20261001 at 256px](q18_icon_styles/tomato_puree_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/tomato_puree_flat_20261001_64.png) |
+| Canned tuna | ![flat seed 20261001 at 256px](q18_icon_styles/canned_tuna_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/canned_tuna_flat_20261001_64.png) |
+| Fish fingers | ![flat seed 20261001 at 256px](q18_icon_styles/fish_fingers_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/fish_fingers_flat_20261001_64.png) |
+| Canned tomatoes | ![flat seed 20261001 at 256px](q18_icon_styles/canned_tomatoes_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/canned_tomatoes_flat_20261001_64.png) |
+| Quark | ![flat seed 20261001 at 256px](q18_icon_styles/quark_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/quark_flat_20261001_64.png) |
+| Mozzarella | ![flat seed 20261001 at 256px](q18_icon_styles/mozzarella_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/mozzarella_flat_20261001_64.png) |
+| Minced beef | ![flat seed 20261001 at 256px](q18_icon_styles/minced_beef_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/minced_beef_flat_20261001_64.png) |
+| Parsnip | ![flat seed 20261001 at 256px](q18_icon_styles/parsnip_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/parsnip_flat_20261001_64.png) |
+| Karelian pasty | ![flat seed 20261001 at 256px](q18_icon_styles/karelian_pasty_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/karelian_pasty_flat_20261001_64.png) |
+| Oat drink | ![flat seed 20261001 at 256px](q18_icon_styles/oat_drink_flat_20261001_256.png) | ![flat seed 20261001 at 64px](q18_icon_styles/oat_drink_flat_20261001_64.png) |
+
+Timings: Tomato puree 50.3s (cold start - GPU had unloaded since the earlier trial), Canned
+tuna 22.9s, Fish fingers 22.9s, Canned tomatoes 22.9s, Quark 22.9s, Mozzarella 22.9s, Minced
+beef 22.9s, Parsnip 22.7s, Karelian pasty 23.0s, Oat drink 22.9s. 10/10 renders ok, no
+protocol failures.
+
+**No faces, eyes or characters appeared in any of the 10 renders.** The ruling's specific
+requirement is met cleanly and consistently - this is the headline result of the recheck.
+
+Everything else about the earlier "Reading the styles" section's account of `flat`'s
+non-face failure modes still holds, and this recheck adds direct evidence:
+
+- **Clean and on-subject (6/10):** Tomato puree, Canned tomatoes, Parsnip, Oat drink read
+  well at both sizes. Canned tuna is also on-subject but keeps the pre-existing **text
+  artefact** ("TUNE AUN", "wae to g lk" on the label) - a known SDXL weakness, not related
+  to faces.
+- **Tiled/repeating-pattern failure, still present without faces (2/10):** Fish fingers and
+  Karelian pasty both came back as a repeating decorative pattern rather than a single
+  centred object - the same compositional failure mode the original trial saw on some
+  `emoji` renders, now confirmed on `flat` too with a fresh seed. Unreadable at 64px in both
+  cases.
+- **Quark fails again, a third seed in a row:** an abstract line-art mark with no visual
+  connection to curd cheese - the same failure as both original seeds in both styles. This
+  is now 3/3 seeds tested across both styles. Confirms the earlier finding: Quark needs a
+  more descriptive subject string or a reference image, not a style or seed change.
+- **Mozzarella and Minced beef are abstract, not clearly on-subject** at this seed (an
+  ambiguous container/texture shape, and what reads more like kitchen-tool line icons than
+  meat, respectively) - milder than a full failure, but neither would pass as a recognisable
+  product icon as rendered.
+
+Net: the operator's "no faces" bar is met 10/10. The product-recognisability bar from the
+original trial is not solved by the template change (it was never meant to be) - Quark still
+needs a different subject or a reference image, and the tiled-pattern failure is a
+per-seed instability independent of the faces fix. **Regenerate with a new seed** (next
+round) is the practical mitigation already planned for exactly this.
+
 ## Failures (0)
 
-None.
+None. (10/10 renders in the original trial and 10/10 in the recheck completed without a
+protocol error; the quality issues above - Quark, the tiled patterns, the text artefact -
+are not client/protocol failures.)
 
 ## Reading the styles
+
+> **Superseded by the operator ruling above** wherever it reads a rendered face as
+> acceptable, or weighs `emoji`'s 3D-face look as a point in its favour - the ruling rejects
+> faces outright, so `emoji`'s aesthetic strength here no longer counts as one. The
+> non-face findings (the tiled-pattern failures, the text artefacts, and Quark) are
+> unaffected and still stand, and are confirmed again by the recheck above.
 
 All 40 renders came back technically clean (a valid transparent PNG each, no protocol
 failures), but several are unusable as a product icon. Judged by eye against every table
@@ -215,14 +303,16 @@ seed, not strength), so there is no measured basis yet for moving off the defaul
   a spot-check for sharper linework, but 0.75 already produced clean, single-subject icons for
   9 of 10 products.
 
-The operator chooses the style; this is a recommendation for the strength within whichever
-style is picked, not a vote on which style to use.
+The operator has since ruled on the style (flat, no faces - see above); the strength
+recommendation for `flat` (keep 0.75) stands unchanged by that ruling, since the recheck
+used the same 0.75 and produced the same mix of clean and imperfect results.
 
 ## Next round
 
 Not implemented here. Wiring this into the product icon queue still needs:
 - PNG storage for a generated icon (where product_icons.py's SVGs live now, or a sibling column/table - out of this lane's scope, see product_icons.py).
-- Queue integration: call `build_icon_workflow` + `comfyui.render` for each gap product once the operator has picked a style.
-- A per-product Regenerate action that renders again with a new random seed.
+- Queue integration: call `build_icon_workflow` (now `flat` by default, per the ruling) + `comfyui.render` for each gap product.
+- A per-product Regenerate action that renders again with a new random seed - the recheck shows this is not cosmetic: Fish fingers, Karelian pasty, Mozzarella and Minced beef all need a re-roll before they are usable, and this is the mechanism for it.
+- A better subject string or an IP-Adapter reference image for Quark specifically (3/3 seeds across both styles have failed on it; it is not a seed problem).
 - Setting `COMFYUI_BASE_URL` in the real stack once the Kyokki server can reach the GPU host (a media-gateway is planned; see the assignment's Access section).
 
