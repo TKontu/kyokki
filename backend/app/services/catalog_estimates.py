@@ -35,6 +35,7 @@ from app.crud.product_master import MovedInventoryItem, get_products
 from app.models.product_master import ProductMaster
 from app.services.expiry_recompute import recompute_expiry_for_product
 from app.services.llm_extractor import LLMExtractionError, extract_json_object
+from app.services.llm_http import LLMAuthError, post_chat
 
 # Re-exported: the bands moved to their own module (H58) and callers still import them here.
 from app.services.shelf_life_bands import (  # noqa: F401
@@ -178,13 +179,13 @@ async def _complete(batch: list[EstimateRequest]) -> str:
 
     try:
         async with httpx.AsyncClient(timeout=settings.LLM_ESTIMATE_TIMEOUT) as client:
-            response = await client.post(
-                f"{settings.LLM_BASE_URL}/chat/completions",
-                json=payload,
-                headers={"Authorization": f"Bearer {settings.LLM_API_KEY}"},
+            response = await post_chat(
+                client, payload, budget=settings.LLM_ESTIMATE_TIMEOUT
             )
             response.raise_for_status()
             body = response.json()
+    except LLMAuthError as exc:
+        raise LLMExtractionError(str(exc)) from exc
     except httpx.HTTPError as exc:
         raise LLMExtractionError(f"Estimate request failed: {exc!r}") from exc
 
