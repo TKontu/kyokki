@@ -7,6 +7,7 @@ table does not know, and a proposal is never shown before a person confirms it.
 """
 
 import json
+import unicodedata
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -28,6 +29,11 @@ from app.services.product_emoji import (
     load_reference,
     reference_emoji,
 )
+
+# Captured before any test runs, so it survives the autouse `_no_model_selection` fixture
+# (tests/conftest.py) patching `product_emoji._post_proposal` for every other test. The
+# gateway-rule tests below need the real thing.
+REAL_POST_PROPOSAL = product_emoji._post_proposal
 
 
 @pytest.fixture(autouse=True)
@@ -138,6 +144,16 @@ class TestCuratedTable:
         assert product_emoji.gap_hint("Canned tomatoes")
         assert product_emoji.gap_hint("Tomato puree")
         assert product_emoji.gap_hint("Quark") is None  # no brief was given
+
+    def test_an_nfd_decomposed_name_still_matches_the_table(self) -> None:
+        """A name typed or OCR'd on a different keyboard or OS can arrive
+        NFD-decomposed - "e" plus a combining grave accent rather than the precomposed
+        "è" - which `normalize_product_name` alone treats as a different string
+        (PR #137 review)."""
+        nfd_name = unicodedata.normalize("NFD", "Crème fraîche")
+        assert nfd_name != "Crème fraîche"  # a genuinely different byte sequence
+
+        assert product_emoji.curated_lookup(nfd_name) == (None, EmojiMatch.NONE)
 
 
 class TestLookup:
@@ -341,19 +357,27 @@ class TestCookChoice:
             await product_emoji.set_cook_choice(db_session, product.id, "🚀")
 
     async def test_cook_and_cleared_are_never_overwritten_by_a_table_hit(
-        self, db_session: AsyncSession, categories
+        self, db_session: AsyncSession, categories, broadcast
     ) -> None:
-        product = await _product(db_session, "Gouda")
-        await product_emoji.set_cook_choice(db_session, product.id, "🥨")
+        """The emoji job is queued behind the shelf-life estimate, which can wait minutes
+        on the model - plenty of time for the cook to set or clear the emoji by hand
+        before `_apply_one_on_create` ever runs for this product (PR #137 review)."""
+        cook_product = await _product(db_session, "Gouda")
+        await product_emoji.set_cook_choice(db_session, cook_product.id, "🥨")
 
-        # apply_on_create is only ever called for a brand-new product; a cook choice is
-        # simply never revisited by it. Confirm that a fresh lookup does not clobber it if
-        # somehow re-applied.
-        applied_hit = await product_emoji.lookup(db_session, "Gouda")
-        assert applied_hit == ("🧀", EmojiMatch.EXACT)
-        stored = await _reload(db_session, product)
-        assert stored.emoji == "🥨"
-        assert stored.emoji_match == EmojiMatch.COOK
+        cleared_product = await _product(db_session, "Cheddar", category="cheese")
+        await product_emoji.set_cook_choice(db_session, cleared_product.id, None)
+
+        await product_emoji._apply_one_on_create(cook_product.id)
+        await product_emoji._apply_one_on_create(cleared_product.id)
+
+        stored_cook = await _reload(db_session, cook_product)
+        assert stored_cook.emoji == "🥨"
+        assert stored_cook.emoji_match == EmojiMatch.COOK
+
+        stored_cleared = await _reload(db_session, cleared_product)
+        assert stored_cleared.emoji is None
+        assert stored_cleared.emoji_match == EmojiMatch.CLEARED
 
 
 # --- the model proposal ----------------------------------------------------------------------
@@ -434,8 +458,11 @@ def _reply(content: str) -> httpx.Response:
 
 
 class TestGatewayRules:
-    """llama-swap requires a key since 2026-09-30 (the preamble); these rules are inline
-    here rather than through the (possibly-unmerged) shared `services/llm_http.py`."""
+    """llama-swap requires a key since 2026-09-30 (the preamble). The retry, drain-backoff
+    and timeout-budget rules themselves live in the shared `services/llm_http.py` (GW-1) and
+    are tested there; these tests only prove `_post_proposal` wires into it correctly: the
+    budget it passes, a timeout propagating unchanged, a 503 still resolving end to end
+    through the helper, and an `LLMAuthError` becoming our own logged, key-free error."""
 
     async def test_it_sends_a_bearer_key_and_a_timeout_of_at_least_300s(
         self, monkeypatch: pytest.MonkeyPatch
@@ -444,7 +471,7 @@ class TestGatewayRules:
         monkeypatch.setattr(settings, "LLM_API_KEY", "the-key")
         monkeypatch.setattr(settings, "LLM_TIMEOUT", 10.0)
 
-        await product_emoji._post_proposal({"model": "m"})
+        await REAL_POST_PROPOSAL({"model": "m"})
 
         assert seen["headers"]["authorization"] == "Bearer the-key"
         assert seen["timeout"] > 299.0
@@ -466,96 +493,28 @@ class TestGatewayRules:
             lambda **kw: real(transport=httpx.MockTransport(handler)),
         )
 
-        with pytest.raises(product_emoji.EmojiProposalError, match="timed out"):
-            await product_emoji._post_proposal({"model": "m"})
+        with pytest.raises(product_emoji.EmojiProposalError, match="ReadTimeout"):
+            await REAL_POST_PROPOSAL({"model": "m"})
 
         assert calls == 1
 
-    async def test_a_503_with_retry_after_is_waited_out_and_retried(
+    async def test_a_503_with_retry_after_still_resolves_through_the_shared_helper(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def respond(request: httpx.Request, n: int) -> httpx.Response:
-            if n == 1:
-                return httpx.Response(503, headers={"Retry-After": "3"})
-            return _reply('{"r": []}')
-
-        seen = _gateway(monkeypatch, respond)
-        sleeps: list[float] = []
-
-        async def fake_sleep(seconds: float) -> None:
-            sleeps.append(seconds)
-
-        monkeypatch.setattr(product_emoji.asyncio, "sleep", fake_sleep)
-
-        content = await product_emoji._post_proposal({"model": "m"})
-
-        assert content == '{"r": []}'
-        assert len(seen["requests"]) == 2
-        assert sleeps == [3.0]
-
-    async def test_the_retry_gets_the_remaining_budget_not_the_full_timeout(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A sibling review's finding: passing the constant timeout on every loop would let
-        a chain of 503s run far longer than LLM_TIMEOUT (or its 300s floor) ever intended."""
-
         def respond(request: httpx.Request, n: int) -> httpx.Response:
             if n == 1:
                 return httpx.Response(503, headers={"Retry-After": "1"})
             return _reply('{"r": []}')
 
         seen = _gateway(monkeypatch, respond)
-        monkeypatch.setattr(product_emoji.asyncio, "sleep", AsyncMock())
-        monkeypatch.setattr(settings, "LLM_TIMEOUT", 300.0)
+        monkeypatch.setattr(
+            "app.services.llm_http.asyncio.sleep", AsyncMock(return_value=None)
+        )
 
-        await product_emoji._post_proposal({"model": "m"})
+        content = await REAL_POST_PROPOSAL({"model": "m"})
 
-        assert len(seen["timeouts"]) == 2
-        assert seen["timeouts"][1] < seen["timeouts"][0]
-
-    @pytest.mark.parametrize("bad", ["nan", "inf", "-5", "not-a-number"])
-    async def test_an_unusable_retry_after_falls_back_to_the_default_wait(
-        self, monkeypatch: pytest.MonkeyPatch, bad: str
-    ) -> None:
-        """`float()` parses "nan" and "inf" without raising, and `max(0.0, nan)` is `0.0` -
-        none of these may be trusted as a wait time (a sibling review's finding)."""
-
-        def respond(request: httpx.Request, n: int) -> httpx.Response:
-            if n == 1:
-                return httpx.Response(503, headers={"Retry-After": bad})
-            return _reply('{"r": []}')
-
-        _gateway(monkeypatch, respond)
-        sleeps: list[float] = []
-
-        async def fake_sleep(seconds: float) -> None:
-            sleeps.append(seconds)
-
-        monkeypatch.setattr(product_emoji.asyncio, "sleep", fake_sleep)
-
-        await product_emoji._post_proposal({"model": "m"})
-
-        assert sleeps == [product_emoji.DEFAULT_RETRY_AFTER]
-
-    async def test_a_retry_after_under_one_second_is_floored(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def respond(request: httpx.Request, n: int) -> httpx.Response:
-            if n == 1:
-                return httpx.Response(503, headers={"Retry-After": "0.2"})
-            return _reply('{"r": []}')
-
-        _gateway(monkeypatch, respond)
-        sleeps: list[float] = []
-
-        async def fake_sleep(seconds: float) -> None:
-            sleeps.append(seconds)
-
-        monkeypatch.setattr(product_emoji.asyncio, "sleep", fake_sleep)
-
-        await product_emoji._post_proposal({"model": "m"})
-
-        assert sleeps == [1.0]
+        assert content == '{"r": []}'
+        assert len(seen["requests"]) == 2
 
     @pytest.mark.parametrize("status", [401, 403])
     async def test_a_401_or_403_is_logged_without_the_key_and_raises(
@@ -567,8 +526,8 @@ class TestGatewayRules:
         monkeypatch.setattr(settings, "LLM_API_KEY", "super-secret-key")
         _gateway(monkeypatch, lambda request, n: httpx.Response(status))
 
-        with pytest.raises(product_emoji.EmojiProposalError):
-            await product_emoji._post_proposal({"model": "m"})
+        with pytest.raises(product_emoji.EmojiProposalError, match="LLM_API_KEY"):
+            await REAL_POST_PROPOSAL({"model": "m"})
 
         assert "super-secret-key" not in caplog.text
         assert "rejected LLM_API_KEY" in caplog.text
@@ -738,3 +697,30 @@ class TestOnCreateHook:
         product_emoji.schedule_emoji(tasks, [])
 
         assert len(tasks.tasks) == 0
+
+
+class TestNoAccidentalGatewayCalls:
+    """The autouse `_no_model_selection` fixture (tests/conftest.py) must patch this
+    module's own model call too - otherwise every test that creates a product whose
+    generic name is not in the curated table sends a real request to
+    `settings.LLM_BASE_URL` (found in PR #137 review)."""
+
+    async def test_the_autouse_fixture_keeps_this_module_off_the_real_gateway(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _boom(*args, **kwargs):
+            raise AssertionError("product_emoji tried to open a real httpx connection")
+
+        monkeypatch.setattr(httpx.AsyncClient, "__init__", _boom)
+
+        # No manual patch of this module's own call here - only the autouse fixture is
+        # in play, so this proves the fixture intercepts before httpx is ever touched.
+        result = await product_emoji.propose(["Brand New Thing"])
+
+        assert result is None
+
+    def test_the_fixture_really_does_replace_the_function(self) -> None:
+        """Names what `REAL_POST_PROPOSAL` is for: the gateway-rule tests above call it
+        directly because `product_emoji._post_proposal` is this fixture's mock, not the
+        real function, for the duration of every test."""
+        assert product_emoji._post_proposal is not REAL_POST_PROPOSAL

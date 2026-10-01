@@ -6,6 +6,7 @@ cook's own choice (an emoji sets `cook`, null sets `cleared`); `POST .../emoji/c
 review list. Every mutation broadcasts over the existing icon WebSocket path.
 """
 
+import json
 from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud import product_master as crud_product
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import EmojiMatch, ProductMaster
+from app.services import product_emoji, shelf_life_on_create
 
 
 @pytest.fixture
@@ -334,3 +336,86 @@ async def _item(db: AsyncSession, product: ProductMaster) -> InventoryItem:
     db.add(item)
     await db.commit()
     return item
+
+
+# --- end to end: a product created for real, with BackgroundTasks actually running -------
+
+
+@pytest.fixture
+def _background_jobs_use_the_test_session(session_factory) -> None:
+    """Both background jobs open their own session; here it is the test's, so the rows
+    they write are visible to the test's own assertions afterwards."""
+    with (
+        patch.object(shelf_life_on_create, "open_session", session_factory),
+        patch.object(product_emoji, "open_session", session_factory),
+    ):
+        yield
+
+
+class TestEndToEndOnCreate:
+    """A product created through the real quick-add endpoint, with BackgroundTasks really
+    running (PR #137 review, finding 4): before this, the lookup, the queueing and the
+    model call were each tested in isolation, but nothing drove a create endpoint all the
+    way through to a stored `emoji`/`emoji_match`."""
+
+    async def test_a_table_name_ends_up_exact_and_shows_on_the_tile(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        _background_jobs_use_the_test_session,
+    ) -> None:
+        response = await client.post(
+            "/api/inventory/quick-add",
+            json={
+                "name": "Gouda",
+                "category": "cheese",
+                "quantity": 1,
+                "unit": "pcs",
+                "purchase_date": "2026-09-01",
+            },
+        )
+
+        assert response.status_code == 201
+        product_id = response.json()["product_master_id"]
+
+        product = await client.get(f"/api/products/{product_id}")
+        assert product.json()["emoji"] == "🧀"
+        assert product.json()["emoji_match"] == "exact"
+
+        inventory = await client.get("/api/inventory")
+        (item,) = [i for i in inventory.json() if i["product_master_id"] == product_id]
+        assert item["product_emoji"] == "🧀"
+
+    async def test_an_unknown_name_ends_up_proposed_with_the_model_stubbed(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        _background_jobs_use_the_test_session,
+    ) -> None:
+        async def fake_post_proposal(payload: dict) -> str:
+            return json.dumps({"r": [{"i": 1, "e": "🥨", "m": "exact"}]})
+
+        with patch.object(product_emoji, "_post_proposal", new=fake_post_proposal):
+            response = await client.post(
+                "/api/inventory/quick-add",
+                json={
+                    "name": "Brand New Snack Nobody Has Heard Of",
+                    "category": "snacks",
+                    "quantity": 1,
+                    "unit": "pcs",
+                    "purchase_date": "2026-09-01",
+                },
+            )
+
+        assert response.status_code == 201
+        product_id = response.json()["product_master_id"]
+
+        product = await client.get(f"/api/products/{product_id}")
+        body = product.json()
+        assert body["emoji_match"] == "proposed"
+        assert body["emoji"] == "🥨"
+
+        inventory = await client.get("/api/inventory")
+        (item,) = [i for i in inventory.json() if i["product_master_id"] == product_id]
+        # A proposal is never shown on the tile until a person confirms it.
+        assert item["product_emoji"] is None

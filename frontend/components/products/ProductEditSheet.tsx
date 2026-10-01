@@ -380,24 +380,31 @@ export function ProductEditSheet({
             >
               ∅
             </button>
-            {(emojiReference.data ?? []).map((entry) => (
-              <button
-                key={entry.emoji}
-                type="button"
-                title={entry.name}
-                aria-label={entry.name}
-                aria-pressed={emoji === entry.emoji && emojiMatch === 'cook'}
-                disabled={setEmoji.isPending}
-                onClick={() => pickEmoji(entry.emoji)}
-                className={`flex h-9 w-9 items-center justify-center rounded-ui border text-xl ${
-                  emoji === entry.emoji && emojiMatch === 'cook'
-                    ? 'border-ui-text bg-ui-text dark:border-ui-dark-text dark:bg-ui-dark-text'
-                    : 'border-ui-border dark:border-ui-dark-border'
-                }`}
-              >
-                {entry.emoji}
-              </button>
-            ))}
+            {(emojiReference.data ?? []).map((entry) => {
+              // The picker's own selection mark: a table-set exact match or the cook's
+              // own pick both show as "this one is chosen" - only a pending proposal does
+              // not, since it is not shown anywhere until confirmed.
+              const selected =
+                emoji === entry.emoji && (emojiMatch === 'exact' || emojiMatch === 'cook')
+              return (
+                <button
+                  key={entry.emoji}
+                  type="button"
+                  title={entry.name}
+                  aria-label={entry.name}
+                  aria-pressed={selected}
+                  disabled={setEmoji.isPending}
+                  onClick={() => pickEmoji(entry.emoji)}
+                  className={`flex h-9 w-9 items-center justify-center rounded-ui border text-xl ${
+                    selected
+                      ? 'border-ui-text bg-ui-text dark:border-ui-dark-text dark:bg-ui-dark-text'
+                      : 'border-ui-border dark:border-ui-dark-border'
+                  }`}
+                >
+                  {entry.emoji}
+                </button>
+              )
+            })}
           </div>
         </div>
       </fieldset>

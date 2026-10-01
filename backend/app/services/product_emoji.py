@@ -19,20 +19,17 @@ precision ~0.97 but recall only ~0.70 against the operator's rulings):
    stored as `none`. `confirm()` promotes it to `exact` and teaches the learned table, so the
    same generic name is never asked again - not even for a later product created under it.
 
-Gateway rules (llama-swap requires a key since 2026-09-30), implemented inline here rather
-than through the shared `services/llm_http.py` a sibling lane is adding (which may not be
-merged yet - the same applies to `scripts/emoji_trial.py`, which duplicates them too):
-a bearer `LLM_API_KEY`, a timeout of at least 300 s (a cold start takes 2-5 minutes) with no
-retry on a timeout, and a `503` with `Retry-After` waited out and retried within that budget.
+Gateway rules (llama-swap requires a key since 2026-09-30) go through the shared
+`services/llm_http.py`: a bearer `LLM_API_KEY`, a timeout of at least 300 s (a cold start
+takes 2-5 minutes) with no retry on a timeout, and a `503` with `Retry-After` waited out and
+retried within that budget. `scripts/emoji_trial.py` uses the same helper.
 A model failure leaves the product unchanged; nothing here ever logs a full prompt at INFO.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
-import math
-import time
+import unicodedata
 from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
@@ -50,6 +47,8 @@ from app.core.logging import get_logger
 from app.crud import product_master as crud_product
 from app.models.product_master import EmojiMatch, ProductMaster
 from app.services.broadcast_helpers import broadcast_product_update
+from app.services.llm_http import LLMAuthError
+from app.services.llm_http import post_chat as llm_post_chat
 from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import known_non_food
 from app.services.product_names import normalize_product_name
@@ -62,9 +61,6 @@ CURATED_FILE = RESOURCES_DIR / "emoji_curated.json"
 
 # A cold start takes 2-5 minutes (the preamble); never below that, whatever LLM_TIMEOUT is.
 MIN_PROPOSAL_TIMEOUT = 300.0
-# How long to wait out a draining gateway's 503 before trying again, when it gives no
-# Retry-After of its own.
-DEFAULT_RETRY_AFTER = 5.0
 
 
 class EmojiProposalError(Exception):
@@ -84,13 +80,26 @@ def reference_emoji() -> set[str]:
     return {entry["e"] for entry in load_reference()}
 
 
+def _normalized(name: str) -> str:
+    """The lookup key: NFC-normalized first, then `normalize_product_name`.
+
+    A name typed or OCR'd on a different keyboard or OS can arrive NFD-decomposed (e.g.
+    "e" + a combining grave accent instead of the precomposed "è"), which is a different
+    string to `normalize_product_name` even though it is the same text. NFC-folding first
+    means "Crème fraîche" matches the curated table's entry whichever form it comes in as.
+    This stays local to this module rather than changing the shared
+    `services/product_names.py` key (PR #137 review).
+    """
+    return normalize_product_name(unicodedata.normalize("NFC", name or ""))
+
+
 def _load_curated() -> tuple[dict[str, str | None], dict[str, str]]:
-    """The curated table, keyed by `normalize_product_name`, and its icon-brief hints."""
+    """The curated table, keyed by `_normalized`, and its icon-brief hints."""
     data = json.loads(CURATED_FILE.read_text(encoding="utf-8"))
     table: dict[str, str | None] = {}
     hints: dict[str, str] = {}
     for row in data["products"]:
-        key = normalize_product_name(row["name"])
+        key = _normalized(row["name"])
         table[key] = row.get("emoji")
         hint = row.get("hint")
         if hint:
@@ -101,7 +110,7 @@ def _load_curated() -> tuple[dict[str, str | None], dict[str, str]]:
 def gap_hint(generic_name: str) -> str | None:
     """The operator's own words for a gap product's future generated icon, if given."""
     _, hints = _load_curated()
-    return hints.get(normalize_product_name(generic_name))
+    return hints.get(_normalized(generic_name))
 
 
 def curated_lookup(generic_name: str) -> tuple[str | None, EmojiMatch] | None:
@@ -110,7 +119,7 @@ def curated_lookup(generic_name: str) -> tuple[str | None, EmojiMatch] | None:
     None: the table does not know this generic name at all (not even as a gap row).
     """
     table, _ = _load_curated()
-    key = normalize_product_name(generic_name)
+    key = _normalized(generic_name)
     if key not in table:
         return None
     emoji = table[key]
@@ -127,9 +136,7 @@ async def lookup(
     hit = curated_lookup(generic_name)
     if hit is not None:
         return hit
-    learned = await crud_product.get_learned_emoji(
-        db, normalize_product_name(generic_name)
-    )
+    learned = await crud_product.get_learned_emoji(db, _normalized(generic_name))
     return (learned, EmojiMatch.EXACT) if learned is not None else None
 
 
@@ -147,11 +154,18 @@ async def is_non_food(db: AsyncSession, generic_name: str) -> bool:
 
 
 async def apply_on_create(db: AsyncSession, product: ProductMaster) -> bool:
-    """Give a brand-new product its emoji from the table, right away. True: a hit was applied.
+    """Give a brand-new product its emoji from the table, right away. True: nothing more to
+    do - either a hit was applied, or the row is already settled and must stay that way.
 
-    Non-food is skipped entirely - no emoji, no proposal. False means the caller should
-    schedule a background proposal instead: the table does not know this name yet.
+    This job is queued behind the shelf-life estimate, which can wait minutes on the model,
+    so a product's `emoji_match` may already be `cook` or `cleared` by the time this runs -
+    the cook's own choice, made in that window, and never overwritten by a table hit
+    (PR #137 review). Non-food is skipped entirely - no emoji, no proposal. False means the
+    caller should schedule a background proposal instead: the table does not know this name
+    yet.
     """
+    if product.emoji_match is not None:
+        return True
     if await is_non_food(db, str(product.canonical_name)):
         return True
     hit = await lookup(db, str(product.canonical_name))
@@ -179,7 +193,7 @@ async def confirm(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
     if product is not None and product.emoji:
         await crud_product.learn_emoji(
             db,
-            normalize_product_name(str(product.canonical_name)),
+            _normalized(str(product.canonical_name)),
             str(product.emoji),
         )
     return product
@@ -311,72 +325,32 @@ def _build_payload(prompt: str) -> dict[str, Any]:
     return payload
 
 
-def _retry_wait(response: httpx.Response) -> float:
-    """Seconds to wait before retrying a 503: `Retry-After` if it is usable, else a default.
-
-    Never below 1s, and never a bad header value: `float()` parses "nan" and "inf" without
-    raising, and `max(0.0, nan)` is `0.0`, so a value that is not finite and non-negative is
-    rejected the same as a header that does not parse at all (a sibling review's finding).
-    """
-    retry_after = response.headers.get("Retry-After")
-    wait = DEFAULT_RETRY_AFTER
-    if retry_after:
-        try:
-            parsed = float(retry_after)
-        except ValueError:
-            parsed = float("nan")
-        if math.isfinite(parsed) and parsed >= 0:
-            wait = parsed
-    return max(wait, 1.0)
-
-
 async def _post_proposal(payload: dict[str, Any]) -> str:
-    """One chat completion, following the gateway rules inline (module docstring).
+    """One chat completion, through the shared gateway helper (`services/llm_http.py`).
 
     Raises:
-        EmojiProposalError: the request failed, timed out, the key was rejected, or the
-            gateway kept draining past the timeout budget.
+        EmojiProposalError: the gateway rejected `LLM_API_KEY`, the request failed or
+            timed out, or the reply carried no usable message.
     """
     budget = max(settings.LLM_TIMEOUT, MIN_PROPOSAL_TIMEOUT)
-    deadline = time.monotonic() + budget
-    while True:
-        # What is left of the budget, not the full timeout again - a sibling review's other
-        # finding, since a chain of 503s must not multiply the wall-clock budget by retries.
-        remaining = deadline - time.monotonic()
-        try:
-            async with httpx.AsyncClient(timeout=remaining) as client:
-                response = await client.post(
-                    f"{settings.LLM_BASE_URL}/chat/completions",
-                    json=payload,
-                    headers={"Authorization": f"Bearer {settings.LLM_API_KEY}"},
-                )
-        except httpx.TimeoutException as exc:
-            # Never retried: a cold start already took most of the budget.
-            raise EmojiProposalError(f"request timed out: {exc!r}") from exc
-        except httpx.HTTPError as exc:
-            raise EmojiProposalError(repr(exc)) from exc
-
-        if response.status_code == 503:
-            wait = _retry_wait(response)
-            if time.monotonic() + wait >= deadline:
-                raise EmojiProposalError("gateway draining (503) with no time left")
-            await asyncio.sleep(wait)
-            continue
-
-        if response.status_code in (401, 403):
-            logger.warning("the LLM gateway rejected LLM_API_KEY")
-            raise EmojiProposalError(f"gateway auth failed: {response.status_code}")
-
-        try:
-            response.raise_for_status()
-            body = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise EmojiProposalError(repr(exc)) from exc
-        try:
-            content = body["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise EmojiProposalError("reply has no message content") from exc
-        return str(content or "")
+    try:
+        async with httpx.AsyncClient(timeout=budget) as client:
+            response = await llm_post_chat(client, payload, budget=budget)
+    except LLMAuthError as exc:
+        logger.warning("the LLM gateway rejected LLM_API_KEY")
+        raise EmojiProposalError(str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise EmojiProposalError(repr(exc)) from exc
+    try:
+        response.raise_for_status()
+        body = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise EmojiProposalError(repr(exc)) from exc
+    try:
+        content = body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise EmojiProposalError("reply has no message content") from exc
+    return str(content or "")
 
 
 @dataclass(frozen=True)

@@ -20,9 +20,11 @@ skipped, repeated names are reported and skipped).
 (`--limit N` for a trial on part of the catalog).
 `--build-reference` regenerates the reference JSON from Unicode's `emoji-test.txt`.
 Requests go one at a time to `LLM_BASE_URL` with `LLM_MODEL` and `LLM_API_KEY` (override the
-first two with --url/--model), each with `LLM_TIMEOUT` (--timeout). The output files are
-rewritten after every batch, so an interrupted run keeps the batches it finished. A batch
-whose answer numbering is not exactly 1..n is rejected as `invalid`.
+first two with --url/--model), each with `LLM_TIMEOUT` (--timeout), through the shared
+gateway helper (`app/services/llm_http.py`: the bearer key, the 503/`Retry-After` drain
+backoff, never retrying a timeout). The output files are rewritten after every batch, so an
+interrupted run keeps the batches it finished. A batch whose answer numbering is not exactly
+1..n is rejected as `invalid`.
 """
 
 from __future__ import annotations
@@ -31,7 +33,6 @@ import argparse
 import asyncio
 import csv
 import json
-import math
 import re
 import sys
 import time
@@ -354,27 +355,43 @@ def _message_content(body: Any) -> str:
 
 # A cold start takes 2-5 minutes (the preamble); never below that, whatever --timeout is.
 MIN_GATEWAY_TIMEOUT = 300.0
-# How long to wait out a draining gateway's 503 when it gives no usable Retry-After.
-DEFAULT_RETRY_WAIT = 5.0
 
 
-def _retry_wait(response: httpx.Response) -> float:
-    """Seconds to wait before retrying a 503: `Retry-After` if it is usable, else a default.
+async def _post_chat_async(
+    payload: dict[str, Any],
+    *,
+    url: str,
+    api_key: str,
+    budget: float,
+    transport: httpx.BaseTransport | None = None,
+) -> str:
+    from app.core.config import settings as app_settings
+    from app.services import llm_http
 
-    Never below 1s, and never a bad header value: `float()` parses "nan" and "inf" without
-    raising, and a negative wait would retry at once, so both are rejected the same as a
-    header that does not parse at all.
-    """
-    retry_after = response.headers.get("Retry-After")
-    wait = DEFAULT_RETRY_WAIT
-    if retry_after:
-        try:
-            parsed = float(retry_after)
-        except ValueError:
-            parsed = float("nan")
-        if math.isfinite(parsed) and parsed >= 0:
-            wait = parsed
-    return max(wait, 1.0)
+    # llm_http.post_chat reads the URL and the key off `settings`; this script takes them
+    # as its own --url/--model-style arguments, so they are swapped in for the one call and
+    # put back, rather than requiring every caller to mutate global settings itself.
+    original_url, original_key = app_settings.LLM_BASE_URL, app_settings.LLM_API_KEY
+    app_settings.LLM_BASE_URL, app_settings.LLM_API_KEY = url.rstrip("/"), api_key
+    try:
+        async with httpx.AsyncClient(timeout=budget, transport=transport) as client:
+            try:
+                response = await llm_http.post_chat(client, payload, budget=budget)
+            except llm_http.LLMAuthError as exc:
+                print(
+                    "the LLM gateway rejected LLM_API_KEY", file=sys.stderr, flush=True
+                )
+                raise GatewayError(str(exc)) from exc
+            except httpx.HTTPError as exc:
+                raise GatewayError(repr(exc)) from exc
+    finally:
+        app_settings.LLM_BASE_URL, app_settings.LLM_API_KEY = original_url, original_key
+    try:
+        response.raise_for_status()
+        body = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise GatewayError(repr(exc)) from exc
+    return _message_content(body)
 
 
 def post_chat(
@@ -385,49 +402,18 @@ def post_chat(
     timeout: float,
     transport: httpx.BaseTransport | None = None,
 ) -> str:
-    """One chat completion, retrying a draining gateway's 503 within the timeout budget.
+    """One chat completion, through the shared gateway helper (`app/services/llm_http.py`):
+    the bearer key, the 503/`Retry-After` drain backoff, and never retrying a timeout.
 
-    The gateway requires a key since 2026-09-30 (the preamble): `api_key` is always sent as
-    a bearer token. A timeout is never retried - a cold start already spent most of it - and
-    every request, including a retry after a 503 wait, gets what is left of the budget, not
-    the full timeout again. A 401/403 is reported without the key and raised; every other
-    failure raises GatewayError.
+    Requests go one at a time (the script's own batching), so this blocks with its own
+    event loop rather than asking every caller to be async.
     """
     budget = max(timeout, MIN_GATEWAY_TIMEOUT)
-    deadline = time.monotonic() + budget
-    while True:
-        remaining = deadline - time.monotonic()
-        try:
-            with httpx.Client(
-                timeout=httpx.Timeout(remaining, connect=10.0), transport=transport
-            ) as client:
-                response = client.post(
-                    f"{url.rstrip('/')}/chat/completions",
-                    json=payload,
-                    headers={"Authorization": f"Bearer {api_key}"},
-                )
-        except httpx.TimeoutException as exc:
-            raise GatewayError(f"request timed out: {exc!r}") from exc
-        except httpx.HTTPError as exc:
-            raise GatewayError(repr(exc)) from exc
-
-        if response.status_code == 503:
-            wait = _retry_wait(response)
-            if time.monotonic() + wait >= deadline:
-                raise GatewayError("gateway draining (503) with no time left")
-            time.sleep(wait)
-            continue
-
-        if response.status_code in (401, 403):
-            print("the LLM gateway rejected LLM_API_KEY", file=sys.stderr, flush=True)
-            raise GatewayError(f"gateway auth failed: {response.status_code}")
-
-        try:
-            response.raise_for_status()
-            body = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise GatewayError(repr(exc)) from exc
-        return _message_content(body)
+    return asyncio.run(
+        _post_chat_async(
+            payload, url=url, api_key=api_key, budget=budget, transport=transport
+        )
+    )
 
 
 # --- the answers -------------------------------------------------------------------------

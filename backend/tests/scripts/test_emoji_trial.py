@@ -7,6 +7,7 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -461,22 +462,26 @@ class TestPostChat:
             self._post(lambda request: httpx.Response(500, text="broken"))
 
 
-def _client_spy(monkeypatch: pytest.MonkeyPatch) -> list[httpx.Timeout]:
-    """Every `httpx.Client(timeout=..., ...)` this call makes, for inspecting the budget."""
-    seen: list[httpx.Timeout] = []
-    real = httpx.Client
+def _client_spy(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Every `httpx.AsyncClient(timeout=..., ...)` this call makes, for inspecting the
+    budget passed to it."""
+    seen: list[Any] = []
+    real = httpx.AsyncClient
 
-    def spy(**kwargs: Any) -> httpx.Client:
+    def spy(**kwargs: Any) -> httpx.AsyncClient:
         seen.append(kwargs["timeout"])
         return real(**kwargs)
 
-    monkeypatch.setattr(emoji_trial.httpx, "Client", spy)
+    monkeypatch.setattr(emoji_trial.httpx, "AsyncClient", spy)
     return seen
 
 
 class TestGatewayRules:
-    """llama-swap requires a key since 2026-09-30 (the preamble); these rules are inline
-    here, not through the (possibly-unmerged) shared `services/llm_http.py`."""
+    """llama-swap requires a key since 2026-09-30 (the preamble). The retry, drain-backoff
+    and timeout-budget rules themselves live in the shared `services/llm_http.py` (GW-1) and
+    are tested there; these tests only prove this script's `post_chat` wires into it
+    correctly: the budget it passes, a timeout propagating unchanged, a 503 still resolving
+    end to end through the helper, and a 401/403 logged without the key."""
 
     def test_the_timeout_is_floored_to_300s(
         self, monkeypatch: pytest.MonkeyPatch
@@ -495,7 +500,7 @@ class TestGatewayRules:
             ),
         )
 
-        assert seen[0].read > 299.0
+        assert seen[0] > 299.0
 
     def test_a_timeout_is_never_retried(self) -> None:
         calls = {"n": 0}
@@ -504,7 +509,7 @@ class TestGatewayRules:
             calls["n"] += 1
             raise httpx.ReadTimeout("too slow", request=request)
 
-        with pytest.raises(emoji_trial.GatewayError, match="timed out"):
+        with pytest.raises(emoji_trial.GatewayError, match="ReadTimeout"):
             emoji_trial.post_chat(
                 {"model": "m"},
                 url="http://gateway/v1",
@@ -515,20 +520,22 @@ class TestGatewayRules:
 
         assert calls["n"] == 1
 
-    def test_a_503_with_retry_after_is_waited_out_and_retried(
+    def test_a_503_with_retry_after_still_resolves_through_the_shared_helper(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        waits: list[float] = []
-        monkeypatch.setattr(emoji_trial.time, "sleep", lambda s: waits.append(s))
         calls = {"n": 0}
 
         def handler(request: httpx.Request) -> httpx.Response:
             calls["n"] += 1
             if calls["n"] == 1:
-                return httpx.Response(503, headers={"Retry-After": "3"})
+                return httpx.Response(503, headers={"Retry-After": "1"})
             return httpx.Response(
                 200, json={"choices": [{"message": {"content": "ok"}}]}
             )
+
+        monkeypatch.setattr(
+            "app.services.llm_http.asyncio.sleep", AsyncMock(return_value=None)
+        )
 
         content = emoji_trial.post_chat(
             {"model": "m"},
@@ -540,88 +547,6 @@ class TestGatewayRules:
 
         assert content == "ok"
         assert calls["n"] == 2
-        assert waits == [3.0]
-
-    def test_the_retry_gets_the_remaining_budget_not_the_full_timeout(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The bug a sibling review caught: passing the constant `timeout` on every loop
-        would let a chain of 503s run far longer than the caller's budget."""
-        seen = _client_spy(monkeypatch)
-        monkeypatch.setattr(emoji_trial.time, "sleep", lambda s: None)
-        calls = {"n": 0}
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            calls["n"] += 1
-            if calls["n"] == 1:
-                return httpx.Response(503, headers={"Retry-After": "1"})
-            return httpx.Response(
-                200, json={"choices": [{"message": {"content": "ok"}}]}
-            )
-
-        emoji_trial.post_chat(
-            {"model": "m"},
-            url="http://gateway/v1",
-            api_key="k",
-            timeout=300.0,
-            transport=httpx.MockTransport(handler),
-        )
-
-        assert len(seen) == 2
-        assert seen[1].read < seen[0].read
-
-    @pytest.mark.parametrize("bad", ["nan", "inf", "-5", "not-a-number"])
-    def test_an_unusable_retry_after_falls_back_to_the_default_wait(
-        self, monkeypatch: pytest.MonkeyPatch, bad: str
-    ) -> None:
-        """`float()` parses "nan" and "inf" without raising, and a negative wait would retry
-        at once - none of these may be trusted as a wait time."""
-        waits: list[float] = []
-        monkeypatch.setattr(emoji_trial.time, "sleep", lambda s: waits.append(s))
-        calls = {"n": 0}
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            calls["n"] += 1
-            if calls["n"] == 1:
-                return httpx.Response(503, headers={"Retry-After": bad})
-            return httpx.Response(
-                200, json={"choices": [{"message": {"content": "ok"}}]}
-            )
-
-        emoji_trial.post_chat(
-            {"model": "m"},
-            url="http://gateway/v1",
-            api_key="k",
-            timeout=300.0,
-            transport=httpx.MockTransport(handler),
-        )
-
-        assert waits == [emoji_trial.DEFAULT_RETRY_WAIT]
-
-    def test_a_retry_after_under_one_second_is_floored(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        waits: list[float] = []
-        monkeypatch.setattr(emoji_trial.time, "sleep", lambda s: waits.append(s))
-        calls = {"n": 0}
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            calls["n"] += 1
-            if calls["n"] == 1:
-                return httpx.Response(503, headers={"Retry-After": "0.2"})
-            return httpx.Response(
-                200, json={"choices": [{"message": {"content": "ok"}}]}
-            )
-
-        emoji_trial.post_chat(
-            {"model": "m"},
-            url="http://gateway/v1",
-            api_key="k",
-            timeout=300.0,
-            transport=httpx.MockTransport(handler),
-        )
-
-        assert waits == [1.0]
 
     @pytest.mark.parametrize("status", [401, 403])
     def test_a_401_or_403_is_logged_without_the_key_and_raises(

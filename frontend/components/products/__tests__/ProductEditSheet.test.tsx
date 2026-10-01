@@ -536,6 +536,18 @@ describe('ProductEditSheet emoji', () => {
     expect(screen.getByRole('button', { name: 'No emoji' })).toBeInTheDocument()
   })
 
+  it('marks a table-set exact emoji as the picker selection, not just a cook pick', async () => {
+    renderSheet({ ...PRODUCT, emoji: '🧀', emoji_match: 'exact' })
+
+    const selected = await screen.findByRole('button', { name: 'cheese wedge' })
+
+    expect(selected).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'pretzel' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+  })
+
   it('picking one puts it to the cook, at once, without Save', async () => {
     let body: unknown
     server.use(

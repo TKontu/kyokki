@@ -7,9 +7,12 @@ before this build do not. This walks the whole catalog once and applies the cura
 call at all, printing what would change or what changed. Non-food, `cook` and `cleared`
 products are never touched - a hand-set choice, or one the cook cleared, is never overwritten.
 
-`--propose` also asks the model, batched and one request at a time, for the names neither
-table knows; its `exact` answers land as `proposed`, shown on the products page's review list
-until a person confirms them, exactly as a new product's own miss would be.
+`--propose` also asks the model, in batches of `--batch-size` (20 by default) and one
+request at a time, for the names neither table knows - exactly as `scripts/emoji_trial.py`
+does; its `exact` answers land as `proposed`, shown on the products page's review list until
+a person confirms them, the same as a new product's own miss would be. Each batch is applied
+(or, on `--dry-run`, reported) as soon as it answers, so a run interrupted partway through a
+large catalog keeps the batches it finished.
 
 The operator runs this inside the `kyokki-api` container after deploy:
 
@@ -23,7 +26,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from uuid import UUID
@@ -40,6 +43,9 @@ SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 # Never touched: a hand-set choice, or one the cook cleared, outlives any backfill.
 UNTOUCHABLE = {EmojiMatch.COOK.value, EmojiMatch.CLEARED.value}
+
+# Matches scripts/emoji_trial.py's own default; one request per batch, one batch at a time.
+DEFAULT_BATCH_SIZE = 20
 
 
 def _default_sessions() -> AbstractAsyncContextManager[AsyncSession]:
@@ -70,8 +76,12 @@ async def _candidates(db: AsyncSession) -> list[ProductMaster]:
     return list(result.scalars().all())
 
 
-async def plan(db: AsyncSession, *, propose: bool) -> list[Change]:
-    """What the backfill would change. With `propose`, also the model's answer for a miss."""
+async def plan(db: AsyncSession) -> tuple[list[Change], list[ProductMaster]]:
+    """The curated table's changes, and every miss it left for `propose_in_batches`.
+
+    No model call here: a miss is only collected, never asked about, so a plain
+    (non-`--propose`) run never reaches the gateway.
+    """
     changes: list[Change] = []
     misses: list[ProductMaster] = []
     for product in await _candidates(db):
@@ -80,8 +90,7 @@ async def plan(db: AsyncSession, *, propose: bool) -> list[Change]:
             continue
         hit = await product_emoji.lookup(db, name)
         if hit is None:
-            if propose:
-                misses.append(product)
+            misses.append(product)
             continue
         emoji, match = hit
         already = (
@@ -90,20 +99,35 @@ async def plan(db: AsyncSession, *, propose: bool) -> list[Change]:
         if already:
             continue
         changes.append(Change(product.id, name, product.emoji_match, emoji, match))
+    return changes, misses
 
-    if misses:
-        answers = await product_emoji.propose([str(p.canonical_name) for p in misses])
-        if answers is not None:
-            for product, answer in zip(misses, answers, strict=True):
-                changes.append(
-                    Change(
-                        product.id,
-                        str(product.canonical_name),
-                        product.emoji_match,
-                        answer.emoji,
-                        answer.match,
-                    )
-                )
+
+async def propose_in_batches(
+    misses: list[ProductMaster],
+    *,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    on_batch: Callable[[list[Change]], Awaitable[None]] | None = None,
+) -> list[Change]:
+    """Ask the model about every miss, one batch after another (the gateway serves one
+    request at a time) - exactly as `scripts/emoji_trial.py` does.
+
+    `on_batch` gets each batch's changes as soon as it answers, so a caller can apply or
+    print them right away: an interrupted run then keeps the batches it finished, rather
+    than losing the whole `--propose` pass to one failure near the end.
+    """
+    changes: list[Change] = []
+    for start in range(0, len(misses), batch_size):
+        batch = misses[start : start + batch_size]
+        answers = await product_emoji.propose([str(p.canonical_name) for p in batch])
+        if answers is None:
+            continue
+        batch_changes = [
+            Change(p.id, str(p.canonical_name), p.emoji_match, a.emoji, a.match)
+            for p, a in zip(batch, answers, strict=True)
+        ]
+        changes.extend(batch_changes)
+        if on_batch:
+            await on_batch(batch_changes)
     return changes
 
 
@@ -128,14 +152,7 @@ def _describe(match: EmojiMatch, emoji: str | None) -> str:
     return f"{emoji} ({match.value})" if emoji else f"none ({match.value})"
 
 
-async def backfill(
-    *, dry_run: bool, propose: bool, sessions: SessionFactory = _default_sessions
-) -> list[Change]:
-    """Plan, print, and - unless `dry_run` - apply. Returns the plan either way."""
-    async with sessions() as db:
-        changes = await plan(db, propose=propose)
-
-    label = "model" if propose else "curated table"
+def _report(changes: list[Change], *, dry_run: bool, label: str) -> None:
     print(f"{len(changes)} product(s) would change from the {label}")
     for change in changes:
         before = change.before or "never looked up"
@@ -144,10 +161,52 @@ async def backfill(
             f"  {verb}  {change.name}  {before} -> {_describe(change.match, change.emoji)}"
         )
 
+
+async def _apply_and_report(
+    changes: list[Change], *, dry_run: bool, label: str, sessions: SessionFactory
+) -> None:
+    """Report a batch (or the curated-table pass), and apply it right away unless dry-run -
+    so a later batch failing never undoes what an earlier one already wrote."""
+    _report(changes, dry_run=dry_run, label=label)
     if not dry_run and changes:
         async with sessions() as db:
             applied = await apply_changes(db, changes)
-        print(f"{applied} applied")
+        print(f"  {applied} applied")
+
+
+async def backfill(
+    *,
+    dry_run: bool,
+    propose: bool,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    sessions: SessionFactory = _default_sessions,
+) -> list[Change]:
+    """The curated table's changes first, applied (or reported) at once; then, with
+    `propose`, the model's answer for every miss, one batch at a time, each one applied (or
+    reported) as soon as it comes back. Returns everything planned, table and model alike.
+    """
+    async with sessions() as db:
+        changes, misses = await plan(db)
+
+    await _apply_and_report(
+        changes, dry_run=dry_run, label="curated table", sessions=sessions
+    )
+
+    if propose and misses:
+        print(
+            f"{len(misses)} miss(es); asking the model in batches of {batch_size}, "
+            "one request at a time"
+        )
+
+        async def on_batch(batch_changes: list[Change]) -> None:
+            await _apply_and_report(
+                batch_changes, dry_run=dry_run, label="model", sessions=sessions
+            )
+
+        proposed = await propose_in_batches(
+            misses, batch_size=batch_size, on_batch=on_batch
+        )
+        changes.extend(proposed)
     return changes
 
 
@@ -161,8 +220,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="also ask the model, batched, for names neither table knows",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="model proposal batch size (default 20)",
+    )
     args = parser.parse_args(argv)
-    asyncio.run(backfill(dry_run=args.dry_run, propose=args.propose))
+    asyncio.run(
+        backfill(dry_run=args.dry_run, propose=args.propose, batch_size=args.batch_size)
+    )
     return 0
 
 
