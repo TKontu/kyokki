@@ -19,6 +19,7 @@ import httpx
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.llm_extractor import LLMExtractionError, extract_json_object
+from app.services.llm_http import LLMAuthError, post_chat
 
 logger = get_logger(__name__)
 
@@ -143,13 +144,13 @@ async def select_products(lines: list[SelectionLine]) -> dict[str, UUID]:
     started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=settings.LLM_ESTIMATE_TIMEOUT) as client:
-            response = await client.post(
-                f"{settings.LLM_BASE_URL}/chat/completions",
-                json=payload,
-                headers={"Authorization": f"Bearer {settings.LLM_API_KEY}"},
+            response = await post_chat(
+                client, payload, budget=settings.LLM_ESTIMATE_TIMEOUT
             )
             response.raise_for_status()
             body = response.json()
+    except LLMAuthError as exc:
+        raise LLMExtractionError(str(exc)) from exc
     except httpx.HTTPError as exc:
         raise LLMExtractionError(f"Selection request failed: {exc!r}") from exc
 
