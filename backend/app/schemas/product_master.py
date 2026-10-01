@@ -3,7 +3,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.core.config import settings
 from app.models.product_master import EmojiMatch, IconStatus, ShelfLifeSource
 from app.schemas.types import JsonDecimal, canonicalize_units
 from app.services.units import unit_type_for
@@ -157,7 +156,15 @@ class ProductMasterResponse(ProductMasterBase):
 
     @model_validator(mode="after")
     def _generation_enabled(self) -> "ProductMasterResponse":
-        """Always the server's own setting, never whatever the ORM row happened to carry."""
+        """Always the server's own setting, never whatever the ORM row happened to carry.
+
+        Imported here, not at module level: a schema module importing `app.core.config`
+        at import time makes `Settings()` build eagerly for anything that merely imports
+        this schema (`scripts/check_vocabularies.py` does, with no DB env vars set) -
+        unrelated code should not need a database configured just to import a type.
+        """
+        from app.core.config import settings
+
         self.generation_enabled = bool(settings.COMFYUI_BASE_URL)
         return self
 
