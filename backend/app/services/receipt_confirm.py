@@ -17,6 +17,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.logging import get_logger
 from app.models.inventory_item import InventoryItem
@@ -41,6 +42,10 @@ from app.services.store_chain import normalize_store_chain
 logger = get_logger(__name__)
 
 UNKNOWN_CHAIN = "unknown"
+
+# A sane cap for a printed line, stored alongside the index so the item's sheet reads
+# right even if `ocr_structured` is later re-read differently (Q26).
+RECEIPT_LINE_TEXT_MAX_LENGTH = 500
 
 
 class ReceiptNotFound(LookupError):
@@ -87,33 +92,41 @@ class _Confirmation:
         self.resolver = ProductResolver(db)
         self.aliases: dict[str, StoreProductAlias] = {}
 
-    def line(self, position: int, item: ConfirmedItemCreate) -> dict[str, Any]:
+    def line(
+        self, position: int, item: ConfirmedItemCreate
+    ) -> tuple[int | None, dict[str, Any]]:
         """The receipt line this item refers to, by identity where the client gave one.
 
-        `index` is a position among *readable* lines, so an unreadable line anywhere
-        shifts every index after it and the wrong printed name gets learned as an alias.
-        `line_id` does not move (H12); `index` stays for receipts read before it.
+        `index` is the line's raw position in `self.lines`: `items_from_structured`
+        enumerates the full raw list without renumbering, so a line the model could not
+        read is simply left out of what the client sees, and no index after it shifts.
+        `line_id` is still preferred (H12): it survives a later re-read, where `index`
+        would point at whatever line ended up at that position instead.
+
+        Returns the line's own raw position in `self.lines` alongside it (Q26): for an
+        index lookup that is `item.index` itself; for a `line_id` lookup, wherever it
+        was found.
         """
         if item.line_id is not None:
             wanted = str(item.line_id)
-            for candidate in self.lines:
+            for raw_index, candidate in enumerate(self.lines):
                 if (
                     isinstance(candidate, dict)
                     and str(candidate.get("line_id") or "") == wanted
                 ):
                     if not candidate.get("name"):
                         break
-                    return candidate
+                    return raw_index, candidate
             raise InvalidConfirmItem(f"Item {position}: receipt has no line {wanted}")
 
         if item.index is None:
-            return {}
+            return None, {}
         line = self.lines[item.index] if item.index < len(self.lines) else None
         if not isinstance(line, dict) or not line.get("name"):
             raise InvalidConfirmItem(
                 f"Item {position}: receipt has no line {item.index}"
             )
-        return line
+        return item.index, line
 
     async def product(
         self, position: int, item: ConfirmedItemCreate, line: dict[str, Any]
@@ -258,7 +271,7 @@ class _Confirmation:
         self.result.aliases_learned += 1
 
     async def add(self, position: int, item: ConfirmedItemCreate) -> None:
-        line = self.line(position, item)
+        line_index, line = self.line(position, item)
         product = await self.product(position, item, line)
         inventory_item = build_inventory_item(
             product,
@@ -268,6 +281,14 @@ class _Confirmation:
             expiry_date=item.expiry_date,
             location=item.location,
             receipt_id=cast(UUID, self.receipt.id),
+        )
+        # Where this item came from on the receipt (Q26); NULL for an item added
+        # without a line (a free line, or a product-id-only item with no `index`).
+        item_row: Any = inventory_item  # Column-typed model: assign plain values
+        item_row.receipt_line_index = line_index
+        line_name = line.get("name") if line else None
+        item_row.receipt_line_text = (
+            str(line_name)[:RECEIPT_LINE_TEXT_MAX_LENGTH] if line_name else None
         )
         self.db.add(inventory_item)
         self.result.inventory_items.append((inventory_item, product))
@@ -308,6 +329,38 @@ async def _apply_non_food(
     forgotten = _printed_names(confirmation, corrected)
     if forgotten:
         await forget_non_food(db, confirmation.chain, forgotten)
+
+    _mark_confirmed_non_food(confirmation, skipped)
+
+
+def _mark_confirmed_non_food(
+    confirmation: "_Confirmation", skipped: Iterable[int]
+) -> None:
+    """Record, on this receipt's own stored lines, which ones were folded away as
+    household *in this confirm* (Q28).
+
+    `remember_non_food` above only teaches the printed name for *future* receipts;
+    nothing recorded that this line was household on *this* one, so a never-seen
+    household line read `skipped` on the audit view instead of `household`. A line
+    already flagged `non_food` at extraction time needs nothing further: the audit
+    checks `stocked` before `household`, so a line the cook included anyway still
+    reads `stocked` regardless of this flag.
+
+    Mutating the dicts inside `confirmation.lines` changes the very list the receipt's
+    `ocr_structured` already holds (`_Confirmation.__init__` reads it, not a copy), but
+    SQLAlchemy does not notice an in-place JSONB mutation on its own - `flag_modified`
+    tells it to write the column back.
+    """
+    marked = False
+    for index in skipped:
+        if not (0 <= index < len(confirmation.lines)):
+            continue
+        line = confirmation.lines[index]
+        if isinstance(line, dict) and not line.get("confirmed_non_food"):
+            line["confirmed_non_food"] = True
+            marked = True
+    if marked:
+        flag_modified(confirmation.receipt, "ocr_structured")
 
 
 async def confirm_receipt(

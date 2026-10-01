@@ -236,6 +236,70 @@ describe('ItemEditSheet', () => {
   })
 })
 
+describe('ItemEditSheet: where the item came from (Q26)', () => {
+  const FROM_RECEIPT: InventoryItem = { ...OAT, receipt_id: 'receipt-1' }
+
+  it('shows nothing, and asks nothing, for a hand-added item', () => {
+    // onUnhandledRequest: 'error' fails the test if this reaches the API at all
+    mockApi()
+    renderSheet(OAT)
+
+    expect(screen.queryByText(/^From /)).not.toBeInTheDocument()
+  })
+
+  it('names the receipt and the printed line, linking to the receipt', async () => {
+    mockApi()
+    server.use(
+      http.get(`${API_URL}/inventory/item-oat/source`, () =>
+        HttpResponse.json({
+          receipt_id: 'receipt-1',
+          store_chain: 's-group',
+          purchase_date: '2026-09-26',
+          line_text: 'KOKKIKARTANO KERMAINEN LOHIKEITTO',
+          line_index: 1,
+        })
+      )
+    )
+    renderSheet(FROM_RECEIPT)
+
+    const link = await screen.findByRole('link', {
+      name: 'From S-group, 26.9.2026: KOKKIKARTANO KERMAINEN LOHIKEITTO',
+    })
+    expect(link).toHaveAttribute('href', '/receipts/receipt-1')
+  })
+
+  it('names only the receipt when the line is unknown (a legacy confirm)', async () => {
+    mockApi()
+    server.use(
+      http.get(`${API_URL}/inventory/item-oat/source`, () =>
+        HttpResponse.json({
+          receipt_id: 'receipt-1',
+          store_chain: 's-group',
+          purchase_date: '2026-09-26',
+          line_text: null,
+          line_index: null,
+        })
+      )
+    )
+    renderSheet(FROM_RECEIPT)
+
+    expect(
+      await screen.findByRole('link', { name: 'From S-group, 26.9.2026' })
+    ).toBeInTheDocument()
+  })
+
+  it('shows nothing when the item has a receipt but no source comes back', async () => {
+    mockApi()
+    server.use(
+      http.get(`${API_URL}/inventory/item-oat/source`, () => HttpResponse.json(null))
+    )
+    renderSheet(FROM_RECEIPT)
+
+    await waitFor(() => expect(screen.getByLabelText('Expiry')).toBeInTheDocument())
+    expect(screen.queryByText(/^From /)).not.toBeInTheDocument()
+  })
+})
+
 describe('while the item moves underneath the sheet (H25)', () => {
   // It used to seed the inputs at mount and diff them against the live item, so a background
   // change armed Save by itself and one press wrote the stale snapshot back over the server.

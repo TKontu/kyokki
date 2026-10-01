@@ -164,3 +164,62 @@ export interface ReceiptConfirmResponse {
   aliases_learned: number
   error: string | null
 }
+
+/**
+ * Which receipt line an inventory item was confirmed from (Q26).
+ * `GET /api/inventory/{item_id}/source`; null when the item has no receipt. `line_text` and
+ * `line_index` are null for an item confirmed before this was tracked, or one added by hand.
+ */
+export interface ItemSource {
+  receipt_id: string
+  store_chain: string | null
+  purchase_date: string | null
+  line_text: string | null
+  line_index: number | null
+}
+
+/**
+ * How a printed receipt line's outcome reads on the audit view (Q28). `pending`: not
+ * confirmed yet. `stocked`: it became one or more inventory items. `household`: folded away
+ * as non-food. `skipped`: neither - the cook left it out.
+ */
+export type ReceiptLineOutcome = 'pending' | 'stocked' | 'household' | 'skipped'
+
+/** One inventory item a receipt (or receipt line) produced. */
+export interface ReceiptAuditItemRef {
+  id: string
+  product_id: string | null
+  product_name: string | null
+}
+
+/** One printed receipt line and what became of it (Q28). */
+export interface ReceiptAuditLine {
+  index: number
+  name: string
+  price: number | null
+  outcome: ReceiptLineOutcome
+  items: ReceiptAuditItemRef[] // Set when outcome is 'stocked'
+}
+
+/**
+ * Everything the cook can check about how a receipt became stock (Q28).
+ * `GET /api/receipts/{id}/audit`, for any processing status. The original file is served
+ * separately at `GET /api/receipts/{id}/file`.
+ */
+export interface ReceiptAudit {
+  id: string
+  store_chain: string | null
+  purchase_date: string | null
+  processing_status: Vocabulary<ReceiptStatus>
+  created_at: string
+  ocr_raw_text: string | null
+  model_raw_answer: string | null // The model's raw completion, when one was stored (#131)
+  // The targeted re-read's raw completion (Q27), when the first read missed lines
+  model_raw_answer_retry: string | null
+  // What GET /file would serve; null if the stored file is gone - tells the viewer whether
+  // to render an <img> or a PDF viewer
+  file_content_type: string | null
+  lines: ReceiptAuditLine[]
+  // Items created from this receipt before its line index was tracked (no backfill, Q26)
+  unlinked_items: ReceiptAuditItemRef[]
+}

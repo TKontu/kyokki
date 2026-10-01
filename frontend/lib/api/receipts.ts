@@ -4,9 +4,10 @@
  * be read again. Receipts also arrive through the Telegram bot.
  */
 
-import apiClient from './client'
+import apiClient, { API_BASE_URL } from './client'
 import type {
   Receipt,
+  ReceiptAudit,
   ReceiptConfirmRequest,
   ReceiptConfirmResponse,
   ReceiptListParams,
@@ -31,6 +32,22 @@ export async function get(id: string): Promise<Receipt> {
   return apiClient.get<Receipt>(`/receipts/${id}`)
 }
 
+/**
+ * Everything the cook can check about how a receipt became stock (Q28): the OCR text, the
+ * model's raw answer when stored, and each printed line's outcome. Works for any status.
+ */
+export async function audit(id: string): Promise<ReceiptAudit> {
+  return apiClient.get<ReceiptAudit>(`/receipts/${id}/audit`)
+}
+
+/**
+ * Where the receipt's original image or PDF is served (Q28), for an `<img src>` or an
+ * `<iframe>`/`<object>`. Never fetch this into the DOM as markup.
+ */
+export function fileUrl(id: string): string {
+  return `${API_BASE_URL}/receipts/${encodeURIComponent(id)}/file`
+}
+
 /** Turn the reviewed lines into stock. Lines left out are skipped. */
 export async function confirm(
   id: string,
@@ -53,5 +70,5 @@ export async function scan(file: File, fields?: ReceiptScanFields): Promise<Rece
   return apiClient.upload<Receipt>('/receipts/scan', file, data)
 }
 
-const receiptsAPI = { list, get, confirm, process, scan }
+const receiptsAPI = { list, get, audit, fileUrl, confirm, process, scan }
 export default receiptsAPI

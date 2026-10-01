@@ -223,6 +223,40 @@ describe('Inventory API', () => {
     })
   })
 
+  describe('source (Q26)', () => {
+    it('fetches which receipt line the item came from', async () => {
+      const source = {
+        receipt_id: 'r1',
+        store_chain: 's-group',
+        purchase_date: '2026-09-26',
+        line_text: 'KOKKIKARTANO KERMAINEN LOHIKEITTO',
+        line_index: 1,
+      }
+      ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => source,
+      })
+
+      await expect(inventoryAPI.source(mockInventoryItem.id)).resolves.toEqual(source)
+
+      expect(global.fetch).toHaveBeenCalledWith(
+        `${API_URL}/inventory/${mockInventoryItem.id}/source`,
+        expect.objectContaining({ method: 'GET' })
+      )
+    })
+
+    it('resolves null for a hand-added item', async () => {
+      ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => null,
+      })
+
+      await expect(inventoryAPI.source(mockInventoryItem.id)).resolves.toBeNull()
+    })
+  })
+
   describe('create', () => {
     it('should create a new inventory item', async () => {
       const newItemData: InventoryItemCreate = {

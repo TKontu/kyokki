@@ -128,6 +128,13 @@ describe('ReceiptsPage', () => {
     ])
   })
 
+  it('opens a confirmed receipt on the audit view (Q28), not the review screen', async () => {
+    renderPage([summary({ id: 'r-confirmed', processing_status: 'confirmed' })])
+
+    const link = await screen.findByRole('link', { name: /S-group/ })
+    expect(link).toHaveAttribute('href', '/receipts/r-confirmed')
+  })
+
   it('points an empty list at the two ways in', async () => {
     renderPage([])
 
