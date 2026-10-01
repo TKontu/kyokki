@@ -6,7 +6,9 @@ import httpx
 import pytest
 from conftest import PRODUCT_ID, RECEIPT_ID, FakeApi, Runner
 
-from kyokki import commands
+from kyokki import cli, commands
+
+ANOTHER_PRODUCT_ID = "aaaaaaaa-1111-4111-8111-111111111111"
 
 MATCHED_ITEM = {
     "index": 0,
@@ -138,6 +140,19 @@ def test_receipt_upload_duplicate_is_conflict_with_the_existing_id(
     assert RECEIPT_ID in detail["message"]
 
 
+def test_receipt_upload_too_large_is_a_usage_error(
+    api: FakeApi, run: Runner, tmp_path
+) -> None:
+    # The real server's detail is a plain string (F6): `HTTPException(413, detail=str(exc))`.
+    upload_file = tmp_path / "receipt.jpg"
+    upload_file.write_bytes(b"x")
+    api.error("POST", "/api/receipts/scan", 413, "Receipt is 25 MB; the limit is 20 MB")
+    result = run("receipt", "upload", str(upload_file))
+    assert result.code == 2
+    detail = result.json()
+    assert "20 MB" in detail["message"]
+
+
 def test_receipt_upload_wait_polls_until_completed(
     api: FakeApi, run: Runner, tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -193,6 +208,14 @@ def test_receipt_upload_wait_times_out(
     assert result.json()["code"] == "timeout"
     gets = [r for r in api.requests if r.method == "GET"]
     assert len(gets) == 1
+
+
+def test_receipt_upload_default_timeout_is_1800_seconds() -> None:
+    # F2: the server's per-receipt budget is ~28 min; 600s produced false timeouts.
+    parser = cli.build_parser()
+    args = parser.parse_args(["receipt", "upload", "somefile.jpg"])
+    assert args.timeout == 1800
+    assert commands.DEFAULT_RECEIPT_WAIT_TIMEOUT == 1800
 
 
 # --- status -----------------------------------------------------------------
@@ -252,6 +275,9 @@ def test_receipt_confirm_refuses_on_unmatched_food_lines(
     assert result.code == 6
     detail = result.json()
     assert "TUNTEMATON TUOTE" in detail["message"]
+    assert "--assign" in detail["message"]
+    assert "--new" in detail["message"]
+    assert "--skip-unmatched" in detail["message"]
     assert all(r.method == "GET" for r in api.requests)
 
 
@@ -340,19 +366,24 @@ def test_receipt_confirm_refuses_when_not_ready(
     assert all(r.method == "GET" for r in api.requests)
 
 
-@pytest.mark.parametrize("status_code", [400, 409])
-def test_receipt_confirm_retry_conflict_from_the_server_is_6(
-    api: FakeApi, run: Runner, status_code: int
+def test_receipt_confirm_already_confirmed_409_is_conflict(
+    api: FakeApi, run: Runner
 ) -> None:
+    # F3/F6: the real server sends a plain-string detail for this 409.
     api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_ALL_MATCHED)
-    api.error(
-        "POST",
-        CONFIRM_PATH,
-        status_code,
-        {"code": "conflict", "message": "receipt already confirmed"},
-    )
+    api.error("POST", CONFIRM_PATH, 409, "Receipt already confirmed")
     result = run("receipt", "confirm", RECEIPT_ID, "--all-matched")
     assert result.code == 6
+
+
+def test_receipt_confirm_invalid_item_400_is_a_usage_error(
+    api: FakeApi, run: Runner
+) -> None:
+    # F3/F6: a 400 (e.g. a product deleted since `status`) is usage, not conflict.
+    api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_ALL_MATCHED)
+    api.error("POST", CONFIRM_PATH, 400, "Item 0: unknown product")
+    result = run("receipt", "confirm", RECEIPT_ID, "--all-matched")
+    assert result.code == 2
 
 
 def test_receipt_confirm_requires_all_matched_flag(api: FakeApi, run: Runner) -> None:
@@ -364,3 +395,167 @@ def test_receipt_confirm_requires_all_matched_flag(api: FakeApi, run: Runner) ->
 def test_receipt_confirm_needs_a_uuid(run: Runner) -> None:
     result = run("receipt", "confirm", "not-a-uuid", "--all-matched")
     assert result.code == 2
+
+
+# --- confirm: --assign and --new (F1) ------------------------------------------
+
+
+def test_receipt_confirm_assign_sends_the_given_product_id(
+    api: FakeApi, run: Runner
+) -> None:
+    api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_WITH_UNMATCHED)
+    api.on("POST", CONFIRM_PATH, 200, CONFIRM_RESULT)
+    result = run(
+        "receipt",
+        "confirm",
+        RECEIPT_ID,
+        "--all-matched",
+        "--assign",
+        f"1={ANOTHER_PRODUCT_ID}",
+    )
+    assert result.code == 0
+    body = api.last_json()
+    assert len(body["items"]) == 2
+    assigned = next(i for i in body["items"] if i["product_id"] == ANOTHER_PRODUCT_ID)
+    assert assigned["line_id"] == UNMATCHED_ITEM["line_id"]
+    assert assigned["quantity"] == UNMATCHED_ITEM["quantity"]
+    assert assigned["unit"] == UNMATCHED_ITEM["unit"]
+    assert assigned["purchase_date"] == "2026-09-20"
+
+
+def test_receipt_confirm_new_sends_name_and_category(api: FakeApi, run: Runner) -> None:
+    api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_WITH_UNMATCHED)
+    api.on("POST", CONFIRM_PATH, 200, CONFIRM_RESULT)
+    result = run("receipt", "confirm", RECEIPT_ID, "--all-matched", "--new", "1=dairy")
+    assert result.code == 0
+    body = api.last_json()
+    created = next(i for i in body["items"] if "category" in i)
+    assert created["name"] == UNMATCHED_ITEM["name"]  # no generic_name: falls back
+    assert created["category"] == "dairy"
+    assert "product_id" not in created
+
+
+def test_receipt_confirm_new_prefers_the_generic_name(
+    api: FakeApi, run: Runner
+) -> None:
+    receipt = {
+        **RECEIPT_WITH_UNMATCHED,
+        "items": [
+            MATCHED_ITEM,
+            {**UNMATCHED_ITEM, "generic_name": "Tahini"},
+            NON_FOOD_ITEM,
+        ],
+    }
+    api.on("GET", RECEIPT_GET_PATH, 200, receipt)
+    api.on("POST", CONFIRM_PATH, 200, CONFIRM_RESULT)
+    result = run("receipt", "confirm", RECEIPT_ID, "--all-matched", "--new", "1=pantry")
+    assert result.code == 0
+    created = next(i for i in api.last_json()["items"] if "category" in i)
+    assert created["name"] == "Tahini"
+
+
+def test_receipt_confirm_assign_unknown_line_is_a_usage_error(
+    api: FakeApi, run: Runner
+) -> None:
+    api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_WITH_UNMATCHED)
+    result = run(
+        "receipt",
+        "confirm",
+        RECEIPT_ID,
+        "--all-matched",
+        "--assign",
+        f"99={PRODUCT_ID}",
+    )
+    assert result.code == 2
+    assert all(r.method == "GET" for r in api.requests)
+
+
+def test_receipt_confirm_assign_a_non_food_line_is_a_usage_error(
+    api: FakeApi, run: Runner
+) -> None:
+    api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_WITH_UNMATCHED)
+    result = run(
+        "receipt", "confirm", RECEIPT_ID, "--all-matched", "--assign", f"2={PRODUCT_ID}"
+    )
+    assert result.code == 2
+    assert all(r.method == "GET" for r in api.requests)
+
+
+def test_receipt_confirm_assigning_the_same_line_twice_is_a_usage_error(
+    api: FakeApi, run: Runner
+) -> None:
+    api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_WITH_UNMATCHED)
+    result = run(
+        "receipt",
+        "confirm",
+        RECEIPT_ID,
+        "--all-matched",
+        "--assign",
+        f"1={ANOTHER_PRODUCT_ID}",
+        "--assign",
+        f"1={PRODUCT_ID}",
+    )
+    assert result.code == 2
+
+
+def test_receipt_confirm_assign_and_new_the_same_line_is_a_usage_error(
+    api: FakeApi, run: Runner
+) -> None:
+    api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_WITH_UNMATCHED)
+    result = run(
+        "receipt",
+        "confirm",
+        RECEIPT_ID,
+        "--all-matched",
+        "--assign",
+        f"1={ANOTHER_PRODUCT_ID}",
+        "--new",
+        "1=dairy",
+    )
+    assert result.code == 2
+
+
+def test_receipt_confirm_assign_needs_a_line_equals_uuid(run: Runner) -> None:
+    result = run(
+        "receipt", "confirm", RECEIPT_ID, "--all-matched", "--assign", "1=not-a-uuid"
+    )
+    assert result.code == 2
+
+
+def test_receipt_confirm_assign_needs_the_equals_sign(run: Runner) -> None:
+    result = run("receipt", "confirm", RECEIPT_ID, "--all-matched", "--assign", "nope")
+    assert result.code == 2
+
+
+def test_receipt_confirm_dry_run_with_assign_shows_the_product(
+    api: FakeApi, run: Runner, tty: None
+) -> None:
+    api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_WITH_UNMATCHED)
+    result = run(
+        "receipt",
+        "confirm",
+        RECEIPT_ID,
+        "--all-matched",
+        "--assign",
+        f"1={ANOTHER_PRODUCT_ID}",
+        "--dry-run",
+    )
+    assert result.code == 0
+    assert ANOTHER_PRODUCT_ID in result.out
+
+
+def test_receipt_confirm_dry_run_with_new_shows_the_category(
+    api: FakeApi, run: Runner, tty: None
+) -> None:
+    api.on("GET", RECEIPT_GET_PATH, 200, RECEIPT_WITH_UNMATCHED)
+    result = run(
+        "receipt",
+        "confirm",
+        RECEIPT_ID,
+        "--all-matched",
+        "--new",
+        "1=pantry",
+        "--dry-run",
+    )
+    assert result.code == 0
+    assert "pantry" in result.out

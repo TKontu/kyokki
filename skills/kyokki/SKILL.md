@@ -11,7 +11,7 @@ Kyokki is a self-hosted kitchen inventory system. You drive it entirely through 
 ## The generic-product rule
 
 Kyokki holds **one product per food**, named plainly ("Milk", "Oat drink", "Tahini") —
-never a brand, fat percentage, or pack size. A name as printed on a receipt or asked by
+never a brand, size, fat content or cut. A name as printed on a receipt or asked by
 a person ("ARLA BARISTA", "kaurajuoma") is an *alias* that resolves to the generic
 product; it is never a product of its own. Always resolve a name before creating
 anything.
@@ -92,20 +92,30 @@ kyokki stock list --expiring 3
 ```
 kyokki receipt upload receipt.jpg --wait
 kyokki receipt status 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01
-kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched
 ```
 
-`--wait` polls until the model has read it (a cold model takes minutes; `--timeout`
-extends how long). `confirm --all-matched` sends every matched food line; if any food
-line is unmatched it refuses (exit 6) and lists them. Resolve them with
-`product resolve` / `product name add` and confirm again, or send the matched ones now
-and ask the user about the rest separately:
+`--wait` polls until the model has read it — a receipt can take up to ~30 minutes
+when the model re-reads it, so the default `--timeout` is generous; do not shorten it.
+`status` lists each line, its printed and generic name, and the matched product (or
+`(unmatched)`).
+
+`confirm --all-matched` sends every matched food line as-is. **Teaching a name
+(`product name add`) never touches a receipt already read** — it does not fix an
+unmatched line, so do not loop on it. For each unmatched line, resolve its generic name
+(`kyokki product resolve "<name>"`), then: one clear `match` → attach the line to it
+with `--assign`; `candidates`, no clear match (exit 4) → ask the user, then `--assign`
+the one they pick; no match at all → `--new` it, in a real category from
+`kyokki category list` (never invent one):
 
 ```
-kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched --skip-unmatched
+kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched --assign 1=0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --new 2=pantry
 ```
 
-Confirm is final: a line you do not send is never stocked.
+`--assign`/`--new` are repeatable, one per unmatched line, and combine with a plain
+`--all-matched`. Only leave a line out on purpose, with `--skip-unmatched`; confirm is
+final, and a line you do not send is never stocked. Confirm itself already learns the
+line's printed name as an alias for next time — no separate `product name add` needed
+for a line you just confirmed.
 
 ### Shopping list
 

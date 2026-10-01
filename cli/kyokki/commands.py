@@ -570,7 +570,11 @@ RECEIPT_PATH = "/api/receipts/"
 # Not yet read: status/confirm both treat these as "not ready yet".
 IN_PROGRESS_STATUSES = {"uploaded", "queued", "processing"}
 RECEIPT_POLL_SECONDS = 5
-DEFAULT_RECEIPT_WAIT_TIMEOUT = 600
+# The server's per-receipt budget is ~28 min: MinerU OCR (120s) plus up to three
+# sequential model calls at 420s each, with margin (`receipt_stale_minutes` in
+# backend/app/core/config.py). 600s produced a false timeout on a receipt needing a
+# re-read. cli.py's `--timeout` default reads this constant, so there is one number.
+DEFAULT_RECEIPT_WAIT_TIMEOUT = 1800
 # The router's plain-string 404 for an unknown receipt id.
 RECEIPT_NOT_FOUND = re.compile(r"^Receipt '\S+' not found$")
 # Why a receipt is not ready for `confirm`, keyed on processing_status.
@@ -611,14 +615,14 @@ def _duplicate_as_conflict(exc: CliError) -> CliError:
     )
 
 
-def _confirm_conflict(exc: CliError) -> CliError:
-    """The confirm endpoint has no Idempotency-Key (unlike stock/shopping): a retry
-    answers 409 (already confirmed) or 400 (a stale line); both are reported as
-    conflict (exit 6) rather than the usual 2/1, since neither can be told apart from
-    a request that was simply rejected again."""
-    if exc.status in (400, 409) and isinstance(exc.detail, dict):
-        return CliError(CONFLICT, {**exc.detail, "code": "conflict"}, exc.status)
-    return exc
+def _too_large_as_usage(exc: CliError) -> CliError:
+    """413 from /scan (over the server's upload cap): a usage error (exit 2), like a
+    bad argument, not the generic http_413 (exit 1). The server's own message already
+    names the file's size and the limit; only the code and exit change."""
+    if exc.status != 413:
+        return exc
+    detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc)}
+    return CliError(USAGE, {**detail, "code": "usage"}, exc.status)
 
 
 def _not_ready(receipt: dict[str, Any]) -> CliError | None:
@@ -714,7 +718,7 @@ def receipt_upload(ctx: Context) -> Outcome:
             expect=dict,
         )
     except CliError as exc:
-        raise _duplicate_as_conflict(exc) from None
+        raise _too_large_as_usage(_duplicate_as_conflict(exc)) from None
     receipt = answer.body
     if a.wait:
         receipt = _wait_for_receipt(ctx.api, str(receipt.get("id")), a.timeout)
@@ -740,17 +744,74 @@ def receipt_status(ctx: Context) -> Outcome:
     return Outcome(receipt, human)
 
 
-def _confirm_line(item: dict[str, Any], purchase_date: str) -> dict[str, Any]:
+def _check_line(
+    index: int, by_index: dict[int, dict[str, Any]], seen: set[int]
+) -> dict[str, Any]:
+    """The line --assign/--new names: it must exist, be food, and not already be
+    claimed by an earlier --assign/--new (exit 2 otherwise)."""
+    item = by_index.get(index)
+    if item is None:
+        raise usage_error(f"no line {index} on this receipt; see kyokki receipt status")
+    if item.get("non_food"):
+        raise usage_error(f"line {index} is non-food; it is never stocked")
+    if index in seen:
+        raise usage_error(f"line {index} is named more than once (--assign/--new)")
+    seen.add(index)
+    return item
+
+
+def _resolve_overrides(
+    assign: list[tuple[int, str]],
+    new: list[tuple[int, str]],
+    by_index: dict[int, dict[str, Any]],
+) -> tuple[dict[int, str], dict[int, str]]:
+    """``--assign LINE=PRODUCT_ID`` and ``--new LINE=CATEGORY``, validated against the
+    receipt's own lines. Raises a usage error (exit 2) for an unknown line, a non-food
+    line, or a line named twice, across both options together."""
+    seen: set[int] = set()
+    assignments: dict[int, str] = {}
+    for index, product_id in assign:
+        _check_line(index, by_index, seen)
+        assignments[index] = product_id
+    categories: dict[int, str] = {}
+    for index, category in new:
+        _check_line(index, by_index, seen)
+        categories[index] = category
+    return assignments, categories
+
+
+def _confirm_line(
+    item: dict[str, Any],
+    purchase_date: str,
+    assignments: dict[int, str],
+    categories: dict[int, str],
+) -> dict[str, Any]:
+    index = int(item["index"])
     line: dict[str, Any] = (
-        {"line_id": str(item["line_id"])}
-        if item.get("line_id")
-        else {"index": item.get("index")}
+        {"line_id": str(item["line_id"])} if item.get("line_id") else {"index": index}
     )
-    line["product_id"] = item["product_id"]
+    if index in categories:
+        line["name"] = item.get("generic_name") or item.get("name")
+        line["category"] = categories[index]
+    else:
+        line["product_id"] = assignments.get(index, item.get("product_id"))
     line["quantity"] = item.get("quantity")
     line["unit"] = item.get("unit")
     line["purchase_date"] = purchase_date
     return line
+
+
+def _confirm_line_preview(line: dict[str, Any]) -> str:
+    where = line.get("line_id") or f"index {line.get('index')}"
+    what = (
+        f"new product {line['name']!r} ({line['category']})"
+        if "category" in line
+        else f"product {line['product_id']}"
+    )
+    return (
+        f"  {where}: {what} {output.number(line['quantity'])} {line['unit']}, "
+        f"purchased {line['purchase_date']}"
+    )
 
 
 def receipt_confirm(ctx: Context) -> Outcome:
@@ -773,10 +834,22 @@ def receipt_confirm(ctx: Context) -> Outcome:
         )
 
     items = receipt.get("items") or []
+    by_index = {item.get("index"): item for item in items}
+    assignments, categories = _resolve_overrides(a.assign, a.new, by_index)
+    overridden = set(assignments) | set(categories)
+
     food = [item for item in items if not item.get("non_food")]
     non_food = [item for item in items if item.get("non_food")]
-    matched = [item for item in food if item.get("product_id")]
-    unmatched = [item for item in food if not item.get("product_id")]
+    matched = [
+        item
+        for item in food
+        if item.get("product_id") or item.get("index") in overridden
+    ]
+    unmatched = [
+        item
+        for item in food
+        if not item.get("product_id") and item.get("index") not in overridden
+    ]
 
     if unmatched and not a.skip_unmatched:
         listed = "; ".join(
@@ -787,7 +860,8 @@ def receipt_confirm(ctx: Context) -> Outcome:
             {
                 "code": "conflict",
                 "message": f"{len(unmatched)} food line(s) are unmatched, so nothing "
-                f"was sent: {listed}; resolve them or pass --skip-unmatched",
+                f"was sent: {listed}; resolve them with --assign/--new, or pass "
+                "--skip-unmatched to leave them out",
                 "unmatched": [
                     {"index": item.get("index"), "name": item.get("name")}
                     for item in unmatched
@@ -795,7 +869,9 @@ def receipt_confirm(ctx: Context) -> Outcome:
             },
         )
 
-    confirmed_items = [_confirm_line(item, purchase_date) for item in matched]
+    confirmed_items = [
+        _confirm_line(item, purchase_date, assignments, categories) for item in matched
+    ]
     body = {
         "items": confirmed_items,
         "non_food_indexes": [item.get("index") for item in non_food],
@@ -807,13 +883,7 @@ def receipt_confirm(ctx: Context) -> Outcome:
 
         def dry_run_human() -> str:
             lines = [f"Would confirm receipt {a.receipt_id}:"]
-            for line in confirmed_items:
-                where = line.get("line_id") or f"index {line.get('index')}"
-                lines.append(
-                    f"  {where}: product {line['product_id']} "
-                    f"{output.number(line['quantity'])} {line['unit']}, "
-                    f"purchased {line['purchase_date']}"
-                )
+            lines.extend(_confirm_line_preview(line) for line in confirmed_items)
             if non_food:
                 lines.append(f"  ({len(non_food)} non-food line(s) left out)")
             if skipped:
@@ -827,7 +897,12 @@ def receipt_confirm(ctx: Context) -> Outcome:
             "POST", f"{RECEIPT_PATH}{a.receipt_id}/confirm", body=body, expect=dict
         )
     except CliError as exc:
-        raise _confirm_conflict(_receipt_not_found(exc)) from None
+        # No `_confirm_conflict` here on purpose (F3): the confirm endpoint has no
+        # Idempotency-Key, but its 400/409 both carry a plain-string detail, which
+        # `error_from`'s own STRING_DETAIL_EXIT table already maps correctly - 400
+        # (an item the server rejected, e.g. a since-deleted product_id) to usage
+        # (exit 2), 409 (already confirmed) to conflict (exit 6).
+        raise _receipt_not_found(exc) from None
     result = answer.body
 
     def human() -> str:

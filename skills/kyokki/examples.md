@@ -100,23 +100,39 @@ real, then confirm what actually changed.
 kyokki receipt upload /path/to/receipt.jpg --wait
 ```
 
-Once it has read (completed), look at the lines it could not match:
+`--wait` can take up to ~30 minutes if the model has to re-read it; that is normal, not
+a hang. Once it has read (completed), look at the lines, matched and not:
 
 ```
 kyokki receipt status 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01
 ```
 
-For each unmatched food line, resolve its name and either teach an alias (if it is a
-known product under a new name) or create a product for it, then confirm:
+Say line 1, "KEVYTMAITO 1L", came back unmatched, with generic name "Milk". Teaching a
+name (`product name add`) does not reach back into an already-read receipt, so resolve
+and attach the line directly instead:
 
 ```
-kyokki product resolve "KEVYTMAITO 1L"
-kyokki product name add 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 "KEVYTMAITO 1L"
-kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched
+kyokki product resolve "Milk"
 ```
 
-If the user would rather decide about the rest later, send the matched lines now and
-ask about the others separately — never guess a match yourself:
+- A `match` (say product `0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01`): attach the line to it
+  and confirm:
+  ```
+  kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched --assign 1=0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01
+  ```
+- `candidates` with no clear match (exit 4): ask the user which product they meant,
+  then `--assign` it the same way. Never guess.
+- No match at all, say line 2 "TUOREMEHU 1L" / generic "Juice": create a product for
+  it, in a real category (`kyokki category list`), never an invented one:
+  ```
+  kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched --assign 1=0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --new 2=dairy
+  ```
+
+Confirm itself learns "KEVYTMAITO 1L" as Milk's alias and "TUOREMEHU 1L" as the new
+Juice product's alias — no separate `product name add` needed for either.
+
+If the user would rather decide about some lines later, send the rest now and leave
+those out on purpose:
 
 ```
 kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched --skip-unmatched
