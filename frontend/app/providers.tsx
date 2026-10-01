@@ -10,6 +10,7 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { useEffect, useState } from 'react'
 import { ToastProvider } from '@/components/ui/Toast'
 import { applyTheme, readTheme } from '@/lib/theme'
+import { useLiveUpdates } from '@/hooks/useLiveUpdates'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -31,6 +32,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
       })
   )
+
+  // One SSE connection for the whole app (A5): invalidates the right query keys as
+  // broadcasts arrive, so inventory/useInventory.ts's poll is a fallback, not the only path.
+  useLiveUpdates(queryClient)
 
   // Re-asserts the stored theme (class and status-bar colour) once hydration has finished.
   // THEME_SCRIPT already applies it before first paint, so this is normally a no-op; it

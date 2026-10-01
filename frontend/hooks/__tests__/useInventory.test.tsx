@@ -7,6 +7,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   INVENTORY_POLL_MS,
+  INVENTORY_LIVE_POLL_MS,
   inventoryKeys,
   useInventoryList,
   useInventoryItem,
@@ -16,6 +17,7 @@ import {
   useDeleteInventoryItem,
   useUnconsumeInventoryItem,
 } from '../useInventory'
+import { setLiveStatus, resetLiveStatusForTests } from '@/lib/live'
 import type { InventoryItem, InventoryItemCreate } from '@/types/inventory'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'
@@ -62,9 +64,10 @@ function createWrapper() {
     },
   })
 
-  return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-  )
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  }
+  return Wrapper
 }
 
 describe('useInventory Hooks', () => {
@@ -114,6 +117,60 @@ describe('useInventory Hooks', () => {
 
     it('refreshes about twice a minute', () => {
       expect(INVENTORY_POLL_MS).toBe(30_000)
+    })
+
+    describe('while the live stream is connected (A5)', () => {
+      afterEach(() => resetLiveStatusForTests())
+
+      it('relaxes the poll interval instead of stopping it', async () => {
+        setLiveStatus('connected')
+        jest.useFakeTimers()
+        ;(global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => [mockInventoryItem],
+        })
+
+        const { result } = renderHook(() => useInventoryList(), { wrapper: createWrapper() })
+        await waitFor(() => expect(result.current.isSuccess).toBe(true))
+        expect(global.fetch).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(INVENTORY_POLL_MS + 1_000)
+        })
+        // The fallback 30 s interval must not have fired a refetch.
+        expect(global.fetch).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(INVENTORY_LIVE_POLL_MS)
+        })
+        expect((global.fetch as jest.Mock).mock.calls.length).toBeGreaterThan(1)
+        jest.useRealTimers()
+      })
+
+      it('falls back to the normal poll the moment the stream disconnects', async () => {
+        setLiveStatus('connected')
+        jest.useFakeTimers()
+        ;(global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => [mockInventoryItem],
+        })
+
+        const { result, rerender } = renderHook(() => useInventoryList(), {
+          wrapper: createWrapper(),
+        })
+        await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+        act(() => setLiveStatus('disconnected'))
+        rerender()
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(INVENTORY_POLL_MS + 1_000)
+        })
+        expect((global.fetch as jest.Mock).mock.calls.length).toBeGreaterThan(1)
+        jest.useRealTimers()
+      })
     })
 
     it('should handle loading state', () => {
