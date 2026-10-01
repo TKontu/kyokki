@@ -16,6 +16,7 @@ import {
   receiptKeys,
   useConfirmReceipt,
   useReceipt,
+  useReceiptAudit,
   useReceiptList,
 } from '../useReceipts'
 import type { Receipt } from '@/types/receipt'
@@ -102,6 +103,49 @@ describe('useReceipt', () => {
       })
     )
     renderHook(() => useReceipt(''), { wrapper: wrapper(newClient()) })
+
+    act(() => {
+      jest.advanceTimersByTime(READING_POLL_MS)
+    })
+    expect(seen).toEqual([])
+  })
+})
+
+describe('useReceiptAudit', () => {
+  it('loads the audit data for a receipt', async () => {
+    server.use(
+      http.get(`${API_URL}/receipts/r1/audit`, () =>
+        HttpResponse.json({
+          id: 'r1',
+          store_chain: 's-group',
+          purchase_date: '2026-09-26',
+          processing_status: 'confirmed',
+          created_at: '2026-09-26T10:00:00Z',
+          ocr_raw_text: null,
+          model_raw_answer: null,
+          model_raw_answer_retry: null,
+          file_content_type: null,
+          lines: [],
+          unlinked_items: [],
+        })
+      )
+    )
+    const { result } = renderHook(() => useReceiptAudit('r1'), { wrapper: wrapper(newClient()) })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.store_chain).toBe('s-group')
+  })
+
+  it('does not query without an id', () => {
+    jest.useFakeTimers()
+    const seen: string[] = []
+    server.use(
+      http.get(`${API_URL}/receipts/:id/audit`, ({ params }) => {
+        seen.push(String(params.id))
+        return HttpResponse.json(null)
+      })
+    )
+    renderHook(() => useReceiptAudit(''), { wrapper: wrapper(newClient()) })
 
     act(() => {
       jest.advanceTimersByTime(READING_POLL_MS)

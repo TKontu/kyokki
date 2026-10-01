@@ -535,3 +535,81 @@ class TestConfirmMovesStock:
             if call.kwargs["action"] == "created"
         ]
         assert len(created) == 1
+
+
+class TestConfirmStoresTheReceiptLine:
+    """Q26: a confirmed item remembers which printed line it came from."""
+
+    async def test_index_stores_the_lines_raw_position_and_text(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        processed_receipt: dict,
+    ):
+        receipt = await test_db.get(Receipt, UUID(processed_receipt["id"]))
+        assert receipt is not None
+        receipt.ocr_structured = {
+            "lines": [
+                {"name": "SUUKKO", "category": "dairy"},
+                {"name": "KOKKIKARTANO KERMAINEN LOHIKEITTO", "category": "dairy"},
+            ]
+        }
+        await test_db.commit()
+
+        response = await client.post(
+            f"/api/receipts/{processed_receipt['id']}/confirm",
+            json={
+                "items": [
+                    {
+                        "index": 1,
+                        "product_id": processed_receipt["product_id"],
+                        "quantity": 1,
+                        "unit": "pcs",
+                        "purchase_date": "2026-09-26",
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        from sqlalchemy import select
+
+        stmt = select(InventoryItem).where(
+            InventoryItem.receipt_id == processed_receipt["id"]
+        )
+        result = await test_db.execute(stmt)
+        item = result.scalar_one()
+        assert item.receipt_line_index == 1
+        assert item.receipt_line_text == "KOKKIKARTANO KERMAINEN LOHIKEITTO"
+
+    async def test_an_item_added_without_a_line_leaves_both_null(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        processed_receipt: dict,
+    ):
+        """No index and no line_id: a free line names a product directly."""
+        response = await client.post(
+            f"/api/receipts/{processed_receipt['id']}/confirm",
+            json={
+                "items": [
+                    {
+                        "product_id": processed_receipt["product_id"],
+                        "quantity": 1,
+                        "unit": "pcs",
+                        "purchase_date": "2026-09-26",
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        from sqlalchemy import select
+
+        stmt = select(InventoryItem).where(
+            InventoryItem.receipt_id == processed_receipt["id"]
+        )
+        result = await test_db.execute(stmt)
+        item = result.scalar_one()
+        assert item.receipt_line_index is None
+        assert item.receipt_line_text is None

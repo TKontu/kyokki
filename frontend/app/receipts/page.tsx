@@ -47,11 +47,21 @@ function ReadMethodNote({ receipt }: { receipt: ReceiptSummary }) {
   )
 }
 
+/**
+ * A confirmed receipt has nothing left to review, so it opens the audit view (Q28) instead
+ * of the review screen; everything else keeps going through the review flow as before.
+ */
+function receiptHref(receipt: Pick<ReceiptSummary, 'id' | 'processing_status'>): string {
+  return receipt.processing_status === 'confirmed'
+    ? `/receipts/${receipt.id}`
+    : `/receipt/${receipt.id}`
+}
+
 function ReceiptRow({ receipt }: { receipt: ReceiptSummary }) {
   return (
     <li>
       <Link
-        href={`/receipt/${receipt.id}`}
+        href={receiptHref(receipt)}
         className={
           'flex min-h-touch-lg items-center justify-between gap-3 rounded-ui border ' +
           'border-ui-border px-4 py-3 dark:border-ui-dark-border ' +

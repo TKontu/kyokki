@@ -152,7 +152,10 @@ Two honest limits:
 
 > **Gateway API key (GW-1, 2026-09-30): the llama-swap gateway now requires one.** Every
 > `/v1/*` request needs `Authorization: Bearer <token>`; without it the gateway answers 401.
-> In the Portainer stack:
+> The compose file now declares `LLM_API_KEY` the same required way as `POSTGRES_PASSWORD`
+> (`${LLM_API_KEY:?}`), so with it unset every `docker compose -f docker-compose.prod.yml …`
+> command - including `logs` and `down` - refuses to run, and the stack will not start at
+> all, not just answer 401 once it is up. In the Portainer stack:
 >
 > - set `LLM_API_KEY` to the llama-swap key, then **Pull and redeploy**;
 > - verify from the host (or a container with network access) with:

@@ -76,4 +76,29 @@ describe('receipts API', () => {
     expect(lastCall().url).toBe(`${API_URL}/receipts/r1/process`)
     expect(lastCall().method).toBe('POST')
   })
+
+  it('gets the audit view data (Q28)', async () => {
+    const auditBody = {
+      id: 'r1',
+      store_chain: 's-group',
+      purchase_date: '2026-09-26',
+      processing_status: 'confirmed',
+      created_at: '2026-09-26T10:00:00Z',
+      ocr_raw_text: null,
+      model_raw_answer: null,
+      model_raw_answer_retry: null,
+      file_content_type: null,
+      lines: [],
+      unlinked_items: [],
+    }
+    respond(auditBody)
+
+    await expect(receiptsAPI.audit('r1')).resolves.toEqual(auditBody)
+    expect(lastCall().url).toBe(`${API_URL}/receipts/r1/audit`)
+  })
+
+  it('builds the file URL without fetching it', () => {
+    expect(receiptsAPI.fileUrl('r1')).toBe(`${API_URL}/receipts/r1/file`)
+    expect(global.fetch).not.toHaveBeenCalled()
+  })
 })

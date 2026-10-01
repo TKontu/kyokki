@@ -140,10 +140,13 @@ def test_a_long_selection_timeout_widens_the_window(
 def test_estimates_and_selection_have_their_own_shorter_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Q27 verdict #17: the synchronous "Re-estimate all" must not wait 7 minutes a batch."""
+    """Q27 verdict #17: the synchronous "Re-estimate all" must not wait 7 minutes a batch.
+
+    The default rose from 180 to 300 (2026-09-30): the llama-swap gateway notice says a
+    cold start now takes 2 to 5 minutes."""
     monkeypatch.delenv("LLM_ESTIMATE_TIMEOUT", raising=False)
     settings = _settings(monkeypatch)
-    assert settings.LLM_ESTIMATE_TIMEOUT == 180.0
+    assert settings.LLM_ESTIMATE_TIMEOUT == 300.0
     assert _settings(monkeypatch, LLM_ESTIMATE_TIMEOUT="90").LLM_ESTIMATE_TIMEOUT == 90
 
 
@@ -258,3 +261,130 @@ def test_malformed_api_token_fails_at_load_without_the_hash(
         _settings(monkeypatch, KYOKKI_API_TOKENS=f"hermes:admin:{_HASH}")
     assert "'hermes'" in str(exc.value)
     assert _HASH not in str(exc.value)
+
+
+# --- ComfyUI (Q18-G1) --------------------------------------------------------------------
+
+
+def test_comfyui_defaults_leave_it_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in ("COMFYUI_BASE_URL", "COMFYUI_TIMEOUT", "COMFYUI_POLL_INTERVAL"):
+        monkeypatch.delenv(key, raising=False)
+    settings = _settings(monkeypatch)
+    assert settings.COMFYUI_BASE_URL == ""
+    assert settings.COMFYUI_TIMEOUT == 300.0
+    assert settings.COMFYUI_POLL_INTERVAL == 2.0
+
+
+def test_comfyui_base_url_never_hardcoded_but_settable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(
+        monkeypatch,
+        COMFYUI_BASE_URL="http://192.168.0.94:9292/upstream/a4.comfyui",
+    )
+    assert settings.COMFYUI_BASE_URL == "http://192.168.0.94:9292/upstream/a4.comfyui"
+
+
+@pytest.mark.parametrize("value", ["59", "0", "-10"])
+def test_comfyui_timeout_below_60_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    with pytest.raises(ValueError):
+        _settings(monkeypatch, COMFYUI_TIMEOUT=value)
+
+
+def test_comfyui_timeout_at_the_floor_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _settings(monkeypatch, COMFYUI_TIMEOUT="60").COMFYUI_TIMEOUT == 60.0
+
+
+# --- LLM_API_KEY (llama-swap now requires one, 2026-09-30) -------------------------------
+
+
+def test_llm_api_key_defaults_to_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    assert _settings(monkeypatch).LLM_API_KEY == ""
+
+
+def test_llm_api_key_warns_at_startup_when_empty(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The warning names LLM_API_KEY and never logs its value."""
+    import logging
+
+    from app.core.config import _warn_if_llm_api_key_missing
+
+    empty = _settings(monkeypatch, LLM_API_KEY="")
+    with caplog.at_level(logging.WARNING, logger="app.core.config"):
+        _warn_if_llm_api_key_missing(empty)
+    assert any("LLM_API_KEY" in record.message for record in caplog.records)
+
+
+def test_llm_api_key_is_silent_when_set(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    from app.core.config import _warn_if_llm_api_key_missing
+
+    secret = "sk-llama-swap-secret-value"
+    present = _settings(monkeypatch, LLM_API_KEY=secret)
+    with caplog.at_level(logging.WARNING, logger="app.core.config"):
+        _warn_if_llm_api_key_missing(present)
+    assert caplog.records == []
+    assert secret not in caplog.text
+
+
+def test_module_level_call_warns_when_the_module_loads_with_an_empty_key(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """review verdict #9: the `_warn_if_llm_api_key_missing(settings)` call that actually
+    fires at import time (config.py's last line) was untested - only the function body
+    was. Reloading the module re-runs that line with the warning as a fresh assertion.
+
+    `importlib.reload` replaces the module's entire namespace, including the `settings`
+    singleton every other module imported a reference to - reloading it again afterwards
+    with "restore" env vars is not enough, because those restore values are never the
+    *real* ones (e.g. the actual CI database name), so other tests that read
+    `app.core.config.settings` fresh would see the wrong POSTGRES_DB/LLM_API_KEY for the
+    rest of the run. A snapshot-and-restore of the whole module namespace avoids this: it
+    puts back the exact pre-test objects, not a reconstruction from guessed values.
+    """
+    import importlib
+    import logging
+
+    import app.core.config as config_module
+
+    original_namespace = dict(vars(config_module))
+    for key, value in REQUIRED.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("LLM_API_KEY", "")
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.core.config"):
+            importlib.reload(config_module)
+        assert any("LLM_API_KEY" in record.message for record in caplog.records)
+    finally:
+        vars(config_module).clear()
+        vars(config_module).update(original_namespace)
+
+
+# --- LLM_ESTIMATE_TIMEOUT (raised from 180 to 300, 2026-09-30) ---------------------------
+
+
+def test_the_stale_window_budget_still_follows_three_llm_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LLM_ESTIMATE_TIMEOUT's default rose from 180 to 300 s (the llama-swap gateway notice:
+    cold starts now take 2 to 5 minutes), but 3 x LLM_TIMEOUT (1260 s) still dominates
+    2 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT (1140 s), so the stale-window budget is unchanged."""
+    settings = _settings(
+        monkeypatch,
+        RECEIPT_STALE_MINUTES="",
+        LLM_TIMEOUT="420",
+        LLM_ESTIMATE_TIMEOUT="300",
+        MINERU_TIMEOUT="120",
+    )
+    assert 3 * settings.LLM_TIMEOUT == 1260
+    assert 2 * settings.LLM_TIMEOUT + settings.LLM_ESTIMATE_TIMEOUT == 1140
+    assert settings.receipt_stale_minutes == 28

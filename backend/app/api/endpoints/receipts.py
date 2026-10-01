@@ -15,19 +15,21 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import handle_integrity_errors
 from app.crud import receipt as crud_receipt
 from app.db.session import get_db
 from app.schemas.receipt import (
+    ReceiptAuditResponse,
     ReceiptConfirmRequest,
     ReceiptConfirmResponse,
     ReceiptResponse,
     ReceiptStatus,
     ReceiptSummary,
 )
-from app.services import receipt_confirm, receipt_queue
+from app.services import receipt_audit, receipt_confirm, receipt_queue
 from app.services.receipt_ingest import (
     ReceiptTooLarge,
     UnsupportedReceiptType,
@@ -121,6 +123,62 @@ async def get_receipt(
             detail=f"Receipt '{receipt_id}' not found",
         )
     return receipt
+
+
+@router.get("/{receipt_id}/file")
+async def get_receipt_file(
+    receipt_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    """Serve the receipt's original upload: the image or PDF the OCR pipeline read (Q28).
+
+    Resolved only through the stored row - never a path the caller names - and only when
+    it stays inside the upload directory and the file is still there.
+
+    Raises:
+        HTTPException 404: No such receipt, or its file is gone.
+    """
+    receipt = await crud_receipt.get_receipt(db, receipt_id)
+    if not receipt:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Receipt '{receipt_id}' not found",
+        )
+    path = receipt_audit.resolve_receipt_file(receipt)
+    if path is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Receipt '{receipt_id}' has no file",
+        )
+    return FileResponse(
+        path,
+        media_type=receipt_audit.content_type_for(path),
+        headers={
+            "Content-Disposition": f'inline; filename="{path.name}"',
+            "Cache-Control": "private, max-age=0, must-revalidate",
+        },
+    )
+
+
+@router.get("/{receipt_id}/audit", response_model=ReceiptAuditResponse)
+async def get_receipt_audit(
+    receipt_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> ReceiptAuditResponse:
+    """Everything the cook can check about how a receipt became stock (Q28).
+
+    Available for any processing status, confirmed included: the metadata, the OCR text,
+    the model's raw answer when one was stored, and each printed line's outcome.
+
+    Raises:
+        HTTPException 404: No such receipt.
+    """
+    try:
+        return await receipt_audit.build_receipt_audit(db, receipt_id)
+    except receipt_audit.ReceiptNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
 
 
 @router.get("", response_model=list[ReceiptSummary])

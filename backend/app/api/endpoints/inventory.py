@@ -27,6 +27,8 @@ from app.schemas.inventory_item import (
     UndoResponse,
     UndoStepResponse,
 )
+from app.schemas.receipt import ItemSourceResponse
+from app.services import receipt_audit
 from app.services import undo as undo_service
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest
@@ -143,6 +145,22 @@ async def get_inventory_item(
             detail=f"Inventory item with ID '{item_id}' not found",
         )
     return item
+
+
+@router.get("/{item_id}/source", response_model=ItemSourceResponse | None)
+async def get_item_source(
+    item_id: UUID, db: AsyncSession = Depends(get_db)
+) -> ItemSourceResponse | None:
+    """Which receipt line this item was confirmed from, for the item's sheet (Q26).
+
+    Null when the item has no receipt, or the receipt it names no longer exists.
+    """
+    try:
+        return await receipt_audit.get_item_source(db, item_id)
+    except receipt_audit.ItemNotFound as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
 
 
 @router.post(
