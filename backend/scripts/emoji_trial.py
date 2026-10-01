@@ -4,8 +4,9 @@ The operator's rule (2026-09-27): a product shows an Apple emoji only when one n
 that food - its CLDR short name names the same thing a cook means by the product's generic
 name. The closest match is never used; everything without an exact emoji goes on the gap
 list, to get a generated emoji-style image later. This script asks the model, in batches, for
-each product's exact emoji (or none) from the reference list in `scripts/emoji_food.json`,
-checks every answer against that list, and writes a Markdown table plus CSV and JSON.
+each product's exact emoji (or none) from the reference list in
+`app/resources/emoji_reference.json`, checks every answer against that list, and writes a
+Markdown table plus CSV and JSON.
 
 This is a spike tool, not part of the app: it changes nothing in the database.
 
@@ -19,9 +20,11 @@ skipped, repeated names are reported and skipped).
 (`--limit N` for a trial on part of the catalog).
 `--build-reference` regenerates the reference JSON from Unicode's `emoji-test.txt`.
 Requests go one at a time to `LLM_BASE_URL` with `LLM_MODEL` and `LLM_API_KEY` (override the
-first two with --url/--model), each with `LLM_TIMEOUT` (--timeout). The output files are
-rewritten after every batch, so an interrupted run keeps the batches it finished. A batch
-whose answer numbering is not exactly 1..n is rejected as `invalid`.
+first two with --url/--model), each with `LLM_TIMEOUT` (--timeout), through the shared
+gateway helper (`app/services/llm_http.py`: the bearer key, the 503/`Retry-After` drain
+backoff, never retrying a timeout). The output files are rewritten after every batch, so an
+interrupted run keeps the batches it finished. A batch whose answer numbering is not exactly
+1..n is rejected as `invalid`.
 """
 
 from __future__ import annotations
@@ -42,7 +45,16 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 
-REFERENCE_FILE = Path(__file__).resolve().parent / "emoji_food.json"
+# Moved under app/resources for the Q18 build (docs/spikes/Q18_exact_emoji.md,
+# "Recommendation for the build"): the app reads the same file, and its household emoji were
+# dropped there, because the operator ruled non-food gets no icon at all. This script still
+# works unchanged; --build-reference on this cutoff would only regenerate food and plants.
+REFERENCE_FILE = (
+    Path(__file__).resolve().parent.parent
+    / "app"
+    / "resources"
+    / "emoji_reference.json"
+)
 # iPad 8th gen runs iPadOS 17/18. Emoji 15.1 arrived in iPadOS 17.4 and 16.0 only in 18.4,
 # so 15.1 is the newest version every supported iPad renders once it is up to date.
 DEFAULT_CUTOFF = "15.1"
@@ -50,8 +62,10 @@ MATCHES = ("exact", "borderline", "none")
 OUTCOMES = (*MATCHES, "invalid", "missing")
 VARIATION_SELECTOR = "\ufe0f"
 
-# The whole Food & Drink group, the plant subgroups, and the household goods a grocery
-# receipt carries (by CLDR name, from any other group).
+# The whole Food & Drink group, the plant subgroups, and named animals sold as food (by CLDR
+# name, from any other group). No household goods: the operator ruled non-food gets no icon at
+# all (2026-09-27, docs/spikes/Q18_exact_emoji.md "Not applicable: non-food"), so the shipped
+# reference never offers one to propose or pick.
 FOOD_GROUPS = {"Food & Drink"}
 PLANT_SUBGROUPS = {"plant-flower", "plant-other"}
 EXTRA_NAMES = {
@@ -64,27 +78,6 @@ EXTRA_NAMES = {
     "squid",
     "oyster",
     "chicken",
-    # household
-    "soap",
-    "roll of paper",
-    "sponge",
-    "toothbrush",
-    "lotion bottle",
-    "broom",
-    "basket",
-    "bucket",
-    "razor",
-    "bubbles",
-    "safety pin",
-    "wastebasket",
-    "shopping bags",
-    "candle",
-    "light bulb",
-    "battery",
-    "pill",
-    "adhesive bandage",
-    "thermometer",
-    "syringe",
 }
 
 
@@ -360,6 +353,47 @@ def _message_content(body: Any) -> str:
     return str(message.get("content") or "")
 
 
+# A cold start takes 2-5 minutes (the preamble); never below that, whatever --timeout is.
+MIN_GATEWAY_TIMEOUT = 300.0
+
+
+async def _post_chat_async(
+    payload: dict[str, Any],
+    *,
+    url: str,
+    api_key: str,
+    budget: float,
+    transport: httpx.BaseTransport | None = None,
+) -> str:
+    from app.core.config import settings as app_settings
+    from app.services import llm_http
+
+    # llm_http.post_chat reads the URL and the key off `settings`; this script takes them
+    # as its own --url/--model-style arguments, so they are swapped in for the one call and
+    # put back, rather than requiring every caller to mutate global settings itself.
+    original_url, original_key = app_settings.LLM_BASE_URL, app_settings.LLM_API_KEY
+    app_settings.LLM_BASE_URL, app_settings.LLM_API_KEY = url.rstrip("/"), api_key
+    try:
+        async with httpx.AsyncClient(timeout=budget, transport=transport) as client:
+            try:
+                response = await llm_http.post_chat(client, payload, budget=budget)
+            except llm_http.LLMAuthError as exc:
+                print(
+                    "the LLM gateway rejected LLM_API_KEY", file=sys.stderr, flush=True
+                )
+                raise GatewayError(str(exc)) from exc
+            except httpx.HTTPError as exc:
+                raise GatewayError(repr(exc)) from exc
+    finally:
+        app_settings.LLM_BASE_URL, app_settings.LLM_API_KEY = original_url, original_key
+    try:
+        response.raise_for_status()
+        body = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise GatewayError(repr(exc)) from exc
+    return _message_content(body)
+
+
 def post_chat(
     payload: dict[str, Any],
     *,
@@ -368,21 +402,18 @@ def post_chat(
     timeout: float,
     transport: httpx.BaseTransport | None = None,
 ) -> str:
-    """One chat completion. Raises GatewayError on any failure."""
-    try:
-        with httpx.Client(
-            timeout=httpx.Timeout(timeout, connect=10.0), transport=transport
-        ) as client:
-            response = client.post(
-                f"{url.rstrip('/')}/chat/completions",
-                json=payload,
-                headers={"Authorization": f"Bearer {api_key}"},
-            )
-            response.raise_for_status()
-            body = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise GatewayError(repr(exc)) from exc
-    return _message_content(body)
+    """One chat completion, through the shared gateway helper (`app/services/llm_http.py`):
+    the bearer key, the 503/`Retry-After` drain backoff, and never retrying a timeout.
+
+    Requests go one at a time (the script's own batching), so this blocks with its own
+    event loop rather than asking every caller to be async.
+    """
+    budget = max(timeout, MIN_GATEWAY_TIMEOUT)
+    return asyncio.run(
+        _post_chat_async(
+            payload, url=url, api_key=api_key, budget=budget, transport=transport
+        )
+    )
 
 
 # --- the answers -------------------------------------------------------------------------

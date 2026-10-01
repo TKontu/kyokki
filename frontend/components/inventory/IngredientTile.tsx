@@ -4,14 +4,16 @@
  * IngredientTile (V1, operator ask 2026-09-24).
  *
  * One item as a small rounded box: its icon and the name, coloured by how soon to eat it, with
- * no numbers. The icon is the product's own drawing when the model has drawn one (Q18), and the
- * category emoji otherwise, including when the drawing fails to load. The colour's word ("going stale") is in the accessible name, a
+ * no numbers. The icon follows one precedence (Q18 build, lib/productIcon.ts): the product's
+ * exact emoji first, then its own drawing when the model has drawn one (Q18), and the
+ * category emoji last, including when the drawing fails to load. The colour's word ("going stale") is in the accessible name, a
  * stale tile has a heavier border and a used-up one a struck-through name, so the colour is
  * never the only signal.
  */
 
 import { useState } from 'react'
 import { iconUrl } from '@/lib/api/products'
+import { productIconGlyph, resolveProductIcon } from '@/lib/productIcon'
 import { STALENESS, stalenessOf } from '@/lib/staleness'
 import type { InventoryItem } from '@/types/inventory'
 
@@ -26,28 +28,33 @@ export interface IngredientTileProps {
 export function IngredientTile({ item, onSelect, onMore }: IngredientTileProps) {
   const tier = stalenessOf(item)
   const style = STALENESS[tier]
-  const version = item.product_icon_version ?? null
-  // The version that failed to load; a newer one gets its own try.
+  const icon = resolveProductIcon({
+    emoji: item.product_emoji ?? null,
+    iconVersion: item.product_icon_version ?? null,
+    categoryIcon: item.category_icon ?? null,
+  })
+  // The version that failed to load; a newer one gets its own try. Only a drawing can fail
+  // this way - an emoji or the category glyph is plain text.
   const [broken, setBroken] = useState<number | null>(null)
-  const drawn = version !== null && version !== broken
+  const drawnVersion = icon.kind === 'drawn' && icon.version !== broken ? icon.version : null
   const face = (
     <>
-      {drawn ? (
+      {drawnVersion !== null ? (
         // A same-origin <img>: the drawing can never run script, and the middleware
         // authenticates the request. next/image is for photos, not a 40 px SVG.
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={iconUrl(item.product_master_id, version)}
+          src={iconUrl(item.product_master_id, drawnVersion)}
           alt=""
           aria-hidden="true"
           width={40}
           height={40}
           className="h-10 w-10"
-          onError={() => setBroken(version)}
+          onError={() => setBroken(drawnVersion)}
         />
       ) : (
         <span aria-hidden="true" className="text-2xl leading-none">
-          {item.category_icon ?? ''}
+          {productIconGlyph(icon, item.category_icon)}
         </span>
       )}
       <span

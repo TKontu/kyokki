@@ -174,3 +174,46 @@ export function useClearProductIcon() {
     onSuccess: invalidate,
   })
 }
+
+/**
+ * The pickable emoji (Q18 build): a fixed reference list, so it is cached for the session
+ * rather than refetched every time the edit sheet opens.
+ */
+export function useEmojiReference() {
+  return useQuery({
+    queryKey: [...productKeys.all, 'emoji-reference'] as const,
+    queryFn: () => productsAPI.emojiReference(),
+    staleTime: Infinity,
+  })
+}
+
+/**
+ * Mutation: the cook's own emoji choice (Q18 build). An emoji sets `cook`; null sets
+ * `cleared`. Refreshes the product and the tiles that show its icon.
+ */
+export function useSetProductEmoji() {
+  const invalidate = useInvalidateIcon()
+  return useMutation({
+    mutationFn: ({ id, emoji }: { id: string; emoji: string | null }) =>
+      productsAPI.setEmoji(id, emoji),
+    onSuccess: invalidate,
+  })
+}
+
+/** Mutation: confirm the model's proposal (Q18 build). It becomes exact and shows on the tile. */
+export function useConfirmProductEmoji() {
+  const invalidate = useInvalidateIcon()
+  return useMutation({
+    mutationFn: (id: string) => productsAPI.confirmEmoji(id),
+    onSuccess: invalidate,
+  })
+}
+
+/** Mutation: reject the model's proposal (Q18 build). It goes on the gap list. */
+export function useRejectProductEmoji() {
+  const invalidate = useInvalidateIcon()
+  return useMutation({
+    mutationFn: (id: string) => productsAPI.rejectEmoji(id),
+    onSuccess: invalidate,
+  })
+}

@@ -149,4 +149,49 @@ describe('IngredientTile', () => {
       expect(container.textContent).not.toMatch(/\d/)
     })
   })
+
+  describe('the exact emoji (Q18 build)', () => {
+    it('shows product_emoji ahead of the drawing', () => {
+      const { container } = render(
+        <IngredientTile
+          item={{ ...MILK, product_emoji: '🥛', product_icon_version: 1790000000 }}
+        />
+      )
+
+      expect(container.querySelector('img')).toBeNull()
+      expect(container).toHaveTextContent('🥛')
+    })
+
+    it('shows product_emoji ahead of the category emoji', () => {
+      const { container } = render(
+        <IngredientTile item={{ ...MILK, product_emoji: '🍼', category_icon: '🥛' }} />
+      )
+
+      expect(container).toHaveTextContent('🍼')
+      expect(container).not.toHaveTextContent('🥛')
+    })
+
+    it('falls back to the drawing when there is no product_emoji', () => {
+      const { container } = render(
+        <IngredientTile
+          item={{ ...MILK, product_emoji: null, product_icon_version: 1790000000 }}
+        />
+      )
+
+      expect(container.querySelector('img')).not.toBeNull()
+    })
+
+    it('falls back to the category emoji when a broken drawing has no product_emoji', () => {
+      const { container } = render(
+        <IngredientTile
+          item={{ ...MILK, product_emoji: null, product_icon_version: 1790000000 }}
+        />
+      )
+
+      fireEvent.error(container.querySelector('img') as HTMLImageElement)
+
+      expect(container.querySelector('img')).toBeNull()
+      expect(container).toHaveTextContent('🥛')
+    })
+  })
 })

@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.category import Category
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
-from app.models.product_master import IconStatus, ProductMaster
+from app.models.product_emoji_learned import ProductEmojiLearned
+from app.models.product_master import EmojiMatch, IconStatus, ProductMaster
 from app.models.product_name import ProductName
 from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
@@ -32,13 +33,15 @@ def _unit_type(unit: str) -> str:
 
 
 async def get_products(
-    db: AsyncSession, search: str | None = None
+    db: AsyncSession, search: str | None = None, emoji_match: str | None = None
 ) -> list[ProductMaster]:
     """Get all products with optional search filter.
 
     Args:
         db: Database session.
         search: Optional search string to filter by canonical_name.
+        emoji_match: Optional `emoji_match` filter (Q18 build), e.g. "proposed" for the
+            review list.
 
     Returns:
         List of products matching the filter.
@@ -47,6 +50,8 @@ async def get_products(
 
     if search:
         query = query.where(ProductMaster.canonical_name.ilike(f"%{search}%"))
+    if emoji_match:
+        query = query.where(ProductMaster.emoji_match == emoji_match)
 
     query = query.order_by(ProductMaster.canonical_name)
 
@@ -659,3 +664,116 @@ async def products_needing_icons(
     if limit is not None:
         query = query.limit(limit)
     return list((await db.execute(query)).scalars().all())
+
+
+# --- the exact emoji (Q18 build) ----------------------------------------------------------
+
+
+class EmojiNotProposed(Exception):
+    """Confirm or reject was asked of a product whose emoji is not `proposed`."""
+
+
+async def get_emoji_subject(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
+    """The product, freshly read, for deciding what its emoji does next."""
+    return await db.get(ProductMaster, product_id, populate_existing=True)
+
+
+async def set_emoji(
+    db: AsyncSession, product: ProductMaster, *, emoji: str | None, match: EmojiMatch
+) -> None:
+    """Set the product's emoji and match together, whatever decided them. Commits."""
+    row: Any = product
+    row.emoji = emoji
+    row.emoji_match = match.value
+    await db.commit()
+
+
+async def confirm_emoji_proposal(
+    db: AsyncSession, product_id: UUID
+) -> ProductMaster | None:
+    """A `proposed` emoji becomes `exact`. None: no such product.
+
+    Raises:
+        EmojiNotProposed: the product's emoji is not `proposed`.
+    """
+    product = await get_emoji_subject(db, product_id)
+    if product is None:
+        return None
+    if product.emoji_match != EmojiMatch.PROPOSED:
+        raise EmojiNotProposed(f"product '{product_id}' has no emoji to confirm")
+    row: Any = product
+    row.emoji_match = EmojiMatch.EXACT.value
+    await db.commit()
+    await db.refresh(product)
+    return product
+
+
+async def reject_emoji_proposal(
+    db: AsyncSession, product_id: UUID
+) -> ProductMaster | None:
+    """A `proposed` emoji becomes `none`, and the emoji itself is dropped. None: no product.
+
+    Raises:
+        EmojiNotProposed: the product's emoji is not `proposed`.
+    """
+    product = await get_emoji_subject(db, product_id)
+    if product is None:
+        return None
+    if product.emoji_match != EmojiMatch.PROPOSED:
+        raise EmojiNotProposed(f"product '{product_id}' has no emoji to reject")
+    row: Any = product
+    row.emoji = None
+    row.emoji_match = EmojiMatch.NONE.value
+    await db.commit()
+    await db.refresh(product)
+    return product
+
+
+async def set_cook_emoji(
+    db: AsyncSession, product_id: UUID, emoji: str | None
+) -> ProductMaster | None:
+    """The cook's own choice: an emoji (`cook`), or none at all (`cleared`). Commits."""
+    product = await get_emoji_subject(db, product_id)
+    if product is None:
+        return None
+    row: Any = product
+    if emoji is None:
+        row.emoji = None
+        row.emoji_match = EmojiMatch.CLEARED.value
+    else:
+        row.emoji = emoji
+        row.emoji_match = EmojiMatch.COOK.value
+    await db.commit()
+    await db.refresh(product)
+    return product
+
+
+async def get_learned_emoji(db: AsyncSession, generic_name_key: str) -> str | None:
+    """A confirmed proposal's emoji for this normalised generic name, or None."""
+    row = (
+        await db.execute(
+            select(ProductEmojiLearned.emoji).where(
+                ProductEmojiLearned.generic_name == generic_name_key
+            )
+        )
+    ).first()
+    return None if row is None else str(row[0])
+
+
+async def learn_emoji(db: AsyncSession, generic_name_key: str, emoji: str) -> None:
+    """Remember a confirmed proposal, so this generic name is never asked again. Commits.
+
+    A name already learned keeps its first answer - a confirm can only ever agree with
+    the name's own earlier confirmation, since the curated table and this table are both
+    checked before any product of that name is ever proposed one again.
+    """
+    existing = (
+        await db.execute(
+            select(ProductEmojiLearned).where(
+                ProductEmojiLearned.generic_name == generic_name_key
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        db.add(ProductEmojiLearned(generic_name=generic_name_key, emoji=emoji))
+        await db.commit()

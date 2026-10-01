@@ -21,6 +21,7 @@ from app.services import shelf_life_on_create
 from app.services.catalog_estimates import Estimate, EstimateRequest
 from app.services.generic_products import ProductResolver, build_inventory_item
 from app.services.llm_extractor import LLMExtractionError
+from app.services.product_emoji import apply_emoji_for_new_products
 from app.services.product_icons import draw_icons
 from app.services.shelf_life_on_create import (
     estimate_new_products,
@@ -251,13 +252,18 @@ class TestScheduleEstimates:
         (task,) = [t for t in tasks.tasks if t.func is estimate_new_products]
         assert task.args == (ids,)
 
-    def test_the_estimate_goes_before_the_icons(self) -> None:
-        """The shelf life dates the food; the drawing only decorates it (Q18)."""
+    def test_the_estimate_goes_before_the_icons_and_the_emoji(self) -> None:
+        """The shelf life dates the food; the drawing and the emoji only decorate it
+        (Q18, Q18 build)."""
         tasks = BackgroundTasks()
 
         schedule_estimates(tasks, [uuid4()])
 
-        assert [t.func for t in tasks.tasks] == [estimate_new_products, draw_icons]
+        assert [t.func for t in tasks.tasks] == [
+            estimate_new_products,
+            draw_icons,
+            apply_emoji_for_new_products,
+        ]
 
     def test_each_new_product_gets_its_icon_drawn(self) -> None:
         tasks = BackgroundTasks()
@@ -266,6 +272,16 @@ class TestScheduleEstimates:
         schedule_estimates(tasks, ids)
 
         (task,) = [t for t in tasks.tasks if t.func is draw_icons]
+        assert list(task.args[0]) == ids
+
+    def test_each_new_product_gets_its_emoji_looked_up_or_proposed(self) -> None:
+        """Q18 build: next to the icon drawing, the same new products."""
+        tasks = BackgroundTasks()
+        ids = [uuid4(), uuid4()]
+
+        schedule_estimates(tasks, ids)
+
+        (task,) = [t for t in tasks.tasks if t.func is apply_emoji_for_new_products]
         assert list(task.args[0]) == ids
 
     def test_no_products_schedules_nothing(self) -> None:

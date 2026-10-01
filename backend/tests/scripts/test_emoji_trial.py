@@ -7,6 +7,7 @@ import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -35,6 +36,10 @@ class TestBuildReference:
 # subgroup: animal-mammal
 1F404                                                  ; fully-qualified     # 🐄 E1.0 cow
 
+# subgroup: animal-bird
+1F414 FE0F                                             ; fully-qualified     # 🐔️ E0.6 chicken
+1F414                                                  ; unqualified         # 🐔 E0.6 chicken
+
 # subgroup: plant-other
 1F33F                                                  ; fully-qualified     # 🌿 E0.6 herb
 
@@ -49,28 +54,28 @@ class TestBuildReference:
 
 # group: Objects
 
-# subgroup: light & video
-1F56F FE0F                                             ; fully-qualified     # 🕯️ E0.7 candle
-1F56F                                                  ; unqualified         # 🕯 E0.7 candle
-
 # subgroup: household
 1F9FC                                                  ; fully-qualified     # 🧼 E11.0 soap
 1FA91                                                  ; fully-qualified     # 🪑 E12.0 chair
 """
 
-    def test_it_keeps_food_plants_and_named_household_objects(self) -> None:
+    def test_it_keeps_food_plants_and_named_food_animals_but_not_household(
+        self,
+    ) -> None:
         data = emoji_trial.build_reference(self.EMOJI_TEST, cutoff="15.1")
 
         names = [entry["name"] for entry in data["emoji"]]
-        assert names == ["herb", "broccoli", "lime", "candle", "soap"]
+        assert names == ["chicken", "herb", "broccoli", "lime"]
+        assert "soap" not in names
+        assert "chair" not in names
         assert data["unicode_emoji_version"] == "18.0"
         assert data["cutoff"] == "15.1"
 
     def test_it_uses_the_fully_qualified_form(self) -> None:
         data = emoji_trial.build_reference(self.EMOJI_TEST, cutoff="15.1")
 
-        candle = next(e for e in data["emoji"] if e["name"] == "candle")
-        assert candle["e"] == "\U0001f56f️"
+        chicken = next(e for e in data["emoji"] if e["name"] == "chicken")
+        assert chicken["e"] == "\U0001f414️"
 
     def test_it_lists_what_the_cutoff_excluded(self) -> None:
         data = emoji_trial.build_reference(self.EMOJI_TEST, cutoff="15.1")
@@ -88,11 +93,14 @@ class TestBuildReference:
         by_name = {e["name"]: e["e"] for e in data["emoji"]}
         for name in ("broccoli", "grapes", "egg", "cookie", "butter", "glass of milk"):
             assert name in by_name, name
-        for name in ("soap", "roll of paper", "sponge", "toothbrush", "candle", "pill"):
-            assert name in by_name, name
         # Emoji 18.0 files the seafood under Animals & Nature, not Food & Drink.
         for name in ("shrimp", "squid", "oyster", "crab", "lobster", "fish"):
             assert name in by_name, name
+        # Household objects are dropped from the shipped reference (Q18 build): the operator
+        # ruled non-food gets no icon at all (docs/spikes/Q18_exact_emoji.md, "Not applicable:
+        # non-food"), so the picker must never be able to offer one.
+        for name in ("soap", "roll of paper", "sponge", "toothbrush", "candle", "pill"):
+            assert name not in by_name, name
 
 
 class TestReadNames:
@@ -417,12 +425,12 @@ class TestRun:
 
 
 class TestPostChat:
-    def _post(self, handler: Any) -> str:
+    def _post(self, handler: Any, timeout: float = 5.0, api_key: str = "k") -> str:
         return emoji_trial.post_chat(
             {"model": "m"},
             url="http://gateway/v1",
-            api_key="k",
-            timeout=5.0,
+            api_key=api_key,
+            timeout=timeout,
             transport=httpx.MockTransport(handler),
         )
 
@@ -451,7 +459,112 @@ class TestPostChat:
 
     def test_an_http_error_is_a_gateway_error(self) -> None:
         with pytest.raises(emoji_trial.GatewayError):
-            self._post(lambda request: httpx.Response(503, text="busy"))
+            self._post(lambda request: httpx.Response(500, text="broken"))
+
+
+def _client_spy(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """Every `httpx.AsyncClient(timeout=..., ...)` this call makes, for inspecting the
+    budget passed to it."""
+    seen: list[Any] = []
+    real = httpx.AsyncClient
+
+    def spy(**kwargs: Any) -> httpx.AsyncClient:
+        seen.append(kwargs["timeout"])
+        return real(**kwargs)
+
+    monkeypatch.setattr(emoji_trial.httpx, "AsyncClient", spy)
+    return seen
+
+
+class TestGatewayRules:
+    """llama-swap requires a key since 2026-09-30 (the preamble). The retry, drain-backoff
+    and timeout-budget rules themselves live in the shared `services/llm_http.py` (GW-1) and
+    are tested there; these tests only prove this script's `post_chat` wires into it
+    correctly: the budget it passes, a timeout propagating unchanged, a 503 still resolving
+    end to end through the helper, and a 401/403 logged without the key."""
+
+    def test_the_timeout_is_floored_to_300s(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _client_spy(monkeypatch)
+
+        emoji_trial.post_chat(
+            {"model": "m"},
+            url="http://gateway/v1",
+            api_key="k",
+            timeout=5.0,
+            transport=httpx.MockTransport(
+                lambda r: httpx.Response(
+                    200, json={"choices": [{"message": {"content": "hi"}}]}
+                )
+            ),
+        )
+
+        assert seen[0] > 299.0
+
+    def test_a_timeout_is_never_retried(self) -> None:
+        calls = {"n": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            raise httpx.ReadTimeout("too slow", request=request)
+
+        with pytest.raises(emoji_trial.GatewayError, match="ReadTimeout"):
+            emoji_trial.post_chat(
+                {"model": "m"},
+                url="http://gateway/v1",
+                api_key="k",
+                timeout=5.0,
+                transport=httpx.MockTransport(handler),
+            )
+
+        assert calls["n"] == 1
+
+    def test_a_503_with_retry_after_still_resolves_through_the_shared_helper(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = {"n": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(503, headers={"Retry-After": "1"})
+            return httpx.Response(
+                200, json={"choices": [{"message": {"content": "ok"}}]}
+            )
+
+        monkeypatch.setattr(
+            "app.services.llm_http.asyncio.sleep", AsyncMock(return_value=None)
+        )
+
+        content = emoji_trial.post_chat(
+            {"model": "m"},
+            url="http://gateway/v1",
+            api_key="k",
+            timeout=300.0,
+            transport=httpx.MockTransport(handler),
+        )
+
+        assert content == "ok"
+        assert calls["n"] == 2
+
+    @pytest.mark.parametrize("status", [401, 403])
+    def test_a_401_or_403_is_logged_without_the_key_and_raises(
+        self, capsys: pytest.CaptureFixture[str], status: int
+    ) -> None:
+        with pytest.raises(emoji_trial.GatewayError):
+            emoji_trial.post_chat(
+                {"model": "m"},
+                url="http://gateway/v1",
+                api_key="super-secret-key",
+                timeout=5.0,
+                transport=httpx.MockTransport(lambda r: httpx.Response(status)),
+            )
+
+        captured = capsys.readouterr()
+        assert "super-secret-key" not in captured.out
+        assert "super-secret-key" not in captured.err
+        assert "rejected LLM_API_KEY" in captured.err
 
 
 class TestOutput:

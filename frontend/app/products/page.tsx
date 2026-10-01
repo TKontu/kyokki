@@ -31,9 +31,12 @@ import { useCategories } from '@/hooks/useCategories'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import {
   SEARCH_DEBOUNCE_MS,
+  useConfirmProductEmoji,
   useEstimateCatalog,
   useProductList,
+  useRejectProductEmoji,
 } from '@/hooks/useProducts'
+import { isAPIError } from '@/lib/api/errors'
 import type { EstimateScope } from '@/lib/api/products'
 import { auditRows, type AuditRow, type Edge } from '@/lib/shelfLifeAudit'
 import type { CatalogEstimateResponse, ProductMaster } from '@/types/product'
@@ -236,6 +239,70 @@ function ProposedChanges({
   )
 }
 
+/** Every product with a proposal waiting (Q18 build), one tap to confirm or reject. */
+function EmojiReviewList({ products }: { products: ProductMaster[] }) {
+  const confirm = useConfirmProductEmoji()
+  const reject = useRejectProductEmoji()
+  const toast = useToast()
+
+  if (products.length === 0) return null
+
+  const onError = (error: unknown, fallback: string) => {
+    const readable = isAPIError(error) && error.status < 500 && error.message
+    toast.error(readable ? error.message : fallback)
+  }
+
+  return (
+    <section
+      aria-label="Emoji to confirm"
+      className="mb-4 rounded-ui border border-ui-border p-4 dark:border-ui-dark-border"
+    >
+      <h2 className="text-sm font-medium text-ui-text dark:text-ui-dark-text">
+        {`Emoji to confirm (${products.length})`}
+      </h2>
+      <ul className="mt-2 flex flex-col gap-2">
+        {products.map((product) => (
+          <li key={product.id} className="flex items-center justify-between gap-3">
+            <span className="flex min-w-0 items-center gap-2">
+              <span aria-hidden="true" className="text-2xl leading-none">
+                {product.emoji}
+              </span>
+              <span className="truncate text-ui-text dark:text-ui-dark-text">
+                {product.canonical_name}
+              </span>
+            </span>
+            <span className="flex shrink-0 gap-2">
+              <Button
+                size="sm"
+                loading={confirm.isPending && confirm.variables === product.id}
+                onClick={() =>
+                  confirm.mutate(product.id, {
+                    onError: (error) => onError(error, 'Could not confirm this emoji'),
+                  })
+                }
+              >
+                Confirm
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={reject.isPending && reject.variables === product.id}
+                onClick={() =>
+                  reject.mutate(product.id, {
+                    onError: (error) => onError(error, 'Could not reject this emoji'),
+                  })
+                }
+              >
+                Reject
+              </Button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 export default function ProductsPage() {
   const [term, setTerm] = useState('')
   const [editing, setEditing] = useState<ProductMaster | null>(null)
@@ -247,6 +314,8 @@ export default function ProductsPage() {
   const { data: categories } = useCategories()
   const estimate = useEstimateCatalog()
   const toast = useToast()
+  // The review list (Q18 build): a proposal is never shown on a tile until confirmed here.
+  const { data: proposedEmoji } = useProductList({ emoji_match: 'proposed' })
 
   const categoryName = useMemo(() => {
     const names = new Map((categories ?? []).map((c) => [c.id, c.display_name]))
@@ -315,6 +384,8 @@ export default function ProductsPage() {
       </header>
 
       <main className="px-6 py-4">
+        <EmojiReviewList products={proposedEmoji ?? []} />
+
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <input
             type="search"

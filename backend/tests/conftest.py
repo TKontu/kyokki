@@ -375,6 +375,14 @@ def _no_model_selection():
     commits for real would otherwise send it to the gateway (and could swap the receipt
     model off its GPU). The drawing call answers nothing, so the job ends `failed`; a test
     that wants a drawing patches `product_icons._complete` itself.
+
+    The exact emoji proposal (Q18 build) is the fourth: every create path for a product
+    whose generic name the curated table does not know schedules a model call the same way
+    (PR #137 review - this was missing, so "Tomato" and "Orange" in
+    `tests/api/test_estimate_on_create.py` sent real requests). It answers nothing, so
+    `propose()` returns `None` and the product is left unchanged, exactly as a model
+    failure does; a test that wants a proposal patches `product_emoji._post_proposal`
+    itself.
     """
     from unittest.mock import AsyncMock, patch
 
@@ -391,6 +399,11 @@ def _no_model_selection():
         ),
         patch(
             "app.services.product_icons._complete",
+            new_callable=AsyncMock,
+            return_value="",
+        ),
+        patch(
+            "app.services.product_emoji._post_proposal",
             new_callable=AsyncMock,
             return_value="",
         ),

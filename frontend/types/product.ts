@@ -10,6 +10,11 @@ export type UnitType = 'volume' | 'weight' | 'count'
 export type ShelfLifeSource = 'category' | 'model' | 'cook'
 // Where a product's drawn icon stands (Q18). `cleared`: the cook chose the category emoji.
 export type IconStatus = 'pending' | 'ready' | 'failed' | 'cleared'
+// Where a product's exact Apple emoji stands (Q18 build). `exact`: the curated table, or a
+// confirmed proposal. `proposed`: the model's answer, not yet confirmed - never shown.
+// `none`: the gap list, or a rejected proposal. `cook`: set by hand. `cleared`: the cook
+// chose no emoji; nothing proposes one again.
+export type EmojiMatch = 'exact' | 'proposed' | 'none' | 'cook' | 'cleared'
 // Whose word a learned name is (H51): the product's own, the cook's, or a model guess.
 export type NameSource = 'canonical' | 'cook' | 'model'
 
@@ -40,6 +45,11 @@ export interface ProductMaster {
   // Optional so fixtures written before Q18 still type-check.
   icon_status?: IconStatus | null
   icon_version?: number | null
+  // The exact Apple emoji (Q18 build), one from GET /products/emoji/reference. The tile and
+  // this sheet show it only when emoji_match is 'exact' or 'cook' (lib/productIcon.ts).
+  // Optional so fixtures written before this build still type-check.
+  emoji?: string | null
+  emoji_match?: EmojiMatch | null
   created_at: string // ISO datetime
   updated_at: string // ISO datetime
 }
@@ -86,6 +96,19 @@ export interface IconRedrawRequest {
 
 export interface ProductListParams {
   search?: string
+  // Feeds the "Emoji to confirm" review list (Q18 build), e.g. 'proposed'.
+  emoji_match?: EmojiMatch
+}
+
+/** The cook's own emoji choice (Q18 build): an emoji sets `cook`, null sets `cleared`. */
+export interface ProductEmojiRequest {
+  emoji: string | null
+}
+
+/** One pickable emoji, for the product edit sheet's picker (Q18 build). */
+export interface EmojiReferenceEntry {
+  emoji: string
+  name: string
 }
 
 /** One product a catalog refresh would change, and what to (Q11). */

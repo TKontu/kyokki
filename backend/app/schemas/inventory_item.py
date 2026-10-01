@@ -1,9 +1,11 @@
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.models.product_master import EmojiMatch
 from app.schemas.types import JsonDecimal, canonicalize_units
 
 
@@ -231,7 +233,33 @@ class InventoryItemResponse(InventoryItemBase):
             "/products/{product_master_id}/icon.svg?v=; null: show category_icon"
         ),
     )
+    product_emoji: str | None = Field(
+        None,
+        description=(
+            "The product's exact Apple emoji (Q18 build), only when confirmed exact or "
+            "set by the cook; null otherwise, even if the product has a proposal pending"
+        ),
+    )
     created_at: datetime
     consumed_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_product_emoji(cls, data: Any) -> Any:
+        """`product_emoji` from the loaded `product_master` (Q18 build).
+
+        `InventoryItem` is owned by a sibling lane this round, so it cannot gain a
+        property the way `category_icon` and `product_icon_version` did; this derives the
+        same way from the relationship the list query already loads, before validation.
+        A plain dict (already-built data) is passed through unchanged.
+        """
+        product_master = getattr(data, "product_master", None)
+        if product_master is None:
+            return data
+        match = getattr(product_master, "emoji_match", None)
+        emoji = getattr(product_master, "emoji", None)
+        shown = match in (EmojiMatch.EXACT, EmojiMatch.COOK)
+        data.product_emoji = emoji if shown and emoji else None
+        return data

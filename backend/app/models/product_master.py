@@ -45,6 +45,22 @@ class IconStatus(StrEnum):
     CLEARED = "cleared"  # the cook chose the category emoji; nothing redraws on its own
 
 
+class EmojiMatch(StrEnum):
+    """Where a product's exact Apple emoji stands (Q18 build). NULL: never looked up.
+
+    The operator's rule (2026-09-27, docs/spikes/Q18_exact_emoji.md): a tile shows an emoji
+    only when it is precise, so the closest match is never shown. The tile checks this value,
+    not just whether `emoji` is set: a `proposed` row has an emoji column that must stay
+    hidden until a person confirms it.
+    """
+
+    EXACT = "exact"  # the curated table, or a proposal a person confirmed
+    PROPOSED = "proposed"  # the model's answer, not yet confirmed - never shown
+    NONE = "none"  # on the gap list, or a rejected proposal
+    COOK = "cook"  # set by hand; never overwritten by a table hit or a backfill
+    CLEARED = "cleared"  # the cook chose no emoji; nothing proposes one again
+
+
 class ProductMaster(Base):
     """Canonical product definition - the single source of truth for products.
 
@@ -114,6 +130,11 @@ class ProductMaster(Base):
     icon_status = Column(String, nullable=True)
     # When icon_svg last changed; NULL exactly when there is no drawing to show.
     icon_updated_at = Column(DateTime(timezone=True), nullable=True)
+
+    # The exact Apple emoji (Q18 build): one emoji from app/resources/emoji_reference.json,
+    # or NULL. The tile only shows it when emoji_match is `exact` or `cook` - see EmojiMatch.
+    emoji = Column(Text, nullable=True)
+    emoji_match = Column(String, nullable=True)
 
     # Timestamps
     created_at = Column(

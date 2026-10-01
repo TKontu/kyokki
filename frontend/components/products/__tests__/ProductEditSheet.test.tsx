@@ -61,11 +61,20 @@ const NAMES: ProductNames = {
   ],
 }
 
+const EMOJI_REFERENCE = [
+  { emoji: '🥩', name: 'cut of meat' },
+  { emoji: '🥨', name: 'pretzel' },
+  { emoji: '🧀', name: 'cheese wedge' },
+]
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 beforeEach(() => {
   server.use(
     http.get(`${API_URL}/categories`, () => HttpResponse.json(CATEGORIES)),
-    http.get(`${API_URL}/products/p-1/names`, () => HttpResponse.json(NAMES))
+    http.get(`${API_URL}/products/p-1/names`, () => HttpResponse.json(NAMES)),
+    http.get(`${API_URL}/products/emoji/reference`, () =>
+      HttpResponse.json(EMOJI_REFERENCE)
+    )
   )
 })
 afterEach(() => {
@@ -495,5 +504,119 @@ describe('ProductEditSheet icon', () => {
     })
 
     expect(save()).toBeDisabled()
+  })
+})
+
+// Q18 build: the exact emoji, ahead of the drawing in the same preview. A proposal shows
+// Confirm/Reject; otherwise a picker limited to the reference list, plus "No emoji".
+describe('ProductEditSheet emoji', () => {
+  function emojiSection() {
+    return screen.getByRole('group', { name: 'Emoji' })
+  }
+
+  it('shows the emoji ahead of the drawing', async () => {
+    renderSheet({
+      ...PRODUCT,
+      icon_status: 'ready',
+      icon_version: 1790000000,
+      emoji: '🧀',
+      emoji_match: 'exact',
+    })
+
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Icon' })).toHaveTextContent('🧀'))
+    expect(screen.getByRole('group', { name: 'Icon' }).querySelector('img')).toBeNull()
+  })
+
+  it('offers the reference list, plus No emoji', async () => {
+    renderSheet()
+
+    await screen.findByRole('button', { name: 'cut of meat' })
+    expect(screen.getByRole('button', { name: 'pretzel' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'cheese wedge' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'No emoji' })).toBeInTheDocument()
+  })
+
+  it('marks a table-set exact emoji as the picker selection, not just a cook pick', async () => {
+    renderSheet({ ...PRODUCT, emoji: '🧀', emoji_match: 'exact' })
+
+    const selected = await screen.findByRole('button', { name: 'cheese wedge' })
+
+    expect(selected).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'pretzel' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    )
+  })
+
+  it('picking one puts it to the cook, at once, without Save', async () => {
+    let body: unknown
+    server.use(
+      http.put(`${API_URL}/products/p-1/emoji`, async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ ...PRODUCT, emoji: '🥨', emoji_match: 'cook' })
+      })
+    )
+    renderSheet()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'pretzel' }))
+
+    await waitFor(() => expect(body).toEqual({ emoji: '🥨' }))
+    expect(await screen.findByText('Your own choice')).toBeInTheDocument()
+    expect(save()).toBeDisabled()
+  })
+
+  it('No emoji clears it', async () => {
+    let body: unknown
+    server.use(
+      http.put(`${API_URL}/products/p-1/emoji`, async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ ...PRODUCT, emoji: null, emoji_match: 'cleared' })
+      })
+    )
+    renderSheet({ ...PRODUCT, emoji: '🧀', emoji_match: 'exact' })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'No emoji' }))
+
+    await waitFor(() => expect(body).toEqual({ emoji: null }))
+  })
+
+  it('a proposal shows Confirm and Reject, and no other emoji is shown yet', async () => {
+    renderSheet({ ...PRODUCT, emoji: '🥨', emoji_match: 'proposed' })
+
+    await waitFor(() => expect(emojiSection()).toHaveTextContent('🥨'))
+    expect(emojiSection()).toHaveTextContent('waiting to be confirmed')
+    expect(screen.getByRole('button', { name: 'Confirm' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument()
+    // A proposal is never shown as the icon until it is confirmed.
+    expect(screen.getByRole('group', { name: 'Icon' })).not.toHaveTextContent('🥨')
+  })
+
+  it('confirming makes it exact', async () => {
+    server.use(
+      http.post(`${API_URL}/products/p-1/emoji/confirm`, () =>
+        HttpResponse.json({ ...PRODUCT, emoji: '🥨', emoji_match: 'exact' })
+      )
+    )
+    renderSheet({ ...PRODUCT, emoji: '🥨', emoji_match: 'proposed' })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Confirm' }))
+
+    expect(await screen.findByText('Exact match')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole('group', { name: 'Icon' })).toHaveTextContent('🥨')
+    )
+  })
+
+  it('rejecting drops it to the gap list', async () => {
+    server.use(
+      http.post(`${API_URL}/products/p-1/emoji/reject`, () =>
+        HttpResponse.json({ ...PRODUCT, emoji: null, emoji_match: 'none' })
+      )
+    )
+    renderSheet({ ...PRODUCT, emoji: '🥨', emoji_match: 'proposed' })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject' }))
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirm' })).toBeNull())
   })
 })
