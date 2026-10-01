@@ -1,16 +1,24 @@
-"""Q26 (item provenance) and Q28 (receipt audit): read models only, nothing is written here.
+"""Q26 (item provenance) and Q28 (receipt audit).
 
 Q26: which printed receipt line an inventory item came from, for the item's sheet.
 Q28: everything the cook can check about how a receipt became stock - the original file, the
 OCR text, the model's raw answer, and each printed line's outcome.
+
+Everything above reads only. `record_stocked_lines` is the one write: a hard-deleted
+`InventoryItem` leaves no trace of itself anywhere (no soft-delete column, no audit table),
+so confirm's own stocked lines must be marked on the receipt itself, from the confirm
+endpoint, or a line a cook already stocked and then removed reads back as `skipped` -
+indistinguishable from one they genuinely left out (follow-up from round 2026-09-30-1).
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
@@ -45,6 +53,46 @@ class ItemNotFound(LookupError):
 
 class ReceiptNotFound(LookupError):
     """No receipt with that id."""
+
+
+async def record_stocked_lines(
+    db: AsyncSession,
+    receipt: Receipt,
+    inventory_items: Sequence[tuple[InventoryItem, ProductMaster]],
+) -> None:
+    """Mark, on the receipt's own stored lines, which ones produced stock at confirm.
+
+    Called once, right after confirm, from the confirm endpoint. Nothing else ever
+    records this: an `InventoryItem` carries its `receipt_line_index` while it exists,
+    but a hard delete removes the row outright (`crud.inventory_item.delete_inventory_item`
+    does a plain `db.delete`, no soft-delete column, and nothing else logs it - unlike a
+    discard, which only changes `status`). Without this mark, the audit view cannot tell
+    "the cook never stocked this line" from "the cook stocked it and it is gone since" -
+    both look identical once the item row is gone.
+
+    A no-op, and no extra commit, when nothing changed (the common case: re-reading an
+    already-marked line, or a receipt with no `lines` to mark).
+    """
+    structured = (
+        receipt.ocr_structured if isinstance(receipt.ocr_structured, dict) else None
+    )
+    lines = structured.get("lines") if structured else None
+    if not isinstance(lines, list):
+        return
+
+    changed = False
+    for item, _product in inventory_items:
+        index = cast("int | None", item.receipt_line_index)
+        if index is None or not (0 <= index < len(lines)):
+            continue
+        line = lines[index]
+        if isinstance(line, dict) and not line.get("stocked_at_confirm"):
+            line["stocked_at_confirm"] = True
+            changed = True
+
+    if changed:
+        flag_modified(receipt, "ocr_structured")
+        await db.commit()
 
 
 async def get_item_source(db: AsyncSession, item_id: UUID) -> ItemSourceResponse | None:
@@ -182,6 +230,11 @@ async def build_receipt_audit(
             outcome = "pending"
         elif stocked:
             outcome = "stocked"
+        elif raw_line.get("stocked_at_confirm"):
+            # `record_stocked_lines` marked this line when it was confirmed; the item(s)
+            # it produced are gone now (hard-deleted - nothing else leaves a trace), but
+            # that is not the same as the cook having left the line out.
+            outcome = "removed"
         elif raw_line.get("non_food") or raw_line.get("confirmed_non_food"):
             # `non_food`: the model's or a remembered name's guess at extraction time.
             # `confirmed_non_food`: the cook folded this line away *in this confirm*
@@ -191,6 +244,7 @@ async def build_receipt_audit(
         else:
             outcome = "skipped"
         price = raw_line.get("price")
+        hint = raw_line.get("reanalyse_hint")
         lines.append(
             ReceiptAuditLine(
                 index=index,
@@ -198,6 +252,8 @@ async def build_receipt_audit(
                 price=float(price) if isinstance(price, int | float) else None,
                 outcome=outcome,
                 items=stocked or [],
+                reanalysed=bool(raw_line.get("reanalysed")),
+                reanalyse_hint=hint if isinstance(hint, str) else None,
             )
         )
 

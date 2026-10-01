@@ -15,6 +15,9 @@ import {
   fieldInputClass,
   fieldLabelClass,
 } from '@/components/ui/formStyles'
+import { useReanalyseLine } from '@/hooks/useReceipts'
+import { useToast } from '@/hooks/useToast'
+import { isAPIError } from '@/lib/api/errors'
 import type { Category } from '@/types/category'
 import type { ExtractedItem, ReceiptUnit } from '@/types/receipt'
 
@@ -40,6 +43,12 @@ export interface ReceiptItemRowProps {
   row: ReviewRow
   categories: Category[]
   onChange: (changes: Partial<ReviewRow>) => void
+  /** The receipt this row belongs to, for the re-analyse request (Q38). */
+  receiptId: string
+  /** The cook has edited this row by hand since it loaded: a re-analyse asks before it overwrites. */
+  dirty: boolean
+  /** A re-analyse answered; the caller applies it to the row (and clears its own edits). */
+  onReanalysed: (item: ExtractedItem) => void
 }
 
 
@@ -54,9 +63,21 @@ export function canInclude(item: ExtractedItem, row: ReviewRow): boolean {
   return row.name.trim() !== '' && row.category !== ''
 }
 
-export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemRowProps) {
+export function ReceiptItemRow({
+  item,
+  row,
+  categories,
+  onChange,
+  receiptId,
+  dirty,
+  onReanalysed,
+}: ReceiptItemRowProps) {
   const [changing, setChanging] = useState(false)
   const [searchTerm, setSearchTerm] = useState(row.name)
+  const [reanalysing, setReanalysing] = useState(false)
+  const [hint, setHint] = useState('')
+  const toast = useToast()
+  const reanalyse = useReanalyseLine()
   const productId = chosenProductId(item, row)
   const matched = Boolean(productId)
   const ready = canInclude(item, row)
@@ -66,13 +87,41 @@ export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemR
   // The cook's own choice is their word, whatever the read proposed.
   const chosenByCook = row.productId !== undefined
 
+  const askAgain = () => {
+    if (!item.line_id) return
+    reanalyse.mutate(
+      { receiptId, lineId: item.line_id, hint: hint.trim() || null },
+      {
+        onSuccess: (updated) => {
+          if (
+            dirty &&
+            !window.confirm(
+              'This row has been edited by hand. Replace it with the re-analysed result?'
+            )
+          ) {
+            return
+          }
+          onReanalysed(updated)
+          setReanalysing(false)
+          setHint('')
+        },
+        onError: (error) => {
+          toast.error(
+            isAPIError(error) ? error.message : 'Could not re-analyse this line'
+          )
+        },
+      }
+    )
+  }
+
   return (
     <div
+      aria-busy={reanalyse.isPending}
       className={`rounded-ui border p-3 ${
         row.include
           ? 'border-ui-border dark:border-ui-dark-border'
           : 'border-dashed border-ui-border dark:border-ui-dark-border opacity-60'
-      }`}
+      } ${reanalyse.isPending ? 'opacity-70' : ''}`}
     >
       <div className="flex items-start gap-3">
         <input
@@ -162,11 +211,53 @@ export function ReceiptItemRow({ item, row, categories, onChange }: ReceiptItemR
               </Button>
             </div>
           )}
-          <p className="mt-1 text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
-            {item.name}
+          {/* The printed line, never editable and never replaced by the generic name
+              above it (Q39): the cook's only way to judge a mismatch without opening the
+              audit view. Shown whatever state the row is in, matched or not. */}
+          <p className="mt-1 font-mono text-xs text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
+            {item.price != null ? `${item.name} · ${item.price.toFixed(2)}` : item.name}
           </p>
         </div>
       </div>
+
+      {item.line_id && (
+        <div className="mt-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-expanded={reanalysing}
+            onClick={() => setReanalysing((open) => !open)}
+          >
+            Re-analyse
+          </Button>
+          {reanalysing && (
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <div className="min-w-48 flex-1">
+                <label htmlFor={`${rowId}-hint`} className={`${fieldLabelClass} sr-only`}>
+                  What is it?
+                </label>
+                <input
+                  id={`${rowId}-hint`}
+                  type="text"
+                  placeholder="What is it? e.g. cashew nuts"
+                  value={hint}
+                  disabled={reanalyse.isPending}
+                  onChange={(event) => setHint(event.target.value)}
+                  className={fieldInputClass}
+                />
+              </div>
+              <Button
+                size="sm"
+                loading={reanalyse.isPending}
+                disabled={reanalyse.isPending}
+                onClick={askAgain}
+              >
+                Ask again
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-end gap-3">
         {!matched && (
