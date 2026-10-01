@@ -15,6 +15,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { CieloFridge } from '@/components/fridge/CieloFridge'
 import { FRIDGE_MOCKS, fixtureItems, type FridgeMock } from '@/components/fridge-mocks'
 import { useInventoryList } from '@/hooks/useInventory'
+import { applyTheme, readTheme } from '@/lib/theme'
 
 /** The mocks, and the production fridge they led to. */
 const DESIGNS: FridgeMock[] = [
@@ -64,8 +65,13 @@ export default function FridgeMocksPage() {
     const root = document.documentElement
     root.classList.remove('light', 'dark')
     if (theme !== 'auto') root.classList.add(theme)
-    return () => root.classList.remove('light', 'dark')
   }, [theme])
+
+  // Restore the cook's own choice on the way out, rather than stripping it to the device
+  // theme: this demo's local toggle must not outlive the page it was opened from. A separate,
+  // mount-only effect: keyed on `[theme]` above, this cleanup would fire on every toggle too,
+  // not just on unmount (review, round 2026-09-30-1).
+  useEffect(() => () => applyTheme(readTheme()), [])
 
   const design = DESIGNS.find((mock) => mock.id === designId) ?? DESIGNS[0]
   const Fridge = design.Component

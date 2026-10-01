@@ -87,6 +87,9 @@ describe('CieloFridge', () => {
     expect(door).not.toBeNull()
     const bottom = Number(door!.getAttribute('data-bottom'))
     expect(bottom).toBeGreaterThanOrEqual(freezer.y + freezer.h)
+    // The door's own bin is the tallest thing it holds: pinned so a smaller DOOR_BOTTOM
+    // that still clears the freezer (e.g. 674) cannot leave the drinks bin overhanging it.
+    expect(bottom).toBeGreaterThanOrEqual(drinks.y + drinks.h)
   })
 
   it('draws a window with the sky of the hour and the moon in its phase (Q30)', () => {
@@ -204,6 +207,8 @@ describe('CieloFridge', () => {
     ['Other', 'other'],
     ['Ready meals', 'ready_meals'],
     ['Meat & fish', 'meat'],
+    ['Veggies', 'veggies'],
+    ['Fruits', 'fruits'],
   ] as const)('draws the %s "+" marker inside its box on a crowded fridge (review F8)', (label, id) => {
     render(<CieloFridge items={crowdedItems()} />)
 
@@ -234,6 +239,27 @@ describe('CieloFridge', () => {
         units(dot.style.top) > top ||
         (units(dot.style.top) === top && units(dot.style.left) > left)
       expect(after).toBe(false)
+    }
+  })
+
+  it('keeps room for every area\'s contents emoji, even "Sauces & condiments" on its narrow shelf (review)', () => {
+    // "Sauces & condiments" is the one area whose label alone fills its 124u header row
+    // (CIELO_BOX.condiments.w=136, less PAD*2). The header must never let a long label push
+    // the emoji out: the label shrinks and truncates (never growing past its row), and the
+    // emoji span never shrinks away, so it is always rendered with real, positive space.
+    render(<CieloFridge items={crowdedItems()} />)
+
+    for (const each of AREAS) {
+      const section = area(each.label)
+      const emoji = section.querySelector('[aria-hidden="true"]')
+      expect(emoji).not.toBeNull()
+      expect(emoji!.textContent).not.toBe('')
+      // The layout rule this depends on: the emoji span never shrinks (so it always keeps
+      // its own width), and the label beside it is the one that gives way.
+      expect(emoji!.className).toMatch(/\bshrink-0\b/)
+      const label = section.querySelector('span.truncate')
+      expect(label).not.toBeNull()
+      expect(label!.className).toMatch(/\bmin-w-0\b/)
     }
   })
 

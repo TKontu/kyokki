@@ -67,6 +67,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           'dark:border-ui-dark-border dark:bg-ui-dark-bg-secondary',
           'border-b lg:w-20 lg:flex-col lg:border-b-0 lg:border-r lg:p-2',
           'pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)] lg:pt-2',
+          // Viewport-high and pinned (Q33's "..." is the rail's foot): below `lg` the bar
+          // scrolls with the page as it always has, but on a long page (Products, Gone,
+          // Receipts) in landscape an un-pinned rail put "..." at the end of the document,
+          // reachable only by scrolling all the way down.
+          'lg:sticky lg:top-0 lg:h-screen lg:self-start',
         ].join(' ')}
       >
         {DESTINATIONS.map((destination) => {

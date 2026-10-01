@@ -52,7 +52,7 @@ describe('Home Page', () => {
     await screen.findByText(/no items found/i)
   })
 
-  it('stands the fridge on the warm beige scene, in both themes (Q29)', async () => {
+  it('stands the fridge on a token the dark theme retints, not a light-only literal (Q29)', async () => {
     mockApi()
     const { container } = render(<Home />, { wrapper })
 
