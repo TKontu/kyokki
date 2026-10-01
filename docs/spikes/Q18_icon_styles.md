@@ -4,7 +4,7 @@ Ten gap-list products, each rendered in both LoRA styles at two seeds, so the op
 
 ## Operator ruling (2026-09-30)
 
-> "Flat. No faces."
+> "Flat. No faces"
 
 The style is **flat**, and no generated icon may show a face, eyes or a character, in
 either style (`emoji` stays available in the code for a possible future use, just not as

@@ -98,6 +98,16 @@ class TestGraphShape:
         assert graph["6"]["inputs"]["seed"] == 12345
         assert graph["6"]["inputs"]["steps"] == 40
 
+    @pytest.mark.parametrize("seed", [0, 1, 2**64 - 1])
+    def test_seed_at_the_edges_of_the_valid_range_is_accepted(self, seed: int) -> None:
+        graph = build_icon_workflow("Leek", style="flat", seed=seed)
+        assert graph["6"]["inputs"]["seed"] == seed
+
+    @pytest.mark.parametrize("seed", [-1, 2**64])
+    def test_seed_outside_0_to_2_64_minus_1_is_rejected(self, seed: int) -> None:
+        with pytest.raises(ValueError):
+            build_icon_workflow("Leek", style="flat", seed=seed)
+
 
 class TestStyles:
     def test_emoji_style_uses_the_emoji_trigger_and_default_strength(self) -> None:
@@ -126,7 +136,7 @@ class TestStyles:
             assert graph["4"]["inputs"]["text"] == expected
 
     def test_negative_prompt_excludes_faces_in_both_styles(self) -> None:
-        """Operator ruling (2026-09-30): 'Flat. No faces.'"""
+        """Operator ruling (2026-09-30): 'Flat. No faces'"""
         face_terms = (
             "face",
             "eyes",
@@ -147,7 +157,7 @@ class TestStyles:
                 )
 
     def test_default_style_is_flat(self) -> None:
-        """Operator ruling (2026-09-30): 'Flat. No faces.'"""
+        """Operator ruling (2026-09-30): 'Flat. No faces'"""
         graph = build_icon_workflow("Leek", seed=1)
         assert graph["3"]["inputs"]["text"].startswith("flat,")
         assert graph["2"]["inputs"]["strength_model"] == 0.75

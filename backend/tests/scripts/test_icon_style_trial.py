@@ -216,3 +216,28 @@ class TestMarkdown:
         markdown = icon_style_trial.render_markdown(results, "q18_icon_styles", None)
         assert "## Failures (0)" in markdown
         assert "None." in markdown
+
+
+class TestRegeneratingKeepsTheRulingAndRecheck:
+    """review verdict #7: re-running the script must not silently drop the operator
+    ruling or the flat-recheck section from the committed doc."""
+
+    def test_render_markdown_always_includes_the_operator_ruling(self) -> None:
+        markdown = icon_style_trial.render_markdown([], "q18_icon_styles", None)
+        assert "## Operator ruling" in markdown
+        assert "Flat. No faces" in markdown
+        assert "Flat. No faces." not in markdown  # no full stop inside the quote
+
+    def test_render_markdown_always_includes_the_flat_recheck_section(self) -> None:
+        markdown = icon_style_trial.render_markdown([], "q18_icon_styles", None)
+        assert "Flat, no faces (recheck" in markdown
+        for name, _brief in icon_style_trial.PRODUCTS:
+            slug = icon_style_trial.slug(name)
+            assert slug in markdown
+            assert f"{slug}_flat_{icon_style_trial.RECHECK_SEED}_256.png" in markdown
+            assert f"{slug}_flat_{icon_style_trial.RECHECK_SEED}_64.png" in markdown
+
+    def test_graph_method_matches_the_current_negative_prompt(self) -> None:
+        from app.services.icon_workflow import NEGATIVE_PROMPT
+
+        assert NEGATIVE_PROMPT in icon_style_trial.GRAPH_METHOD

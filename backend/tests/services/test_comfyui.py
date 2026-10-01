@@ -50,6 +50,8 @@ class FakeComfyUI:
         view_status: int = 200,
         view_content: bytes = b"PNGBYTES",
         never_complete: bool = False,
+        ack_status: int = 200,
+        interrupt_status: int = 200,
     ) -> None:
         self.prompt_responses = list(prompt_responses or [])
         self.history_responses = list(history_responses or [])
@@ -57,6 +59,8 @@ class FakeComfyUI:
         self.view_status = view_status
         self.view_content = view_content
         self.never_complete = never_complete
+        self.ack_status = ack_status
+        self.interrupt_status = interrupt_status
         self.calls: list[tuple[str, str]] = []
         self.headers_seen: list[httpx.Headers] = []
         self.ack_calls = 0
@@ -90,10 +94,10 @@ class FakeComfyUI:
             return httpx.Response(self.view_status, content=self.view_content)
         if path == "/comfyui-hold/ack":
             self.ack_calls += 1
-            return httpx.Response(200, json={})
+            return httpx.Response(self.ack_status, json={})
         if path == "/interrupt":
             self.interrupt_calls += 1
-            return httpx.Response(200, json={})
+            return httpx.Response(self.interrupt_status, json={})
         raise AssertionError(f"disallowed endpoint reached: {request.method} {path}")
 
     def client(self) -> httpx.AsyncClient:
@@ -357,6 +361,196 @@ class TestProtocol:
         monkeypatch.setattr(settings, "COMFYUI_BASE_URL", "")
         with pytest.raises(comfyui.ComfyUIDisabled):
             await comfyui.render(WORKFLOW)
+
+
+class TestAckAndInterruptSurviveTheirOwnAuthFailure:
+    """A 401/403 on the housekeeping calls (fix pass, review verdict #2) must never
+    replace the real outcome, discard fetched images, or skip the >=1s spacing."""
+
+    async def test_401_on_ack_after_success_still_returns_images_and_keeps_spacing(
+        self,
+    ) -> None:
+        fake = FakeComfyUI(ack_status=401)
+        clock = FakeClock()
+        client = fake.client()
+        try:
+            result = await comfyui.render(
+                WORKFLOW, http_client=client, sleep=clock.sleep, clock=clock.clock
+            )
+            # A second job right after: spacing must still apply despite the failed ack,
+            # which only happens if _last_ack was set even though the ack got a 401.
+            await comfyui.render(
+                WORKFLOW, http_client=client, sleep=clock.sleep, clock=clock.clock
+            )
+        finally:
+            await client.aclose()
+
+        assert result == [b"PNGBYTES"]
+        assert fake.ack_calls == 2
+        assert clock.sleeps == [1.0]
+
+    async def test_401_on_interrupt_after_timeout_still_raises_timeout(self) -> None:
+        fake = FakeComfyUI(never_complete=True, interrupt_status=401)
+        clock = FakeClock()
+        client = fake.client()
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(settings, "COMFYUI_TIMEOUT", 5.0)
+        monkeypatch.setattr(settings, "COMFYUI_POLL_INTERVAL", 2.0)
+        try:
+            with pytest.raises(comfyui.ComfyUITimeout):
+                await comfyui.render(
+                    WORKFLOW, http_client=client, sleep=clock.sleep, clock=clock.clock
+                )
+        finally:
+            monkeypatch.undo()
+            await client.aclose()
+
+        assert fake.interrupt_calls == 1
+        # The ack is still attempted afterwards, despite the interrupt's own 401.
+        assert fake.ack_calls == 1
+
+
+class TestJobFailureDetection:
+    """review verdict #3: a failed or empty-output ComfyUI job must not be polled to the
+    timeout, and must not be returned as a silent empty list."""
+
+    async def test_status_str_error_raises_without_polling_to_the_timeout(self) -> None:
+        error_response = httpx.Response(
+            200,
+            json={
+                "p1": {
+                    "status": {"completed": False, "status_str": "error"},
+                    "outputs": {},
+                }
+            },
+        )
+        fake = FakeComfyUI(history_responses=[error_response])
+        clock = FakeClock()
+        client = fake.client()
+        try:
+            with pytest.raises(comfyui.ComfyUIError, match="failed"):
+                await comfyui.render(
+                    WORKFLOW, http_client=client, sleep=clock.sleep, clock=clock.clock
+                )
+        finally:
+            await client.aclose()
+
+        history_calls = [p for m, p in fake.calls if p.startswith("/history/")]
+        assert len(history_calls) == 1
+        assert clock.sleeps == []  # no poll-interval wait: it failed on the first check
+        assert fake.ack_calls == 1  # the ack still happens through the finally
+
+    async def test_execution_error_message_is_surfaced(self) -> None:
+        error_response = httpx.Response(
+            200,
+            json={
+                "p1": {
+                    "status": {
+                        "completed": False,
+                        "messages": [
+                            ["execution_error", {"exception_message": "LoRA missing"}]
+                        ],
+                    },
+                    "outputs": {},
+                }
+            },
+        )
+        fake = FakeComfyUI(history_responses=[error_response])
+        client = fake.client()
+        try:
+            with pytest.raises(comfyui.ComfyUIError, match="LoRA missing"):
+                await comfyui.render(WORKFLOW, http_client=client)
+        finally:
+            await client.aclose()
+
+        assert fake.ack_calls == 1
+
+    async def test_completed_with_no_images_raises_instead_of_returning_empty(
+        self,
+    ) -> None:
+        fake = FakeComfyUI(outputs=[])
+        client = fake.client()
+        try:
+            with pytest.raises(comfyui.ComfyUIError, match="no images"):
+                await comfyui.render(WORKFLOW, http_client=client)
+        finally:
+            await client.aclose()
+
+        assert fake.ack_calls == 1
+
+
+class TestRetryAfterParsing:
+    """review verdict #5: only a finite number 0 or above is a usable Retry-After; the
+    minimum wait is floored, and a persistent drain eventually gives up."""
+
+    @pytest.mark.parametrize("retry_after", ["nan", "inf", "-inf"])
+    async def test_non_finite_retry_after_fails_at_once(self, retry_after: str) -> None:
+        fake = FakeComfyUI(
+            prompt_responses=[
+                httpx.Response(503, headers={"Retry-After": retry_after}, json={})
+            ]
+        )
+        client = fake.client()
+        try:
+            with pytest.raises(comfyui.ComfyUIUnavailable):
+                await comfyui.render(WORKFLOW, http_client=client)
+        finally:
+            await client.aclose()
+        assert [p for m, p in fake.calls if p == "/prompt"] == ["/prompt"]
+
+    async def test_http_date_retry_after_is_unparseable_and_fails_at_once(self) -> None:
+        fake = FakeComfyUI(
+            prompt_responses=[
+                httpx.Response(
+                    503,
+                    headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"},
+                    json={},
+                )
+            ]
+        )
+        client = fake.client()
+        try:
+            with pytest.raises(comfyui.ComfyUIUnavailable):
+                await comfyui.render(WORKFLOW, http_client=client)
+        finally:
+            await client.aclose()
+        assert [p for m, p in fake.calls if p == "/prompt"] == ["/prompt"]
+
+    async def test_retry_after_zero_is_floored_to_the_minimum_wait(self) -> None:
+        fake = FakeComfyUI(
+            prompt_responses=[
+                httpx.Response(503, headers={"Retry-After": "0"}, json={}),
+                httpx.Response(200, json={"prompt_id": "p1"}),
+            ]
+        )
+        clock = FakeClock()
+        client = fake.client()
+        try:
+            result = await comfyui.render(
+                WORKFLOW, http_client=client, sleep=clock.sleep, clock=clock.clock
+            )
+        finally:
+            await client.aclose()
+        assert result == [b"PNGBYTES"]
+        assert clock.sleeps[0] == comfyui.MIN_RETRY_WAIT == 1.0
+
+    async def test_retry_cap_gives_up_after_max_drain_retries(self) -> None:
+        responses = [
+            httpx.Response(503, headers={"Retry-After": "1"}, json={})
+            for _ in range(comfyui.MAX_DRAIN_RETRIES + 1)
+        ]
+        fake = FakeComfyUI(prompt_responses=responses)
+        clock = FakeClock()
+        client = fake.client()
+        try:
+            with pytest.raises(comfyui.ComfyUIUnavailable):
+                await comfyui.render(
+                    WORKFLOW, http_client=client, sleep=clock.sleep, clock=clock.clock
+                )
+        finally:
+            await client.aclose()
+        prompt_calls = [p for m, p in fake.calls if p == "/prompt"]
+        assert len(prompt_calls) == comfyui.MAX_DRAIN_RETRIES + 1
 
 
 class TestEndpointAllowList:

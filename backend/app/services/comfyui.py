@@ -19,6 +19,7 @@ from ``app.core.config.settings`` - never hardcode the host.
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -46,6 +47,13 @@ ALLOWED_PATHS = frozenset(
 
 # At least this long between the previous job's ack and the next job's submit, per base URL.
 MIN_JOB_SPACING = 1.0
+
+# A drain that answers "Retry-After: 0" repeatedly must not be hammered (the same fix as
+# llm_http.py on main for the LLM gateway's drain backoff).
+MIN_RETRY_WAIT = 1.0
+# A hard ceiling on consecutive drain retries to /prompt, independent of the job budget: a
+# hold stuck draining for the whole budget must still give up, not retry forever at ~1s apart.
+MAX_DRAIN_RETRIES = 30
 
 Sleep = Callable[[float], Awaitable[None]]
 Clock = Callable[[], float]
@@ -109,6 +117,37 @@ def _check_auth(response: httpx.Response) -> None:
         )
 
 
+def _parse_retry_after(value: str) -> float | None:
+    """Seconds, if ``value`` is a finite number 0 or above; ``None`` otherwise.
+
+    Unlike the LLM gateway's ``Retry-After`` (``llm_http.py``), ComfyUI's hold only ever
+    gives a plain number of seconds, so an HTTP-date is treated as unparseable here, the
+    same as ``nan``/``inf``/garbage - none of them are a usable wait.
+    """
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
+
+
+def _job_error_reason(status: dict[str, Any]) -> str | None:
+    """Why a ComfyUI job failed, from its ``/history`` status, or ``None`` if it did not."""
+    if status.get("status_str") == "error":
+        return "status_str=error"
+    for message in status.get("messages") or []:
+        if (
+            isinstance(message, list | tuple)
+            and message
+            and message[0] == "execution_error"
+        ):
+            detail = message[1] if len(message) > 1 else {}
+            if isinstance(detail, dict) and detail.get("exception_message"):
+                return str(detail["exception_message"])
+            return "execution_error"
+    return None
+
+
 def _base_url() -> str:
     base_url = settings.COMFYUI_BASE_URL
     if not base_url:
@@ -132,11 +171,13 @@ async def render(
     ``time.monotonic`` and exist so a test can control timing without really waiting.
 
     Raises :class:`ComfyUIDisabled` when no base URL is configured,
-    :class:`ComfyUIUnavailable` on a 503 with no ``Retry-After`` (nothing was queued; do
-    not retry), and :class:`ComfyUITimeout` if the job does not finish before the budget
-    runs out (an ``/interrupt`` is sent first). One job at a time runs against any given
-    base URL, process-wide, with at least :data:`MIN_JOB_SPACING` seconds after the
-    previous job's ack.
+    :class:`ComfyUIUnavailable` on a 503 with no usable ``Retry-After`` or after too many
+    drain retries (nothing was queued; do not retry further), and :class:`ComfyUITimeout`
+    if the job does not finish before the budget runs out (an ``/interrupt`` is sent
+    first). A job ComfyUI itself reports as failed, or one that completes with no images,
+    raises :class:`ComfyUIError`. One job at a time runs against any given base URL,
+    process-wide, with at least :data:`MIN_JOB_SPACING` seconds after the previous job's
+    ack.
     """
     sleep = asyncio.sleep if sleep is None else sleep
     clock = time.monotonic if clock is None else clock
@@ -204,8 +245,13 @@ async def _render_locked(
         )
         return outputs
     finally:
-        await _ack(client, headers, prompt_id)
-        _last_ack[base_url] = clock()
+        # _ack already catches and logs its own failures; this inner finally is the
+        # belt-and-braces guarantee that _last_ack is set even if something unexpected
+        # still escapes it, so the >=1s spacing is never silently lost.
+        try:
+            await _ack(client, headers, prompt_id)
+        finally:
+            _last_ack[base_url] = clock()
 
 
 async def _submit(
@@ -217,22 +263,35 @@ async def _submit(
     clock: Clock,
 ) -> str:
     submit_headers = {**headers, "X-Hold-Ack": "1"}
+    retries = 0
     while True:
         response = await _guarded_request(
             client, "POST", "/prompt", json={"prompt": workflow}, headers=submit_headers
         )
         _check_auth(response)
         if response.status_code == 503:
-            retry_after = response.headers.get("Retry-After")
-            if retry_after is None:
+            retry_after_header = response.headers.get("Retry-After")
+            wait = (
+                _parse_retry_after(retry_after_header)
+                if retry_after_header is not None
+                else None
+            )
+            if wait is None:
                 raise ComfyUIUnavailable(
-                    "ComfyUI could not open the hold (503, no Retry-After); "
+                    "ComfyUI could not open the hold (503 with no usable Retry-After); "
                     "nothing was queued"
                 )
+            if retries >= MAX_DRAIN_RETRIES:
+                raise ComfyUIUnavailable(
+                    f"ComfyUI kept draining past {MAX_DRAIN_RETRIES} retries; "
+                    "nothing was queued"
+                )
+            wait = max(wait, MIN_RETRY_WAIT)
             remaining = deadline - clock()
             if remaining <= 0:
                 raise ComfyUITimeout("ComfyUI kept draining past the job budget")
-            await sleep(min(float(retry_after), remaining))
+            await sleep(min(wait, remaining))
+            retries += 1
             continue
         response.raise_for_status()
         prompt_id: str = response.json()["prompt_id"]
@@ -256,9 +315,18 @@ async def _poll_until_complete(
         response.raise_for_status()
         body = response.json()
         entry = body.get(prompt_id)
-        if entry and entry.get("status", {}).get("completed"):
-            result: dict[str, Any] = entry
-            return result
+        if entry:
+            status = entry.get("status") or {}
+            error_reason = _job_error_reason(status)
+            if error_reason:
+                raise ComfyUIError(f"ComfyUI job {prompt_id} failed: {error_reason}")
+            if status.get("completed"):
+                if not _extract_images(entry):
+                    raise ComfyUIError(
+                        f"ComfyUI job {prompt_id} completed with no images"
+                    )
+                result: dict[str, Any] = entry
+                return result
         if clock() >= deadline:
             raise ComfyUITimeout(f"ComfyUI job {prompt_id} did not complete in time")
         await sleep(poll_interval)
@@ -271,7 +339,10 @@ async def _interrupt(
         response = await _guarded_request(client, "POST", "/interrupt", headers=headers)
         _check_auth(response)
         response.raise_for_status()
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ComfyUIError):
+        # Never raise from here: a 401/403 (ComfyUIError, via _check_auth) or any other
+        # HTTP failure must not mask the real outcome this was called to report around -
+        # typically a ComfyUITimeout already in flight. The message never carries the key.
         logger.warning(
             "ComfyUI /interrupt failed", extra={"prompt_id": prompt_id}, exc_info=True
         )
@@ -286,7 +357,10 @@ async def _ack(
         )
         _check_auth(response)
         response.raise_for_status()
-    except httpx.HTTPError:
+    except (httpx.HTTPError, ComfyUIError):
+        # Never raise from here: a 401/403 (ComfyUIError, via _check_auth) or any other
+        # HTTP failure on the ack must not discard images already fetched or replace the
+        # real outcome. The message never carries the key.
         logger.warning(
             "ComfyUI hold ack failed", extra={"prompt_id": prompt_id}, exc_info=True
         )

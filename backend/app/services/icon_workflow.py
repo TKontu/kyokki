@@ -11,7 +11,7 @@ strength range:
 - ``emoji``: the 3D emoji look, strength 0.2 to 0.5.
 - ``flat``: the flat icon look, strength 0.7 to 0.8.
 
-Operator ruling (2026-09-30), quoted in full: "Flat. No faces." ``flat`` is therefore the
+Operator ruling (2026-09-30), quoted in full: "Flat. No faces" - ``flat`` is therefore the
 default style (``emoji`` stays available for an explicit call), and the negative prompt
 excludes faces and characters in both styles.
 """
@@ -24,7 +24,7 @@ Style = Literal["emoji", "flat"]
 
 CHECKPOINT = "sd_xl_base_1.0.safetensors"
 LORA_NAME = "SDXL-Emoji-Lora-r4.safetensors"
-# Operator ruling (2026-09-30): "Flat. No faces." The face/character terms apply to both
+# Operator ruling (2026-09-30): "Flat. No faces". The face/character terms apply to both
 # styles - emoji stays available, but nothing generated may show a face or a character.
 NEGATIVE_PROMPT = (
     "blurry, text, watermark, face, eyes, mouth, smile, cartoon character, mascot, "
@@ -44,6 +44,9 @@ LORA_STRENGTH_RANGE: dict[Style, tuple[float, float]] = {
     "flat": (0.7, 0.8),
 }
 
+# ComfyUI's KSampler seed is an unsigned 64-bit integer.
+SEED_MAX = 2**64 - 1
+
 
 def build_icon_workflow(
     subject: str,
@@ -56,7 +59,7 @@ def build_icon_workflow(
 ) -> dict[str, Any]:
     """The verified icon graph for one product.
 
-    ``style`` defaults to ``"flat"`` (operator ruling, 2026-09-30: "Flat. No faces.");
+    ``style`` defaults to ``"flat"`` (operator ruling, 2026-09-30: "Flat. No faces");
     ``"emoji"`` stays available for an explicit call. The negative prompt always excludes
     faces and characters in both styles, and the flat positive prompt asks for nothing
     character-like.
@@ -70,6 +73,9 @@ def build_icon_workflow(
     """
     if style not in TRIGGERS:
         raise ValueError(f"style must be 'emoji' or 'flat', got {style!r}")
+
+    if not 0 <= seed <= SEED_MAX:
+        raise ValueError(f"seed must be between 0 and {SEED_MAX}, got {seed}")
 
     strength = DEFAULT_LORA_STRENGTH[style] if lora_strength is None else lora_strength
     low, high = LORA_STRENGTH_RANGE[style]

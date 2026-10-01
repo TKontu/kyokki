@@ -336,6 +336,30 @@ def test_llm_api_key_is_silent_when_set(
     assert secret not in caplog.text
 
 
+def test_module_level_call_warns_when_the_module_loads_with_an_empty_key(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """review verdict #9: the `_warn_if_llm_api_key_missing(settings)` call that actually
+    fires at import time (config.py's last line) was untested - only the function body
+    was. Reloading the module re-runs that line with the warning as a fresh assertion.
+    The module is reloaded again afterwards so later tests see a normal singleton."""
+    import importlib
+    import logging
+
+    import app.core.config as config_module
+
+    for key, value in REQUIRED.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("LLM_API_KEY", "")
+    try:
+        with caplog.at_level(logging.WARNING, logger="app.core.config"):
+            importlib.reload(config_module)
+        assert any("LLM_API_KEY" in record.message for record in caplog.records)
+    finally:
+        monkeypatch.setenv("LLM_API_KEY", "restored-after-reload-test")
+        importlib.reload(config_module)
+
+
 # --- LLM_ESTIMATE_TIMEOUT (raised from 180 to 300, 2026-09-30) ---------------------------
 
 

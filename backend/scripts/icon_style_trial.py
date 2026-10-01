@@ -31,7 +31,12 @@ from pathlib import Path
 from PIL import Image
 
 from app.services import comfyui
-from app.services.icon_workflow import DEFAULT_LORA_STRENGTH, Style, build_icon_workflow
+from app.services.icon_workflow import (
+    DEFAULT_LORA_STRENGTH,
+    NEGATIVE_PROMPT,
+    Style,
+    build_icon_workflow,
+)
 
 # The ten gap-list products (docs/spikes/Q18_exact_emoji.md "Gap list"): the four with an
 # operator icon brief, plus six more spanning dairy, cheese, bread, meat, vegetables and
@@ -163,7 +168,10 @@ def write_thumbnails(full_path: Path, image_dir: Path, job: Job) -> dict[int, Pa
 
 # --- the write-up --------------------------------------------------------------------------
 
-GRAPH_METHOD = """## Method
+# Built from the live NEGATIVE_PROMPT so this section can never again describe a stale
+# prompt after icon_workflow.py changes (review verdict #7: it used to hardcode the
+# pre-ruling text).
+GRAPH_METHOD = f"""## Method
 
 Every render used `app.services.icon_workflow.build_icon_workflow` (the frozen graph),
 through `app.services.comfyui.render` (the hold protocol), against `a4.comfyui` on the GPU
@@ -176,7 +184,7 @@ Fixed graph parameters:
 - LoRA: `SDXL-Emoji-Lora-r4.safetensors`
 - Canvas: 1024x1024, batch 1
 - Sampler: `dpmpp_2m`, scheduler `karras`, cfg 7.0, denoise 1.0, 25 steps
-- Negative prompt: "blurry, text, watermark"
+- Negative prompt: "{NEGATIVE_PROMPT}"
 - Background removal: `LoadRembgByBiRefNetModel` (`General.safetensors`) + `RembgByBiRefNet`
 
 Per style:
@@ -189,6 +197,104 @@ Per style:
 Two fixed seeds per style (20260930, 20260931), chosen for a reproducible side-by-side
 rather than a representative sample.
 """
+
+# Fixed text (review verdict #7): re-running this script must not silently drop the
+# operator's ruling or the flat-recheck section from the committed doc. The ruling's prose
+# is a historical record and does not change when the script runs again; the recheck
+# section's image table is instead generated from PRODUCTS + RECHECK_SEED below, so it
+# still points at the right files if those renders are ever regenerated at that seed.
+OPERATOR_RULING_SECTION = """## Operator ruling (2026-09-30)
+
+> "Flat. No faces"
+
+The style is **flat**, and no generated icon may show a face, eyes or a character, in
+either style (`emoji` stays available in the code for a possible future use, just not as
+the default). `backend/app/services/icon_workflow.py` changed to match:
+
+- `build_icon_workflow`'s `style` parameter now defaults to `"flat"`; passing `style="emoji"`
+  explicitly still works exactly as before.
+- The negative prompt gained face/character terms, applied to **both** styles: `face, eyes,
+  mouth, smile, cartoon character, mascot, anthropomorphic`, alongside the existing `blurry,
+  text, watermark`.
+- The flat positive prompt already asked for nothing character-like ("flat, `<subject>`,
+  simple flat icon, white background"); no wording change was needed there.
+
+This **supersedes** the original "Reading the styles" section below wherever it praises
+`emoji`'s aesthetic (that style is no longer the default, and its 3D-face look is exactly
+what the ruling rejects) or reads a rendered face/character as acceptable. The rest of that
+section's findings - the tiled-pattern failures, the garbled label text, and the Quark
+failure in particular - still apply, since none of them were about faces. A "Flat, no
+faces" recheck (10 products, flat only, one new seed each, rendered with the updated
+template above) is added at the end of the Renders section below.
+"""
+
+# The seed used for the flat-only, no-faces recheck (one new seed, all 10 products).
+RECHECK_SEED = 20261001
+
+FLAT_RECHECK_INTRO = (
+    "Rendered after the operator ruling above, with the updated template (`style` "
+    "defaulting to `flat`, the face/character terms added to the negative prompt): the "
+    "same 10 products, flat only, one new seed each (10 renders, not 40 - no `emoji` and "
+    'no second seed, since the question this recheck answers is only "does the new '
+    'template keep faces out").'
+)
+
+FLAT_RECHECK_FINDINGS = """Timings: Tomato puree 50.3s (cold start - GPU had unloaded since the earlier trial), Canned
+tuna 22.9s, Fish fingers 22.9s, Canned tomatoes 22.9s, Quark 22.9s, Mozzarella 22.9s, Minced
+beef 22.9s, Parsnip 22.7s, Karelian pasty 23.0s, Oat drink 22.9s. 10/10 renders ok, no
+protocol failures.
+
+**No faces, eyes or characters appeared in any of the 10 renders.** The ruling's specific
+requirement is met cleanly and consistently - this is the headline result of the recheck.
+
+Everything else about the earlier "Reading the styles" section's account of `flat`'s
+non-face failure modes still holds, and this recheck adds direct evidence:
+
+- **Clean and on-subject (6/10):** Tomato puree, Canned tomatoes, Parsnip, Oat drink read
+  well at both sizes. Canned tuna is also on-subject but keeps the pre-existing **text
+  artefact** ("TUNE AUN", "wae to g lk" on the label) - a known SDXL weakness, not related
+  to faces.
+- **Tiled/repeating-pattern failure, still present without faces (2/10):** Fish fingers and
+  Karelian pasty both came back as a repeating decorative pattern rather than a single
+  centred object - the same compositional failure mode the original trial saw on some
+  `emoji` renders, now confirmed on `flat` too with a fresh seed. Unreadable at 64px in both
+  cases.
+- **Quark fails again, a third seed in a row:** an abstract line-art mark with no visual
+  connection to curd cheese - the same failure as both original seeds in both styles. This
+  is now 3/3 seeds tested across both styles. Confirms the earlier finding: Quark needs a
+  more descriptive subject string or a reference image, not a style or seed change.
+- **Mozzarella and Minced beef are abstract, not clearly on-subject** at this seed (an
+  ambiguous container/texture shape, and what reads more like kitchen-tool line icons than
+  meat, respectively) - milder than a full failure, but neither would pass as a recognisable
+  product icon as rendered.
+
+Net: the operator's "no faces" bar is met 10/10. The product-recognisability bar from the
+original trial is not solved by the template change (it was never meant to be) - Quark still
+needs a different subject or a reference image, and the tiled-pattern failure is a
+per-seed instability independent of the faces fix. **Regenerate with a new seed** (next
+round) is the practical mitigation already planned for exactly this.
+"""
+
+
+def _flat_recheck_section(image_dir_name: str) -> list[str]:
+    """The "Flat, no faces" recheck: a generated image table plus the fixed findings."""
+    lines = [
+        f"### Flat, no faces (recheck, seed {RECHECK_SEED})",
+        "",
+        FLAT_RECHECK_INTRO,
+        "",
+        "| Product | 256px | 64px |",
+        "| --- | --- | --- |",
+    ]
+    for name, _brief in PRODUCTS:
+        base = f"{slug(name)}_flat_{RECHECK_SEED}"
+        cell_256 = (
+            f"![flat seed {RECHECK_SEED} at 256px]({image_dir_name}/{base}_256.png)"
+        )
+        cell_64 = f"![flat seed {RECHECK_SEED} at 64px]({image_dir_name}/{base}_64.png)"
+        lines.append(f"| {name} | {cell_256} | {cell_64} |")
+    lines += ["", FLAT_RECHECK_FINDINGS]
+    return lines
 
 
 def _thumb_cell(image_dir_name: str, job: Job, size: int) -> str:
@@ -242,6 +348,7 @@ def render_markdown(
         "operator can pick a look before it is wired into the icon queue. The operator "
         "chooses; this document does not decide for them.",
         "",
+        OPERATOR_RULING_SECTION,
         GRAPH_METHOD,
     ]
     if cold_start_seconds is not None:
@@ -258,6 +365,8 @@ def render_markdown(
             seen.append(result.job.product)
     for product in seen:
         lines += _product_table(product, results, image_dir_name)
+
+    lines += _flat_recheck_section(image_dir_name)
 
     failures = [r for r in results if not r.ok]
     lines += [f"## Failures ({len(failures)})", ""]

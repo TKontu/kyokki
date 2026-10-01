@@ -79,7 +79,7 @@ jobs:
 
       - name: Compose file parses with only the required variables set
         run: |
-          POSTGRES_PASSWORD=ci-check docker compose -f docker-compose.prod.yml config -q
+          POSTGRES_PASSWORD=ci-check LLM_API_KEY=ci-check docker compose -f docker-compose.prod.yml config -q
           echo "docker-compose.prod.yml is valid"
 
       - name: Every stack.env.example key is used by the compose file
