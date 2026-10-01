@@ -613,3 +613,86 @@ class TestConfirmStoresTheReceiptLine:
         item = result.scalar_one()
         assert item.receipt_line_index is None
         assert item.receipt_line_text is None
+
+
+class TestStockedMarker:
+    """`_mark_stocked` writes `stocked_at_confirm` in the same transaction as the items
+    it describes (F2, audit follow-up from round 2026-09-30-1): present right after a
+    successful confirm, gone if the whole confirm rolls back.
+    """
+
+    async def _receipt_with_lines(self, test_db: AsyncSession) -> Receipt:
+        receipt = Receipt(
+            id=uuid4(),
+            image_path=f"data/receipts/{uuid4()}.jpg",
+            processing_status="completed",
+            ocr_structured={"lines": [{"name": "VALIO MAITO 1L", "price": 1.49}]},
+            items_extracted=1,
+            items_matched=0,
+        )
+        test_db.add(receipt)
+        await test_db.commit()
+        return receipt
+
+    async def test_the_marker_is_present_right_after_confirm(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        sample_product: ProductMaster,
+    ) -> None:
+        receipt = await self._receipt_with_lines(test_db)
+
+        response = await client.post(
+            f"/api/receipts/{receipt.id}/confirm",
+            json={
+                "items": [
+                    {
+                        "index": 0,
+                        "product_id": str(sample_product.id),
+                        "quantity": 1,
+                        "unit": "pcs",
+                        "purchase_date": "2026-09-26",
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200, response.text
+
+        await test_db.refresh(receipt)
+        assert receipt.ocr_structured["lines"][0]["stocked_at_confirm"] is True
+
+    async def test_a_rollback_after_marking_leaves_no_marker(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        sample_product: ProductMaster,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Forces the failure *after* `_mark_stocked` has already mutated the
+        in-memory line - proving the write depends on the commit actually landing."""
+        receipt = await self._receipt_with_lines(test_db)
+
+        async def failing_commit() -> None:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(test_db, "commit", failing_commit)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await client.post(
+                f"/api/receipts/{receipt.id}/confirm",
+                json={
+                    "items": [
+                        {
+                            "index": 0,
+                            "product_id": str(sample_product.id),
+                            "quantity": 1,
+                            "unit": "pcs",
+                            "purchase_date": "2026-09-26",
+                        }
+                    ]
+                },
+            )
+
+        monkeypatch.undo()
+        await test_db.refresh(receipt)
+        assert "stocked_at_confirm" not in receipt.ocr_structured["lines"][0]
