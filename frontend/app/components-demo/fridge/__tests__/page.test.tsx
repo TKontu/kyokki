@@ -141,6 +141,28 @@ describe('fridge mocks page', () => {
     expect(document.documentElement).not.toHaveClass('light')
   })
 
+  it('does not restore on every toggle, only on unmount (review, round 2026-09-30-1)', () => {
+    // The cleanup used to be keyed on [theme], so it fired on every toggle, not just on
+    // leaving the page - restoring the stored theme mid-visit instead of showing the preview.
+    mockItems([])
+    window.localStorage.setItem(THEME_KEY, 'dark')
+    document.documentElement.classList.add('dark')
+    const { unmount } = render(<FridgeMocksPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Light' }))
+    expect(document.documentElement).toHaveClass('light')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Auto' }))
+    expect(document.documentElement).not.toHaveClass('light')
+    expect(document.documentElement).not.toHaveClass('dark') // the preview, not the stored dark
+
+    fireEvent.click(screen.getByRole('button', { name: 'Dark' }))
+    expect(document.documentElement).toHaveClass('dark') // still just the toggle
+
+    unmount()
+    expect(document.documentElement).toHaveClass('dark') // now it restores the stored choice
+  })
+
   it('shows the production portrait fridge beside the mocks, on sample stock (Q17-B)', () => {
     mockItems([])
     window.history.replaceState(null, '', '/components-demo/fridge?design=portrait&sample=on')

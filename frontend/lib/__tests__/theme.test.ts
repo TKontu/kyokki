@@ -4,7 +4,6 @@
 
 import { THEME_COLOR_DARK, THEME_COLOR_LIGHT } from '../brand'
 import {
-  THEME_COLOR_META_ID,
   THEME_KEY,
   THEME_SCRIPT,
   applyTheme,
@@ -16,14 +15,30 @@ import {
 
 const root = () => document.documentElement
 
-function themeColorMeta(): HTMLMetaElement | null {
-  return document.getElementById(THEME_COLOR_META_ID) as HTMLMetaElement | null
+/** The pair Next renders from `viewport.themeColor` in `layout.tsx` - not anything our own
+ * code creates (see `setThemeColor`'s docstring), so tests build them the way Next would. */
+function addThemeColorMetas(): void {
+  for (const [media, content] of [
+    ['(prefers-color-scheme: light)', THEME_COLOR_LIGHT],
+    ['(prefers-color-scheme: dark)', THEME_COLOR_DARK],
+  ] as const) {
+    const meta = document.createElement('meta')
+    meta.setAttribute('name', 'theme-color')
+    meta.setAttribute('media', media)
+    meta.setAttribute('content', content)
+    document.head.appendChild(meta)
+  }
+}
+
+function themeColorMetas(): HTMLMetaElement[] {
+  return Array.from(document.querySelectorAll('meta[name="theme-color"]'))
 }
 
 beforeEach(() => {
   window.localStorage.clear()
   root().classList.remove('light', 'dark')
-  themeColorMeta()?.remove()
+  document.head.innerHTML = ''
+  addThemeColorMetas()
 })
 
 describe('theme', () => {
@@ -109,59 +124,64 @@ describe('theme', () => {
   })
 
   describe('setThemeColor', () => {
-    it('overrides theme-color with the forced choice', () => {
+    it('rewrites both existing tags to the forced colour, never adding a third', () => {
       setThemeColor('dark')
-      expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_DARK)
+      const metas = themeColorMetas()
+      expect(metas).toHaveLength(2)
+      for (const meta of metas) expect(meta).toHaveAttribute('content', THEME_COLOR_DARK)
 
       setThemeColor('light')
-      expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_LIGHT)
+      expect(themeColorMetas()).toHaveLength(2)
+      for (const meta of themeColorMetas()) {
+        expect(meta).toHaveAttribute('content', THEME_COLOR_LIGHT)
+      }
     })
 
-    it('removes the override for System, leaving the media-query pair in charge', () => {
+    it('restores each tag to its own colour for System', () => {
       setThemeColor('dark')
       setThemeColor('system')
-      expect(themeColorMeta()).toBeNull()
+      const [light, dark] = themeColorMetas()
+      expect(light).toHaveAttribute('content', THEME_COLOR_LIGHT)
+      expect(dark).toHaveAttribute('content', THEME_COLOR_DARK)
     })
 
-    it('updates the existing tag in place rather than adding a second one', () => {
-      setThemeColor('dark')
-      setThemeColor('light')
-      expect(document.querySelectorAll(`#${THEME_COLOR_META_ID}`)).toHaveLength(1)
+    it('does nothing if the tags are not there yet, rather than adding one', () => {
+      document.head.innerHTML = ''
+      expect(() => setThemeColor('dark')).not.toThrow()
+      expect(themeColorMetas()).toHaveLength(0)
     })
   })
 
   it('moves the status-bar colour with the class when the theme is forced (applyTheme)', () => {
     applyTheme('dark')
-    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_DARK)
+    for (const meta of themeColorMetas()) expect(meta).toHaveAttribute('content', THEME_COLOR_DARK)
 
     applyTheme('light')
-    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_LIGHT)
+    for (const meta of themeColorMetas()) {
+      expect(meta).toHaveAttribute('content', THEME_COLOR_LIGHT)
+    }
 
     applyTheme('system')
-    expect(themeColorMeta()).toBeNull()
+    const [light, dark] = themeColorMetas()
+    expect(light).toHaveAttribute('content', THEME_COLOR_LIGHT)
+    expect(dark).toHaveAttribute('content', THEME_COLOR_DARK)
   })
 
   it("moves the status-bar colour on toggle too (saveTheme, the settings page's path)", () => {
     saveTheme('dark')
-    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_DARK)
+    for (const meta of themeColorMetas()) expect(meta).toHaveAttribute('content', THEME_COLOR_DARK)
   })
 
-  it('sets the same status-bar override from the boot script, before hydration can', () => {
+  it('leaves theme-color alone: the boot script only ever touches the class', () => {
+    // setThemeColor cannot run from the boot script without risking a hydration mismatch on
+    // tags that carry no suppressHydrationWarning of their own (see the module docstring);
+    // the mount effect in app/providers.tsx is what sets the forced colour, after hydration.
     window.localStorage.setItem(THEME_KEY, 'dark')
     new Function(THEME_SCRIPT)()
-    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_DARK)
 
-    themeColorMeta()?.remove()
-    root().classList.remove('dark')
-    window.localStorage.setItem(THEME_KEY, 'light')
-    new Function(THEME_SCRIPT)()
-    expect(themeColorMeta()).toHaveAttribute('content', THEME_COLOR_LIGHT)
-
-    // System (no stored value): the script must not add an override
-    themeColorMeta()?.remove()
-    root().classList.remove('light')
-    window.localStorage.removeItem(THEME_KEY)
-    new Function(THEME_SCRIPT)()
-    expect(themeColorMeta()).toBeNull()
+    expect(root()).toHaveClass('dark')
+    const [light, dark] = themeColorMetas()
+    expect(light).toHaveAttribute('content', THEME_COLOR_LIGHT)
+    expect(dark).toHaveAttribute('content', THEME_COLOR_DARK)
   })
 })

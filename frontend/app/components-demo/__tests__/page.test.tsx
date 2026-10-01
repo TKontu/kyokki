@@ -47,4 +47,25 @@ describe('ComponentsDemo', () => {
 
     expect(document.documentElement).toHaveClass('dark')
   })
+
+  it('does not restore on every toggle, only on unmount (review, round 2026-09-30-1)', () => {
+    // The cleanup used to be keyed on [darkMode], so it fired on every toggle, not just on
+    // leaving the page - restoring the stored theme mid-visit instead of showing the preview.
+    window.localStorage.setItem(THEME_KEY, 'light')
+
+    const { unmount } = renderDemo()
+    expect(document.documentElement).not.toHaveClass('dark')
+
+    fireEvent.click(screen.getByRole('button', { name: /Dark Mode/ }))
+    expect(document.documentElement).toHaveClass('dark') // the toggle, not the stored Light
+
+    fireEvent.click(screen.getByRole('button', { name: /Light Mode/ }))
+    expect(document.documentElement).not.toHaveClass('dark') // still the toggle's doing
+
+    fireEvent.click(screen.getByRole('button', { name: /Dark Mode/ }))
+    expect(document.documentElement).toHaveClass('dark') // the preview survives a round trip
+
+    unmount()
+    expect(document.documentElement).not.toHaveClass('dark') // now it restores Light
+  })
 })

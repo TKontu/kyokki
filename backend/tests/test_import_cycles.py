@@ -8,6 +8,11 @@
 what happened running `tests/services/test_storage.py` alone. Once something else has
 already imported `app.schemas` in full (as the rest of the suite does via fixtures), the
 cycle is masked, so this needs a fresh subprocess to catch.
+
+`app.main` and `app.worker.receipt_worker` are the two production entry points that import
+`app.schemas` (directly or by importing the routers/services that do), so they are the ones
+a regression through them would actually have to pass - the two narrower modules above
+could stay fixed in isolation while a production entry point still failed.
 """
 
 from __future__ import annotations
@@ -24,7 +29,12 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.mark.parametrize(
     "module",
-    ["app.services.storage", "app.schemas.category"],
+    [
+        "app.services.storage",
+        "app.schemas.category",
+        "app.main",
+        "app.worker.receipt_worker",
+    ],
 )
 def test_imports_cleanly_in_a_fresh_interpreter(module: str) -> None:
     env = dict(os.environ)

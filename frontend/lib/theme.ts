@@ -10,8 +10,19 @@
  * Forcing the theme also has to move `<meta name="theme-color">` (round 2026-09-30-1):
  * `layout.tsx`'s `viewport.themeColor` renders one tag per `prefers-color-scheme` media query,
  * so on a light iPad with Dark forced the Home Screen status bar stayed light over a dark page.
- * `setThemeColor` overrides those with the forced colour; System removes the override and
- * leaves the two media-query tags - and the OS - in charge, same as the class.
+ * `setThemeColor` rewrites the `content` of those same two tags to the forced colour, rather
+ * than adding a third one - a first attempt did that, and a boot script inserting a `<head>`
+ * child before hydration shifts React's tag-based matching of every sibling after it by one,
+ * breaking hydration (a review of round 2026-09-30-1 reproduced it: with a stored `dark`
+ * theme, hydration failed and silently reverted both the class and the colour).
+ *
+ * `setThemeColor` still is not called from `THEME_SCRIPT`, even rewriting in place: the two
+ * tags have no `suppressHydrationWarning` of their own (Next generates them from the
+ * `viewport` export, not JSX of ours to add it to), so a value changed on them before
+ * hydration logs a mismatch and React patches it back to the unforced colour anyway. Instead
+ * a mount effect in `providers.tsx` calls `applyTheme(readTheme())` once hydration has
+ * actually finished, which sets the forced colour (and heals the class too, belt and braces,
+ * if a hydration mismatch ever reverts that instead).
  */
 
 import { THEME_COLOR_DARK, THEME_COLOR_LIGHT } from './brand'
@@ -36,29 +47,40 @@ export function readTheme(): ThemeChoice {
   }
 }
 
-/** The id of the `<meta name="theme-color">` `setThemeColor` adds to override System's pair. */
-export const THEME_COLOR_META_ID = 'theme-color-forced'
-
 /**
- * Overrides `<meta name="theme-color">` for a forced theme, so the Home Screen status bar
- * matches it instead of the device's own appearance. System removes the override.
+ * Next renders these two from `viewport.themeColor` in `layout.tsx` - one per
+ * `prefers-color-scheme` media query. Selected by `media`, not position, since metadata tags
+ * and the boot script's place in `<head>` are Next's to order, not ours.
  */
-export function setThemeColor(choice: ThemeChoice, doc: Document = document): void {
-  const existing = doc.getElementById(THEME_COLOR_META_ID)
-  if (choice === 'system') {
-    existing?.remove()
-    return
+function themeColorMetas(doc: Document): { light: Element | null; dark: Element | null } {
+  return {
+    light: doc.querySelector('meta[name="theme-color"][media*="light"]'),
+    dark: doc.querySelector('meta[name="theme-color"][media*="dark"]'),
   }
-  const meta = existing ?? doc.createElement('meta')
-  meta.id = THEME_COLOR_META_ID
-  meta.setAttribute('name', 'theme-color')
-  meta.setAttribute('content', choice === 'dark' ? THEME_COLOR_DARK : THEME_COLOR_LIGHT)
-  if (!existing) doc.head.prepend(meta)
 }
 
-/** Puts the choice on `<html>`: a class for Light or Dark, none for System. Moves the
- * status bar colour with it (`setThemeColor`), both here (the toggle) and in `THEME_SCRIPT`
- * (before hydration). */
+/**
+ * Rewrites the `content` of Next's two existing `theme-color` tags for a forced theme, so the
+ * Home Screen status bar matches it instead of the device's own appearance; both become the
+ * same colour, so which one a browser's media query matches makes no difference. System
+ * restores each to its own colour. Never adds or removes a tag (see the module docstring).
+ */
+export function setThemeColor(choice: ThemeChoice, doc: Document = document): void {
+  const { light, dark } = themeColorMetas(doc)
+  if (choice === 'system') {
+    light?.setAttribute('content', THEME_COLOR_LIGHT)
+    dark?.setAttribute('content', THEME_COLOR_DARK)
+    return
+  }
+  const color = choice === 'dark' ? THEME_COLOR_DARK : THEME_COLOR_LIGHT
+  light?.setAttribute('content', color)
+  dark?.setAttribute('content', color)
+}
+
+/** Puts the choice on `<html>`: a class for Light or Dark, none for System. Moves the status
+ * bar colour with it (`setThemeColor`) - called from here on toggle, and from a mount effect
+ * in `providers.tsx` once hydration has finished (`THEME_SCRIPT` cannot call it: see the
+ * module docstring). */
 export function applyTheme(choice: ThemeChoice, root: HTMLElement = document.documentElement) {
   root.classList.remove('light', 'dark')
   if (choice !== 'system') root.classList.add(choice)
@@ -84,15 +106,17 @@ export function effectiveTheme(choice: ThemeChoice, prefersDark: boolean): 'ligh
 
 /**
  * Runs in `<head>` before the body paints. Self-contained - it cannot import - and it must
- * never throw, or it would stop the page's other inline scripts. Sets the same status-bar
- * override `setThemeColor` would, since that (a real import) cannot run until hydration.
+ * never throw, or it would stop the page's other inline scripts.
+ *
+ * It only ever touches the `class` on `<html>`, which `suppressHydrationWarning` there (see
+ * `layout.tsx`) was already covering before this round. It deliberately leaves the
+ * `theme-color` tags alone: unlike that class, they carry no `suppressHydrationWarning` (Next
+ * generates them from the `viewport` export, not from JSX we write), so changing their
+ * `content` here - even just the value, with no tag added or removed - would still hydrate as
+ * a mismatch React logs and then overwrites back to the unforced colour. The mount effect in
+ * `providers.tsx` sets the forced colour once hydration has actually finished, which is also
+ * what repairs it if hydration mismatches for any other reason.
  */
 export const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem(${JSON.stringify(
   THEME_KEY
-)});if(t==='light'||t==='dark'){var c=document.documentElement.classList;c.remove('light','dark');c.add(t);var m=document.getElementById(${JSON.stringify(
-  THEME_COLOR_META_ID
-)});if(!m){m=document.createElement('meta');m.id=${JSON.stringify(
-  THEME_COLOR_META_ID
-)};m.setAttribute('name','theme-color');document.head.prepend(m)}m.setAttribute('content',t==='dark'?${JSON.stringify(
-  THEME_COLOR_DARK
-)}:${JSON.stringify(THEME_COLOR_LIGHT)})}}catch(e){}})()`
+)});if(t==='light'||t==='dark'){var c=document.documentElement.classList;c.remove('light','dark');c.add(t)}}catch(e){}})()`

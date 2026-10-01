@@ -34,10 +34,13 @@ export default function ComponentsDemo() {
     } else {
       document.documentElement.classList.remove('dark');
     }
-    // Restore the cook's own choice on the way out, rather than leaving the device theme
-    // behind: this demo's local toggle must not outlive the page it was opened from.
-    return () => applyTheme(readTheme());
   }, [darkMode]);
+
+  // Restore the cook's own choice on the way out, rather than leaving the device theme
+  // behind: this demo's local toggle must not outlive the page it was opened from. A
+  // separate, mount-only effect: keyed on `[darkMode]` above, this cleanup would fire on
+  // every toggle too, not just on unmount (review, round 2026-09-30-1).
+  React.useEffect(() => () => applyTheme(readTheme()), []);
 
   return (
     <div className="min-h-screen bg-ui-bg dark:bg-ui-dark-bg transition-colors">

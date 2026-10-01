@@ -65,10 +65,13 @@ export default function FridgeMocksPage() {
     const root = document.documentElement
     root.classList.remove('light', 'dark')
     if (theme !== 'auto') root.classList.add(theme)
-    // Restore the cook's own choice on the way out, rather than stripping it to the device
-    // theme: this demo's local toggle must not outlive the page it was opened from.
-    return () => applyTheme(readTheme())
   }, [theme])
+
+  // Restore the cook's own choice on the way out, rather than stripping it to the device
+  // theme: this demo's local toggle must not outlive the page it was opened from. A separate,
+  // mount-only effect: keyed on `[theme]` above, this cleanup would fire on every toggle too,
+  // not just on unmount (review, round 2026-09-30-1).
+  useEffect(() => () => applyTheme(readTheme()), [])
 
   const design = DESIGNS.find((mock) => mock.id === designId) ?? DESIGNS[0]
   const Fridge = design.Component

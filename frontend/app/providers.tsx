@@ -7,8 +7,9 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ToastProvider } from '@/components/ui/Toast'
+import { applyTheme, readTheme } from '@/lib/theme'
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(
@@ -30,6 +31,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
         },
       })
   )
+
+  // Re-asserts the stored theme (class and status-bar colour) once hydration has finished.
+  // THEME_SCRIPT already applies it before first paint, so this is normally a no-op; it
+  // exists so a hydration mismatch elsewhere in the tree - which React recovers from by
+  // discarding the server-rendered DOM and re-rendering on the client - cannot silently
+  // leave a forced theme reverted (round 2026-09-30-1).
+  useEffect(() => {
+    applyTheme(readTheme())
+  }, [])
 
   return (
     <QueryClientProvider client={queryClient}>
