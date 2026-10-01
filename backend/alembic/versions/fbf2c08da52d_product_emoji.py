@@ -18,7 +18,7 @@ space-insensitive), so the same name is never asked again even for a later produ
 under it - `product_master.canonical_name` is unique only while a product lives.
 
 Revision ID: fbf2c08da52d
-Revises: e4b8c1d7a236
+Revises: f1a2b3c4d5e6
 Create Date: 2026-09-30 09:00:00.000000
 
 """
@@ -30,7 +30,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "fbf2c08da52d"
-down_revision: str | Sequence[str] | None = "e4b8c1d7a236"
+down_revision: str | Sequence[str] | None = "f1a2b3c4d5e6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
