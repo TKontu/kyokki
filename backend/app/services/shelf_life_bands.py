@@ -23,7 +23,10 @@ PLAUSIBLE_DAYS: dict[str, tuple[int, int]] = {
     "pantry": (7, 1825),
     "beverages": (7, 1825),
     "condiments": (7, 1825),
-    "spices": (30, 1825),
+    # A floor of 7, like its pantry-type siblings above: the seed row is "Spices & Herbs",
+    # which a fresh herb (basil, parsley) can genuinely be filed under with a ~7-day life.
+    # 30 rejected that true answer, keeping the placeholder in its place (round 2026-09-30-1).
+    "spices": (7, 1825),
     "snacks": (7, 730),
 }
 # A category nobody listed above still gets a sanity check, just a loose one.

@@ -29,6 +29,7 @@ from app.services.catalog_estimates import (
     INSTRUCTIONS,
     Estimate,
     EstimateRequest,
+    _plausible,
     band_for,
     build_prompt,
     estimate_products,
@@ -55,6 +56,9 @@ PRODUCE_DAYS = next(
 
 MINCE = EstimateRequest(id="p-mince", name="Ground beef", category="meat")
 PASTA = EstimateRequest(id="p-pasta", name="Pasta", category="pantry")
+# H58/round 2026-09-30-1: "Spices & Herbs" also holds a fresh basil or parsley, which is
+# nothing like a dried spice's shelf life.
+BASIL = EstimateRequest(id="p-basil", name="Fresh basil", category="spices")
 
 
 def _answer(rows: str) -> str:
@@ -201,6 +205,17 @@ class TestParseEstimates:
     def test_an_answer_with_no_result_list_is_unusable(self) -> None:
         with pytest.raises(LLMExtractionError):
             parse_estimates('{"nope": true}', [MINCE])
+
+    def test_a_seven_day_spice_estimate_is_accepted(self) -> None:
+        """A fresh basil filed under spices is not rejected for a plausible short life.
+
+        `spices` used to carry a floor of 30 days, which a true ~7-day answer for a fresh
+        herb could never clear; the product kept its 720-day placeholder instead (H58,
+        round 2026-09-30-1).
+        """
+        (estimate,) = parse_estimates(_answer('{"id": "p-basil", "d": 7}'), [BASIL])
+
+        assert estimate.shelf_life_days == 7
 
 
 class TestRefreshCatalogShelfLives:
@@ -504,6 +519,10 @@ class TestPlausibleBands:
         for category in SEED_CATEGORIES:
             low, high = PLAUSIBLE_DAYS[category["id"]]
             assert low <= category["default_shelf_life_days"] <= high, category["id"]
+
+    def test_a_seven_day_spice_is_plausible(self) -> None:
+        """A fresh herb filed under spices is not rejected for a true short shelf life."""
+        assert _plausible(7, "spices") is True
 
 
 class TestACookNumberLearnedMeanwhile:

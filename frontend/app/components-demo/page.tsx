@@ -8,9 +8,14 @@ import Skeleton, { SkeletonInventoryItem, SkeletonCard } from '@/components/ui/S
 import { ExpiryBadge } from '@/components/inventory/ExpiryBadge';
 import BottomSheet from '@/components/ui/BottomSheet';
 import { useToast } from '@/hooks/useToast';
+import { applyTheme, readTheme } from '@/lib/theme';
 
 export default function ComponentsDemo() {
-  const [darkMode, setDarkMode] = useState(false);
+  // Starts from whatever is already on <html> (the cook's own choice, applied before this
+  // page mounted), so opening the demo does not itself strip a forced Dark to Light.
+  const [darkMode, setDarkMode] = useState(
+    () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+  );
   const [sheetOpen, setSheetOpen] = useState(false);
   const toast = useToast();
 
@@ -30,6 +35,12 @@ export default function ComponentsDemo() {
       document.documentElement.classList.remove('dark');
     }
   }, [darkMode]);
+
+  // Restore the cook's own choice on the way out, rather than leaving the device theme
+  // behind: this demo's local toggle must not outlive the page it was opened from. A
+  // separate, mount-only effect: keyed on `[darkMode]` above, this cleanup would fire on
+  // every toggle too, not just on unmount (review, round 2026-09-30-1).
+  React.useEffect(() => () => applyTheme(readTheme()), []);
 
   return (
     <div className="min-h-screen bg-ui-bg dark:bg-ui-dark-bg transition-colors">

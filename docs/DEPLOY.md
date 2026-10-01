@@ -31,7 +31,8 @@ Two more services publish no port:
   `kyokki-frontend` → *Package settings* → *Change visibility* → **Public**. Private packages
   would need a registry login on the host instead.
 - An OpenAI-compatible LLM endpoint reachable from that host (the llama-swap gateway with a
-  vision-capable model such as `muse-glimmer`). Name the copy pinned to the GPU Kyokki may use
+  vision-capable model such as `muse-glimmer`), **which needs an API key since 2026-09-30 (see
+  the note under "Updating")**. Name the copy pinned to the GPU Kyokki may use
   (the gateway lists `c0.*` and `c2.*` copies; Kyokki defaults to `c2.muse-glimmer`).
   MinerU OCR is optional: when it is unreachable,
   receipt photos are read directly by the vision model.
@@ -148,6 +149,25 @@ Two honest limits:
 >   not wait 7 minutes a batch.
 >
 > Then **Pull and redeploy**. No migration is involved.
+
+> **Gateway API key (GW-1, 2026-09-30): the llama-swap gateway now requires one.** Every
+> `/v1/*` request needs `Authorization: Bearer <token>`; without it the gateway answers 401.
+> In the Portainer stack:
+>
+> - set `LLM_API_KEY` to the llama-swap key, then **Pull and redeploy**;
+> - verify from the host (or a container with network access) with:
+>   ```bash
+>   curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $LLM_API_KEY" \
+>     http://192.168.0.94:9292/v1/models
+>   ```
+>   which must print `200`;
+> - health probes and healthchecks must keep hitting `/health`, not `/v1/*` - `/health` needs
+>   no key;
+> - cold starts take 2 to 5 minutes, longer for a 27B model, so keep `LLM_TIMEOUT` and
+>   `LLM_ESTIMATE_TIMEOUT` at 300 s or more, preferably 600 s (see the Q27 note above for
+>   how they are used).
+>
+> No migration is involved.
 
 > **Unit migration (MVP-U1, revision `a4f8c2d91e37`):** `alembic upgrade head` converts stored
 > quantities to `dl | tsp | tbsp | g | pcs` (e.g. 1000 ml becomes 10 dl). It prints a warning for

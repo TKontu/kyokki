@@ -89,7 +89,7 @@ export function AreaSpot({
           style={{ height: u(HEADER - DOT_GAP), gap: u(4) }}
         >
           <span
-            className="rounded-full bg-white/85 font-semibold leading-tight text-slate-800 shadow-sm dark:bg-slate-950/75 dark:text-slate-100"
+            className="min-w-0 truncate rounded-full bg-white/85 font-semibold leading-tight text-slate-800 shadow-sm dark:bg-slate-950/75 dark:text-slate-100"
             style={{ fontSize: u(labelSize), padding: `${u(2)} ${u(labelSize === 13 ? 7 : 5)}` }}
           >
             {area.label}
@@ -97,7 +97,7 @@ export function AreaSpot({
           {contents.length > 0 && (
             <span
               aria-hidden="true"
-              className="flex leading-none drop-shadow-sm"
+              className="flex shrink-0 leading-none drop-shadow-sm"
               style={{ fontSize: u(17), gap: u(2) }}
             >
               {contents.map((icon) => (
