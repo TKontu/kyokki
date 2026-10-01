@@ -171,6 +171,26 @@ describe('useInventory Hooks', () => {
         expect((global.fetch as jest.Mock).mock.calls.length).toBeGreaterThan(1)
         jest.useRealTimers()
       })
+
+      it('treats "failing" (F8: repeated connection failures) the same as disconnected', async () => {
+        setLiveStatus('failing')
+        jest.useFakeTimers()
+        ;(global.fetch as jest.Mock).mockResolvedValue({
+          ok: true,
+          status: 200,
+          json: async () => [mockInventoryItem],
+        })
+
+        const { result } = renderHook(() => useInventoryList(), { wrapper: createWrapper() })
+        await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+        await act(async () => {
+          await jest.advanceTimersByTimeAsync(INVENTORY_POLL_MS + 1_000)
+        })
+        // The normal 30 s poll fired - "failing" gets no special relaxed cadence.
+        expect((global.fetch as jest.Mock).mock.calls.length).toBeGreaterThan(1)
+        jest.useRealTimers()
+      })
     })
 
     it('should handle loading state', () => {

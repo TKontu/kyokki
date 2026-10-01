@@ -13,6 +13,10 @@ import { productKeys } from '../useProducts'
 import { consumptionLogKeys } from '../useConsumptionLog'
 import { getLiveStatus, resetLiveStatusForTests, EVENTS_PATH } from '@/lib/live'
 
+/** F5: models everything the hook relies on, including "open, then silent" - which
+ *  needs no special support here, since the fake only ever reacts to an `emit*` call: a
+ *  test that opens a connection and then simply stops calling `emit*` while advancing
+ *  fake timers *is* a connection that looks alive but has gone quiet. */
 class FakeEventSource {
   static instances: FakeEventSource[] = []
   url: string
@@ -20,6 +24,7 @@ class FakeEventSource {
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
   onerror: (() => void) | null = null
+  private listeners = new Map<string, Set<(event: { data: string }) => void>>()
 
   constructor(url: string) {
     this.url = url
@@ -30,12 +35,26 @@ class FakeEventSource {
     this.closed = true
   }
 
+  addEventListener(type: string, handler: (event: { data: string }) => void) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set())
+    this.listeners.get(type)?.add(handler)
+  }
+
+  removeEventListener(type: string, handler: (event: { data: string }) => void) {
+    this.listeners.get(type)?.delete(handler)
+  }
+
   emitOpen() {
     this.onopen?.()
   }
 
   emitMessage(data: string) {
     this.onmessage?.({ data })
+  }
+
+  /** The named heartbeat event (`event: ping`), not a bare SSE comment - see F2. */
+  emitPing() {
+    this.listeners.get('ping')?.forEach((handler) => handler({ data: '' }))
   }
 
   emitError() {
@@ -70,12 +89,17 @@ describe('useLiveUpdates', () => {
     FakeEventSource.instances = []
     window.EventSource = FakeEventSource as unknown as typeof EventSource
     jest.useFakeTimers()
+    // F8's one console surface is expected in a couple of tests here, and incidental in
+    // others (enough errors in a row crosses the threshold); keep every test's output
+    // clean rather than asserting silence everywhere.
+    jest.spyOn(console, 'warn').mockImplementation(() => {})
   })
 
   afterEach(() => {
     jest.useRealTimers()
     window.EventSource = originalEventSource as typeof EventSource
     resetLiveStatusForTests()
+    jest.restoreAllMocks()
   })
 
   it('opens exactly one connection, at /api/events', () => {
@@ -265,5 +289,163 @@ describe('useLiveUpdates', () => {
     invalidate.mockClear()
     act(() => jest.advanceTimersByTime(1_000))
     expect(invalidate).not.toHaveBeenCalled()
+  })
+
+  describe('the staleness watchdog (F2)', () => {
+    it('reconnects a connection that looks open but has gone silent for 3 missed heartbeats', () => {
+      renderHook(() => useLiveUpdates(newClient()))
+      act(() => latestSource().emitOpen())
+      expect(getLiveStatus()).toBe('connected')
+
+      // Just under 45s (3 x the backend's 15s heartbeat): still trusted.
+      act(() => jest.advanceTimersByTime(49_999))
+      expect(FakeEventSource.instances).toHaveLength(1)
+      expect(getLiveStatus()).toBe('connected')
+
+      // The next 5s watchdog tick crosses 45s of total silence.
+      act(() => jest.advanceTimersByTime(1))
+      expect(FakeEventSource.instances).toHaveLength(2)
+      expect(FakeEventSource.instances[0].closed).toBe(true)
+      expect(getLiveStatus()).toBe('disconnected')
+    })
+
+    it('a heartbeat (the named "ping" event) keeps the connection from going stale', () => {
+      renderHook(() => useLiveUpdates(newClient()))
+      act(() => latestSource().emitOpen())
+
+      // Four 20s steps (80s total) comfortably exceed the 45s staleness window, but each
+      // step is under it individually, and a ping resets the clock every time.
+      for (let i = 0; i < 4; i += 1) {
+        act(() => {
+          jest.advanceTimersByTime(20_000)
+          latestSource().emitPing()
+        })
+      }
+
+      expect(FakeEventSource.instances).toHaveLength(1)
+      expect(getLiveStatus()).toBe('connected')
+    })
+
+    it('an ordinary message also counts as activity, not only open/ping', () => {
+      renderHook(() => useLiveUpdates(newClient()))
+      act(() => latestSource().emitOpen())
+
+      for (let i = 0; i < 4; i += 1) {
+        act(() => {
+          jest.advanceTimersByTime(20_000)
+          latestSource().emitMessage(message('inventory_update'))
+        })
+      }
+
+      expect(FakeEventSource.instances).toHaveLength(1)
+      expect(getLiveStatus()).toBe('connected')
+    })
+
+    it('treats a stale source as down on visibilitychange, not only a null one', () => {
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        configurable: true,
+      })
+      renderHook(() => useLiveUpdates(newClient()))
+      act(() => latestSource().emitOpen())
+      expect(FakeEventSource.instances).toHaveLength(1)
+
+      // Jump the clock without advancing fake timers, so the periodic watchdog's own
+      // interval does not fire first - this isolates the visibilitychange handler's own
+      // staleness check, the thing this test is actually about.
+      jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 46_000)
+
+      act(() => document.dispatchEvent(new Event('visibilitychange')))
+      expect(FakeEventSource.instances).toHaveLength(2)
+      expect(FakeEventSource.instances[0].closed).toBe(true)
+    })
+
+    it('treats a stale source as down on "online" too', () => {
+      renderHook(() => useLiveUpdates(newClient()))
+      act(() => latestSource().emitOpen())
+      expect(FakeEventSource.instances).toHaveLength(1)
+
+      jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 46_000)
+
+      act(() => window.dispatchEvent(new Event('online')))
+      expect(FakeEventSource.instances).toHaveLength(2)
+      expect(FakeEventSource.instances[0].closed).toBe(true)
+    })
+  })
+
+  describe('stale-instance guards (F7)', () => {
+    it('ignores onopen/onmessage from an instance that is no longer the live source', () => {
+      const queryClient = newClient()
+      const invalidate = jest.spyOn(queryClient, 'invalidateQueries')
+      renderHook(() => useLiveUpdates(queryClient))
+
+      const first = latestSource()
+      act(() => {
+        first.emitError()
+        jest.advanceTimersByTime(1_000) // the scheduled reconnect fires
+      })
+      expect(FakeEventSource.instances).toHaveLength(2)
+      const second = latestSource()
+      act(() => second.emitOpen())
+      expect(getLiveStatus()).toBe('connected')
+
+      invalidate.mockClear()
+      // The old, already-replaced instance firing late (a real EventSource should not
+      // do this once closed, but nothing stops a queued microtask) must be a no-op.
+      act(() => {
+        first.emitOpen()
+        first.emitMessage(message('inventory_update'))
+        jest.advanceTimersByTime(300)
+      })
+      expect(invalidate).not.toHaveBeenCalled()
+      expect(getLiveStatus()).toBe('connected')
+    })
+  })
+
+  describe('a "failing" status for a connection that never succeeds (F8)', () => {
+    it('surfaces "failing" and warns once after FAILURE_THRESHOLD failures with no open', () => {
+      renderHook(() => useLiveUpdates(newClient()))
+      const warn = console.warn as jest.Mock
+
+      // Four failures in a row: still just "disconnected", no warning yet.
+      for (let i = 0; i < 4; i += 1) {
+        act(() => {
+          latestSource().emitError()
+          jest.advanceTimersByTime(30_000) // comfortably past that attempt's backoff
+        })
+      }
+      expect(getLiveStatus()).toBe('disconnected')
+      expect(warn).not.toHaveBeenCalled()
+
+      // The 5th failure in a row crosses the threshold.
+      act(() => latestSource().emitError())
+      expect(getLiveStatus()).toBe('failing')
+      expect(warn).toHaveBeenCalledTimes(1)
+
+      // It keeps retrying at the capped backoff, but does not warn again.
+      act(() => jest.advanceTimersByTime(30_000))
+      act(() => latestSource().emitError())
+      expect(getLiveStatus()).toBe('failing')
+      expect(warn).toHaveBeenCalledTimes(1)
+    })
+
+    it('a successful open resets the failure count and leaves the status connected', () => {
+      renderHook(() => useLiveUpdates(newClient()))
+      const warn = console.warn as jest.Mock
+
+      for (let i = 0; i < 4; i += 1) {
+        act(() => {
+          latestSource().emitError()
+          jest.advanceTimersByTime(30_000)
+        })
+      }
+      act(() => latestSource().emitOpen())
+      expect(getLiveStatus()).toBe('connected')
+
+      // Erroring again afterwards starts counting from zero, not from 4.
+      act(() => latestSource().emitError())
+      expect(getLiveStatus()).toBe('disconnected')
+      expect(warn).not.toHaveBeenCalled()
+    })
   })
 })

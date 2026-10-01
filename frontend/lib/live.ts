@@ -51,7 +51,12 @@ export function parseLiveMessage(raw: string): LiveMessage | null {
   return null
 }
 
-export type LiveStatus = 'connected' | 'disconnected'
+/** `'failing'` (F8): connecting has failed `FAILURE_THRESHOLD` times in a row without
+ *  ever succeeding once. Every reader that only cares about "is it carrying updates
+ *  right now" (e.g. `useInventory.ts`'s poll interval) should treat it exactly like
+ *  `'disconnected'` - it exists only so something can be surfaced for a connection that
+ *  is not just briefly down but stuck. */
+export type LiveStatus = 'connected' | 'disconnected' | 'failing'
 
 let liveStatus: LiveStatus = 'disconnected'
 const listeners = new Set<() => void>()
