@@ -1,20 +1,26 @@
 """Re-ask the model for one receipt line, with an optional hint from the cook (Q38)."""
 
+import asyncio
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import httpx
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import sessionmaker
 
 from app.models.category import Category
+from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
 from app.models.store_product_alias import StoreProductAlias
 from app.services import receipt_line_reanalyse
 from app.services.llm_extractor import CategoryOption
 from app.services.llm_http import LLMAuthError
+from app.services.matching_service import normalize_receipt_name
+from app.services.product_selection import select_products as real_select_products
+from app.services.receipt_confirm import UNKNOWN_CHAIN
 
 PURCHASED = date(2026, 9, 26)
 
@@ -408,3 +414,256 @@ class TestReanalyseLine:
             await receipt_line_reanalyse.reanalyse_line(
                 db_session, receipt.id, line_id, None
             )
+
+
+class TestResolutionWithCatalog:
+    """F4: the real resolver tiers, exercised for this call site with a real catalog."""
+
+    async def test_a_matching_catalog_name_resolves(
+        self,
+        db_session: AsyncSession,
+        sample_category: Category,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        product = ProductMaster(
+            id=uuid4(),
+            canonical_name="Cashew nuts",
+            category="dairy",
+            storage_type="pantry",
+            default_shelf_life_days=180,
+            unit_type="count",
+            default_unit="pcs",
+        )
+        db_session.add(product)
+        await db_session.commit()
+
+        line_id = uuid4()
+        receipt = await _receipt(
+            db_session,
+            status="completed",
+            ocr_structured={
+                "lines": [{"name": "PESTO JA CASHEW", "line_id": str(line_id)}]
+            },
+        )
+        _stub(monkeypatch, json.dumps({"g": "Cashew nuts", "c": "dairy"}))
+
+        item = await receipt_line_reanalyse.reanalyse_line(
+            db_session, receipt.id, line_id, None
+        )
+
+        assert item.product_id == product.id
+        assert item.match_source == "name"
+
+    async def test_an_alias_for_the_printed_name_resolves(
+        self,
+        db_session: AsyncSession,
+        sample_category: Category,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        product = ProductMaster(
+            id=uuid4(),
+            canonical_name="Cashew nuts",
+            category="dairy",
+            storage_type="pantry",
+            default_shelf_life_days=180,
+            unit_type="count",
+            default_unit="pcs",
+        )
+        db_session.add(product)
+        await db_session.commit()
+        alias = StoreProductAlias(
+            product_master_id=product.id,
+            store_chain=UNKNOWN_CHAIN,
+            receipt_name=normalize_receipt_name("PESTO JA CASHEW"),
+            source="cook",
+            confidence_score=1.0,
+            manually_verified=True,
+            occurrence_count=1,
+            last_seen=datetime.now(UTC),
+        )
+        db_session.add(alias)
+        await db_session.commit()
+
+        line_id = uuid4()
+        receipt = await _receipt(
+            db_session,
+            status="completed",
+            store_chain=None,
+            ocr_structured={
+                "lines": [{"name": "PESTO JA CASHEW", "line_id": str(line_id)}]
+            },
+        )
+        # A different `g` from the model: the alias is keyed on the printed name, not
+        # the generic name, so it wins regardless of what the model answered.
+        _stub(monkeypatch, json.dumps({"g": "Something else entirely", "c": "dairy"}))
+
+        item = await receipt_line_reanalyse.reanalyse_line(
+            db_session, receipt.id, line_id, None
+        )
+
+        assert item.product_id == product.id
+        assert item.match_source == "alias"
+
+    async def test_selection_is_asked_and_a_failure_still_returns_unmatched(
+        self,
+        db_session: AsyncSession,
+        sample_category: Category,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Neither alias nor name settles this line, so the resolver shortlists it and
+        asks the model to choose (`product_selection.select_products`, its own
+        `post_chat` stubbed here, separately from the re-analyse prompt's). A selection
+        failure (`LLMExtractionError`) must not fail the re-analyse: it comes back
+        unmatched, the line's fresh name and category still applied.
+        """
+        # The autouse `_no_model_selection` fixture normally replaces
+        # `select_products` outright; undone here so the real function - and its own
+        # `post_chat` - runs, per the review's request to exercise that path for real.
+        monkeypatch.setattr(
+            "app.services.product_resolution.select_products", real_select_products
+        )
+
+        # Same category as the line's resolved answer, so the retriever offers it as a
+        # candidate (a category match alone is enough - no name similarity needed).
+        other = ProductMaster(
+            id=uuid4(),
+            canonical_name="Peanut butter",
+            category="dairy",
+            storage_type="pantry",
+            default_shelf_life_days=180,
+            unit_type="count",
+            default_unit="pcs",
+        )
+        db_session.add(other)
+        await db_session.commit()
+
+        line_id = uuid4()
+        receipt = await _receipt(
+            db_session,
+            status="completed",
+            ocr_structured={
+                "lines": [{"name": "PESTO JA CASHEW", "line_id": str(line_id)}]
+            },
+        )
+        _stub(monkeypatch, json.dumps({"g": "Cashew nuts", "c": "dairy"}))
+
+        async def failing_post_chat(client, payload, *, budget):
+            raise httpx.ConnectError("gateway down")
+
+        monkeypatch.setattr(
+            "app.services.product_selection.post_chat", failing_post_chat
+        )
+
+        item = await receipt_line_reanalyse.reanalyse_line(
+            db_session, receipt.id, line_id, None
+        )
+
+        assert item.generic_name == "Cashew nuts"
+        assert item.product_id is None
+        # Unresolved is its own vocabulary value, not absent (`ResolutionSource`'s "none")
+        assert item.match_source == "none"
+
+
+class TestLockTiming:
+    """F1: the receipt row must not stay locked across the model call."""
+
+    async def test_the_lock_is_taken_only_after_the_model_answers(
+        self,
+        db_engine,
+        committed_db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        line_id = uuid4()
+        receipt = await _receipt(
+            committed_db_session,
+            status="completed",
+            ocr_structured={"lines": [{"name": "X", "line_id": str(line_id)}]},
+        )
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_ask_model(prompt: str) -> str:
+            started.set()
+            await release.wait()
+            return json.dumps({"g": "Something", "c": None})
+
+        monkeypatch.setattr(receipt_line_reanalyse, "_ask_model", slow_ask_model)
+
+        factory = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+        async def run_reanalyse() -> object:
+            async with factory() as session:
+                return await receipt_line_reanalyse.reanalyse_line(
+                    session, receipt.id, line_id, None
+                )
+
+        task = asyncio.create_task(run_reanalyse())
+        await asyncio.wait_for(started.wait(), timeout=10)
+
+        # While the model call is "in flight", a second connection can lock the same
+        # row without waiting at all: phase 1 holds no lock (F1).
+        async with factory() as prober:
+            await asyncio.wait_for(
+                prober.execute(
+                    text("SELECT id FROM receipt WHERE id = :id FOR UPDATE NOWAIT"),
+                    {"id": str(receipt.id)},
+                ),
+                timeout=5,
+            )
+            await prober.rollback()
+
+        release.set()
+        item = await asyncio.wait_for(task, timeout=10)
+        assert item.generic_name == "Something"
+
+    async def test_phase_two_sees_a_change_committed_during_the_model_call(
+        self,
+        db_engine,
+        committed_db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Locking late (F1) is only safe if the re-check it buys actually reads fresh
+        data. `receipt` stays in this session's identity map across both phases, and
+        SQLAlchemy does not refresh an identity-mapped object's attributes from a plain
+        re-query - `populate_existing` is what makes the phase 2 re-check see a change
+        another session committed while the model call was running, rather than the
+        phase 1 snapshot."""
+        line_id = uuid4()
+        receipt = await _receipt(
+            committed_db_session,
+            status="completed",
+            ocr_structured={"lines": [{"name": "X", "line_id": str(line_id)}]},
+        )
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_ask_model(prompt: str) -> str:
+            started.set()
+            await release.wait()
+            return json.dumps({"g": "Something", "c": None})
+
+        monkeypatch.setattr(receipt_line_reanalyse, "_ask_model", slow_ask_model)
+
+        factory = sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+        async def run_reanalyse() -> object:
+            async with factory() as session:
+                return await receipt_line_reanalyse.reanalyse_line(
+                    session, receipt.id, line_id, None
+                )
+
+        task = asyncio.create_task(run_reanalyse())
+        await asyncio.wait_for(started.wait(), timeout=10)
+
+        # A concurrent re-read replaces the line while the model call is in flight -
+        # same line_id gone, a different one in its place.
+        async with factory() as writer:
+            other = await writer.get(Receipt, receipt.id)
+            other.ocr_structured = {"lines": [{"name": "Y", "line_id": str(uuid4())}]}
+            await writer.commit()
+
+        release.set()
+        with pytest.raises(receipt_line_reanalyse.LineNotFound):
+            await asyncio.wait_for(task, timeout=10)

@@ -30,10 +30,11 @@ from app.crud.category import get_categories
 from app.models.receipt import Receipt
 from app.schemas.receipt import ExtractedItem, ReceiptStatus, items_from_structured
 from app.services.broadcast_helpers import broadcast_receipt_status
-from app.services.llm_extractor import NON_FOOD, CategoryOption, extract_json_object
+from app.services.llm_extractor import CategoryOption, extract_json_object
 from app.services.llm_http import LLMAuthError, post_chat
 from app.services.non_food import known_non_food
 from app.services.product_resolution import ProductResolution, ResolvableLine
+from app.services.receipt_confirm import UNKNOWN_CHAIN
 from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)
@@ -41,6 +42,13 @@ logger = get_logger(__name__)
 # A longer hint is more likely pasted junk than a real answer (also enforced by the
 # schema's own constant; kept here too so this module has no silent dependency on it).
 HINT_MAX_LENGTH = 200
+
+# What the model answers for `c` when a line is not food at all. A copy of
+# `llm_extractor.NON_FOOD`'s value, not an import of it: `llm_extractor.py` is owned by a
+# sibling lane this round and is not in the set of its names this module may rely on
+# (`ProductResolution.resolve`, `ResolvableLine`, `Resolution`, `extract_json_object`,
+# `CategoryOption`). Kept identical so the two prompts agree on the sentinel.
+NON_FOOD = "household"
 
 
 class ReceiptNotFound(LookupError):
@@ -207,13 +215,38 @@ async def _ask_model(prompt: str) -> str:
     return cast(str, content)
 
 
+def _structured_of(receipt: Receipt) -> dict[str, Any] | None:
+    return cast(
+        "dict[str, Any] | None",
+        receipt.ocr_structured if isinstance(receipt.ocr_structured, dict) else None,
+    )
+
+
+def _check_reanalysable(receipt: Receipt | None, receipt_id: UUID) -> Receipt:
+    """404/409, shared by the unlocked read and the locked re-check (F1)."""
+    if receipt is None:
+        raise ReceiptNotFound(f"Receipt '{receipt_id}' not found")
+    if receipt.processing_status != ReceiptStatus.COMPLETED:
+        raise ReceiptNotReanalysable(
+            f"Receipt is not reviewable (status {receipt.processing_status})"
+        )
+    return receipt
+
+
 async def reanalyse_line(
     db: AsyncSession, receipt_id: UUID, line_id: UUID, hint: str | None
 ) -> ExtractedItem:
     """Re-ask the model for one line's generic name, category and match.
 
-    Nothing is learned: no alias, synonym or product is created or changed. Only this
-    line of `receipt.ocr_structured` is written, under a row lock.
+    Nothing is learned: no alias, synonym or product is created or changed.
+
+    The receipt row is **not** locked while the model answers (up to
+    `settings.LLM_ESTIMATE_TIMEOUT`, plus a possible second call if resolution asks the
+    model to pick a product): a lock held that long would block confirm, and any other
+    re-analyse, on the same receipt for no reason - nothing here needs exclusivity until
+    the write. The row is re-read `FOR UPDATE` only once the answer is in hand, the
+    receipt and the line are re-checked (another confirm or re-read could have run while
+    this one was waiting), and only then is anything written.
 
     Raises:
         ReceiptNotFound: no receipt with this id.
@@ -227,26 +260,13 @@ async def reanalyse_line(
     if hint is not None and len(hint) > HINT_MAX_LENGTH:
         raise InvalidHint(f"The hint is longer than {HINT_MAX_LENGTH} characters")
 
-    receipt = (
-        await db.execute(
-            select(Receipt).where(Receipt.id == receipt_id).with_for_update()
-        )
-    ).scalar_one_or_none()
-    if receipt is None:
-        raise ReceiptNotFound(f"Receipt '{receipt_id}' not found")
-    if receipt.processing_status != ReceiptStatus.COMPLETED:
-        raise ReceiptNotReanalysable(
-            f"Receipt is not reviewable (status {receipt.processing_status})"
-        )
-
-    structured = cast(
-        "dict[str, Any] | None",
-        receipt.ocr_structured if isinstance(receipt.ocr_structured, dict) else None,
-    )
+    # Phase 1: read only, no lock. Builds the prompt and asks the model.
+    receipt = _check_reanalysable(await db.get(Receipt, receipt_id), receipt_id)
+    structured = _structured_of(receipt)
     found = _find_line(structured, line_id)
     if found is None or structured is None:
         raise LineNotFound(f"Receipt has no line '{line_id}'")
-    index, line = found
+    _, line = found
 
     categories = [
         CategoryOption(id=str(c.id), name=str(c.display_name))
@@ -272,10 +292,14 @@ async def reanalyse_line(
     content = await _ask_model(prompt)
     generic, category, non_food = parse_answer(content, category_ids)
 
-    chain = normalize_store_chain(
-        str(receipt.store_chain) if receipt.store_chain else None
+    # Resolution reads alias/name keys and, only for a line none of those settle, asks
+    # the model to pick from a shortlist (`ProductResolution._select`) - another call
+    # with no lock held, same reasoning as above.
+    chain = (
+        normalize_store_chain(str(receipt.store_chain) if receipt.store_chain else None)
+        or UNKNOWN_CHAIN
     )
-    remembered = await known_non_food(db, chain)
+    remembered = await known_non_food(db, None)
     resolvable = ResolvableLine(
         line_id=str(line_id),
         printed=request.printed,
@@ -288,6 +312,29 @@ async def reanalyse_line(
     resolution = resolutions[str(line_id)]
     non_food = non_food or resolution.non_food
 
+    # Phase 2: lock, re-check, write. Everything above only computed an answer; nothing
+    # was assumed still true until now. `populate_existing` matters here: `receipt` is
+    # already in this session's identity map from phase 1, and without it SQLAlchemy
+    # would hand back that same Python object unrefreshed - the lock would be real at
+    # the database level, but the re-check above it would still be reading phase 1's
+    # stale `ocr_structured`, exactly what phase 2 exists to not do.
+    receipt = _check_reanalysable(
+        (
+            await db.execute(
+                select(Receipt)
+                .where(Receipt.id == receipt_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none(),
+        receipt_id,
+    )
+    structured = _structured_of(receipt)
+    found = _find_line(structured, line_id)
+    if found is None or structured is None:
+        raise LineNotFound(f"Receipt has no line '{line_id}'")
+    index, line = found
+
     line["generic_name"] = generic
     line["category"] = None if non_food else category
     line["non_food"] = non_food
@@ -299,6 +346,11 @@ async def reanalyse_line(
         str(resolution.product.storage_type) if resolution.product else None
     )
     line["match_source"] = resolution.source if resolution.product else None
+    # No score ever decided anything for this line (H13); a stale one from the first
+    # read would otherwise survive a re-analyse that found nothing (receipt_processing.py
+    # resets the same pair when it writes a line).
+    line["match_score"] = None
+    line["match_confidence"] = None
     line["resolution"] = resolution.as_dict()
     line["reanalysed"] = True
     line["reanalyse_hint"] = hint
@@ -324,7 +376,7 @@ async def reanalyse_line(
         items_matched=int(receipt.items_matched or 0),
     )
 
-    items = items_from_structured(cast("dict[str, Any] | None", receipt.ocr_structured))
+    items = items_from_structured(_structured_of(receipt))
     for item in items:
         if item.index == index:
             return item

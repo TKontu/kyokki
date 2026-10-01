@@ -71,13 +71,13 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers())
 afterAll(() => server.close())
 
-function renderRow(props: Partial<React.ComponentProps<typeof ReceiptItemRow>> = {}) {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  })
-  const onChange = jest.fn()
-  const onReanalysed = jest.fn()
-  render(
+function tree(
+  queryClient: QueryClient,
+  onChange: (changes: Partial<ReviewRow>) => void,
+  onReanalysed: (item: ExtractedItem) => void,
+  props: Partial<React.ComponentProps<typeof ReceiptItemRow>>
+) {
+  return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <ReceiptItemRow
@@ -93,7 +93,24 @@ function renderRow(props: Partial<React.ComponentProps<typeof ReceiptItemRow>> =
       </ToastProvider>
     </QueryClientProvider>
   )
-  return { onChange, onReanalysed }
+}
+
+function renderRow(props: Partial<React.ComponentProps<typeof ReceiptItemRow>> = {}) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  const onChange = jest.fn()
+  const onReanalysed = jest.fn()
+  const { rerender } = render(tree(queryClient, onChange, onReanalysed, props))
+  return {
+    onChange,
+    onReanalysed,
+    // Re-renders the same tree (same QueryClient, same component instance) with new
+    // props - for simulating a prop change, such as `dirty` flipping, while a mutation
+    // from the first render is still in flight.
+    rerenderWith: (next: Partial<React.ComponentProps<typeof ReceiptItemRow>>) =>
+      rerender(tree(queryClient, onChange, onReanalysed, { ...props, ...next })),
+  }
 }
 
 describe('printed line (Q39)', () => {
@@ -178,6 +195,32 @@ describe('re-analyse (Q38)', () => {
 
     await waitFor(() => expect(confirmSpy).toHaveBeenCalled())
     expect(onReanalysed).not.toHaveBeenCalled()
+    confirmSpy.mockRestore()
+  })
+
+  it('reads dirty at response time, not click time (F3)', async () => {
+    let resolve!: (value: Response) => void
+    const pending = new Promise<Response>((r) => {
+      resolve = r
+    })
+    server.use(
+      http.post(`${API_URL}/receipts/r1/lines/line-0/reanalyse`, () => pending)
+    )
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true)
+    const { onReanalysed, rerenderWith } = renderRow({ dirty: false })
+
+    // Clicked while the row was clean: a closure over `dirty` at click time would
+    // never ask, however the row changes afterwards.
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }))
+
+    // The cook edits the row while the request is still in flight.
+    rerenderWith({ dirty: true })
+
+    resolve(HttpResponse.json(item({ generic_name: 'Model name' })))
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled())
+    expect(onReanalysed).toHaveBeenCalled()
     confirmSpy.mockRestore()
   })
 

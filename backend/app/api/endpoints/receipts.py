@@ -318,11 +318,6 @@ async def confirm_receipt(
     except receipt_confirm.InvalidConfirmItem as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    # So a later hard-deleted item's line reads "removed" on the audit view rather than
-    # "skipped" - the only trace left once the inventory_item row is gone (see
-    # receipt_audit.record_stocked_lines).
-    await receipt_audit.record_stocked_lines(db, result.receipt, result.inventory_items)
-
     schedule_estimates(background_tasks, result.created_product_ids)
     return ReceiptConfirmResponse(
         success=True,

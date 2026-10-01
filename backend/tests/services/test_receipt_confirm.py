@@ -960,3 +960,63 @@ class TestModelGuessesDoNotBecomeKeys:
 
         alias = await _alias_for(db_session, "HEINZ KETCHUP")
         assert (alias.source, alias.manually_verified) == ("name", False)
+
+
+class TestStockedMarker:
+    """`_mark_stocked` writes `stocked_at_confirm` in the same transaction as the items
+    it describes (F2, audit follow-up): present right after a successful confirm, gone
+    if the whole confirm rolls back.
+    """
+
+    async def test_the_marker_is_present_right_after_confirm(
+        self, db_session: AsyncSession, receipt: Receipt, milk: ProductMaster
+    ) -> None:
+        await confirm_receipt(
+            db_session, receipt.id, [_item(index=0, product_id=milk.id)]
+        )
+
+        await db_session.refresh(receipt)
+        assert receipt.ocr_structured["lines"][0]["stocked_at_confirm"] is True
+        # Line 2 (MUOVIKASSI) was never sent: nothing to mark
+        assert "stocked_at_confirm" not in receipt.ocr_structured["lines"][2]
+
+    async def test_a_rollback_after_marking_leaves_no_marker(
+        self,
+        db_session: AsyncSession,
+        receipt: Receipt,
+        milk: ProductMaster,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Forces the failure *after* `_mark_stocked` has already mutated the
+        in-memory line - proving the write depends on the commit actually landing,
+        not merely that `_mark_stocked` is skipped when an earlier item fails (that
+        is the next test, mirroring `TestInvalidItemsWriteNothing`)."""
+
+        async def failing_commit() -> None:
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(db_session, "commit", failing_commit)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await confirm_receipt(
+                db_session, receipt.id, [_item(index=0, product_id=milk.id)]
+            )
+
+        monkeypatch.undo()
+        await db_session.refresh(receipt)
+        assert "stocked_at_confirm" not in receipt.ocr_structured["lines"][0]
+
+    async def test_an_invalid_item_elsewhere_in_the_batch_marks_nothing(
+        self, db_session: AsyncSession, receipt: Receipt, milk: ProductMaster
+    ) -> None:
+        """Mirrors `TestInvalidItemsWriteNothing`: a later invalid item rolls the
+        whole confirm back, so the valid item's line gets no marker either."""
+        with pytest.raises(InvalidConfirmItem, match="Category required"):
+            await confirm_receipt(
+                db_session,
+                receipt.id,
+                [_item(index=0, product_id=milk.id), _item(index=2)],
+            )
+
+        await db_session.refresh(receipt)
+        assert "stocked_at_confirm" not in receipt.ocr_structured["lines"][0]

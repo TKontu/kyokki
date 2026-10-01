@@ -247,80 +247,6 @@ class TestBuildReceiptAudit:
         assert audit.file_content_type == "image/png"
 
 
-class TestRecordStockedLines:
-    """So a line's item surviving hard delete is not required for the audit to know it
-    was once stocked (follow-up from round 2026-09-30-1)."""
-
-    async def test_marks_each_items_line(
-        self, db_session: AsyncSession, sample_product: ProductMaster
-    ):
-        receipt = await _receipt(
-            db_session,
-            status="confirmed",
-            ocr_structured={"lines": [{"name": "A"}, {"name": "B"}]},
-        )
-        item = build_inventory_item(
-            sample_product, quantity=Decimal("1"), purchase_date=PURCHASED
-        )
-        item.receipt_line_index = 1
-
-        await receipt_audit.record_stocked_lines(
-            db_session, receipt, [(item, sample_product)]
-        )
-
-        await db_session.refresh(receipt)
-        assert receipt.ocr_structured["lines"][1]["stocked_at_confirm"] is True
-        assert "stocked_at_confirm" not in receipt.ocr_structured["lines"][0]
-
-    async def test_an_item_with_no_line_index_is_skipped(
-        self, db_session: AsyncSession, sample_product: ProductMaster
-    ):
-        receipt = await _receipt(
-            db_session, status="confirmed", ocr_structured={"lines": [{"name": "A"}]}
-        )
-        item = build_inventory_item(
-            sample_product, quantity=Decimal("1"), purchase_date=PURCHASED
-        )
-        # No receipt_line_index: a hand-added item, or one confirmed by product_id alone
-
-        await receipt_audit.record_stocked_lines(
-            db_session, receipt, [(item, sample_product)]
-        )
-
-        await db_session.refresh(receipt)
-        assert "stocked_at_confirm" not in receipt.ocr_structured["lines"][0]
-
-    async def test_an_out_of_range_index_does_not_raise(
-        self, db_session: AsyncSession, sample_product: ProductMaster
-    ):
-        receipt = await _receipt(
-            db_session, status="confirmed", ocr_structured={"lines": [{"name": "A"}]}
-        )
-        item = build_inventory_item(
-            sample_product, quantity=Decimal("1"), purchase_date=PURCHASED
-        )
-        item.receipt_line_index = 5
-
-        await receipt_audit.record_stocked_lines(
-            db_session, receipt, [(item, sample_product)]
-        )
-
-        assert "stocked_at_confirm" not in receipt.ocr_structured["lines"][0]
-
-    async def test_a_receipt_with_no_lines_is_a_noop(
-        self, db_session: AsyncSession, sample_product: ProductMaster
-    ):
-        receipt = await _receipt(db_session, status="confirmed", ocr_structured=None)
-        item = build_inventory_item(
-            sample_product, quantity=Decimal("1"), purchase_date=PURCHASED
-        )
-        item.receipt_line_index = 0
-
-        await receipt_audit.record_stocked_lines(
-            db_session, receipt, [(item, sample_product)]
-        )  # must not raise
-
-
 class TestRemovedOutcome:
     """A stocked item that is later hard-deleted must not read `skipped`."""
 
@@ -379,13 +305,15 @@ class TestRemovedOutcome:
     async def test_a_household_line_is_unaffected_by_the_new_outcome(
         self, db_session: AsyncSession
     ):
-        """`stocked_at_confirm` is never set for a household line (confirm only marks
-        lines that produced an inventory item), but household must still win out over
-        `skipped` even if it somehow were - it is checked first either way."""
+        """`stocked_at_confirm` is never set for a household line in practice (confirm
+        only marks lines that produced an inventory item), but household must still win
+        if a line were ever marked both: it is checked first."""
         receipt = await _receipt(
             db_session,
             status="confirmed",
-            ocr_structured={"lines": [{"name": "X", "non_food": True}]},
+            ocr_structured={
+                "lines": [{"name": "X", "non_food": True, "stocked_at_confirm": True}]
+            },
         )
 
         audit = await receipt_audit.build_receipt_audit(db_session, receipt.id)

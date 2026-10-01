@@ -6,7 +6,7 @@
  * category. A line already matched to a product keeps that product and needs no category.
  */
 
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { ProductSearch } from '@/components/products/ProductSearch'
 import { ProvenanceChip } from '@/components/receipts/ProvenanceChip'
 import Button from '@/components/ui/Button'
@@ -78,6 +78,11 @@ export function ReceiptItemRow({
   const [hint, setHint] = useState('')
   const toast = useToast()
   const reanalyse = useReanalyseLine()
+  // Read at response time, not at click time (F3): a mutation can take a while, and an
+  // edit made to this row while it is in flight must still be caught. A plain closure
+  // over the `dirty` prop would answer with whatever it was when `askAgain` was called.
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
   const productId = chosenProductId(item, row)
   const matched = Boolean(productId)
   const ready = canInclude(item, row)
@@ -94,7 +99,7 @@ export function ReceiptItemRow({
       {
         onSuccess: (updated) => {
           if (
-            dirty &&
+            dirtyRef.current &&
             !window.confirm(
               'This row has been edited by hand. Replace it with the re-analysed result?'
             )
