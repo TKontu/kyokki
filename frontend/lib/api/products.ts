@@ -69,26 +69,27 @@ export async function forgetPrintedName(id: string, aliasId: string): Promise<vo
 }
 
 /**
- * Where a product's drawn icon is served (Q18), for an `<img src>`.
+ * Where a product's generated icon is served (Q18-G2), for an `<img src>`.
  *
- * The version is part of the URL, so a redrawn icon is a new URL and never the cached old
- * one. An `<img>` cannot send the bearer token, but it does not need to: the middleware adds
- * it server-side to every same-origin `/api` request. Never fetch this into the DOM as markup.
+ * The version is part of the URL, so a Regenerate is a new URL and never the cached old one.
+ * An `<img>` cannot send the bearer token, but it does not need to: the middleware adds it
+ * server-side to every same-origin `/api` request. Never fetch this into the DOM as markup.
  */
 export function iconUrl(productId: string, version: number): string {
-  return `${API_BASE_URL}/products/${encodeURIComponent(productId)}/icon.svg?v=${version}`
+  return `${API_BASE_URL}/products/${encodeURIComponent(productId)}/icon.png?v=${version}`
 }
 
 /**
- * Draw the product's icon again (Q18), optionally in the cook's words. Answers at once with
- * `icon_status: 'pending'`; the drawing lands in the background minutes later.
+ * Regenerate the product's icon (Q18-G2), optionally in the cook's words. Always a new random
+ * seed. Answers at once with `icon_status: 'pending'`; the image lands in the background
+ * minutes later. 409 when generation is not configured (`COMFYUI_BASE_URL` empty).
  */
 export async function redrawIcon(id: string, hint?: string | null): Promise<ProductMaster> {
   const body: IconRedrawRequest = { hint: hint?.trim() ? hint.trim() : null }
   return apiClient.post<ProductMaster>(`/products/${id}/icon`, body)
 }
 
-/** Drop the drawing: the tile shows the category emoji again until the cook redraws it. */
+/** Use the category emoji instead: the tile shows it until the cook regenerates. */
 export async function clearIcon(id: string): Promise<ProductMaster> {
   return apiClient.delete<ProductMaster>(`/products/${id}/icon`)
 }

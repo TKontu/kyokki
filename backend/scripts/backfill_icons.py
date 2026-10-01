@@ -1,14 +1,16 @@
-"""Draw an icon for every product that has none yet (Q18). The operator runs it after deploy.
+"""Generate an icon for every gap product that has none yet (Q18-G2). Run after deploy.
 
-New products get their icon drawn when they are created; the products that existed before
-Q18 do not, and neither does one whose drawing failed. This draws those, oldest first, one at a
-time on the configured `ICON_MODEL`, and prints how each one went. A `pending` older than twice
-ICON_TIMEOUT counts too: its job died (a restart mid-queue). A product whose icon the cook set
-to the category emoji (`cleared`) is never drawn.
+A "gap" product is food, not shown with an exact or cook-chosen emoji, and not `cleared`
+(the cook's own "use the category emoji"). New products are generated when they are created;
+the ones that existed before Q18-G2 are not, and neither is one whose render failed. This
+generates those, oldest first, one at a time through the shared Postgres lock
+(`services/product_icons.py`), and prints how each one went. A `pending` older than twice
+COMFYUI_TIMEOUT counts too: its job died (a restart mid-queue).
 
-Each product is checked again right before it is drawn, so one the API finished, started, or
-the cook cleared since the list was read is skipped. Drawings wait their turn with the API's
-on the shared database lock, so running this beside a live server is safe.
+Each product is checked again right before it is generated, so one the API finished, started,
+or the cook cleared since the list was read is skipped. Jobs wait their turn with the API's on
+the shared database lock, so running this beside a live server is safe. Refuses to run (beyond
+listing) while `COMFYUI_BASE_URL` is empty - there is nowhere to send the render.
 
     python -m scripts.backfill_icons --dry-run
     python -m scripts.backfill_icons --limit 20
@@ -44,23 +46,29 @@ async def backfill(
     dry_run: bool,
     sessions: SessionFactory = _default_sessions,
 ) -> dict[str, int]:
-    """Draw what needs drawing. Returns how many were drawn, failed, and skipped."""
+    """Generate what needs generating. Returns how many were generated, failed, skipped."""
+    if not dry_run and not settings.COMFYUI_BASE_URL:
+        print("COMFYUI_BASE_URL is empty; generation is disabled. Refusing to run.")
+        return {"ready": 0, "failed": 0, "skipped": 0}
+
     async with sessions() as db:
         todo = [
             (p.id, str(p.canonical_name), p.icon_status)
-            for p in await product_icons.products_to_draw(db, limit)
+            for p in await product_icons.products_to_generate(db, limit)
         ]
-    print(f"{len(todo)} product(s) to draw on {settings.ICON_MODEL}")
+    print(f"{len(todo)} gap product(s) to generate")
     counts = {"ready": 0, "failed": 0, "skipped": 0}
     for product_id, name, status in todo:
         if dry_run:
-            print(f"  would draw  {name}  ({status or 'never drawn'})")
+            print(f"  would generate  {name}  ({status or 'never generated'})")
             continue
         async with sessions() as db:
-            wanted = await product_icons.still_needs_drawing(db, product_id)
+            wanted = await product_icons.still_needs_generation(db, product_id)
         if not wanted:
             counts["skipped"] += 1
-            print(f"  skipped  {name}  (drawn, being drawn or cleared meanwhile)")
+            print(
+                f"  skipped  {name}  (generated, being generated or cleared meanwhile)"
+            )
             continue
         started = time.monotonic()
         await product_icons.draw_icon(product_id)
@@ -71,7 +79,7 @@ async def backfill(
         print(f"  {after or 'gone':8} {name}  {time.monotonic() - started:.1f}s")
     if not dry_run:
         print(
-            f"{counts['ready']} drawn, {counts['failed']} failed, "
+            f"{counts['ready']} generated, {counts['failed']} failed, "
             f"{counts['skipped']} skipped, of {len(todo)}"
         )
     return counts
@@ -79,9 +87,9 @@ async def backfill(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--limit", type=int, help="draw at most this many products")
+    parser.add_argument("--limit", type=int, help="generate at most this many products")
     parser.add_argument(
-        "--dry-run", action="store_true", help="list the products, draw nothing"
+        "--dry-run", action="store_true", help="list the gap products, generate nothing"
     )
     args = parser.parse_args(argv)
     asyncio.run(backfill(args.limit, args.dry_run))

@@ -577,7 +577,7 @@ async def enrich_product_from_off_data(
             raise
 
 
-# --- the drawn icon (Q18) ---------------------------------------------------------------------
+# --- the generated icon (Q18-G2) ----------------------------------------------------------
 
 
 async def get_icon_subject(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
@@ -585,32 +585,39 @@ async def get_icon_subject(db: AsyncSession, product_id: UUID) -> ProductMaster 
     return await db.get(ProductMaster, product_id, populate_existing=True)
 
 
-async def mark_icon_pending(db: AsyncSession, product: ProductMaster) -> None:
-    """Say a drawing is on its way (or waiting its turn). Commits."""
+async def mark_icon_pending(
+    db: AsyncSession, product: ProductMaster, seed: int
+) -> None:
+    """Say a render is on its way (or waiting its turn), with the seed it will use. Commits."""
     product.icon_status = IconStatus.PENDING  # type: ignore[assignment]
+    product.icon_seed = seed  # type: ignore[assignment]
     await db.commit()
 
 
-async def store_icon(db: AsyncSession, product: ProductMaster, svg: str) -> None:
-    """Keep a sanitised drawing; its version is the moment it was stored. Commits."""
-    product.icon_svg = svg
+async def store_icon(
+    db: AsyncSession, product: ProductMaster, image: bytes, seed: int
+) -> None:
+    """Keep a generated image; its version is the moment it was stored. Commits."""
+    product.icon_image = image
+    product.icon_seed = seed  # type: ignore[assignment]
     product.icon_status = IconStatus.READY  # type: ignore[assignment]
     product.icon_updated_at = datetime.now(UTC)  # type: ignore[assignment]
     await db.commit()
 
 
 async def mark_icon_failed(db: AsyncSession, product: ProductMaster) -> None:
-    """The drawing failed; any earlier drawing stays and stays served. Commits."""
+    """The render failed; any earlier image stays and stays served. Commits."""
     product.icon_status = IconStatus.FAILED  # type: ignore[assignment]
     await db.commit()
 
 
 async def clear_icon(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
-    """Drop the drawing for the category emoji, as the cook's choice. None: no product."""
+    """Drop the image for the category emoji, as the cook's choice. None: no product."""
     product = await db.get(ProductMaster, product_id)
     if product is None:
         return None
-    product.icon_svg = None
+    product.icon_image = None
+    product.icon_seed = None  # type: ignore[assignment]
     product.icon_status = IconStatus.CLEARED  # type: ignore[assignment]
     product.icon_updated_at = None  # type: ignore[assignment]
     await db.commit()
@@ -619,25 +626,34 @@ async def clear_icon(db: AsyncSession, product_id: UUID) -> ProductMaster | None
 
 async def stored_icon(
     db: AsyncSession, product_id: UUID
-) -> tuple[str, datetime] | None:
-    """The stored drawing and when it last changed; None when there is none to show."""
+) -> tuple[bytes, datetime] | None:
+    """The stored image and when it last changed; None when there is none to show."""
     row = (
         await db.execute(
-            select(ProductMaster.icon_svg, ProductMaster.icon_updated_at).where(
+            select(ProductMaster.icon_image, ProductMaster.icon_updated_at).where(
                 ProductMaster.id == product_id,
-                ProductMaster.icon_svg.is_not(None),
+                ProductMaster.icon_image.is_not(None),
                 ProductMaster.icon_updated_at.is_not(None),
             )
         )
     ).first()
     if row is None:
         return None
-    return str(row[0]), row[1]
+    return bytes(row[0]), row[1]
 
 
-def icon_needs_drawing(product: ProductMaster, stale_before: datetime) -> bool:
-    """Never drawn, failed, or pending so long that its job must have died."""
+def icon_needs_generation(product: ProductMaster, stale_before: datetime) -> bool:
+    """Never generated, failed, or pending so long that its job must have died.
+
+    Cleared and exact/cook-emoji products are never picked here: `cleared` is the cook's own
+    "do not generate this" and an exact or cook emoji already shows on the tile, so an image
+    nobody would ever see is not worth a GPU job.
+    """
     status = product.icon_status
+    if status == IconStatus.CLEARED:
+        return False
+    if product.emoji_match in (EmojiMatch.EXACT, EmojiMatch.COOK):
+        return False
     if status is None or status == IconStatus.FAILED:
         return True
     return bool(status == IconStatus.PENDING and product.updated_at < stale_before)
@@ -646,10 +662,22 @@ def icon_needs_drawing(product: ProductMaster, stale_before: datetime) -> bool:
 async def products_needing_icons(
     db: AsyncSession, stale_before: datetime, limit: int | None = None
 ) -> list[ProductMaster]:
-    """Every product `icon_needs_drawing` would pick, oldest first."""
+    """Every product `icon_needs_generation` would pick, oldest first.
+
+    Food-only is not filtered here (it needs a query against `non_food_name`, done at the
+    service layer); every candidate this returns is still rechecked there before a job runs.
+    """
+    not_shown_as_emoji = or_(
+        ProductMaster.emoji_match.is_(None),
+        ProductMaster.emoji_match.notin_([EmojiMatch.EXACT, EmojiMatch.COOK]),
+    )
     query = (
         select(ProductMaster)
         .where(
+            # `cleared` matches none of the three conditions below, so it is already
+            # excluded without a separate clause - and a separate `!= CLEARED` would wrongly
+            # drop every NULL (never-generated) row too, under SQL's three-valued logic.
+            not_shown_as_emoji,
             or_(
                 ProductMaster.icon_status.is_(None),
                 ProductMaster.icon_status == IconStatus.FAILED,
@@ -657,7 +685,7 @@ async def products_needing_icons(
                     ProductMaster.icon_status == IconStatus.PENDING,
                     ProductMaster.updated_at < stale_before,
                 ),
-            )
+            ),
         )
         .order_by(ProductMaster.created_at, ProductMaster.id)
     )

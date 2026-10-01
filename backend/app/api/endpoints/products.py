@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.endpoints.stock import IdempotencyKeyHeader, claim_request, replayed
 from app.api.errors import AgentError
 from app.api.exceptions import handle_integrity_errors, reference_conflict_detail
+from app.core.config import settings
 from app.crud import product_master as crud_product
 from app.crud import store_product_alias as crud_alias
 from app.crud.product_master import MovedInventoryItem
@@ -156,8 +157,8 @@ async def create_product(
     """Create a new product.
 
     Its shelf life is one somebody typed, so it is stored as the cook's (Q19) and no
-    estimate is scheduled: no estimate path may replace it. Its icon is drawn in the
-    background (Q18), like every other new product's.
+    estimate is scheduled: no estimate path may replace it. Its icon is generated in the
+    background (Q18-G2), like every other new food product's, once it is on the gap list.
     """
     async with handle_integrity_errors():
         created = await crud_product.create_product(db, product)
@@ -176,7 +177,8 @@ async def update_product(
 
     Correcting a shelf life moves the stock that was dated by the old one (Q12): a date
     the cook typed is left alone, and so is anything already gone from the kitchen.
-    A new name redraws the icon (Q18), unless the cook chose the category emoji.
+    A new name regenerates the icon (Q18-G2), unless the cook chose the category emoji or
+    generation is not configured.
     """
     before = await crud_product.get_product(db, product_id)
     old_name = None if before is None else str(before.canonical_name)
@@ -195,7 +197,11 @@ async def update_product(
         await _announce(moved, str(product.canonical_name))
 
     renamed = str(product.canonical_name) != old_name
-    if renamed and product.icon_status != IconStatus.CLEARED:
+    if (
+        renamed
+        and product.icon_status != IconStatus.CLEARED
+        and settings.COMFYUI_BASE_URL
+    ):
         async with handle_integrity_errors():
             await product_icons.request_redraw(db, product_id)
         product_icons.schedule_icons(background_tasks, [product_id])
@@ -208,12 +214,12 @@ async def update_product(
 
 # No clash with `GET /{product_id}` above: that path has one segment, this one two.
 @router.get(
-    "/{product_id}/icon.svg",
+    "/{product_id}/icon.png",
     response_class=Response,
     responses={
-        200: {"content": {"image/svg+xml": {}}, "description": "The drawn icon"},
+        200: {"content": {"image/png": {}}, "description": "The generated icon"},
         304: {"description": "The copy the client has is current"},
-        404: {"description": "No drawing: show the category emoji"},
+        404: {"description": "No generated icon: show the emoji or category emoji"},
     },
 )
 async def get_product_icon(
@@ -221,29 +227,27 @@ async def get_product_icon(
     if_none_match: str | None = Header(None),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    """The product's drawn icon (Q18), for an `<img src>`; 404 when it has none.
+    """The product's generated icon (Q18-G2), for an `<img src>`; 404 when it has none.
 
-    The markup was sanitised when it was stored. It is served under a policy that loads and
-    runs nothing, in case something ever slips through, and cached by its version: the
-    iPad asks for `?v=<icon_version>`, so a redraw is a new URL.
+    The served bytes are exactly the stored image, nothing path- or user-supplied. Cached by
+    its version: the iPad asks for `?v=<icon_version>`, so a Regenerate is a new URL.
     """
     stored = await product_icons.stored_icon(db, product_id)
     if stored is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="This product has no drawn icon",
+            detail="This product has no generated icon",
         )
-    svg, updated_at = stored
+    image, updated_at = stored
     etag = f'"{int(updated_at.timestamp())}"'
     headers = {
-        "Content-Security-Policy": "default-src 'none'",
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, max-age=86400",
         "ETag": etag,
     }
     if if_none_match == etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
-    return Response(content=svg, media_type="image/svg+xml", headers=headers)
+    return Response(content=image, media_type="image/png", headers=headers)
 
 
 @router.post(
@@ -257,12 +261,22 @@ async def redraw_product_icon(
     request: IconRedrawRequest | None = Body(None),
     db: AsyncSession = Depends(get_db),
 ) -> ProductMasterResponse:
-    """Draw the product's icon again (Q18), optionally with a hint from the cook.
+    """Regenerate the product's icon (Q18-G2), optionally with a hint from the cook.
 
-    Answers at once with `icon_status: pending`; the drawing lands in the background, a few
-    seconds to a few minutes later. Any earlier drawing stays on the tile until then, and
-    stays if the new one fails.
+    Always a new random seed, so a Regenerate never reproduces the same image. Answers at
+    once with `icon_status: pending`; the render lands in the background, a few seconds to a
+    few minutes later. Any earlier image stays on the tile until then, and stays if the new
+    one fails.
+
+    Returns:
+        - 404: no such product.
+        - 409: generation is not configured (`COMFYUI_BASE_URL` is empty).
     """
+    if not settings.COMFYUI_BASE_URL:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Icon generation is not configured on this server",
+        )
     async with handle_integrity_errors():
         product = await product_icons.request_redraw(db, product_id)
     if product is None:
@@ -282,7 +296,8 @@ async def redraw_product_icon(
 async def clear_product_icon(
     product_id: UUID, db: AsyncSession = Depends(get_db)
 ) -> ProductMasterResponse:
-    """Use the category emoji instead of a drawing (Q18). Only Redraw draws it again."""
+    """Use the category emoji instead of a generated image (Q18-G2). Only Regenerate makes
+    another one."""
     async with handle_integrity_errors():
         product = await product_icons.clear_icon(db, product_id)
     if product is None:

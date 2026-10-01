@@ -86,27 +86,36 @@ describe('IngredientTile', () => {
     expect(onMore).toHaveBeenCalledWith('item-milk')
   })
 
+  it('gives the "…" button a 44px touch target, not its 32px glyph box', () => {
+    render(<IngredientTile item={MILK} onSelect={jest.fn()} onMore={jest.fn()} />)
+
+    const more = screen.getByRole('button', { name: 'More for Oat Milk' })
+    expect(more.className).toMatch(/\bh-touch\b/)
+    expect(more.className).toMatch(/\bw-touch\b/)
+    expect(more.className).not.toMatch(/\bh-8\b/)
+  })
+
   it('falls back to a plain box without a category emoji', () => {
     const { container } = render(<IngredientTile item={{ ...MILK, category_icon: null }} />)
 
     expect(container).toHaveTextContent('Oat Milk')
   })
 
-  describe('the drawn icon (Q18)', () => {
-    it('shows the product its own drawing instead of the category emoji', () => {
+  describe('the generated icon (Q18-G2)', () => {
+    it('shows the product its own generated image instead of the category emoji', () => {
       const { container } = render(
         <IngredientTile item={{ ...MILK, product_icon_version: 1790000000 }} />
       )
 
       const img = container.querySelector('img')
       expect(img).not.toBeNull()
-      expect(img?.getAttribute('src')).toMatch(/\/products\/p1\/icon\.svg\?v=1790000000$/)
+      expect(img?.getAttribute('src')).toMatch(/\/products\/p1\/icon\.png\?v=1790000000$/)
       expect(img).toHaveAttribute('alt', '')
       expect(img).toHaveAttribute('aria-hidden', 'true')
       expect(container).not.toHaveTextContent('🥛')
     })
 
-    it('keeps the emoji when there is no drawing', () => {
+    it('keeps the emoji when there is no generated image', () => {
       const { container } = render(
         <IngredientTile item={{ ...MILK, product_icon_version: null }} />
       )
@@ -115,7 +124,7 @@ describe('IngredientTile', () => {
       expect(container).toHaveTextContent('🥛')
     })
 
-    it('falls back to the emoji when the drawing does not load', () => {
+    it('falls back to the emoji when the generated image does not load', () => {
       const { container } = render(
         <IngredientTile item={{ ...MILK, product_icon_version: 1790000000 }} />
       )
@@ -151,7 +160,7 @@ describe('IngredientTile', () => {
   })
 
   describe('the exact emoji (Q18 build)', () => {
-    it('shows product_emoji ahead of the drawing', () => {
+    it('shows product_emoji ahead of the generated image', () => {
       const { container } = render(
         <IngredientTile
           item={{ ...MILK, product_emoji: '🥛', product_icon_version: 1790000000 }}
@@ -171,7 +180,7 @@ describe('IngredientTile', () => {
       expect(container).not.toHaveTextContent('🥛')
     })
 
-    it('falls back to the drawing when there is no product_emoji', () => {
+    it('falls back to the generated image when there is no product_emoji', () => {
       const { container } = render(
         <IngredientTile
           item={{ ...MILK, product_emoji: null, product_icon_version: 1790000000 }}
@@ -181,7 +190,7 @@ describe('IngredientTile', () => {
       expect(container.querySelector('img')).not.toBeNull()
     })
 
-    it('falls back to the category emoji when a broken drawing has no product_emoji', () => {
+    it('falls back to the category emoji when a broken generated image has no product_emoji', () => {
       const { container } = render(
         <IngredientTile
           item={{ ...MILK, product_emoji: null, product_icon_version: 1790000000 }}

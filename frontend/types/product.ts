@@ -8,7 +8,8 @@ import type { Unit } from './inventory'
 export type StorageType = 'refrigerator' | 'freezer' | 'pantry'
 export type UnitType = 'volume' | 'weight' | 'count'
 export type ShelfLifeSource = 'category' | 'model' | 'cook'
-// Where a product's drawn icon stands (Q18). `cleared`: the cook chose the category emoji.
+// Where a product's generated icon stands (Q18-G2). `cleared`: the cook chose the category
+// emoji.
 export type IconStatus = 'pending' | 'ready' | 'failed' | 'cleared'
 // Where a product's exact Apple emoji stands (Q18 build). `exact`: the curated table, or a
 // confirmed proposal. `proposed`: the model's answer, not yet confirmed - never shown.
@@ -40,11 +41,15 @@ export interface ProductMaster {
   reorder_quantity: number | null // > 0 or null
   off_product_id: string | null // Open Food Facts product ID
   off_data: Record<string, unknown> | null // Cached OFF data
-  // The icon the model drew (Q18). Null status: never drawn. `failed` keeps any earlier
-  // drawing. A version means there is a drawing to show; null means show the category emoji.
+  // The generated icon (Q18-G2). Null status: never generated. `failed` keeps any earlier
+  // image. A version means there is an image to show; null means show the category emoji.
   // Optional so fixtures written before Q18 still type-check.
   icon_status?: IconStatus | null
   icon_version?: number | null
+  // Whether ComfyUI generation is configured on this server (Q18-G2); false: the sheet shows
+  // a plain note instead of Regenerate. Optional so fixtures written before this lane still
+  // type-check.
+  generation_enabled?: boolean
   // The exact Apple emoji (Q18 build), one from GET /products/emoji/reference. The tile and
   // this sheet show it only when emoji_match is 'exact' or 'cook' (lib/productIcon.ts).
   // Optional so fixtures written before this build still type-check.
@@ -89,7 +94,7 @@ export interface ProductMasterUpdate {
   off_product_id?: string | null
 }
 
-/** Draw a product's icon again (Q18), optionally in the cook's words. */
+/** Regenerate a product's icon (Q18-G2), optionally in the cook's words. */
 export interface IconRedrawRequest {
   hint?: string | null // at most 200 characters
 }

@@ -2,8 +2,11 @@
 existing LLM call site.
 
 Each site is driven through its real ``httpx.AsyncClient`` (monkeypatched to a
-``MockTransport``), the same way ``test_product_icons.py::TestTheGatewayCall`` already
-does for icons - so this exercises the real request path, not a fully mocked client.
+``MockTransport``) - this exercises the real request path, not a fully mocked client.
+
+Q18-G2 note: icons used to be one of these sites (the model drew an SVG); generation now
+goes through ComfyUI, not the LLM gateway, so it is out of this matrix. ComfyUI's own
+auth/drain/timeout handling has its own tests in ``test_comfyui.py``.
 """
 
 import json
@@ -20,21 +23,13 @@ from app.schemas.receipt import ReceiptStatus
 from app.services import (
     catalog_estimates,
     llm_extractor,
-    product_icons,
     product_selection,
 )
 from app.services.llm_extractor import CategoryOption, LLMExtractionError
-from app.services.product_icons import IconModelError
 from app.services.receipt_processing import ReceiptProcessingService
 
 CATEGORIES = [CategoryOption(id="dairy", name="Dairy & Eggs")]
 RECEIPT_TEXT = "MAITO 1,00"
-
-# tests/conftest.py's autouse `_no_model_selection` patches `product_icons._complete` to an
-# AsyncMock for every test, so no unit test sends a real request by accident. Capturing the
-# real function now, like `test_product_icons.py::REAL_COMPLETE`, is how a test that wants
-# the real HTTP call reaches it.
-_REAL_ICON_COMPLETE = product_icons._complete
 
 
 def _route(monkeypatch: pytest.MonkeyPatch, module: Any, respond) -> dict:
@@ -74,21 +69,6 @@ def _ok_estimate(_request: httpx.Request, _count: int) -> httpx.Response:
     return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
 
 
-def _ok_icon(_request: httpx.Request, _count: int) -> httpx.Response:
-    return httpx.Response(
-        200,
-        json={
-            "choices": [
-                {
-                    "message": {
-                        "content": '<svg viewBox="0 0 48 48"><rect width="1" height="1" fill="#000"/></svg>'
-                    }
-                }
-            ]
-        },
-    )
-
-
 async def _run_extraction() -> None:
     await llm_extractor.extract_from_text(RECEIPT_TEXT, CATEGORIES)
 
@@ -109,10 +89,6 @@ async def _run_estimate() -> None:
     await catalog_estimates._complete(
         [catalog_estimates.EstimateRequest(id="1", name="Milk", category="dairy")]
     )
-
-
-async def _run_icon() -> None:
-    await _REAL_ICON_COMPLETE("draw a carrot")
 
 
 SITES = [
@@ -137,7 +113,6 @@ SITES = [
         LLMExtractionError,
         id="estimate",
     ),
-    pytest.param(product_icons, _run_icon, _ok_icon, IconModelError, id="icon"),
 ]
 
 

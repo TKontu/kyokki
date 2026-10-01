@@ -15,12 +15,15 @@
  * life follows it server-side), a frozen life of the product's own with the category's
  * as the fallback, and the names that make receipt lines land here.
  *
- * Q18 adds the product's icon: the model's drawing, or the category emoji when there is none.
- * **Redraw** queues a new drawing, optionally with the cook's words ("oval rye pastry with rice
- * filling"), and **Use category emoji** drops the drawing. Neither waits for Save: they act on
- * the icon at once, and the drawing lands minutes later. The drawing loads only as an <img>.
+ * Q18-G2 adds the product's generated icon (ComfyUI, replacing the rejected SVG drawer): a
+ * small image for a food product with no exact emoji, or the category emoji otherwise.
+ * **Regenerate** queues a new render with a fresh seed, optionally with the cook's words
+ * ("oval rye pastry with rice filling"), and **Use category emoji** drops the image. Neither
+ * waits for Save: they act on the icon at once, and the image lands minutes later. When
+ * generation is not configured on this server (`generation_enabled` false), a plain note
+ * replaces the Regenerate button and its hint field. The image loads only as an <img>.
  *
- * The Q18 build adds the exact Apple emoji, ahead of the drawing in the same preview
+ * The Q18 build adds the exact Apple emoji, ahead of the generated image in the same preview
  * (lib/productIcon.ts has the one precedence rule). A `proposed` emoji shows **Confirm** and
  * **Reject**; otherwise the picker below is limited to `GET /products/emoji/reference`, plus
  * "No emoji". None of it waits for Save either.
@@ -102,6 +105,7 @@ export function ProductEditSheet({
       : product
   const iconVersion = liveProduct.icon_version ?? null
   const iconStatus = liveProduct.icon_status ?? null
+  const generationEnabled = liveProduct.generation_enabled ?? false
   const emoji = liveProduct.emoji ?? null
   const emojiMatch = liveProduct.emoji_match ?? null
 
@@ -168,7 +172,7 @@ export function ProductEditSheet({
     const readable = isAPIError(error) && error.status < 500 && error.message
     toast.error(readable ? error.message : fallback)
   }
-  const redrawIcon = () => {
+  const regenerateIcon = () => {
     redraw.mutate(
       { id: product.id, hint },
       {
@@ -176,7 +180,7 @@ export function ProductEditSheet({
           setLiveAnswer(updated)
           setHint('')
         },
-        onError: (error) => actionError(error, 'Could not ask for a new drawing'),
+        onError: (error) => actionError(error, 'Could not ask for a new image'),
       }
     )
   }
@@ -186,15 +190,17 @@ export function ProductEditSheet({
       onError: (error) => actionError(error, 'Could not change the icon'),
     })
   }
-  const iconNote =
-    iconStatus === 'pending'
-      ? 'Drawing… this takes a few minutes'
+  const busyGenerating = redraw.isPending || iconStatus === 'pending'
+  const iconNote = !generationEnabled
+    ? 'Icon generation is not configured on this server'
+    : iconStatus === 'pending'
+      ? 'Generating… this takes a few minutes'
       : iconStatus === 'failed'
-        ? 'The model could not draw it this time. Try again, perhaps with a hint.'
+        ? 'Could not generate one this time. Try again, perhaps with a hint.'
         : iconStatus === 'cleared'
           ? 'Showing the category emoji'
           : iconStatus === null
-            ? 'Not drawn yet'
+            ? 'Not generated yet'
             : null
 
   const pickEmoji = (chosen: string | null) => {
@@ -277,7 +283,7 @@ export function ProductEditSheet({
                 iconVersion: iconVersion !== brokenIcon ? iconVersion : null,
                 categoryIcon: categoryEmoji,
               })
-              return preview.kind === 'drawn' ? (
+              return preview.kind === 'generated' ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={iconUrl(product.id, preview.version)}
@@ -297,27 +303,33 @@ export function ProductEditSheet({
           </div>
           {iconNote && <p className={fieldHintClass}>{iconNote}</p>}
         </div>
-        <label htmlFor="product-icon-hint" className={`${fieldLabelClass} mt-2`}>
-          Hint for the drawing
-        </label>
-        <input
-          id="product-icon-hint"
-          type="text"
-          maxLength={200}
-          placeholder="optional, e.g. oval rye pastry with rice filling"
-          value={hint}
-          onChange={(event) => setHint(event.target.value)}
-          className={`${fieldInputClass} mt-1`}
-        />
+        {generationEnabled && (
+          <>
+            <label htmlFor="product-icon-hint" className={`${fieldLabelClass} mt-2`}>
+              Hint for the image
+            </label>
+            <input
+              id="product-icon-hint"
+              type="text"
+              maxLength={200}
+              placeholder="optional, e.g. oval rye pastry with rice filling"
+              value={hint}
+              onChange={(event) => setHint(event.target.value)}
+              className={`${fieldInputClass} mt-1`}
+            />
+          </>
+        )}
         <div className="mt-2 flex gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={redraw.isPending}
-            onClick={redrawIcon}
-          >
-            Redraw
-          </Button>
+          {generationEnabled && (
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={busyGenerating}
+              onClick={regenerateIcon}
+            >
+              Regenerate
+            </Button>
+          )}
           {iconStatus !== 'cleared' && (
             <Button
               variant="ghost"

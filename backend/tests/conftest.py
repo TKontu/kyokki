@@ -371,12 +371,13 @@ def _no_model_selection():
     The catalog refresh (Q11) is the second such call and gets the same treatment: it
     answers with nothing, so a test that does not say otherwise proposes no changes.
 
-    Product icons (Q18) are the third: every create path queues a drawing, and a test that
-    commits for real would otherwise send it to the gateway (and could swap the receipt
-    model off its GPU). The drawing call answers nothing, so the job ends `failed`; a test
-    that wants a drawing patches `product_icons._complete` itself.
+    Product icons (Q18-G2) used to be the third, when the model drew an SVG for every new
+    product: `product_icons._complete` no longer exists (ComfyUI generates the gap instead,
+    Q18-G2), and nothing here needs to protect it any more - `COMFYUI_BASE_URL` is empty by
+    default in every test environment, so `product_icons.draw_icons` refuses before it would
+    ever reach ComfyUI or write a row, with no patch required.
 
-    The exact emoji proposal (Q18 build) is the fourth: every create path for a product
+    The exact emoji proposal (Q18 build) is the third: every create path for a product
     whose generic name the curated table does not know schedules a model call the same way
     (PR #137 review - this was missing, so "Tomato" and "Orange" in
     `tests/api/test_estimate_on_create.py` sent real requests). It answers nothing, so
@@ -396,11 +397,6 @@ def _no_model_selection():
             "app.services.catalog_estimates.estimate_shelf_lives",
             new_callable=AsyncMock,
             return_value=[],
-        ),
-        patch(
-            "app.services.product_icons._complete",
-            new_callable=AsyncMock,
-            return_value="",
         ),
         patch(
             "app.services.product_emoji._post_proposal",

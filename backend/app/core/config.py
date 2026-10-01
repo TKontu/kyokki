@@ -114,26 +114,20 @@ class Settings(BaseSettings):
     def empty_reasoning_strength_means_none(cls, v: object) -> object:
         return None if v == "" else v
 
-    # Product icons (Q18): the model draws each product a flat 48x48 SVG in the background.
-    # qwen3.8-27b, measured on the spike's 20 products (2026-09-26): ~17 clear against ~4-6 for
-    # muse-glimmer, at ~50 s a drawing. It is not the receipt model, so llama-swap may swap
-    # muse-glimmer out while an icon is drawn and the next receipt waits for it to load again.
-    # Set it to c2.muse-glimmer to trade icon quality for no swap.
-    ICON_MODEL: str = "c2.qwen3.8-27b"
-    # Seconds per request. qwen3.8-27b took 20-89 s a drawing here (2026-09-26); the spike
-    # saw 273 s on a busy GPU. A `pending` older than twice this counts as stale.
-    ICON_TIMEOUT: float = 600.0
-
-    # ComfyUI (Q18-G1): generates a style-trial/production icon for products with no exact
-    # emoji. Empty disables the client entirely - the Kyokki server cannot reach the GPU host
+    # ComfyUI (Q18-G1/G2): generates a flat icon for a food product with no exact emoji (the
+    # gap). Empty disables the client entirely - the Kyokki server cannot reach the GPU host
     # yet (ComfyUI is loopback-only on 192.168.0.94; a media-gateway is planned but not built).
     # e.g. http://192.168.0.94:9292/upstream/a4.comfyui - never hardcode the host.
     COMFYUI_BASE_URL: str = ""
     # Seconds for one render job overall, including any 503-with-Retry-After waits. Cold start
     # is ~14s; SDXL+LoRA+IP-Adapter+BiRefNet at 25 steps measured ~22.5s, but a busy GPU or a
-    # drain can take much longer. Never below 60s.
+    # drain can take much longer. Never below 60s. A `pending` older than twice this counts as
+    # stale (services/product_icons.py).
     COMFYUI_TIMEOUT: float = 300.0
     COMFYUI_POLL_INTERVAL: float = 2.0
+    # Pixels a side the generated icon is stored at (Q18-G2), downscaled with Pillow from
+    # ComfyUI's fixed 1024x1024 canvas - sharp on the iPad tile, small to store and serve.
+    ICON_IMAGE_SIZE: int = 256
 
     @field_validator("COMFYUI_TIMEOUT")
     @classmethod

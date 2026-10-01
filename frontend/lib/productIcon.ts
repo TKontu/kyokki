@@ -1,10 +1,11 @@
 /**
- * One precedence rule for every product icon (Q18 build, operator ruling 2026-09-27).
+ * One precedence rule for every product icon (Q18-G2, operator ruling 2026-09-27/09-30).
  *
  * A tile or the product editor shows the first of these that exists:
  *   1. the exact Apple emoji - `product_emoji` on a tile (already gated server-side), or
  *      `emoji` on a product when `emoji_match` is `exact` or `cook`;
- *   2. the drawn icon (Q18, unchanged): a version means there is a drawing to show;
+ *   2. the generated image (Q18-G2, replacing the rejected SVG drawer): a version means
+ *      ComfyUI has rendered one;
  *   3. the category emoji.
  *
  * A `proposed` emoji is never shown here - it is not exact until a person confirms it
@@ -22,7 +23,7 @@ export interface ProductIconInput {
    * shown.
    */
   emojiMatch?: EmojiMatch | null
-  /** The product's drawn icon version (Q18), or null/undefined when there is none. */
+  /** The product's generated icon version (Q18-G2), or null/undefined when there is none. */
   iconVersion: number | null | undefined
   /** The category's emoji, the last resort. */
   categoryIcon: string | null | undefined
@@ -30,7 +31,7 @@ export interface ProductIconInput {
 
 export type ProductIcon =
   | { kind: 'emoji'; value: string }
-  | { kind: 'drawn'; version: number }
+  | { kind: 'generated'; version: number }
   | { kind: 'category'; value: string }
   | { kind: 'none' }
 
@@ -44,7 +45,7 @@ export function resolveProductIcon(input: ProductIconInput): ProductIcon {
     return { kind: 'emoji', value: input.emoji }
   }
   if (input.iconVersion !== null && input.iconVersion !== undefined) {
-    return { kind: 'drawn', version: input.iconVersion }
+    return { kind: 'generated', version: input.iconVersion }
   }
   if (input.categoryIcon) {
     return { kind: 'category', value: input.categoryIcon }
@@ -52,7 +53,7 @@ export function resolveProductIcon(input: ProductIconInput): ProductIcon {
   return { kind: 'none' }
 }
 
-/** The plain glyph to render when the icon is not a drawing (an emoji, category, or ''). */
+/** The plain glyph to render when the icon is not a generated image (an emoji, category, or ''). */
 export function productIconGlyph(icon: ProductIcon, categoryIcon: string | null | undefined) {
   if (icon.kind === 'emoji' || icon.kind === 'category') return icon.value
   return categoryIcon ?? ''

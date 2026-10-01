@@ -151,10 +151,11 @@ function useInvalidateIcon() {
 }
 
 /**
- * Mutation: draw the product's icon again (Q18), optionally with the cook's hint.
+ * Mutation: Regenerate the product's icon (Q18-G2), optionally with the cook's hint.
  *
- * Answers at once with the product pending; the drawing lands minutes later and the
- * inventory poll brings it to the tiles. Not retried: each call queues another drawing.
+ * Always a new random seed. Answers at once with the product pending; the image lands
+ * minutes later and the inventory poll brings it to the tiles. Not retried: each call
+ * queues another render. 409 when generation is not configured.
  */
 export function useRedrawProductIcon() {
   const invalidate = useInvalidateIcon()
@@ -166,7 +167,7 @@ export function useRedrawProductIcon() {
   })
 }
 
-/** Mutation: use the category emoji instead of the drawing (Q18). */
+/** Mutation: use the category emoji instead of the generated image (Q18-G2). */
 export function useClearProductIcon() {
   const invalidate = useInvalidateIcon()
   return useMutation({

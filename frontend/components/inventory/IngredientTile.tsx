@@ -4,9 +4,9 @@
  * IngredientTile (V1, operator ask 2026-09-24).
  *
  * One item as a small rounded box: its icon and the name, coloured by how soon to eat it, with
- * no numbers. The icon follows one precedence (Q18 build, lib/productIcon.ts): the product's
- * exact emoji first, then its own drawing when the model has drawn one (Q18), and the
- * category emoji last, including when the drawing fails to load. The colour's word ("going stale") is in the accessible name, a
+ * no numbers. The icon follows one precedence (Q18-G2, lib/productIcon.ts): the product's
+ * exact emoji first, then its own generated image when ComfyUI has rendered one, and the
+ * category emoji last, including when the image fails to load. The colour's word ("going stale") is in the accessible name, a
  * stale tile has a heavier border and a used-up one a struck-through name, so the colour is
  * never the only signal.
  */
@@ -33,24 +33,25 @@ export function IngredientTile({ item, onSelect, onMore }: IngredientTileProps) 
     iconVersion: item.product_icon_version ?? null,
     categoryIcon: item.category_icon ?? null,
   })
-  // The version that failed to load; a newer one gets its own try. Only a drawing can fail
-  // this way - an emoji or the category glyph is plain text.
+  // The version that failed to load; a newer one gets its own try. Only a generated image
+  // can fail this way - an emoji or the category glyph is plain text.
   const [broken, setBroken] = useState<number | null>(null)
-  const drawnVersion = icon.kind === 'drawn' && icon.version !== broken ? icon.version : null
+  const generatedVersion =
+    icon.kind === 'generated' && icon.version !== broken ? icon.version : null
   const face = (
     <>
-      {drawnVersion !== null ? (
-        // A same-origin <img>: the drawing can never run script, and the middleware
-        // authenticates the request. next/image is for photos, not a 40 px SVG.
+      {generatedVersion !== null ? (
+        // A same-origin <img>: the middleware authenticates the request. next/image is for
+        // photos, not a 40 px icon.
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={iconUrl(item.product_master_id, drawnVersion)}
+          src={iconUrl(item.product_master_id, generatedVersion)}
           alt=""
           aria-hidden="true"
           width={40}
           height={40}
           className="h-10 w-10"
-          onError={() => setBroken(drawnVersion)}
+          onError={() => setBroken(generatedVersion)}
         />
       ) : (
         <span aria-hidden="true" className="text-2xl leading-none">
@@ -92,7 +93,7 @@ export function IngredientTile({ item, onSelect, onMore }: IngredientTileProps) 
           type="button"
           aria-label={`More for ${item.product_name}`}
           onClick={() => onMore(item.id)}
-          className="absolute right-1 top-1 flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none opacity-70 hover:opacity-100"
+          className="absolute right-1 top-1 flex h-touch w-touch items-center justify-center rounded-full text-lg leading-none opacity-70 hover:opacity-100"
         >
           …
         </button>

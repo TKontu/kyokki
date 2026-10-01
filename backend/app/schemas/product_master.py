@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.core.config import settings
 from app.models.product_master import EmojiMatch, IconStatus, ShelfLifeSource
 from app.schemas.types import JsonDecimal, canonicalize_units
 from app.services.units import unit_type_for
@@ -117,13 +118,22 @@ class ProductMasterResponse(ProductMasterBase):
     icon_status: IconStatus | None = Field(
         None,
         description=(
-            "The drawn icon (Q18): pending, ready, failed (any earlier drawing kept) or "
-            "cleared (the cook chose the category emoji); null: never drawn"
+            "The generated icon (Q18-G2): pending, ready, failed (any earlier image kept) or "
+            "cleared (the cook chose the category emoji); null: never generated"
         ),
     )
     icon_version: int | None = Field(
         None,
-        description="Version for /products/{id}/icon.svg?v=; null: no drawing, show the emoji",
+        description=(
+            "Version for /products/{id}/icon.png?v=; null: no generated image, show the emoji"
+        ),
+    )
+    generation_enabled: bool = Field(
+        False,
+        description=(
+            "Whether ComfyUI generation is configured on this server (COMFYUI_BASE_URL set); "
+            "when false the product sheet shows a plain note instead of Regenerate"
+        ),
     )
     emoji: str | None = Field(
         None,
@@ -145,6 +155,12 @@ class ProductMasterResponse(ProductMasterBase):
 
     model_config = {"from_attributes": True}
 
+    @model_validator(mode="after")
+    def _generation_enabled(self) -> "ProductMasterResponse":
+        """Always the server's own setting, never whatever the ORM row happened to carry."""
+        self.generation_enabled = bool(settings.COMFYUI_BASE_URL)
+        return self
+
 
 class ProductEmojiRequest(BaseModel):
     """The cook's own choice for a product's emoji (Q18 build)."""
@@ -162,7 +178,7 @@ class EmojiReferenceEntry(BaseModel):
 
 
 class IconRedrawRequest(BaseModel):
-    """Draw a product's icon again (Q18), optionally with a word from the cook."""
+    """Regenerate a product's icon (Q18-G2), optionally with a word from the cook."""
 
     hint: str | None = Field(
         None,
