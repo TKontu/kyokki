@@ -11,8 +11,8 @@ background removal, 1024x1024, one image. Non-food never gets one.
 The 1024x1024 output is downscaled with Pillow to `settings.ICON_IMAGE_SIZE` (sharp on the
 iPad tile, small to store) and kept as the product's `icon_image`, a transparent PNG, with the
 seed that produced it (`icon_seed`) and a status exactly like the rejected drawer's
-(`icon_status`: pending, ready, failed, cleared) - the operator's December 2026-09-26 storage
-ruling was "the icon lives with the product", which this keeps.
+(`icon_status`: pending, ready, failed, cleared) - the operator's 2026-09-26 storage ruling
+was "the icon lives with the product", which this keeps.
 
 A render takes seconds to minutes and the GPU host is shared, so it runs as a background job
 after the response has gone, one at a time across every process (API workers and the backfill
