@@ -342,12 +342,21 @@ def test_module_level_call_warns_when_the_module_loads_with_an_empty_key(
     """review verdict #9: the `_warn_if_llm_api_key_missing(settings)` call that actually
     fires at import time (config.py's last line) was untested - only the function body
     was. Reloading the module re-runs that line with the warning as a fresh assertion.
-    The module is reloaded again afterwards so later tests see a normal singleton."""
+
+    `importlib.reload` replaces the module's entire namespace, including the `settings`
+    singleton every other module imported a reference to - reloading it again afterwards
+    with "restore" env vars is not enough, because those restore values are never the
+    *real* ones (e.g. the actual CI database name), so other tests that read
+    `app.core.config.settings` fresh would see the wrong POSTGRES_DB/LLM_API_KEY for the
+    rest of the run. A snapshot-and-restore of the whole module namespace avoids this: it
+    puts back the exact pre-test objects, not a reconstruction from guessed values.
+    """
     import importlib
     import logging
 
     import app.core.config as config_module
 
+    original_namespace = dict(vars(config_module))
     for key, value in REQUIRED.items():
         monkeypatch.setenv(key, value)
     monkeypatch.setenv("LLM_API_KEY", "")
@@ -356,8 +365,8 @@ def test_module_level_call_warns_when_the_module_loads_with_an_empty_key(
             importlib.reload(config_module)
         assert any("LLM_API_KEY" in record.message for record in caplog.records)
     finally:
-        monkeypatch.setenv("LLM_API_KEY", "restored-after-reload-test")
-        importlib.reload(config_module)
+        vars(config_module).clear()
+        vars(config_module).update(original_namespace)
 
 
 # --- LLM_ESTIMATE_TIMEOUT (raised from 180 to 300, 2026-09-30) ---------------------------
