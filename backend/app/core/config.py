@@ -1,3 +1,4 @@
+import logging
 import math
 from pathlib import Path
 from typing import Annotated, Literal
@@ -89,9 +90,7 @@ class Settings(BaseSettings):
 
     # LLM Service (OpenAI-compatible chat completions; llama-swap gateway on the homelab)
     LLM_BASE_URL: str = "http://192.168.0.94:9292/v1"
-    LLM_API_KEY: str = (
-        "ollama"  # sent as a bearer token; the gateway does not require one
-    )
+    LLM_API_KEY: str = ""  # the llama-swap key (required since 2026-09-30)
     # The c0.* copies share a GPU reserved for the operator's agent; Kyokki uses c2.*
     LLM_MODEL: str = "c2.muse-glimmer"
     LLM_TEMPERATURE: float = 0.1
@@ -101,8 +100,11 @@ class Settings(BaseSettings):
     # 49-line read take up to ~240 s on muse-glimmer (docs/vLLM_MANUAL_TEST.md)
     LLM_TIMEOUT: float = 420.0
     # seconds; the catalog estimate and product selection calls answer a short list, and
-    # "Re-estimate all" waits for them synchronously, so they do not get the receipt budget
-    LLM_ESTIMATE_TIMEOUT: float = 180.0
+    # "Re-estimate all" waits for them synchronously, so they do not get the receipt budget.
+    # Raised from 180 (2026-09-30): the llama-swap gateway notice says a cold start now takes
+    # 2 to 5 minutes. 3 x LLM_TIMEOUT still dominates the stale-window budget at 1260 s, so
+    # this change does not move receipt_stale_minutes.
+    LLM_ESTIMATE_TIMEOUT: float = 300.0
     # Sent as chat_template_kwargs.reasoning_strength (Muse Glimmer accepts only these values).
     # Set to an empty value for models whose template has no such argument.
     LLM_REASONING_STRENGTH: Literal["xhigh", "high", "medium", "low"] | None = "low"
@@ -121,6 +123,24 @@ class Settings(BaseSettings):
     # Seconds per request. qwen3.8-27b took 20-89 s a drawing here (2026-09-26); the spike
     # saw 273 s on a busy GPU. A `pending` older than twice this counts as stale.
     ICON_TIMEOUT: float = 600.0
+
+    # ComfyUI (Q18-G1): generates a style-trial/production icon for products with no exact
+    # emoji. Empty disables the client entirely - the Kyokki server cannot reach the GPU host
+    # yet (ComfyUI is loopback-only on 192.168.0.94; a media-gateway is planned but not built).
+    # e.g. http://192.168.0.94:9292/upstream/a4.comfyui - never hardcode the host.
+    COMFYUI_BASE_URL: str = ""
+    # Seconds for one render job overall, including any 503-with-Retry-After waits. Cold start
+    # is ~14s; SDXL+LoRA+IP-Adapter+BiRefNet at 25 steps measured ~22.5s, but a busy GPU or a
+    # drain can take much longer. Never below 60s.
+    COMFYUI_TIMEOUT: float = 300.0
+    COMFYUI_POLL_INTERVAL: float = 2.0
+
+    @field_validator("COMFYUI_TIMEOUT")
+    @classmethod
+    def comfyui_timeout_has_a_floor(cls, v: float) -> float:
+        if v < 60:
+            raise ValueError("COMFYUI_TIMEOUT must be at least 60 seconds")
+        return v
 
     # Telegram receipt drop-in bot (MVP-T1). The bot is disabled while no token is set.
     # Receipt queue worker (python -m app.worker, MVP-R3)
@@ -200,4 +220,16 @@ class Settings(BaseSettings):
     )
 
 
+def _warn_if_llm_api_key_missing(instance: Settings) -> None:
+    # app.core.logging imports this module, so get_logger would be a circular import; the
+    # plain stdlib logger still reaches stderr even before setup_logging() runs. Never logs
+    # the key itself, empty or not.
+    if not instance.LLM_API_KEY:
+        logging.getLogger("app.core.config").warning(
+            "LLM_API_KEY is empty; the llama-swap gateway rejects every request with 401 "
+            "(required since 2026-09-30)"
+        )
+
+
 settings = Settings()
+_warn_if_llm_api_key_missing(settings)
