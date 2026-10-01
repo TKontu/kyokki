@@ -2059,19 +2059,94 @@ not rulings.
     "⋯"; no Scan in the bar; the door reaches the freezer; larder shelves for pantry, sauces and
     condiments, and a new `spices` category.
   - Follow-ups:
-    - [ ] Q18 build: `product_master.emoji` + match state, seeded from the ruled table; skip non-food;
-      the 58 gap products (and future ones) get generated emoji-style images via ComfyUI behind
-      llama-swap (waiting for the operator's details); retire the SVG drawing.
-    - [ ] #130 low follow-ups: the "Sauces & condiments" label clips its emoji; "⋯" sits at the
+    - [ ] Q18 build, split three ways (B and G1 done; G2 open) (round 2026-09-30-1 plan). The operator's ComfyUI details
+      arrived on 2026-09-30.
+      - [x] **Q18-B, the emoji build** (#137; A1, `feat/q18-emoji-build`): `product_master.emoji` and a
+        match state, seeded from the ruled table; model proposals confirmed by a person; the cook
+        can pick or clear; non-food skipped; `backfill_emoji.py`.
+      - [x] **Q18-G1, the ComfyUI client and style trial** (#135; A2, `feat/q18-comfyui-client`):
+        - the client follows the hold protocol on `a4.comfyui` (never `c2.comfyui`), at
+          1024² with batch 1, and keeps one frozen template;
+        - the trial renders the gap products in both LoRA looks (`emoji` and `flat`) for the
+          operator to choose from.
+      - Style ruled by the operator (2026-09-30): **"Flat. No faces"**. The `flat` LoRA trigger is the
+        default, and the negative prompt excludes faces and characters.
+      - [ ] **Q18-G2, generation wired in** (next round, after G1 and the style choice): PNG
+        storage in place of the SVG drawing, the icon queue, and a per-product **Regenerate**
+        with a new random seed (operator ask, 2026-09-30).
+        - **Blocked for production:** ComfyUI is loopback-only (the `:9292` edge returns 403
+          from the LAN).
+        - **The operator to choose** how the Kyokki server reaches it: a Caddy allow rule for
+          the Kyokki host, the planned media-gateway on `:8480`, or running on the GPU host.
+    - [x] (#134) #130 low follow-ups: the "Sauces & condiments" label clips its emoji; "⋯" sits at the
       bottom of the landscape rail; forced Dark does not recolour the status bar (`themeColor`); the
       `spices` plausible band (30-1825 d) would reject a correct fresh-herb estimate; the category pin
       is a hand-kept list; `page.test.tsx` was converted CRLF→LF.
-    - [ ] A pre-existing circular import (`app.services.storage` ↔ `app.schemas.category`) when
+    - [x] (#134) A pre-existing circular import (`app.services.storage` ↔ `app.schemas.category`) when
       `test_storage.py` runs alone.
     - [ ] The "1 of 15 categories" answer recurred once in a live K read (rows and prices right,
       categories nearly empty); the raw answer is now stored on real receipts — capture one.
+    - [x] (#133, #135) **GW-1: the llama-swap gateway requires an API key (operator notice, 2026-09-30).**
+      - Without a key, and with the old `ollama` default, it returns 401. `/health` stays open.
+      - **Operator, now:** set `LLM_API_KEY` in the Portainer stack to the llama-swap key, then
+        redeploy.
+      - Code (round 2026-09-30-1):
+        - A5 (`fix/llm-gateway-auth`): a clear 401 message, and waiting out a drain `503
+          Retry-After`, with no retry on timeout;
+        - A2: the key's default and examples, and `LLM_ESTIMATE_TIMEOUT` 180 → 300 for cold starts.
     - [ ] `LLM_MAX_TOKENS` 8192 truncates some long first reads (2 of 9 K reads); the operator to
       decide whether to raise it to 16384.
+  **Round 2026-09-30-1 is merged (2026-10-01; #133-#137), not yet deployed.** Each PR had a five-lens
+  verdict panel (all five came back fix-first) and one fix pass, checked at source by the planner before merge.
+  - **GW-1 (#133):** the gateway now needs `LLM_API_KEY`.
+    - A shared `services/llm_http.post_chat` covers all four LLM call sites:
+      - a 401/403 names `LLM_API_KEY` (never the key);
+      - a `503 Retry-After` drain is waited out, with each retry bounded by the remaining budget, a
+        1 s minimum wait and at most 30 retries;
+      - a timeout is never retried.
+    - An auth failure reaches the receipt's stored error.
+  - **#130 follow-ups (#134):**
+    - "Sauces & condiments" keeps its emoji, and the landscape rail is sticky.
+    - Forced Dark/Light now sets the status-bar colour after hydration: the boot script touches only the
+      `<html>` class, because a `<meta>` added before hydration broke it, as the review found.
+    - The spices floor is 7 days, and `check_vocabularies` pins seed categories against the fridge areas.
+    - `page.test.tsx` is back to CRLF, and the storage↔schemas import cycle is broken.
+  - **Q18-G1 (#135):** a ComfyUI client following the operator's hold protocol on `a4.comfyui`.
+    - One frozen template: `flat` style, no faces.
+    - The style trial is in `docs/spikes/Q18_icon_styles.md`, and the operator ruled **"Flat. No faces"**.
+    - Flat recheck: 10/10 without faces, but only 4/10 clean. Canned tuna had garbled label text; Fish fingers
+      and Karelian pasty tiled; Mozzarella and Minced beef came out abstract; Quark failed on every seed in
+      both styles.
+    - `LLM_API_KEY` is now **required** by the prod compose (`${LLM_API_KEY:?}`); `LLM_ESTIMATE_TIMEOUT` 180 → 300.
+    - `COMFYUI_BASE_URL` is empty, so the client is disabled in production.
+  - **Q26 + Q28 (#136):**
+    - Each confirmed item stores its receipt line, and the item sheet shows "From <store>, <date>: <line>".
+    - Every receipt opens an audit view: the original image or PDF, the OCR text, the model's answer (and its
+      retry), and each line's outcome. Household lines marked during confirm are recorded on the receipt.
+    - `GET /api/receipts/{id}/file` is traversal-safe. No backfill: older items show the receipt without the line.
+  - **Q18-B (#137):** an exact Apple emoji per product.
+    - `emoji` plus `emoji_match`: exact / proposed / none / cook / cleared.
+    - Seeded from the ruled table (109 exact, 58 gap, no non-food; it matched the rulings row for row at review).
+    - Model proposals are confirmed on `/products`; the cook can pick or clear; cook and cleared are never
+      overwritten.
+    - `scripts/backfill_emoji.py`; proposals are batched and go through `llm_http`.
+    - Live check: 20 unknown names, all `none`. The model is conservative (Basil and Thyme could be 🌿 by the
+      Parsley/Dill precedent).
+  - Follow-ups from this round:
+    - [ ] **Q18-G2: generation wired in.** PNG storage in place of the SVG drawing, the icon queue, and a
+      per-product **Regenerate** with a new seed (operator ask).
+      - Blocked for production: ComfyUI is loopback-only, so the Kyokki server cannot reach `a4.comfyui`
+        (operator decision below).
+      - Quality: about half of the gap products need better subject text or an IP-Adapter reference image.
+        Quark has never rendered.
+    - [ ] `/products` reads no URL filter, so the audit view's item links land on the bare list. A
+      `?q=<name>` filter would make them real links.
+    - [ ] Low or plausible, not fixed:
+      - a concurrent double "confirm emoji" can answer 409 after the first confirm landed;
+      - a stocked item that is later hard-deleted makes its receipt line read `skipped`;
+      - the frontend does not listen to the WebSocket (polling and invalidation instead).
+    - [ ] Force-pushing is blocked in this environment, so lanes merged `main` into their branch instead of
+      rebasing.
 - **Q28 — the receipt and what the model made of it cannot be audited.** After processing, the iPad
   shows only the extracted rows. There is no way to see the receipt image or PDF, the OCR text,
   or the model's raw answer, and no way back to a confirmed receipt's contents. The API already
@@ -2087,7 +2162,16 @@ not rulings.
 - [x] ~~Set `RECEIPT_STALE_MINUTES=25`~~ — automatic since #131 (the window follows the timeouts; a
   lower configured value is raised). Re-upload the K-Citymarket PDF and check all 15 lines arrive.
 - [ ] Decide `LLM_MAX_TOKENS` (8192 now; 16384 recommended against truncated long reads).
-- [ ] Q18 icons: the LLM-drawn SVGs are rejected (operator, 2026-09-27). Stop them with
+- [x] **Before deploying round 2026-09-30-1:** set `LLM_API_KEY` in the Portainer stack to the llama-swap
+  key (done by the operator, 2026-10-01). The prod compose now refuses to start without it, even for `logs` and `down`.
+- [x] (2026-10-01; migrations applied, 34 emoji backfilled, gateway 200) Deploy round 2026-09-30-1: run `alembic upgrade head`, which adds two revisions (`f1a2b3c4d5e6`
+  receipt line, `fbf2c08da52d` emoji). Then, in `kyokki-api`, run
+  `python -m scripts.backfill_emoji --dry-run`, read it, and run it without `--dry-run`.
+  `--propose` asks the model for names that are not in the table.
+- [ ] **Decide how the Kyokki server reaches ComfyUI (Q18-G2):** a Caddy allow rule for the Kyokki host on
+  `/upstream/a4.comfyui/`, the planned media-gateway on `:8480`, or running on the GPU host.
+  Then set `COMFYUI_BASE_URL`.
+- [ ] Q18 icons: the LLM-drawn SVGs are rejected (operator, 2026-09-27); a table emoji now outranks a drawing. Stop them with
   `ICON_MODEL=none` and clear them (`UPDATE product_master SET icon_svg=NULL, icon_status=NULL,
   icon_updated_at=NULL`). New direction: exact Apple emoji only (no closest match), the rest
   generated as emoji-style images through ComfyUI behind llama-swap (details from the operator).
@@ -2169,6 +2253,29 @@ written here.
   with, or overlaps, the freezer drawer section.
 - **Q35 — pantry: sauces and condiments** get their own section in the larder.
 - **Q36 — pantry: spices** get their own section in the larder.
+
+#### Operator friction log — the review screen after round 2026-09-30-1 was deployed (2026-10-01)
+
+Deployed and working: `LLM_API_KEY` returns 200; both migrations applied; 34 products took table
+emoji. A Lidl receipt read cleanly. The item sheet's "From Lidl, <date>: palvarin lihapyörykät" links
+to the audit view.
+- **Q37 — wrong matches are too common.** In the operator's words: "Currently there are too many
+  stupid mistakes". Examples: "cashew pähkinät" (cashew nuts) became a dip, and "pesto" became a dip.
+  - Not yet triaged: whether the extractor's generic name, its category, or the product match is
+    wrong.
+  - The audit view (#136) now shows the printed line, the OCR text and the model's answer for a
+    receipt. Triage from `GET /api/receipts/{id}/audit` once the operator shares the receipt id.
+- **Q38 — re-analyse a line while reviewing.**
+  - Today the cook can re-read the whole receipt (when it is `completed`), or fix a line's name and
+    product by hand.
+  - There is no way to ask the model again for one line: its generic name, category and match.
+  - Direction (to rule): a per-line "Re-analyse" on the review screen, optionally with the cook's hint.
+- **Q39 — the original printed title on the review screen.** The review row shows the generic name
+  and "→ product", but not the printed receipt line it came from. The cook cannot judge a mismatch
+  like Q37's without opening the audit view. Direction: show the printed line, as the audit view does.
+- **Q18 (operator observation):** "Emoji redrawing does not work". This is expected: the product
+  sheet's Redraw is the rejected SVG drawer from #121 (`ICON_MODEL`), and Regenerate arrives with
+  Q18-G2. Only table names have emoji so far; the rest need `backfill_emoji --propose` or a hand pick.
 
 ---
 
@@ -2320,7 +2427,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Next: the Q18 emoji build (+ ComfyUI gaps when the details arrive), Q26 + Q28, #130 follow-ups
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Next: Q37-Q39 (review-screen quality), Q18-G2 (generation wired in, Regenerate; needs the ComfyUI reachability decision)
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
