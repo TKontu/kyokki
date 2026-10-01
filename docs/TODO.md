@@ -2164,7 +2164,7 @@ not rulings.
 - [ ] Decide `LLM_MAX_TOKENS` (8192 now; 16384 recommended against truncated long reads).
 - [x] **Before deploying round 2026-09-30-1:** set `LLM_API_KEY` in the Portainer stack to the llama-swap
   key (done by the operator, 2026-10-01). The prod compose now refuses to start without it, even for `logs` and `down`.
-- [ ] Deploy round 2026-09-30-1: run `alembic upgrade head`, which adds two revisions (`f1a2b3c4d5e6`
+- [x] (2026-10-01; migrations applied, 34 emoji backfilled, gateway 200) Deploy round 2026-09-30-1: run `alembic upgrade head`, which adds two revisions (`f1a2b3c4d5e6`
   receipt line, `fbf2c08da52d` emoji). Then, in `kyokki-api`, run
   `python -m scripts.backfill_emoji --dry-run`, read it, and run it without `--dry-run`.
   `--propose` asks the model for names that are not in the table.
@@ -2253,6 +2253,29 @@ written here.
   with, or overlaps, the freezer drawer section.
 - **Q35 — pantry: sauces and condiments** get their own section in the larder.
 - **Q36 — pantry: spices** get their own section in the larder.
+
+#### Operator friction log — the review screen after round 2026-09-30-1 was deployed (2026-10-01)
+
+Deployed and working: `LLM_API_KEY` returns 200; both migrations applied; 34 products took table
+emoji. A Lidl receipt read cleanly. The item sheet's "From Lidl, <date>: palvarin lihapyörykät" links
+to the audit view.
+- **Q37 — wrong matches are too common.** In the operator's words: "Currently there are too many
+  stupid mistakes". Examples: "cashew pähkinät" (cashew nuts) became a dip, and "pesto" became a dip.
+  - Not yet triaged: whether the extractor's generic name, its category, or the product match is
+    wrong.
+  - The audit view (#136) now shows the printed line, the OCR text and the model's answer for a
+    receipt. Triage from `GET /api/receipts/{id}/audit` once the operator shares the receipt id.
+- **Q38 — re-analyse a line while reviewing.**
+  - Today the cook can re-read the whole receipt (when it is `completed`), or fix a line's name and
+    product by hand.
+  - There is no way to ask the model again for one line: its generic name, category and match.
+  - Direction (to rule): a per-line "Re-analyse" on the review screen, optionally with the cook's hint.
+- **Q39 — the original printed title on the review screen.** The review row shows the generic name
+  and "→ product", but not the printed receipt line it came from. The cook cannot judge a mismatch
+  like Q37's without opening the audit view. Direction: show the printed line, as the audit view does.
+- **Q18 (operator observation):** "Emoji redrawing does not work". This is expected: the product
+  sheet's Redraw is the rejected SVG drawer from #121 (`ICON_MODEL`), and Regenerate arrives with
+  Q18-G2. Only table names have emoji so far; the rest need `backfill_emoji --propose` or a hand pick.
 
 ---
 
@@ -2404,7 +2427,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged 2026-10-01, not yet deployed. Next: Q18-G2 (generation wired in, Regenerate; needs the ComfyUI reachability decision)
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Next: Q37-Q39 (review-screen quality), Q18-G2 (generation wired in, Regenerate; needs the ComfyUI reachability decision)
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery

@@ -1,9 +1,9 @@
 # Handoff
-Generated-UTC: 2026-10-01T06:00:00Z
+Generated-UTC: 2026-10-01T15:40:17Z
 Base-SHA: c4406272c6bce74930df7b07a8e8e3883b053f7d
 
 ## Round delta
-- Round 2026-09-30-1 is merged and reconciled. **It is not deployed.**
+- Round 2026-09-30-1 is merged, reconciled and **deployed** (2026-10-01): migrations applied, 34 emoji backfilled, gateway returns 200.
 - PRs:
   - #133 GW-1 gateway key;
   - #134 #130 follow-ups;
@@ -22,8 +22,7 @@ Base-SHA: c4406272c6bce74930df7b07a8e8e3883b053f7d
   - The prod compose now uses `${LLM_API_KEY:?}`, so the stack refuses to start without it, even for
     `logs` and `down`.
   - In the local `.env`, the key is `LLAMASWAP_API_KEY`; the code reads `LLM_API_KEY`.
-- **Two new Alembic revisions:** `f1a2b3c4d5e6`, then `fbf2c08da52d`.
-- **Then run `backfill_emoji`** (`--dry-run` first) in `kyokki-api`.
+- **New operator friction (Q37-Q39 in `docs/TODO.md`):** wrong matches (cashew nuts and pesto read as "dip"); a per-line re-analyse; the printed line on the review screen. Triage Q37 from `GET /api/receipts/{id}/audit` once the operator shares the receipt id.
 - **Q18-G2 is blocked on the operator.**
   - ComfyUI (`a4.comfyui` on 192.168.0.94) is loopback-only, and the edge returns 403 from the LAN.
   - The Kyokki server needs a route: a Caddy allow rule, the media-gateway on `:8480`, or co-location.
@@ -44,6 +43,5 @@ Base-SHA: c4406272c6bce74930df7b07a8e8e3883b053f7d
 - Do not stage `.claude/README.md` or `.claude/templates/profiles/python-fastapi.md`.
 
 ## Next action
-The operator deploys round 2026-09-30-1 (`LLM_API_KEY` is already set; run `alembic upgrade head` and `backfill_emoji`)
-and decides how the Kyokki server reaches ComfyUI. Then run `/plan-round` for Q18-G2, using
-`docs/TODO.md` (Q18 follow-ups) and `docs/spikes/Q18_icon_styles.md`.
+Triage Q37 with the operator's receipt id (`GET /api/receipts/{id}/audit`), then `/plan-round` for Q37-Q39.
+Add Q18-G2 once the operator decides how the Kyokki server reaches ComfyUI (`docs/TODO.md` Q18 follow-ups).
