@@ -15,22 +15,31 @@ Tiers, in order, stopping at the first hit:
 1. a printed name the cook has already called non-food
 2. an alias for (this chain, printed name)
 3. an alias for (any chain, printed name)
-4. a known catalog name for the generic name
-5. a known catalog name for the printed name
-6. otherwise unresolved - and only then, a shortlist and one model call per receipt
+4. a known catalog name for the printed name
+5. a known catalog name for the generic name, but only when it is the cook's own word
+   for it (`product_name.source = cook`)
+6. otherwise unresolved - and only then, a shortlist and one model call per receipt,
+   which also carries any catalog name found only through the generic name (tier 7)
 
 Nothing falls back to similarity. If the model is unreachable, unresolved lines stay
 unresolved and the receipt still completes.
 
-A name is verified when the catalog stands behind it: the product's own name or a word
-the cook used. A synonym the model taught (`product_name.source = model`) still
-resolves, but unverified, so the review row shows it as "auto" rather than "known"
-(H51, Q13) and the cook's correction at confirm re-points it.
+A name is verified when the catalog stands behind it: the product's own name, or a word
+the cook used, matched on the printed line itself or taught as the cook's own synonym. A
+hit on the generic name alone is never that: it is the model's guess at what the receipt
+says, catalog-shaped or not, and Q37 is exactly this guess landing on an unrelated
+catalog entry because the extraction prompt offers listed names too loosely ("Spread"
+for butter, "Dip" for pesto and cashew nuts). So a catalog name reached only through the
+generic name - whether it is the product's own (`canonical`) name or a synonym the model
+itself taught earlier (`model`) - is carried into the shortlist as a candidate rather
+than trusted outright: the line still goes to selection, which judges it against the
+printed text with the same "same shopping-list line" rule as everything else, and a
+`null` answer leaves the line unmatched rather than wrongly confirmed.
 """
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from sqlalchemy import select, text
@@ -209,6 +218,10 @@ class ProductResolution:
         )
 
         unresolved: list[ResolvableLine] = []
+        # A catalog name found only through the model's generic name is a proposal, not
+        # a key (Q37): carried here so `_select` can guarantee it is among that line's
+        # candidates, even if the shortlist would not otherwise surface it.
+        proposed: dict[str, ProductMaster] = {}
         for line in lines:
             printed_key = normalize_receipt_name(line.printed)
             if printed_key in remembered:
@@ -227,24 +240,36 @@ class ProductResolution:
                     )
                     continue
 
-            named = names.get(normalize_product_name(line.generic)) or names.get(
-                normalize_product_name(line.printed)
-            )
-            if named is not None:
-                # A catalog name is a key. The cook's catalog stands behind its own
-                # names and the cook's words; a model's synonym only pre-fills (H51).
+            # The receipt's own printed line naming a catalog product is a key: the
+            # shop's text, not the model's guess (Q37).
+            named_printed = names.get(normalize_product_name(line.printed))
+            if named_printed is not None:
                 results[line.line_id] = Resolution(
-                    product=named.product,
+                    product=named_printed.product,
                     source="name",
-                    verified=named.source != "model",
+                    verified=named_printed.source != "model",
+                )
+                continue
+
+            named_generic = names.get(normalize_product_name(line.generic))
+            if named_generic is not None and named_generic.source == "cook":
+                # The cook's own word for this generic name - taught by typing it, not
+                # merely left unchanged - is as reliable as any other cook key.
+                results[line.line_id] = Resolution(
+                    product=named_generic.product, source="name", verified=True
                 )
                 continue
 
             results[line.line_id] = Resolution()
+            if named_generic is not None:
+                # Reached only through `g`, whether the product's own name
+                # (`canonical`) or a synonym the model itself taught (`model`): offer
+                # it, do not hand it out (Q37).
+                proposed[line.line_id] = named_generic.product
             unresolved.append(line)
 
         if unresolved and allow_model:
-            await self._select(unresolved, results)
+            await self._select(unresolved, results, proposed)
 
         return results
 
@@ -288,12 +313,30 @@ class ProductResolution:
         return best
 
     async def _select(
-        self, unresolved: Sequence[ResolvableLine], results: dict[str, Resolution]
+        self,
+        unresolved: Sequence[ResolvableLine],
+        results: dict[str, Resolution],
+        proposed: dict[str, ProductMaster] | None = None,
     ) -> None:
-        """Shortlist each unresolved line, then ask the model once for the receipt."""
+        """Shortlist each unresolved line, then ask the model once for the receipt.
+
+        ``proposed`` is the snapped catalog product for a line whose only hit was
+        through the generic name (Q37): guaranteed a candidate slot even when the
+        trigram shortlist would not otherwise surface it, so the printed line always
+        gets a real look at the name the model proposed before it is confirmed or let go.
+        """
+        proposed = proposed or {}
         askable: list[SelectionLine] = []
         for line in unresolved:
             candidates = await self.retriever.candidates(line)
+            snap = proposed.get(line.line_id)
+            if snap is not None:
+                snap_id = cast(UUID, snap.id)
+                if not any(c.product_id == snap_id for c in candidates):
+                    candidates = [
+                        Candidate(product_id=snap_id, name=str(snap.canonical_name)),
+                        *candidates,
+                    ]
             results[line.line_id].candidates = candidates
             if not candidates:
                 continue

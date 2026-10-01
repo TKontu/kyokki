@@ -31,9 +31,20 @@ milk, a different cut, a smaller or processed form:
 - "Oat milk" is not "Milk". "Sour cream" is not "Cream". "Peanut butter" is not "Butter".
 - "Cherry tomato" is not "Tomato". "Pineapple" is not "Apple".
 A named kind of the same food, bought and used the same way, is the SAME product:
-"Granny Smith" is "Apple", "Clementine" is "Mandarin".
+"Granny Smith" is "Apple", "Clementine" is "Mandarin". A processing form - ground,
+minced, sliced, whole - is not a named kind: a milled grain is still a different,
+processed form of the crop it is milled from, the same as any other different or
+processed form above - "Flour" is not "Wheat".
 Sharing a word does not make two products the same: "Tortilla chips" is not "Tortilla",
 "Lemonade" is not "Lemon", "Chocolate milk" is not "Chocolate".
+A raw ingredient is not a manufactured product made from it, however near they sit on a
+shelf: "Cucumber" is not "Pickle". "Milk" is not "Cheese".
+Meat from one animal is not the same product as a cut or cold cut from another, even
+when a shopper would reach for either from the same fridge case: "Duck" is not
+"Goose". "Lamb" is not "Beef".
+A broad word for a whole aisle or kind of food is not a match for one specific thing
+that could plausibly be filed there: it has to be the SAME product, not merely a
+plausible shelf for it.
 The candidates are only the nearest names in the catalog, not a list that contains the
 answer. If none of them is the same thing, answer null: null is a good answer, and a
 wrong pick is worse than none.
