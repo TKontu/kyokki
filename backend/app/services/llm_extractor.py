@@ -37,6 +37,7 @@ from app.parsers.base import (
     ReceiptExtraction,
 )
 from app.parsers.locale_codes import country_code, language_code
+from app.services.llm_http import LLMAuthError, post_chat
 
 logger = get_logger(__name__)
 
@@ -473,13 +474,11 @@ async def _complete(
     response: httpx.Response | None = None
     try:
         async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT) as client:
-            response = await client.post(
-                f"{settings.LLM_BASE_URL}/chat/completions",
-                json=payload,
-                headers={"Authorization": f"Bearer {settings.LLM_API_KEY}"},
-            )
+            response = await post_chat(client, payload, budget=settings.LLM_TIMEOUT)
             response.raise_for_status()
             body = response.json()
+    except LLMAuthError as exc:
+        raise LLMExtractionError(str(exc)) from exc
     except httpx.HTTPError as exc:
         raise LLMExtractionError(f"LLM request failed: {exc!r}") from exc
     except ValueError as exc:
