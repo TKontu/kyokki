@@ -226,6 +226,10 @@ export default function ReceiptAuditPage({ params }: { params: { id: string } })
           {audit.model_raw_answer && (
             <TextBlock label="Model's answer" text={audit.model_raw_answer} />
           )}
+          {/* A targeted second call (Q27) ran only when the first answer missed lines */}
+          {audit.model_raw_answer_retry && (
+            <TextBlock label="Model's answer (retry)" text={audit.model_raw_answer_retry} />
+          )}
         </div>
 
         {audit.processing_status !== 'confirmed' && (

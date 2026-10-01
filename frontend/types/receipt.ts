@@ -214,6 +214,8 @@ export interface ReceiptAudit {
   created_at: string
   ocr_raw_text: string | null
   model_raw_answer: string | null // The model's raw completion, when one was stored (#131)
+  // The targeted re-read's raw completion (Q27), when the first read missed lines
+  model_raw_answer_retry: string | null
   // What GET /file would serve; null if the stored file is gone - tells the viewer whether
   // to render an <img> or a PDF viewer
   file_content_type: string | null

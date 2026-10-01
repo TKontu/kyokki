@@ -123,6 +123,7 @@ describe('useReceiptAudit', () => {
           created_at: '2026-09-26T10:00:00Z',
           ocr_raw_text: null,
           model_raw_answer: null,
+          model_raw_answer_retry: null,
           file_content_type: null,
           lines: [],
           unlinked_items: [],

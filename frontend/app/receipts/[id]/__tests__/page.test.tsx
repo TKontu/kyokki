@@ -20,6 +20,7 @@ function audit(overrides: Partial<ReceiptAudit> = {}): ReceiptAudit {
     created_at: '2026-09-26T10:00:00Z',
     ocr_raw_text: null,
     model_raw_answer: null,
+    model_raw_answer_retry: null,
     file_content_type: 'image/jpeg',
     lines: [],
     unlinked_items: [],
@@ -125,6 +126,24 @@ describe('ReceiptAuditPage', () => {
     expect(screen.getByText('<b>MAITO</b> 1,49')).toBeInTheDocument()
     expect(document.querySelector('b')).not.toBeInTheDocument()
     expect(screen.getByText('{"lines": []}')).toBeInTheDocument()
+  })
+
+  it('offers a second block for the targeted re-read, when one was stored (Q27)', async () => {
+    renderPage(audit({ model_raw_answer_retry: '{"lines": [{"n": "MISSED"}]}' }))
+
+    const toggle = await screen.findByRole('button', { name: "Show Model's answer (retry)" })
+    fireEvent.click(toggle)
+
+    expect(screen.getByText('{"lines": [{"n": "MISSED"}]}')).toBeInTheDocument()
+  })
+
+  it('offers no retry block when no retry ran', async () => {
+    renderPage(audit({ model_raw_answer_retry: null }))
+
+    await screen.findByText('S-group, 26.9.2026')
+    expect(
+      screen.queryByRole('button', { name: /retry/i })
+    ).not.toBeInTheDocument()
   })
 
   it('offers neither text block when neither was stored', async () => {

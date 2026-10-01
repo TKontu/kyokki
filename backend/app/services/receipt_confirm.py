@@ -17,6 +17,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.logging import get_logger
 from app.models.inventory_item import InventoryItem
@@ -96,13 +97,15 @@ class _Confirmation:
     ) -> tuple[int | None, dict[str, Any]]:
         """The receipt line this item refers to, by identity where the client gave one.
 
-        `index` is a position among *readable* lines, so an unreadable line anywhere
-        shifts every index after it and the wrong printed name gets learned as an alias.
-        `line_id` does not move (H12); `index` stays for receipts read before it.
+        `index` is the line's raw position in `self.lines`: `items_from_structured`
+        enumerates the full raw list without renumbering, so a line the model could not
+        read is simply left out of what the client sees, and no index after it shifts.
+        `line_id` is still preferred (H12): it survives a later re-read, where `index`
+        would point at whatever line ended up at that position instead.
 
-        Returns the line's own stable raw position in `self.lines` alongside it (Q26):
-        by identity that is wherever `line_id` was found, which is not necessarily
-        `item.index`.
+        Returns the line's own raw position in `self.lines` alongside it (Q26): for an
+        index lookup that is `item.index` itself; for a `line_id` lookup, wherever it
+        was found.
         """
         if item.line_id is not None:
             wanted = str(item.line_id)
@@ -326,6 +329,38 @@ async def _apply_non_food(
     forgotten = _printed_names(confirmation, corrected)
     if forgotten:
         await forget_non_food(db, confirmation.chain, forgotten)
+
+    _mark_confirmed_non_food(confirmation, skipped)
+
+
+def _mark_confirmed_non_food(
+    confirmation: "_Confirmation", skipped: Iterable[int]
+) -> None:
+    """Record, on this receipt's own stored lines, which ones were folded away as
+    household *in this confirm* (Q28).
+
+    `remember_non_food` above only teaches the printed name for *future* receipts;
+    nothing recorded that this line was household on *this* one, so a never-seen
+    household line read `skipped` on the audit view instead of `household`. A line
+    already flagged `non_food` at extraction time needs nothing further: the audit
+    checks `stocked` before `household`, so a line the cook included anyway still
+    reads `stocked` regardless of this flag.
+
+    Mutating the dicts inside `confirmation.lines` changes the very list the receipt's
+    `ocr_structured` already holds (`_Confirmation.__init__` reads it, not a copy), but
+    SQLAlchemy does not notice an in-place JSONB mutation on its own - `flag_modified`
+    tells it to write the column back.
+    """
+    marked = False
+    for index in skipped:
+        if not (0 <= index < len(confirmation.lines)):
+            continue
+        line = confirmation.lines[index]
+        if isinstance(line, dict) and not line.get("confirmed_non_food"):
+            line["confirmed_non_food"] = True
+            marked = True
+    if marked:
+        flag_modified(confirmation.receipt, "ocr_structured")
 
 
 async def confirm_receipt(

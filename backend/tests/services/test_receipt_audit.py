@@ -204,6 +204,34 @@ class TestBuildReceiptAudit:
         assert audit.lines == []
         assert audit.model_raw_answer is None
 
+    async def test_surfaces_the_retrys_raw_answer_when_present(
+        self, db_session: AsyncSession
+    ):
+        """Q27: a second, targeted call runs when the first answer missed lines."""
+        receipt = await _receipt(
+            db_session,
+            status="completed",
+            ocr_structured={
+                "lines": [],
+                "raw_completion": '{"lines": []}',
+                "raw_completion_retry": '{"lines": [{"n": "MISSED"}]}',
+            },
+        )
+
+        audit = await receipt_audit.build_receipt_audit(db_session, receipt.id)
+
+        assert audit.model_raw_answer == '{"lines": []}'
+        assert audit.model_raw_answer_retry == '{"lines": [{"n": "MISSED"}]}'
+
+    async def test_no_retry_answer_when_none_was_stored(self, db_session: AsyncSession):
+        receipt = await _receipt(
+            db_session, status="completed", ocr_structured={"lines": []}
+        )
+
+        audit = await receipt_audit.build_receipt_audit(db_session, receipt.id)
+
+        assert audit.model_raw_answer_retry is None
+
     async def test_file_content_type_reflects_the_stored_file(
         self, db_session: AsyncSession, tmp_path, monkeypatch
     ):

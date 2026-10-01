@@ -547,6 +547,13 @@ class ReceiptAuditResponse(BaseModel):
     model_raw_answer: str | None = Field(
         None, description="The model's raw completion, when stored (#131)"
     )
+    model_raw_answer_retry: str | None = Field(
+        None,
+        description=(
+            "The targeted re-read's raw completion (Q27), when the first read missed "
+            "lines and a second call was needed"
+        ),
+    )
     file_content_type: str | None = Field(
         None,
         description=(

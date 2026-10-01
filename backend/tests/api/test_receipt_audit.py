@@ -273,6 +273,60 @@ class TestReceiptAudit:
             }
         ]
 
+    async def test_a_line_marked_household_in_this_confirm_reads_household(
+        self, client: AsyncClient, test_db: AsyncSession
+    ):
+        """A never-seen household line folded away via `non_food_indexes` used to read
+        `skipped`: only the non-food *memory* recorded it, nothing said so on this
+        receipt. Goes through the real confirm endpoint, then the audit endpoint.
+        """
+        receipt = await _receipt(
+            test_db,
+            processing_status="completed",
+            ocr_structured={"lines": [{"name": "MUOVIKASSI", "price": 0.10}]},
+        )
+
+        confirm = await client.post(
+            f"/api/receipts/{receipt.id}/confirm",
+            json={"items": [], "non_food_indexes": [0]},
+        )
+        assert confirm.status_code == 200, confirm.text
+
+        response = await client.get(f"/api/receipts/{receipt.id}/audit")
+
+        assert response.status_code == 200
+        assert response.json()["lines"] == [
+            {
+                "index": 0,
+                "name": "MUOVIKASSI",
+                "price": 0.10,
+                "outcome": "household",
+                "items": [],
+            }
+        ]
+
+    async def test_the_household_mark_is_actually_written_to_the_row(
+        self, client: AsyncClient, test_db: AsyncSession
+    ):
+        """Mutating `ocr_structured` in place is invisible to SQLAlchemy without
+        `flag_modified`; without it the row would look unchanged once reloaded from the
+        database, even though the in-process object still shows the mutation.
+        """
+        receipt = await _receipt(
+            test_db,
+            processing_status="completed",
+            ocr_structured={"lines": [{"name": "MUOVIKASSI", "price": 0.10}]},
+        )
+
+        confirm = await client.post(
+            f"/api/receipts/{receipt.id}/confirm",
+            json={"items": [], "non_food_indexes": [0]},
+        )
+        assert confirm.status_code == 200, confirm.text
+
+        await test_db.refresh(receipt)
+        assert receipt.ocr_structured["lines"][0]["confirmed_non_food"] is True
+
 
 class TestReceiptFile:
     """GET /api/receipts/{id}/file (Q28). Must not become a path-traversal or arbitrary read."""

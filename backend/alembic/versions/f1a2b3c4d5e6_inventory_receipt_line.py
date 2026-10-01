@@ -2,10 +2,10 @@
 
 The item had `receipt_id`, but not which printed line on that receipt it came from, so "fish
 soup" could not be traced back to "KOKKIKARTANO KERMAINEN LOHIKEITTO". `receipt_line_index` is
-the line's stable raw position in `receipt.ocr_structured`'s line list (not the readable-only
-position `ExtractedItem.index` sends the client); `receipt_line_text` is the printed name as
-read, kept alongside the index so the item's sheet still reads right if `ocr_structured` is
-ever re-read differently.
+the line's raw position in `receipt.ocr_structured`'s line list - the same position
+`ExtractedItem.index` already sends the client, named as its own column here because
+`ocr_structured` itself can later be re-read differently; `receipt_line_text` is the printed
+name as read, kept alongside the index so the item's sheet still reads right even then.
 
 Both nullable, with no backfill: a hand-added item, or one confirmed before this column
 existed, simply has neither - the sheet shows the receipt without the line.

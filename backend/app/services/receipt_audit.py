@@ -103,10 +103,19 @@ def content_type_for(path: Path) -> str:
     return CONTENT_TYPE_FOR_SUFFIX.get(path.suffix.lower(), DEFAULT_CONTENT_TYPE)
 
 
+def _raw_text(structured: dict[str, Any], key: str) -> str | None:
+    raw = structured.get(key)
+    return raw if isinstance(raw, str) else None
+
+
 def _model_raw_answer(structured: dict[str, Any]) -> str | None:
     """The model's raw completion for this receipt, when one was stored (#131)."""
-    raw = structured.get("raw_completion")
-    return raw if isinstance(raw, str) else None
+    return _raw_text(structured, "raw_completion")
+
+
+def _model_raw_answer_retry(structured: dict[str, Any]) -> str | None:
+    """The targeted re-read's raw completion (Q27), when the first read missed lines."""
+    return _raw_text(structured, "raw_completion_retry")
 
 
 async def _stocked_items(
@@ -173,7 +182,11 @@ async def build_receipt_audit(
             outcome = "pending"
         elif stocked:
             outcome = "stocked"
-        elif raw_line.get("non_food"):
+        elif raw_line.get("non_food") or raw_line.get("confirmed_non_food"):
+            # `non_food`: the model's or a remembered name's guess at extraction time.
+            # `confirmed_non_food`: the cook folded this line away *in this confirm*
+            # (`receipt_confirm._mark_confirmed_non_food`) - a never-seen line has no
+            # other record of that on this receipt.
             outcome = "household"
         else:
             outcome = "skipped"
@@ -198,6 +211,7 @@ async def build_receipt_audit(
         created_at=cast("Any", receipt.created_at),
         ocr_raw_text=cast("str | None", receipt.ocr_raw_text),
         model_raw_answer=_model_raw_answer(structured),
+        model_raw_answer_retry=_model_raw_answer_retry(structured),
         file_content_type=content_type_for(file_path) if file_path else None,
         lines=lines,
         unlinked_items=unlinked_items,
