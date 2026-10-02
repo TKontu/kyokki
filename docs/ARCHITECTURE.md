@@ -14,10 +14,12 @@
 >   (OpenAI-compatible endpoint, vLLM or Ollama), one targeted re-read of whatever it left
 >   unaccounted, and an optional receipt profile as a second opinion that never decides alone
 >   (Q27, §4.1) → product resolution, by tiers: a learned alias or a catalog name for the
->   *printed* line is a key outright; a catalog name reached only through the model's generic
->   name is a proposal that one model call per receipt judges against the printed line, never a
->   key on its own (Q37, §4.1) → review → confirm. If the model fails or finds nothing on a
->   text receipt, a deterministic line parser supplies the rows (MVP-R3b, method `heuristic`).
+>   *printed* line is a key outright, and so is a generic name the cook taught directly; a
+>   catalog name reached only through the model's own generic name - its canonical name or a
+>   synonym the model itself taught - is a proposal that one model call per receipt judges
+>   against the printed line, never a key on its own (Q37, §4.1) → review → confirm. If the
+>   model fails or finds nothing on a text receipt, a deterministic line parser supplies the
+>   rows (MVP-R3b, method `heuristic`).
 >   Since MVP-R3 uploads are queued in Postgres and the `kyokki-worker` service
 >   (`python -m app.worker`) reads them one at a time; no request waits for extraction.
 >   Celery is not used. No store parsers in the core: country or language receipt profiles
@@ -29,10 +31,10 @@
 > - **Products are generic (MVP-R2 ruling, 2026-09-14):** one `product_master` row per thing
 >   a household buys ("Ground beef", "Oat drink"), never per brand, size, fat content or cut.
 >   Extraction returns a brand-free English name per line; resolution tries a learned alias of
->   the printed name, then a catalog name for the printed name, then - through one model call
->   per receipt that judges the printed line - a catalog name the generic name alone pointed at
->   (Q37). Nothing falls back to similarity (H13). Names are English for now; language options
->   come later.
+>   the printed name, then a catalog name for the printed name or for a generic name the cook
+>   taught directly, then - through one model call per receipt that judges the printed line - a
+>   catalog name reached only through the model's own generic name (Q37). Nothing falls back to
+>   similarity (H13). Names are English for now; language options come later.
 > - **Aliases:** `store_product_alias` is read by receipt matching since MVP-R1b and written by
 >   confirm since MVP-R2: each confirmed line's printed name (per chain, `unknown` without a
 >   store) points at the chosen generic product. Quick add (`POST /api/inventory/quick-add`,
@@ -249,10 +251,11 @@ Photo or PDF
                   unavailable); generic heuristic line parser as fallback (MVP-R3b)
   → accounting    every priced line cited or listed; one targeted re-read; raw rows;
                   optional country profiles as evidence; the receipt's arithmetic (Q27)
-  → resolution    alias, then a catalog name for the printed line, as keys outright; a
-                  catalog name only the generic name points at is a candidate, judged by
-                  one model call per receipt against the printed line (Q37); nothing
-                  falls back to similarity (H13)
+  → resolution    alias, a catalog name for the printed line, or a generic name the
+                  cook taught directly, as keys outright; a catalog name reached only
+                  through the model's own generic name is a candidate, judged by one
+                  model call per receipt against the printed line (Q37); nothing falls
+                  back to similarity (H13)
   → review        per-item edit / re-match / skip on the iPad
   → confirm       creates products for new items, inventory items, and alias rows
 ```

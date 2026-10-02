@@ -23,6 +23,19 @@ from app.services.llm_http import LLMAuthError, post_chat
 
 logger = get_logger(__name__)
 
+# The last four rules below (raw ingredient vs. manufactured product, one animal's cut
+# vs. another's, a processing form vs. a named kind, a broad catalog word vs. a
+# catch-all) were added from the Q37 live runs on c2.muse-glimmer against the reported
+# pairs (reported_pairs.json): before them, the model confirmed butter as "Spread",
+# turkey cold cuts as "Ham" and pesto as "Dip" - the exact wrong snaps Q37 reports. With
+# them, 3 consecutive runs of the 15 reported-pair cases (6 pre-Q37 H53 cases, 9 Q37
+# ones) passed 12, 13 and 12 of 15; the pre-Q37 cases always pass, and butter/Spread,
+# baking chocolate/Chips, cashew nuts/Dip and chicken mince/Chicken fillet remain
+# flaky - a real limit of this model at LLM_REASONING_STRENGTH=low, not a wiring gap
+# (see PR #143). This prompt is used only for the lines deterministic keys could not
+# resolve, never for the main extraction read, so it does not touch the fixtures'
+# completeness or category counts (K-Citymarket 15/15, S-kaupat 49/49, REWE DE
+# synthetic 6/6, all measured unchanged against base in the same PR).
 INSTRUCTIONS = """For each line, pick the catalog product that is the same thing, or null if none is.
 
 Same thing means a home cook would put them on one shopping-list line.

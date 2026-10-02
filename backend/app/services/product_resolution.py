@@ -324,6 +324,9 @@ class ProductResolution:
         through the generic name (Q37): guaranteed a candidate slot even when the
         trigram shortlist would not otherwise surface it, so the printed line always
         gets a real look at the name the model proposed before it is confirmed or let go.
+        Added last, not first - it has no trigram score of its own, so it must not read
+        as the ranked top choice - and never past ``CANDIDATES_PER_LINE`` (review F2,
+        F7): the weakest trigram hit gives way rather than the offer running long.
         """
         proposed = proposed or {}
         askable: list[SelectionLine] = []
@@ -333,9 +336,15 @@ class ProductResolution:
             if snap is not None:
                 snap_id = cast(UUID, snap.id)
                 if not any(c.product_id == snap_id for c in candidates):
+                    # It has no trigram score of its own, so it goes last rather than
+                    # first, where a model reads shortlist order as a ranking (F7); and
+                    # it must not grow the offer past the cap, so the weakest trigram
+                    # hit gives way rather than the shortlist running long (F2).
+                    if len(candidates) >= CANDIDATES_PER_LINE:
+                        candidates = candidates[: CANDIDATES_PER_LINE - 1]
                     candidates = [
-                        Candidate(product_id=snap_id, name=str(snap.canonical_name)),
                         *candidates,
+                        Candidate(product_id=snap_id, name=str(snap.canonical_name)),
                     ]
             results[line.line_id].candidates = candidates
             if not candidates:

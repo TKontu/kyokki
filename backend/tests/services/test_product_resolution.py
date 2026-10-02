@@ -32,6 +32,8 @@ from app.models.store_product_alias import StoreProductAlias
 from app.services.llm_extractor import LLMExtractionError
 from app.services.product_names import learn_product_name
 from app.services.product_resolution import (
+    CANDIDATES_PER_LINE,
+    Candidate,
     ProductResolution,
     ResolvableLine,
     TrigramRetriever,
@@ -482,6 +484,73 @@ class TestGenericNameSnapping:
         assert result.product is None
         assert result.source == "none"
         _no_model_selection.assert_awaited_once()
+
+
+class _FixedRetriever:
+    """A retriever stub: `candidates()` always returns this fixed list, in order,
+    independent of the line or the database - for pinning exactly what the trigram
+    shortlist handed `_select` before the snap is merged in (F2, F7)."""
+
+    def __init__(self, fixed: list[Candidate]) -> None:
+        self.fixed = fixed
+
+    async def candidates(self, line: ResolvableLine) -> list[Candidate]:
+        return list(self.fixed)
+
+
+class TestSnapShortlistDiscipline:
+    """PR #143 review, F2 and F7: the guaranteed slot for a snapped catalog name must
+    not grow the shortlist past `CANDIDATES_PER_LINE`, and - having no trigram score of
+    its own - must not sit first and bias selection towards it."""
+
+    async def test_the_snap_does_not_push_the_shortlist_past_the_cap(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """F2: a full trigram shortlist plus the guaranteed snap would be six; the
+        weakest trigram hit (last in the fixed list) gives way, not an arbitrary one."""
+        trigram_hits = [
+            Candidate(product_id=catalog["milk"].id, name="Milk"),
+            Candidate(product_id=catalog["apple"].id, name="Apple"),
+            Candidate(product_id=catalog["cream"].id, name="Cream"),
+            Candidate(product_id=catalog["tomato"].id, name="Tomato"),
+            Candidate(product_id=catalog["beef"].id, name="Ground beef"),
+        ]
+        assert len(trigram_hits) == CANDIDATES_PER_LINE
+
+        resolved = await ProductResolution(
+            db_session, retriever=_FixedRetriever(trigram_hits)
+        ).resolve(
+            [_line("ALESTO SELECTION CASHEWP", "Butter", "pantry")], chain="s-group"
+        )
+
+        candidates = resolved["ALESTO SELECTION CASHEWP"].candidates
+        assert len(candidates) == CANDIDATES_PER_LINE
+        ids = [c.product_id for c in candidates]
+        assert catalog["butter"].id in ids
+        assert catalog["beef"].id not in ids
+
+    async def test_the_snap_is_placed_last_not_first(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """F7: it has no trigram score of its own, so it must not sit ahead of hits
+        that do, where a model reads shortlist order as a ranking."""
+        trigram_hits = [
+            Candidate(product_id=catalog["milk"].id, name="Milk"),
+            Candidate(product_id=catalog["apple"].id, name="Apple"),
+        ]
+
+        resolved = await ProductResolution(
+            db_session, retriever=_FixedRetriever(trigram_hits)
+        ).resolve(
+            [_line("ALESTO SELECTION CASHEWP", "Butter", "pantry")], chain="s-group"
+        )
+
+        candidates = resolved["ALESTO SELECTION CASHEWP"].candidates
+        assert [c.product_id for c in candidates] == [
+            catalog["milk"].id,
+            catalog["apple"].id,
+            catalog["butter"].id,
+        ]
 
 
 class TestSelection:
