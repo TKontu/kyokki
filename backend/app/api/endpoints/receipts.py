@@ -22,6 +22,8 @@ from app.api.exceptions import handle_integrity_errors
 from app.crud import receipt as crud_receipt
 from app.db.session import get_db
 from app.schemas.receipt import (
+    ExtractedItem,
+    ReanalyseLineRequest,
     ReceiptAuditResponse,
     ReceiptConfirmRequest,
     ReceiptConfirmResponse,
@@ -29,7 +31,12 @@ from app.schemas.receipt import (
     ReceiptStatus,
     ReceiptSummary,
 )
-from app.services import receipt_audit, receipt_confirm, receipt_queue
+from app.services import (
+    receipt_audit,
+    receipt_confirm,
+    receipt_line_reanalyse,
+    receipt_queue,
+)
 from app.services.receipt_ingest import (
     ReceiptTooLarge,
     UnsupportedReceiptType,
@@ -319,3 +326,46 @@ async def confirm_receipt(
         aliases_learned=result.aliases_learned,
         error=None,
     )
+
+
+@router.post("/{receipt_id}/lines/{line_id}/reanalyse", response_model=ExtractedItem)
+async def reanalyse_receipt_line(
+    receipt_id: UUID,
+    line_id: UUID,
+    request: ReanalyseLineRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ExtractedItem:
+    """Re-ask the model for one receipt line, with the cook's optional hint (Q38).
+
+    Updates only this line's generic name, category and match. Nothing is learned: no
+    alias, synonym or product is created or changed - only confirm does that.
+
+    Raises:
+        HTTPException 404: No such receipt, or no such line on it.
+        HTTPException 409: The receipt is not reviewable (confirmed, or not read yet).
+        HTTPException 400: The hint is too long.
+        HTTPException 502: The model answered, but not usably.
+        HTTPException 503: The model gateway could not be reached or rejected the key.
+        HTTPException 504: The model did not answer within its budget.
+    """
+    try:
+        async with handle_integrity_errors():
+            return await receipt_line_reanalyse.reanalyse_line(
+                db, receipt_id, line_id, request.hint
+            )
+    except receipt_line_reanalyse.ReceiptNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except receipt_line_reanalyse.LineNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except receipt_line_reanalyse.ReceiptNotReanalysable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except receipt_line_reanalyse.InvalidHint as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except receipt_line_reanalyse.InvalidModelAnswer as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except receipt_line_reanalyse.ReanalyseUnavailable as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    except receipt_line_reanalyse.ReanalyseTimedOut as exc:
+        raise HTTPException(status.HTTP_504_GATEWAY_TIMEOUT, detail=str(exc)) from exc

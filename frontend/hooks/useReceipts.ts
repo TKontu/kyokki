@@ -8,6 +8,7 @@ import { inventoryKeys } from '@/hooks/useInventory'
 import { productKeys } from '@/hooks/useProducts'
 import receiptsAPI, { type ReceiptScanFields } from '@/lib/api/receipts'
 import type {
+  ExtractedItem,
   Receipt,
   ReceiptConfirmRequest,
   ReceiptListParams,
@@ -138,4 +139,35 @@ export function useReprocessReceipt() {
       queryClient.invalidateQueries({ queryKey: receiptKeys.all })
     },
   })
+}
+
+/**
+ * Re-analyse one receipt line (Q38). Deliberately does not invalidate or refetch the
+ * whole receipt: that would also replace every other row's data, and the review screen
+ * keeps unsaved edits in state keyed by line index - the caller applies the one updated
+ * item to the cache itself (see `replaceReceiptItem`), so the other rows' edits survive.
+ */
+export function useReanalyseLine() {
+  return useMutation({
+    mutationFn: ({
+      receiptId,
+      lineId,
+      hint,
+    }: {
+      receiptId: string
+      lineId: string
+      hint?: string | null
+    }) => receiptsAPI.reanalyseLine(receiptId, lineId, hint),
+    // Not idempotent in effect (it asks the model again each time), and a lost response
+    // retried automatically could surprise the cook with a second, different answer.
+    retry: false,
+  })
+}
+
+/** `receipt` with one item replaced by its freshly re-analysed version, by `index`. */
+export function replaceReceiptItem(receipt: Receipt, updated: ExtractedItem): Receipt {
+  return {
+    ...receipt,
+    items: receipt.items.map((item) => (item.index === updated.index ? updated : item)),
+  }
 }

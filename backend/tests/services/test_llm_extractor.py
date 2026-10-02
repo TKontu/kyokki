@@ -689,6 +689,22 @@ class TestCatalogIsANamingAidOnly:
         text = build_instructions(CATEGORIES)
         assert "whether or not it is in this list" not in text
 
+    def test_a_listed_name_is_for_the_same_product_only(self):
+        """Q37: a listed name 'equivalent' read too loosely and cashew nuts, butter and
+        pesto all snapped to Dip or Spread. The block now names the same test g itself
+        uses and says a listed name of a different food is wrong even with nothing
+        closer listed."""
+        text = " ".join(build_instructions(CATEGORIES, ["Dip"]).split())
+        assert "would a home cook put them on one shopping-list line" in text
+        assert "wrong even when the list offers nothing closer" in text
+
+    def test_the_wrongness_rule_is_general_not_receipt_specific(self):
+        """No hardcoded receipt formats or languages (project standing rule): the new
+        sentence must read as a general rule, not cite the Lidl fixture's products."""
+        text = build_instructions(CATEGORIES, ["Dip"])
+        for word in ("Pesto", "Cashew", "Dip spice", "Kalkkuna", "Jauhel"):
+            assert word not in text
+
 
 class TestLanguageNeutralRules:
     """Amendment 1: receipts from any country; Finnish strings only as examples."""

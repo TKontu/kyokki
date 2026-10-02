@@ -95,13 +95,25 @@ resolve(lines, chain, catalog):
     if normalised(printed) in non_food_names          -> non_food, stop
     alias = aliases[(chain, normalised(printed))]
          or aliases[(any chain, normalised(printed))] -> product, source=alias, verified=alias.manually_verified
+    name  = product_names[normalised(printed)]        -> product, source=name, verified=(name.source != model)
     name  = product_names[normalised(generic)]
-         or product_names[normalised(printed)]        -> product, source=name, verified=(name.source != model)
+         if name.source == cook                       -> product, source=name, verified=True
+         elif name                                     -> unresolved, proposed=name.product
     else                                              -> unresolved
+
+  # (Q37) A hit on the *printed* line is a key outright, the same as before. A hit on
+  # the *generic* name alone is a key only when the cook taught that exact name
+  # directly (name.source == cook); the product's own (canonical) name and a synonym
+  # the model itself taught are both just the model's guess at the line, so they are
+  # carried into the shortlist below as a candidate instead - never handed out on
+  # their own, however the receipt's first read snapped to them (an existing catalog
+  # name "equivalent" read too loosely across kinds: nuts -> Dip, butter -> Spread).
 
   if unresolved and catalog not empty:
     for each unresolved line:
       candidates = retrieve(generic, printed, category, k=5)
+      if proposed and proposed not in candidates:        # (Q37)
+        candidates = candidates[:4] + [proposed]          # last, not first; cap held
     ask the model once (see 3.3) for the lines that have candidates
     for each answer: accept product_id only if it is in that line's candidates
                                                       -> product, source=selected, verified=False

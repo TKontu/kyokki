@@ -137,6 +137,42 @@ def item_id(text: str) -> str:
     return text
 
 
+def receipt_id(text: str) -> str:
+    if not commands.looks_like_uuid(text):
+        raise argparse.ArgumentTypeError(
+            f"not a receipt id (a UUID): {text!r}; find it with kyokki receipt upload"
+        )
+    return text
+
+
+def _line_number(text: str) -> int:
+    try:
+        return int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"LINE must be a whole number, as kyokki receipt status prints it: {text!r}"
+        ) from None
+
+
+def line_assign(text: str) -> tuple[int, str]:
+    line, sep, product_id = text.partition("=")
+    if not sep or not product_id:
+        raise argparse.ArgumentTypeError(f"expected LINE=PRODUCT_ID, got {text!r}")
+    if not commands.looks_like_uuid(product_id):
+        raise argparse.ArgumentTypeError(
+            f"not a product id (a UUID): {product_id!r}; find it with kyokki product "
+            "resolve"
+        )
+    return _line_number(line), product_id
+
+
+def line_new(text: str) -> tuple[int, str]:
+    line, sep, category = text.partition("=")
+    if not sep or not category:
+        raise argparse.ArgumentTypeError(f"expected LINE=CATEGORY, got {text!r}")
+    return _line_number(line), category
+
+
 def idempotency_key(text: str) -> str:
     if not text or len(text) > MAX_KEY_LENGTH:
         raise argparse.ArgumentTypeError(
@@ -534,6 +570,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_connection_options(categories, top=False)
 
     add_shopping_commands(top)
+    add_receipt_commands(top)
 
     return parser
 
@@ -747,6 +784,178 @@ def add_shopping_commands(top: "argparse._SubParsersAction[Parser]") -> None:
         help="text or markdown; default: text",
     )
     add_connection_options(export, top=False)
+
+
+def add_receipt_commands(top: "argparse._SubParsersAction[Parser]") -> None:
+    receipt_missing = "no receipt has the ID"
+    receipt = group(
+        top,
+        "receipt",
+        summary="upload a receipt, watch it process, and confirm its matched lines",
+        description="Receipts: scan to stock. Upload a photo or PDF, wait for the model\n"
+        "to read it, then confirm the lines it matched to a product.",
+        examples=[
+            "kyokki receipt upload receipt.jpg --wait",
+            "kyokki receipt status 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01",
+            "kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched",
+        ],
+        exit_codes=shopping_exit_codes(
+            usage="an --assign/--new line is unknown, non-food or named twice, or "
+            "the API rejected the request (400 invalid, 422)",
+            not_found=receipt_missing,
+            conflict="a duplicate upload, an unready receipt, or unmatched food "
+            "lines without --assign/--new/--skip-unmatched",
+        ),
+    )
+
+    upload = leaf(
+        receipt,
+        "upload",
+        summary="upload a receipt image or PDF for processing",
+        description="Upload FILE (an image or PDF) for OCR and extraction, which runs\n"
+        "in the background. Prints the new receipt's id and status. With --wait,\n"
+        "polls kyokki receipt status every few seconds (bounded by --timeout,\n"
+        "default 1800 s: a receipt can take up to ~30 minutes when the model\n"
+        "re-reads it) until the read finishes, then prints the lines. A file that\n"
+        "cannot be read, or is over the server's upload limit (413), is exit 2\n"
+        "before anything is sent; a duplicate (the server already has this file)\n"
+        "is exit 6, with the existing receipt's id. Like scan itself, upload sends\n"
+        "no Idempotency-Key; a retried upload of the same file answers the same\n"
+        "409 duplicate.",
+        examples=[
+            "kyokki receipt upload receipt.jpg",
+            "kyokki receipt upload receipt.pdf --wait",
+            "kyokki receipt upload receipt.jpg --wait --timeout 120",
+        ],
+        handler=commands.receipt_upload,
+        exit_codes=shopping_exit_codes(
+            usage="the file cannot be read, it is over the server's upload limit "
+            "(413), or the API rejected it (400 invalid, 422)",
+            conflict="the file was already uploaded (409); the message names the "
+            "existing receipt id",
+        ),
+    )
+    upload.add_argument("file", metavar="FILE", help="path to the receipt image or PDF")
+    upload.add_argument(
+        "--wait",
+        action="store_true",
+        help="poll until the read finishes, then print the lines",
+    )
+    upload.add_argument(
+        "--timeout",
+        type=positive_number,
+        default=commands.DEFAULT_RECEIPT_WAIT_TIMEOUT,
+        metavar="SECONDS",
+        help=f"give up waiting after this long; default: "
+        f"{commands.DEFAULT_RECEIPT_WAIT_TIMEOUT} (needs --wait)",
+    )
+    add_connection_options(upload, top=False)
+
+    status_cmd = leaf(
+        receipt,
+        "status",
+        summary="a receipt's processing status, and its lines once read",
+        description="Status of receipt ID, and once it has been read, its lines: index,\n"
+        "printed name, generic name, the matched product (and whether verified),\n"
+        "quantity and unit, and whether it is non-food.",
+        examples=[
+            "kyokki receipt status 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01",
+            "kyokki receipt status 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --json",
+        ],
+        handler=commands.receipt_status,
+        exit_codes=shopping_exit_codes(not_found=receipt_missing, changes=False),
+    )
+    status_cmd.add_argument(
+        "receipt_id",
+        type=receipt_id,
+        metavar="ID",
+        help="the receipt's id (a UUID), from receipt upload",
+    )
+    add_connection_options(status_cmd, top=False)
+
+    confirm = leaf(
+        receipt,
+        "confirm",
+        summary="confirm the receipt's matched lines into stock",
+        description="Confirm receipt ID: send every line with a matched product, using\n"
+        "its own quantity and unit, and the receipt's purchase date (or\n"
+        "--purchase-date, required when the receipt has none). Non-food lines are\n"
+        "never stocked. Confirm is final: a line not sent is never stocked.\n\n"
+        "If any food line is unmatched, this refuses (exit 6) and lists them. Fix\n"
+        "them with --assign (an existing product) or --new (a new one), both\n"
+        "repeatable, or leave them out with --skip-unmatched. The receipt must be\n"
+        "read (not still processing, failed, or already confirmed), also exit 6.\n"
+        "--dry-run prints exactly what would be sent and sends nothing. The\n"
+        "confirm endpoint has no Idempotency-Key, so a retried confirm answers\n"
+        "from the server instead of replaying: 409 (already confirmed) is exit 6,\n"
+        "400 (the request was rejected, e.g. a since-deleted product id; re-run\n"
+        "receipt status) is exit 2.",
+        examples=[
+            "kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched",
+            "kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched "
+            "--assign 1=0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --new 2=pantry",
+            "kyokki receipt confirm 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 --all-matched "
+            "--skip-unmatched",
+        ],
+        handler=commands.receipt_confirm,
+        exit_codes=shopping_exit_codes(
+            usage="the receipt has no purchase date and --purchase-date was not "
+            "given, an --assign/--new line is unknown, non-food or named twice, or "
+            "the API rejected the request (400 invalid, 422; also a retried "
+            "confirm's stale item, since confirm has no Idempotency-Key)",
+            not_found=receipt_missing,
+            conflict="unmatched food lines without --assign/--new/--skip-unmatched, "
+            "a receipt not ready to confirm (still processing, failed, or already "
+            "confirmed), or a retried confirm that already succeeded (409)",
+        ),
+    )
+    confirm.add_argument(
+        "receipt_id",
+        type=receipt_id,
+        metavar="ID",
+        help="the receipt's id (a UUID), from receipt upload",
+    )
+    confirm.add_argument(
+        "--all-matched",
+        action="store_true",
+        required=True,
+        help="confirm every matched food line (the only mode there is today)",
+    )
+    confirm.add_argument(
+        "--assign",
+        action="append",
+        type=line_assign,
+        default=[],
+        metavar="LINE=PRODUCT_ID",
+        help="attach line LINE (as receipt status numbers it) to an existing "
+        "product; counts as matched; repeatable",
+    )
+    confirm.add_argument(
+        "--new",
+        action="append",
+        type=line_new,
+        default=[],
+        metavar="LINE=CATEGORY",
+        help="create a new product for line LINE, named by its generic name (the "
+        "printed name if it has none), in CATEGORY; counts as matched; repeatable",
+    )
+    confirm.add_argument(
+        "--skip-unmatched",
+        action="store_true",
+        help="leave unmatched food lines out of the request instead of refusing",
+    )
+    confirm.add_argument(
+        "--purchase-date",
+        type=iso_date,
+        metavar="YYYY-MM-DD",
+        help="required when the receipt itself has none",
+    )
+    confirm.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would be sent; send nothing",
+    )
+    add_connection_options(confirm, top=False)
 
 
 # --- running ------------------------------------------------------------------

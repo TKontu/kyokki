@@ -32,6 +32,8 @@ from app.models.store_product_alias import StoreProductAlias
 from app.services.llm_extractor import LLMExtractionError
 from app.services.product_names import learn_product_name
 from app.services.product_resolution import (
+    CANDIDATES_PER_LINE,
+    Candidate,
     ProductResolution,
     ResolvableLine,
     TrigramRetriever,
@@ -117,17 +119,22 @@ class TestTheSpecTable:
         assert result.source == "none"
 
     async def test_a_synonym_resolves_where_similarity_could_not(
-        self, db_session: AsyncSession, catalog
+        self, db_session: AsyncSession, catalog, _no_model_selection
     ) -> None:
         """ "Minced beef" scores 64 against "Ground beef" - unreachable for any
         threshold that also tolerates OCR noise. One confirm teaches it.
 
-        A synonym the model taught pre-fills the row but is not the cook's word, so it
-        resolves unverified and the row shows it as "auto" (H51, Q13). Before that it
-        was a key that won outright, which is how "ketchup" stayed Taco sauce for ever.
+        A synonym the model taught pre-fills the row but is not the cook's word (H51,
+        Q13): before that it was a key that won outright, which is how "ketchup" stayed
+        Taco sauce for ever. Q37 went further - a model-taught synonym on the generic
+        name is reached only through the model's own guess, so it is only ever a
+        candidate, judged by selection like any other snap, not handed out unverified.
         """
         await learn_product_name(db_session, catalog["beef"], "Minced beef", "model")
         await db_session.commit()
+        _no_model_selection.side_effect = lambda lines: {
+            lines[0].line_id: catalog["beef"].id
+        }
 
         resolved = await ProductResolution(db_session).resolve(
             [_line("ATRIA JAUHELIHA", "Minced beef", "meat")], chain="s-group"
@@ -136,7 +143,7 @@ class TestTheSpecTable:
         result = resolved["ATRIA JAUHELIHA"]
         assert result.product is not None
         assert result.product.id == catalog["beef"].id
-        assert (result.source, result.verified) == ("name", False)
+        assert (result.source, result.verified) == ("selected", False)
 
     async def test_a_synonym_the_cook_taught_is_verified(
         self, db_session: AsyncSession, catalog
@@ -168,22 +175,31 @@ class TestTheSpecTable:
 
 
 class TestDeterministicTiers:
-    async def test_a_known_catalog_name_resolves_and_is_verified(
-        self, db_session: AsyncSession, catalog
+    async def test_a_known_catalog_name_resolves_only_through_selection(
+        self, db_session: AsyncSession, catalog, _no_model_selection
     ) -> None:
+        """Q37: a catalog-name hit reached only through the model's generic name is a
+        proposal, not a key - even a correct one like this must still be judged against
+        the printed line, so it costs one model call rather than being final outright."""
+        _no_model_selection.side_effect = lambda lines: {
+            lines[0].line_id: catalog["milk"].id
+        }
+
         resolved = await ProductResolution(db_session).resolve(
             [_line("VALIO MAITO", "Milk", "dairy")], chain="s-group"
         )
 
         result = resolved["VALIO MAITO"]
         assert result.product is not None and result.product.id == catalog["milk"].id
-        assert (result.source, result.verified) == ("name", True)
+        assert (result.source, result.verified) == ("selected", False)
+        _no_model_selection.assert_awaited_once()
 
-    async def test_a_product_with_no_name_row_is_still_a_verified_key(
-        self, db_session: AsyncSession, catalog
+    async def test_a_product_with_no_name_row_still_needs_selection_via_generic(
+        self, db_session: AsyncSession, catalog, _no_model_selection
     ) -> None:
-        """Open Food Facts enrichment writes straight to `product_master`; a product's
-        own name is the strongest key there is."""
+        """Open Food Facts enrichment writes straight to `product_master`, so this is
+        the canonical-name fallback, not a `product_name` row - but it was still reached
+        only through the generic name, so it is a proposal like any other (Q37)."""
         feta = ProductMaster(
             id=uuid4(),
             canonical_name="Feta",
@@ -195,6 +211,7 @@ class TestDeterministicTiers:
         )
         db_session.add(feta)
         await db_session.commit()
+        _no_model_selection.side_effect = lambda lines: {lines[0].line_id: feta.id}
 
         resolved = await ProductResolution(db_session).resolve(
             [_line("COOP FETA PDO", "Feta", "dairy")], chain="s-group"
@@ -202,7 +219,38 @@ class TestDeterministicTiers:
 
         result = resolved["COOP FETA PDO"]
         assert result.product is not None and result.product.id == feta.id
+        assert (result.source, result.verified) == ("selected", False)
+
+    async def test_printed_name_hit_on_a_catalog_name_still_stays_deterministic(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """A catalog-name hit on the *printed* line is still a key: it is the receipt
+        itself saying the product's own name, not the model's guess (Q37)."""
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("Milk", "Oat drink", "dairy")], chain="s-group"
+        )
+
+        result = resolved["Milk"]
+        assert result.product is not None and result.product.id == catalog["milk"].id
         assert (result.source, result.verified) == ("name", True)
+        _no_model_selection.assert_not_awaited()
+
+    async def test_a_generic_name_the_cook_taught_still_stays_deterministic(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """The cook's own word for a generic name - not merely the model's guess -
+        stays a key, same as any other cook-taught synonym (Q37)."""
+        await learn_product_name(db_session, catalog["beef"], "Mince", "cook")
+        await db_session.commit()
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("ATRIA JAUHELIHA", "Mince", "meat")], chain="s-group"
+        )
+
+        result = resolved["ATRIA JAUHELIHA"]
+        assert result.product is not None and result.product.id == catalog["beef"].id
+        assert (result.source, result.verified) == ("name", True)
+        _no_model_selection.assert_not_awaited()
 
     async def test_an_alias_wins_over_everything_else(
         self, db_session: AsyncSession, catalog
@@ -364,6 +412,147 @@ class TestDeterministicTiers:
         assert resolved["MUOVIKASSI"].product is None
 
 
+class TestGenericNameSnapping:
+    """Q37: a catalog name reached only through the model's `g` is a proposal, never a
+    final match, however it was learned - the product's own name (`canonical`) or a
+    synonym the model itself taught (`model`). Pesto, cashew nuts, baking chocolate,
+    butter, turkey cold cuts and chicken mince all snapped to an existing catalog entry
+    this way on the Lidl receipt (`tests/fixtures/receipts/lidl_espoo_q37.txt`)."""
+
+    async def test_the_snap_is_offered_but_not_final_on_its_own(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """Before the model is even asked, the snapped catalog product must already be
+        a candidate - the whole point is that the printed line gets a second look, not
+        that it is lost."""
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("ALESTO SELECTION CASHEWP", "Butter", "pantry")], chain="s-group"
+        )
+
+        result = resolved["ALESTO SELECTION CASHEWP"]
+        assert result.product is None
+        assert result.source == "none"
+        assert catalog["butter"].id in {c.product_id for c in result.candidates}
+
+    async def test_the_model_rejects_the_snap_and_the_line_stays_unmatched(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """The model sees the printed line and answers null: a wrong pick is worse than
+        none, and no duplicate of Butter gets created from this line."""
+        _no_model_selection.side_effect = lambda lines: {}
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("ALESTO SELECTION CASHEWP", "Butter", "pantry")], chain="s-group"
+        )
+
+        result = resolved["ALESTO SELECTION CASHEWP"]
+        assert result.product is None
+        assert result.source == "none"
+
+    async def test_the_model_may_still_confirm_a_correct_snap(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """Mozzarella, farfalle and olive genuinely are the catalog entry their `g`
+        names - selection, asked, says so, and the line resolves through it."""
+        _no_model_selection.side_effect = lambda lines: {
+            lines[0].line_id: catalog["milk"].id
+        }
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("VALIO KEVYTMAITO", "Milk", "dairy")], chain="s-group"
+        )
+
+        result = resolved["VALIO KEVYTMAITO"]
+        assert result.product is not None and result.product.id == catalog["milk"].id
+        assert (result.source, result.verified) == ("selected", False)
+
+    async def test_a_model_taught_synonym_is_also_only_a_proposal(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """Not just the product's own (canonical) name: a synonym the model itself
+        taught earlier (because the cook did not act on that line) is exactly as
+        unreliable as a fresh snap and must be judged the same way."""
+        await learn_product_name(db_session, catalog["butter"], "Dairy spread", "model")
+        await db_session.commit()
+        _no_model_selection.side_effect = lambda lines: {}
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("OIVARIINI", "Dairy spread", "dairy")], chain="s-group"
+        )
+
+        result = resolved["OIVARIINI"]
+        assert result.product is None
+        assert result.source == "none"
+        _no_model_selection.assert_awaited_once()
+
+
+class _FixedRetriever:
+    """A retriever stub: `candidates()` always returns this fixed list, in order,
+    independent of the line or the database - for pinning exactly what the trigram
+    shortlist handed `_select` before the snap is merged in (F2, F7)."""
+
+    def __init__(self, fixed: list[Candidate]) -> None:
+        self.fixed = fixed
+
+    async def candidates(self, line: ResolvableLine) -> list[Candidate]:
+        return list(self.fixed)
+
+
+class TestSnapShortlistDiscipline:
+    """PR #143 review, F2 and F7: the guaranteed slot for a snapped catalog name must
+    not grow the shortlist past `CANDIDATES_PER_LINE`, and - having no trigram score of
+    its own - must not sit first and bias selection towards it."""
+
+    async def test_the_snap_does_not_push_the_shortlist_past_the_cap(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """F2: a full trigram shortlist plus the guaranteed snap would be six; the
+        weakest trigram hit (last in the fixed list) gives way, not an arbitrary one."""
+        trigram_hits = [
+            Candidate(product_id=catalog["milk"].id, name="Milk"),
+            Candidate(product_id=catalog["apple"].id, name="Apple"),
+            Candidate(product_id=catalog["cream"].id, name="Cream"),
+            Candidate(product_id=catalog["tomato"].id, name="Tomato"),
+            Candidate(product_id=catalog["beef"].id, name="Ground beef"),
+        ]
+        assert len(trigram_hits) == CANDIDATES_PER_LINE
+
+        resolved = await ProductResolution(
+            db_session, retriever=_FixedRetriever(trigram_hits)
+        ).resolve(
+            [_line("ALESTO SELECTION CASHEWP", "Butter", "pantry")], chain="s-group"
+        )
+
+        candidates = resolved["ALESTO SELECTION CASHEWP"].candidates
+        assert len(candidates) == CANDIDATES_PER_LINE
+        ids = [c.product_id for c in candidates]
+        assert catalog["butter"].id in ids
+        assert catalog["beef"].id not in ids
+
+    async def test_the_snap_is_placed_last_not_first(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """F7: it has no trigram score of its own, so it must not sit ahead of hits
+        that do, where a model reads shortlist order as a ranking."""
+        trigram_hits = [
+            Candidate(product_id=catalog["milk"].id, name="Milk"),
+            Candidate(product_id=catalog["apple"].id, name="Apple"),
+        ]
+
+        resolved = await ProductResolution(
+            db_session, retriever=_FixedRetriever(trigram_hits)
+        ).resolve(
+            [_line("ALESTO SELECTION CASHEWP", "Butter", "pantry")], chain="s-group"
+        )
+
+        candidates = resolved["ALESTO SELECTION CASHEWP"].candidates
+        assert [c.product_id for c in candidates] == [
+            catalog["milk"].id,
+            catalog["apple"].id,
+            catalog["butter"].id,
+        ]
+
+
 class TestSelection:
     """The model may only choose from what it was offered."""
 
@@ -408,9 +597,10 @@ class TestSelection:
     async def test_the_model_is_not_asked_when_every_line_resolves(
         self, db_session: AsyncSession, catalog, _no_model_selection
     ) -> None:
-        """A warm catalog costs no model call at all."""
+        """A warm catalog that resolves everything by printed name or alias costs no
+        model call at all (Q37): a generic-name hit alone no longer counts as warm."""
         await ProductResolution(db_session).resolve(
-            [_line("VALIO MAITO", "Milk", "dairy")], chain="s-group"
+            [_line("Milk", "Oat drink", "dairy")], chain="s-group"
         )
 
         _no_model_selection.assert_not_awaited()

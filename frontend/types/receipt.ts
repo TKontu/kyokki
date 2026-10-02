@@ -59,6 +59,7 @@ export interface ExtractedItem {
   index: number // Position in the stored line list; kept for one release
   line_id: string | null // Stable identity, kept across re-reads; null before H12
   name: string // Product name as printed
+  price?: number | null // The line total as printed (Q39); absent on older receipts
   generic_name: string | null // Brand-free generic name suggested for a new product
   quantity: number
   unit: ReceiptUnit
@@ -181,9 +182,10 @@ export interface ItemSource {
 /**
  * How a printed receipt line's outcome reads on the audit view (Q28). `pending`: not
  * confirmed yet. `stocked`: it became one or more inventory items. `household`: folded away
- * as non-food. `skipped`: neither - the cook left it out.
+ * as non-food. `skipped`: neither - the cook left it out. `removed`: it was stocked at
+ * confirm, but every item it produced has since been hard-deleted (audit follow-up).
  */
-export type ReceiptLineOutcome = 'pending' | 'stocked' | 'household' | 'skipped'
+export type ReceiptLineOutcome = 'pending' | 'stocked' | 'household' | 'skipped' | 'removed'
 
 /** One inventory item a receipt (or receipt line) produced. */
 export interface ReceiptAuditItemRef {
@@ -199,6 +201,17 @@ export interface ReceiptAuditLine {
   price: number | null
   outcome: ReceiptLineOutcome
   items: ReceiptAuditItemRef[] // Set when outcome is 'stocked'
+  reanalysed?: boolean // The cook asked the model again for this line alone (Q38)
+  reanalyse_hint?: string | null // The cook's hint on the re-analyse that last touched it
+}
+
+/**
+ * `POST /api/receipts/{id}/lines/{line_id}/reanalyse` (Q38): re-ask the model for one
+ * line's generic name, category and match, with the cook's optional hint. Nothing is
+ * learned - no alias, synonym or product is created or changed.
+ */
+export interface ReanalyseLineRequest {
+  hint?: string | null
 }
 
 /**

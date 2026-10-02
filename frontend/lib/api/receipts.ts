@@ -6,6 +6,8 @@
 
 import apiClient, { API_BASE_URL } from './client'
 import type {
+  ExtractedItem,
+  ReanalyseLineRequest,
   Receipt,
   ReceiptAudit,
   ReceiptConfirmRequest,
@@ -62,6 +64,22 @@ export async function process(id: string): Promise<Receipt> {
   return apiClient.post<Receipt>(`/receipts/${id}/process`, undefined)
 }
 
+/**
+ * Re-ask the model for one line alone, with the cook's optional hint (Q38). Answers with
+ * the line's fresh generic name, category and match; nothing is learned until confirm.
+ */
+export async function reanalyseLine(
+  receiptId: string,
+  lineId: string,
+  hint?: string | null
+): Promise<ExtractedItem> {
+  const data: ReanalyseLineRequest = { hint: hint ?? null }
+  return apiClient.post<ExtractedItem>(
+    `/receipts/${encodeURIComponent(receiptId)}/lines/${encodeURIComponent(lineId)}/reanalyse`,
+    data
+  )
+}
+
 /** Upload a receipt from the iPad. It comes back already queued for the worker. */
 export async function scan(file: File, fields?: ReceiptScanFields): Promise<Receipt> {
   const data: Record<string, string> = {}
@@ -70,5 +88,5 @@ export async function scan(file: File, fields?: ReceiptScanFields): Promise<Rece
   return apiClient.upload<Receipt>('/receipts/scan', file, data)
 }
 
-const receiptsAPI = { list, get, audit, fileUrl, confirm, process, scan }
+const receiptsAPI = { list, get, audit, fileUrl, confirm, process, scan, reanalyseLine }
 export default receiptsAPI
