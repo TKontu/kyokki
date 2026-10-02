@@ -70,3 +70,40 @@ export interface ActionSummary {
 /** `GET /api/consumption-log/summary`: action -> its counts. Absent means nothing happened. */
 export type ConsumptionSummary = Partial<Record<ConsumptionAction, ActionSummary>> &
   Record<string, ActionSummary | undefined>
+
+/** How one category's events split between thrown away and finished (planner ruling, 2026-10-02). */
+export interface CategoryWaste {
+  category: string
+  display_name: string
+  discarded: number
+  finished: number
+  total: number
+  rate: number // discarded / total
+}
+
+/**
+ * `GET /api/consumption-log/waste`: the Gone screen's headline for a window, plus where it is
+ * worst. Counted by events, not amounts - grams and pieces do not add up. A discard a later
+ * restore undid is not waste; corrections, part-uses and restores never enter this count.
+ */
+export interface WasteStats {
+  discarded: number
+  finished: number
+  total: number
+  rate: number | null // null with nothing in the window - never render this as 0%
+  categories: CategoryWaste[] // categories with at least 3 events, worst waste rate first
+}
+
+/** One ISO week of the trend, Europe/Helsinki (the app's timezone), Monday start. */
+export interface WasteWeek {
+  week_start: string // ISO date, the week's Monday
+  discarded: number
+  finished: number
+  total: number
+  rate: number | null
+}
+
+/** `GET /api/consumption-log/waste/trend`: the last 8 ISO weeks, oldest first. */
+export interface WasteTrend {
+  weeks: WasteWeek[]
+}

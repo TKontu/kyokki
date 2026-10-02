@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -53,6 +53,13 @@ class UndoStepResponse(BaseModel):
     unit: str
     action: str = Field(..., description="A ConsumptionAction")
     quantity_consumed: JsonDecimal = Field(..., description="How much the change moved")
+    direction: Literal["up", "down"] | None = Field(
+        None,
+        description=(
+            "Which way a `correct` moved the quantity; null for any other action, and "
+            "for a `correct` logged before this could be told"
+        ),
+    )
 
 
 class UndoPreviewResponse(BaseModel):

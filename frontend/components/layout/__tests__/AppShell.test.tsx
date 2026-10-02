@@ -46,6 +46,17 @@ describe('AppShell', () => {
     )
   })
 
+  it('offers Shopping, right after Stock', () => {
+    renderShell()
+
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    expect(within(nav).getByRole('link', { name: /shopping/i })).toHaveAttribute(
+      'href',
+      '/shopping'
+    )
+    expect(DESTINATIONS.map((d) => d.href)).toEqual(['/', '/shopping', '/receipts', '/products', '/gone'])
+  })
+
   it('pins the rail to the viewport on the wide layout, so "..." is reachable without scrolling', () => {
     renderShell()
 
@@ -98,6 +109,7 @@ describe('AppShell', () => {
 
   it.each([
     ['/', /stock/i],
+    ['/shopping', /shopping/i],
     ['/receipts', /receipts/i],
     ['/gone', /gone/i],
   ])('marks %s as the current page', (path, name) => {

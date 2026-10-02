@@ -13,7 +13,7 @@ its steps.
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +37,7 @@ class UndoStep:
     unit: str
     action: str
     quantity_consumed: Decimal
+    direction: Literal["up", "down"] | None = None
 
 
 def _left_on_item(row: Any) -> Decimal:
@@ -78,6 +79,7 @@ async def preview(db: AsyncSession) -> tuple[UUID, Any, list[UndoStep]] | None:
             unit=row.unit,
             action=str(row.action),
             quantity_consumed=Decimal(str(row.quantity_consumed)),
+            direction=crud_log.correction_direction(row),
         )
         for row in rows
     ]

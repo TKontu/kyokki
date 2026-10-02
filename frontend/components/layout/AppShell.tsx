@@ -24,6 +24,9 @@ interface Destination {
 
 export const DESTINATIONS: Destination[] = [
   { href: '/', label: 'Stock', icon: '🧊' },
+  // The iPad's first view onto the shopping list (frontier item 5); the API and the agent CLI
+  // have used it since MVP.
+  { href: '/shopping', label: 'Shopping', icon: '🛒' },
   // No Scan (Q32): scanning starts from Receipts, which links to /scan
   {
     href: '/receipts',

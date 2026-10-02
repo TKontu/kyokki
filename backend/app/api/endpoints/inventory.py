@@ -96,6 +96,7 @@ async def preview_undo(
                 unit=step.unit,
                 action=step.action,
                 quantity_consumed=step.quantity_consumed,
+                direction=step.direction,
             )
             for step in steps
         ],

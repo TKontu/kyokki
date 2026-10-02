@@ -5,14 +5,14 @@
  * "Thrown away · 3 items" - never the API's vocabulary, and no amounts (V2, presence not
  * amounts). A partial use can still arrive from outside the iPad; it says "Used some".
  *
- * A correction reads "Put back" (Q22). The only one the iPad makes is tapping a grey "used
- * today" tile back, which sets the item to its full amount and is logged as `correct`. The
- * undo preview cannot say which way a correction went - the log stores its amount unsigned
- * (`crud/consumption_log.py`) and sends no direction - so one made downwards through the API
- * reads "Put back" too. Naming the direction waits on the backend (a recorded follow-up).
+ * A correction reads "Put back" (Q22) when it went up - the only one the iPad itself makes
+ * is tapping a grey "used today" tile back, which sets the item to its full amount - and
+ * "Corrected down" when the log says it went the other way. `direction` is null for a
+ * correction logged before the backend could tell (an old row, or one this build predates);
+ * that reads "Put back" too, same as before this build knew to ask (2026-10-02).
  */
 
-import type { UndoPreview, UndoStep } from '@/types/consumption'
+import type { UndoPreview, UndoStep } from '@/types/inventory'
 
 const VERBS: Record<string, string> = {
   use_full: 'Finished',
@@ -23,6 +23,7 @@ const VERBS: Record<string, string> = {
 
 function what(step: UndoStep): string {
   if (step.action === 'use_partial') return 'Used some'
+  if (step.action === 'correct' && step.direction === 'down') return 'Corrected down'
   // An action this build does not know still says something true: its own name (H04)
   return VERBS[step.action] ?? step.action
 }
