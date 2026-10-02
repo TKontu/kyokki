@@ -2339,6 +2339,59 @@ fix passes verified at source by the planner). **Merged 2026-10-02 by the operat
 - Process notes: the planner's spec gave `--wait` 600 s and a 72-name count for a 68-name list (both
   caught in review). A Sonnet session limit stopped four agents overnight; their lenses were re-run.
 
+**Round 2026-10-02-1** (base `1520506`, planned while round 2026-10-01-1's PRs were still open). It is
+merged: #144, #147, #148, #149 and #150 (2026-10-02, operator), and it is not yet deployed. Every PR
+had a verdict panel and a fix pass; the planner reproduced the top findings at source.
+- **Shopping screen (#148, frontier item 5):**
+  - a Shopping destination in the rail, grouped urgent / normal / low, with bought items collapsed;
+  - quick add, tick with undo, remove, clear bought, and generate from low stock with a dry-run
+    preview;
+  - one Idempotency-Key per user action, reused on retry.
+- **Waste rate and trend on Gone (#150):** the waste rate is discarded ÷ (discarded + finished) by
+  events. It covers the window, per category (from 3 events) and 8 ISO weeks in Europe/Helsinki.
+  Restored discards are excluded, including after the item is deleted: pairing falls back to
+  product, unit and amount; the one ambiguity is documented.
+- **Agent discard of expired stock (#147):** `POST /api/stock/discard-expired` gives a dry run,
+  idempotency, a broadcast and one undo batch. The answer is built from what was actually discarded
+  under the row lock. Stock add stores its idempotency answer in the same commit as the item, before
+  broadcasting (Q24).
+- **Undo direction (#149):** a correction previews as "Put back" (up) or "Corrected down".
+  - [ ] Follow-up: a stale `UndoStep`/`UndoPreview` copy remains in `frontend/types/consumption.ts`
+    (the planner's spec named the wrong file). Dedupe it.
+- **Store chain OCR tolerance (#144):** "Lidi" → `lidl`, and "K Citymarket" with the hyphen read as a
+  space → `k-group`. A fuzzy substitution counts only for OCR-confusion glyph pairs; insertions and
+  deletions count only for patterns of 7+ characters. "PRIIMA PERUNA" no longer matches PRISMA
+  (caught in review).
+  - [ ] **Operator:** `python -m scripts.rekey_store_chains` (dry run), then
+    `--apply lidi-suomi-ky`. Apply requires named keys and flags suspicious exact-rule mappings.
+- **Escape:** #141 + #143 together broke a re-analyse test on `main` (each PR was green alone). It
+  was fixed by #146.
+
+**Round 2026-10-02-2** (base `ff145fc`). Two lanes were *stacked* on open PRs. Merged 2026-10-02: #151 and
+#154. Open and ready: #153, #152 (from #148), #155 (from #147). Not yet deployed.
+- **Home Assistant REST (#154, frontier item 6):** `/api/ha/status|expiring|low-stock|consume|shopping/add`
+  under AG1 tokens, with idempotent consume and add, and the YAML in `docs/HOME_ASSISTANT.md`.
+  `expiring_within_3_days` excludes already-expired items, which are counted under `expired`
+  (caught in review).
+- **H27 heuristic parser (#151):** weights with 1-3 decimals; the saving skip is anchored to the
+  `-säästö` loyalty form, so products named "…SÄÄSTÖPAKKAUS" are kept. The "skipped line resets the
+  product" defect had already been fixed by #131 and is now pinned by a test.
+- **Q37b (#153, open, ready):** a rejected snap now carries the selection model's corrected name
+  (live: pesto → "Pesto", butter → "Butter", turkey → "Turkey"). Confirm refuses to re-attach it
+  unless the cook types a different name or picks it explicitly. An unchanged accepted correction
+  learns an unverified alias (one flaky call cannot teach a verified one).
+  - [ ] `docs/PRODUCT_RESOLUTION_SPEC.md` does not yet describe the rejected/corrected fields.
+- **CLI `stock discard --expired` + coded shopping errors (#155, open, ready):** shopping 404s are
+  `AgentError not_found` (create and update); a retried remove is idempotent; the CLI maps a plain 404
+  to exit 3.
+  - [ ] iPad follow-up: `lib/api/client.ts` reads `code` at the top level, not `detail.code`, and the
+    iPad's shopping remove sends no Idempotency-Key.
+- **Shopping live updates (#152, open, ready):** `shopping_list_update` invalidates the shopping list.
+- **Process:** CI workflows run only for PRs into `main`. A stacked PR gets real CI after it is
+  retargeted *and* receives a push; the planner merged `main` into each to trigger it.
+- **Q18-G2 (#142):** the live ComfyUI check is running through an operator-opened tunnel (the agent
+  sandbox refuses SSH).
+
 ---
 
 ## Phase 1: MVP
@@ -2489,7 +2542,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [ ] Q18-G2 generated icons (#142, open)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1 (dispatched, base `1520506`): [ ] shopping screen  [ ] waste rate + trend  [ ] agent discard-expired + Q24 ordering  [ ] undo correction direction  [ ] store chain OCR tolerance. Next: Q37b, Q18-G2 live check
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [ ] Q18-G2 generated icons (#142, open)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [ ] Q37b (#153)  [x] Home Assistant REST (#154)  [ ] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [ ] shopping live (#152). Not deployed. Next: merge #152/#153/#155, Q18-G2 live check (#142), then round 4 (iPad error codes, undo type dedupe, resolution spec, H47)
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
