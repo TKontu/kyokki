@@ -93,7 +93,7 @@ export function IngredientTile({ item, onSelect, onMore }: IngredientTileProps) 
           type="button"
           aria-label={`More for ${item.product_name}`}
           onClick={() => onMore(item.id)}
-          className="absolute right-1 top-1 flex h-touch w-touch items-center justify-center rounded-full text-lg leading-none opacity-70 hover:opacity-100"
+          className="absolute right-0 top-0 flex h-touch w-touch items-center justify-center rounded-full text-lg leading-none opacity-70 hover:opacity-100"
         >
           …
         </button>

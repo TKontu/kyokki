@@ -50,17 +50,28 @@ class TestIconSubject:
     def test_a_gap_product_with_a_brief_gets_it_appended(self) -> None:
         subject = icon_subject("Tomato puree")
 
-        assert subject == "Tomato puree, a small can or squeeze-out tube"
+        assert subject == "Tomato puree, a small can or squeeze out tube"
 
     def test_the_brief_lookup_is_case_and_space_insensitive(self) -> None:
         # The name keeps its own casing in the subject; only the brief lookup is folded.
-        assert "a can, not a fresh tomato" in icon_subject("  canned   TOMATOES ")
+        assert "a can (not a fresh 🍅)" in icon_subject("  canned   TOMATOES ")
+
+    def test_the_briefs_are_verbatim_from_the_gap_list(self) -> None:
+        """F9 review: the wording was paraphrased and dropped "should look as they
+        should"; this pins the exact text from docs/spikes/Q18_exact_emoji.md."""
+        assert icon_subject("Canned tuna") == (
+            'Canned tuna, "should look as they should": the tuna can as sold'
+        )
+        assert icon_subject("Fish fingers") == (
+            "Fish fingers, "
+            '"should look as they should": the fish fingers, or their pack, as sold'
+        )
 
     def test_the_cooks_hint_is_appended_last(self) -> None:
         subject = icon_subject("Tomato puree", hint="in a yellow tube")
 
         assert subject == (
-            "Tomato puree, a small can or squeeze-out tube, in a yellow tube"
+            "Tomato puree, a small can or squeeze out tube, in a yellow tube"
         )
 
     def test_a_blank_hint_is_ignored(self) -> None:
@@ -352,6 +363,51 @@ class TestDrawIcon:
         assert GOOD.hex() not in text
 
 
+class TestTheWorkflowSent:
+    """F11 review: only opaque fixture PNGs were ever used, and nothing asserted the
+    workflow itself matches the operator's "Flat. No faces" ruling (2026-09-30)."""
+
+    async def test_it_uses_the_flat_trigger_and_the_face_negative_prompt(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        from app.services.icon_workflow import NEGATIVE_PROMPT, TRIGGERS
+
+        product = await _product(db_session)
+
+        with _render() as render:
+            await draw_icon(product.id)
+
+        (workflow,), _ = render.await_args
+        assert workflow["3"]["inputs"]["text"].startswith(f"{TRIGGERS['flat']}, ")
+        assert "emoji," not in workflow["3"]["inputs"]["text"]
+        assert workflow["4"]["inputs"]["text"] == NEGATIVE_PROMPT
+        assert "face" in NEGATIVE_PROMPT
+
+    async def test_transparent_alpha_survives_the_downscale(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        """A real transparent image through the real downscale, not an opaque fixture:
+        half the canvas is fully transparent, half fully opaque, to catch a downscale
+        that flattens or discards the alpha channel."""
+        half = Image.new("RGBA", (1024, 512), (0, 0, 0, 0))
+        source = Image.new("RGBA", (1024, 1024), (228, 69, 58, 255))
+        source.paste(half, (0, 0))
+        buffer = io.BytesIO()
+        source.save(buffer, format="PNG")
+        transparent_source = buffer.getvalue()
+        product = await _product(db_session)
+
+        with _render(images=[transparent_source]):
+            await draw_icon(product.id)
+
+        stored = await _reload(db_session, product)
+        with Image.open(io.BytesIO(stored.icon_image)) as image:
+            assert image.mode == "RGBA"
+            alphas = {pixel[3] for pixel in image.convert("RGBA").getdata()}
+            assert 0 in alphas
+            assert 255 in alphas
+
+
 class TestAutomaticQueueGating:
     """Automatic scheduling (a new product, or a rename) never generates for cleared, an
     exact/cook emoji, or non-food - `draw_icon` is the only place with a database session to
@@ -419,19 +475,46 @@ class TestAutomaticQueueGating:
 
 class TestRegenerateIsExplicit:
     """`request_redraw` marks the product `pending` with a fresh seed before the job runs;
-    that mark is what tells `draw_icon` this is the cook's own ask, not the automatic queue."""
+    that mark is what tells `draw_icon` this is the cook's own ask, not the automatic queue.
 
-    async def test_regenerate_still_renders_for_an_exact_emoji_product(
+    F5 (planner ruling): Regenerate is allowed on a `cleared` product (it un-clears) but
+    refused outright - before ever marking anything pending - for an exact or cook emoji,
+    since that image could never show.
+    """
+
+    async def test_regenerate_refuses_an_exact_emoji_product(
         self, db_session: AsyncSession, categories, broadcast
     ) -> None:
         product = await _product(db_session, emoji_match=EmojiMatch.EXACT)
-        await product_icons.request_redraw(db_session, product.id)
+
+        with pytest.raises(product_icons.EmojiAlreadyShown):
+            await product_icons.request_redraw(db_session, product.id)
+
+        assert (await _reload(db_session, product)).icon_status is None
+
+    async def test_regenerate_refuses_a_cook_emoji_product(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session, emoji_match=EmojiMatch.COOK)
+
+        with pytest.raises(product_icons.EmojiAlreadyShown):
+            await product_icons.request_redraw(db_session, product.id)
+
+    async def test_the_job_itself_refuses_an_exact_emoji_product_too(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        """Belt and suspenders: even if a `pending` row with an exact emoji ever reached
+        the job some other way than `request_redraw`, it still refuses - and resolves the
+        row instead of leaving it hanging."""
+        product = await _product(
+            db_session, emoji_match=EmojiMatch.EXACT, icon_status=IconStatus.PENDING
+        )
 
         with _render() as render:
             await draw_icon(product.id)
 
-        render.assert_awaited_once()
-        assert (await _reload(db_session, product)).icon_status == "ready"
+        render.assert_not_awaited()
+        assert (await _reload(db_session, product)).icon_status == "failed"
 
     async def test_regenerate_still_renders_for_a_cleared_product(
         self, db_session: AsyncSession, categories, broadcast

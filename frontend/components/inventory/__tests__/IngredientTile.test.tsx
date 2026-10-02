@@ -95,6 +95,16 @@ describe('IngredientTile', () => {
     expect(more.className).not.toMatch(/\bh-8\b/)
   })
 
+  it('keeps the "…" button corner-flush so the bigger target does not overlap the tile (F7)', () => {
+    render(<IngredientTile item={MILK} onSelect={jest.fn()} onMore={jest.fn()} />)
+
+    const more = screen.getByRole('button', { name: 'More for Oat Milk' })
+    expect(more.className).toMatch(/\bright-0\b/)
+    expect(more.className).toMatch(/\btop-0\b/)
+    expect(more.className).not.toMatch(/\bright-1\b/)
+    expect(more.className).not.toMatch(/\btop-1\b/)
+  })
+
   it('falls back to a plain box without a category emoji', () => {
     const { container } = render(<IngredientTile item={{ ...MILK, category_icon: null }} />)
 

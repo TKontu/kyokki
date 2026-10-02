@@ -15,7 +15,15 @@ emoji, downscales it with Pillow and stores it as a small transparent PNG:
 
 `icon_status` and `icon_updated_at` are reused unchanged: the four status values (pending,
 ready, failed, cleared) and the cache-busting timestamp mean the same thing for a generated
-image as they did for a drawing.
+image as they did for a drawing. A product the old drawer had finished (`ready`, with an
+`icon_updated_at`) or had mid-flight (`pending`) carries that status straight through the
+`icon_svg` -> `icon_image` swap, but `icon_image` starts NULL for everyone: without a data
+fix, such a row would claim a version (`icon_version` is non-null whenever `icon_updated_at`
+is) with nothing behind it, so every tile would request `icon.png` and get a 404, and the
+gap queue would never pick it up (`ready` never counts as needing one). `upgrade` resets
+`icon_status`/`icon_updated_at`/`icon_seed` back to NULL - "never generated" - for every row
+that is not `cleared` and has no image, which after the column add is every row that was not
+`cleared` under the old drawer either.
 
 Revision ID: c715f1ea4510
 Revises: fbf2c08da52d
@@ -42,6 +50,17 @@ def upgrade() -> None:
     )
     op.add_column(
         "product_master", sa.Column("icon_seed", sa.BigInteger(), nullable=True)
+    )
+    # Every row just lost its drawing (icon_image is NULL for all of them, including the ones
+    # the old drawer had finished or had mid-flight) - so any status but `cleared` is now a
+    # lie about an image that is not there. `cleared` is the one status an empty image is
+    # correct for and must survive untouched; everything else goes back to "never generated".
+    op.execute(
+        """
+        UPDATE product_master
+        SET icon_status = NULL, icon_updated_at = NULL, icon_seed = NULL
+        WHERE icon_image IS NULL AND icon_status IS DISTINCT FROM 'cleared'
+        """
     )
 
 

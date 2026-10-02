@@ -250,8 +250,10 @@ ComfyUI request too) in `stack.env` and restart `kyokki-api`. Then queue the exi
 gap products:
 
 ```bash
-docker compose run --rm kyokki-api python -m scripts.backfill_icons --dry-run
-docker compose run --rm kyokki-api python -m scripts.backfill_icons
+docker compose --env-file stack.env -f docker-compose.prod.yml run --rm kyokki-api \
+  python -m scripts.backfill_icons --dry-run
+docker compose --env-file stack.env -f docker-compose.prod.yml run --rm kyokki-api \
+  python -m scripts.backfill_icons
 ```
 
 ## Agent access tokens

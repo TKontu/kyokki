@@ -21,7 +21,7 @@ from sqlalchemy.orm import undefer
 
 from app.core.config import settings
 from app.models.inventory_item import InventoryItem
-from app.models.product_master import ProductMaster
+from app.models.product_master import EmojiMatch, ProductMaster
 from app.services import product_icons
 
 
@@ -71,7 +71,12 @@ def broadcast():
         yield endpoint
 
 
-async def _product(db: AsyncSession, name: str = "Rye bread") -> ProductMaster:
+async def _product(
+    db: AsyncSession,
+    name: str = "Rye bread",
+    *,
+    emoji_match: EmojiMatch | None = None,
+) -> ProductMaster:
     product = ProductMaster(
         id=uuid4(),
         canonical_name=name,
@@ -80,6 +85,7 @@ async def _product(db: AsyncSession, name: str = "Rye bread") -> ProductMaster:
         default_shelf_life_days=5,
         unit_type="count",
         default_unit="pcs",
+        emoji_match=emoji_match.value if emoji_match else None,
     )
     db.add(product)
     await db.commit()
@@ -193,6 +199,42 @@ class TestRegenerate:
 
         assert response.status_code == 409
         assert (await _reload(seeded_db, product.id)).icon_status is None
+
+    async def test_refuses_an_exact_emoji_product(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        """F5 (planner ruling): that image could never show, so the sheet should not even
+        be allowed to ask for one."""
+        product = await _product(seeded_db, emoji_match=EmojiMatch.EXACT)
+
+        response = await client.post(f"/api/products/{product.id}/icon", json={})
+
+        assert response.status_code == 409
+        assert "exact emoji" in response.json()["detail"]
+        model.assert_not_awaited()
+        assert (await _reload(seeded_db, product.id)).icon_status is None
+
+    async def test_refuses_a_cook_emoji_product(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        product = await _product(seeded_db, emoji_match=EmojiMatch.COOK)
+
+        response = await client.post(f"/api/products/{product.id}/icon", json={})
+
+        assert response.status_code == 409
+        model.assert_not_awaited()
+
+    async def test_still_allowed_on_a_cleared_product(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        """F5: Regenerate un-clears - the cook's latest ask wins."""
+        product = await _generated(client, seeded_db)
+        await client.delete(f"/api/products/{product.id}/icon")
+
+        response = await client.post(f"/api/products/{product.id}/icon", json={})
+
+        assert response.status_code == 202
+        assert (await _reload(seeded_db, product.id)).icon_status == "ready"
 
 
 class TestUseCategoryEmoji:
@@ -342,6 +384,22 @@ class TestRenameRegenerates:
 
         model.assert_not_awaited()
         assert (await _reload(seeded_db, product.id)).icon_status == "cleared"
+
+    async def test_renaming_an_exact_emoji_product_queues_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+    ) -> None:
+        """F2 review: a rename goes through the automatic gate, same as any other
+        automatic scheduling - not Regenerate's explicit path (which would have bypassed
+        it, since `request_redraw` used to pre-mark the row pending)."""
+        product = await _product(seeded_db, "Rye bred", emoji_match=EmojiMatch.EXACT)
+
+        response = await client.patch(
+            f"/api/products/{product.id}", json={"canonical_name": "Rye bread"}
+        )
+
+        assert response.status_code == 200
+        model.assert_not_awaited()
+        assert (await _reload(seeded_db, product.id)).icon_status is None
 
     async def test_a_rename_with_generation_off_queues_and_breaks_nothing(
         self, client: AsyncClient, seeded_db: AsyncSession, broadcast

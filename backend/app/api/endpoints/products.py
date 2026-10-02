@@ -25,7 +25,6 @@ from app.crud import product_master as crud_product
 from app.crud import store_product_alias as crud_alias
 from app.crud.product_master import MovedInventoryItem
 from app.db.session import get_db
-from app.models.product_master import IconStatus
 from app.schemas.product_master import (
     CatalogEstimateChange,
     CatalogEstimateResponse,
@@ -196,14 +195,11 @@ async def update_product(
         await db.commit()
         await _announce(moved, str(product.canonical_name))
 
+    # A rename goes through the automatic queue, not Regenerate's explicit path: it must
+    # still skip `cleared`, an exact/cook emoji, and non-food exactly as any other
+    # automatic scheduling does (F2 review) - unlike Regenerate, nobody asked for this one.
     renamed = str(product.canonical_name) != old_name
-    if (
-        renamed
-        and product.icon_status != IconStatus.CLEARED
-        and settings.COMFYUI_BASE_URL
-    ):
-        async with handle_integrity_errors():
-            await product_icons.request_redraw(db, product_id)
+    if renamed:
         product_icons.schedule_icons(background_tasks, [product_id])
 
     await broadcast_product_update(
@@ -270,15 +266,22 @@ async def redraw_product_icon(
 
     Returns:
         - 404: no such product.
-        - 409: generation is not configured (`COMFYUI_BASE_URL` is empty).
+        - 409: generation is not configured (`COMFYUI_BASE_URL` is empty), or the product
+          shows an exact or cook emoji (F5: that image could never show; clear the emoji
+          first). Allowed on a `cleared` product - it un-clears.
     """
     if not settings.COMFYUI_BASE_URL:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Icon generation is not configured on this server",
         )
-    async with handle_integrity_errors():
-        product = await product_icons.request_redraw(db, product_id)
+    try:
+        async with handle_integrity_errors():
+            product = await product_icons.request_redraw(db, product_id)
+    except product_icons.EmojiAlreadyShown as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
     if product is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -46,10 +46,15 @@ async def backfill(
     dry_run: bool,
     sessions: SessionFactory = _default_sessions,
 ) -> dict[str, int]:
-    """Generate what needs generating. Returns how many were generated, failed, skipped."""
+    """Generate what needs generating.
+
+    Returns how many ended `ready`, `failed`, still `pending` (still running, or a newer
+    Regenerate from the API raced in first), `gone` (the product was deleted mid-job), or
+    were `skipped` (generated, being generated, or cleared meanwhile).
+    """
     if not dry_run and not settings.COMFYUI_BASE_URL:
         print("COMFYUI_BASE_URL is empty; generation is disabled. Refusing to run.")
-        return {"ready": 0, "failed": 0, "skipped": 0}
+        return {"ready": 0, "failed": 0, "pending": 0, "gone": 0, "skipped": 0}
 
     async with sessions() as db:
         todo = [
@@ -57,7 +62,7 @@ async def backfill(
             for p in await product_icons.products_to_generate(db, limit)
         ]
     print(f"{len(todo)} gap product(s) to generate")
-    counts = {"ready": 0, "failed": 0, "skipped": 0}
+    counts = {"ready": 0, "failed": 0, "pending": 0, "gone": 0, "skipped": 0}
     for product_id, name, status in todo:
         if dry_run:
             print(f"  would generate  {name}  ({status or 'never generated'})")
@@ -74,12 +79,25 @@ async def backfill(
         await product_icons.draw_icon(product_id)
         async with sessions() as db:
             product = await crud_product.get_icon_subject(db, product_id)
-        after = None if product is None else product.icon_status
-        counts["ready" if after == IconStatus.READY else "failed"] += 1
-        print(f"  {after or 'gone':8} {name}  {time.monotonic() - started:.1f}s")
+        # F12 review: a non-ready outcome used to be called "failed" across the board, which
+        # hid a product deleted mid-job ("gone") and one still mid-render or raced with
+        # another writer ("pending", e.g. a second Regenerate from the API arrived first)
+        # behind an actual render failure.
+        if product is None:
+            bucket = "gone"
+        elif product.icon_status == IconStatus.READY:
+            bucket = "ready"
+        elif product.icon_status == IconStatus.PENDING:
+            bucket = "pending"
+        else:
+            bucket = "failed"
+        counts[bucket] += 1
+        label = "gone" if product is None else str(product.icon_status)
+        print(f"  {label:8} {name}  {time.monotonic() - started:.1f}s")
     if not dry_run:
         print(
             f"{counts['ready']} generated, {counts['failed']} failed, "
+            f"{counts['pending']} still pending, {counts['gone']} gone, "
             f"{counts['skipped']} skipped, of {len(todo)}"
         )
     return counts

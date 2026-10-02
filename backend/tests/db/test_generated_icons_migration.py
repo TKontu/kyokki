@@ -10,13 +10,15 @@ left to restore them from, and the migration says so in its own docstring.
 """
 
 import importlib.util
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from alembic.config import Config
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 BACKEND = Path(__file__).resolve().parents[2]
@@ -103,3 +105,80 @@ class TestTheSchemaChange:
 
         assert str(columns["icon_image"]["type"]).upper() in ("BYTEA", "LARGEBINARY")
         assert str(columns["icon_seed"]["type"]).upper() in ("BIGINT", "INTEGER")
+
+
+class TestOrphanedRowsBackfill:
+    """F1: a row the old SVG drawer finished (`ready`) or had mid-flight (`pending`) carries
+    that status straight through the `icon_svg` -> `icon_image` swap, but `icon_image` starts
+    NULL for everyone. Without the backfill, such a row would claim a version
+    (`icon_version` is non-null whenever `icon_updated_at` is) with no image behind it: every
+    tile would request `icon.png` and get a 404, and the gap queue would never re-pick it up
+    (`ready` never counted as needing one). `cleared` is the one status an empty image is
+    correct for and must survive untouched.
+    """
+
+    async def test_ready_and_pending_are_reset_cleared_is_left_alone(
+        self, db_session: AsyncSession
+    ) -> None:
+        conn = await db_session.connection()
+        await conn.run_sync(
+            _run, "downgrade"
+        )  # back to icon_svg, no icon_image/icon_seed
+
+        await conn.execute(
+            text(
+                "INSERT INTO category (id, display_name, default_shelf_life_days, sort_order) "
+                "VALUES ('produce-f1', 'Produce', 10, 1) ON CONFLICT (id) DO NOTHING"
+            )
+        )
+        now = datetime.now(UTC)
+        rows = {
+            "ready": ("<svg><circle/></svg>", "ready", now),
+            "pending": (None, "pending", now),
+            "cleared": (None, "cleared", None),
+            "never": (None, None, None),
+        }
+        ids = {name: uuid4() for name in rows}
+        for name, (svg, status, updated) in rows.items():
+            await conn.execute(
+                text(
+                    "INSERT INTO product_master "
+                    "(id, canonical_name, category, storage_type, default_shelf_life_days, "
+                    " shelf_life_source, unit_type, default_unit, icon_svg, icon_status, "
+                    " icon_updated_at, created_at, updated_at) "
+                    "VALUES (:id, :name, 'produce-f1', 'refrigerator', 10, "
+                    " 'category', 'count', 'pcs', :svg, :status, :updated, :now, :now)"
+                ),
+                {
+                    "id": ids[name],
+                    "name": f"F1 {name} row",
+                    "svg": svg,
+                    "status": status,
+                    "updated": updated,
+                    "now": now,
+                },
+            )
+
+        await conn.run_sync(_run, "upgrade")
+
+        result = await conn.execute(
+            text(
+                "SELECT id, icon_status, icon_updated_at, icon_seed, icon_image "
+                "FROM product_master WHERE id = ANY(:ids)"
+            ),
+            {"ids": list(ids.values())},
+        )
+        rows_by_id = {row.id: row for row in result}
+        by_name = {name: rows_by_id[row_id] for name, row_id in ids.items()}
+
+        for name in ("ready", "pending", "never"):
+            row = by_name[name]
+            assert row.icon_status is None, name
+            assert row.icon_updated_at is None, name
+            assert row.icon_seed is None, name
+            assert row.icon_image is None, name
+
+        cleared = by_name["cleared"]
+        assert cleared.icon_status == "cleared"
+        assert cleared.icon_updated_at is None
+        assert cleared.icon_image is None

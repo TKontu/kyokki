@@ -12,12 +12,16 @@ only place `services/product_icons.py` builds its generation subject text from.
 
 from app.services.product_names import normalize_product_name
 
-# Sourced verbatim from the gap list's briefs table.
+# Verbatim from the gap list's briefs table (F9 review: the previous wording was
+# paraphrased and dropped "should look as they should"). The emoji in the second one is
+# fine in a generation prompt - it is a short note to the model, not markup.
 _BRIEFS: dict[str, str] = {
-    "Tomato puree": "a small can or squeeze-out tube",
-    "Canned tomatoes": "a can, not a fresh tomato",
-    "Canned tuna": "the tuna can as sold",
-    "Fish fingers": "the fish fingers, or their pack, as sold",
+    "Tomato puree": "a small can or squeeze out tube",
+    "Canned tomatoes": "a can (not a fresh 🍅)",
+    "Canned tuna": '"should look as they should": the tuna can as sold',
+    "Fish fingers": (
+        '"should look as they should": the fish fingers, or their pack, as sold'
+    ),
 }
 
 BRIEFS: dict[str, str] = {

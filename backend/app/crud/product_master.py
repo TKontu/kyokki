@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import undefer
 
 from app.models.category import Category
 from app.models.consumption_log import ConsumptionLog
@@ -32,6 +33,13 @@ def _unit_type(unit: str) -> str:
         return "count"
 
 
+def _escape_ilike(term: str) -> str:
+    """Escape `%`, `_` and the escape character itself, so a literal one in a search term is
+    never read as an ILIKE wildcard (F13 review: `?q=` reaches this now, H58).
+    """
+    return term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 async def get_products(
     db: AsyncSession, search: str | None = None, emoji_match: str | None = None
 ) -> list[ProductMaster]:
@@ -49,7 +57,11 @@ async def get_products(
     query = select(ProductMaster)
 
     if search:
-        query = query.where(ProductMaster.canonical_name.ilike(f"%{search}%"))
+        query = query.where(
+            ProductMaster.canonical_name.ilike(
+                f"%{_escape_ilike(search)}%", escape="\\"
+            )
+        )
     if emoji_match:
         query = query.where(ProductMaster.emoji_match == emoji_match)
 
@@ -580,9 +592,26 @@ async def enrich_product_from_off_data(
 # --- the generated icon (Q18-G2) ----------------------------------------------------------
 
 
-async def get_icon_subject(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
-    """The product, freshly read, for deciding what its icon job does next."""
-    return await db.get(ProductMaster, product_id, populate_existing=True)
+async def get_icon_subject(
+    db: AsyncSession, product_id: UUID, *, for_update: bool = False
+) -> ProductMaster | None:
+    """The product, freshly read, for deciding what its icon job does next.
+
+    Always undefers `icon_image`: callers need to tell "ready with an image" from "ready
+    with none" (a pre-Q18-G2 row's old status carried through with nothing behind it), and a
+    deferred column read outside an active session would otherwise lazy-load unsafely.
+    `for_update=True` takes a row lock (`SELECT ... FOR UPDATE`), so a finishing render can
+    re-check "is this still wanted" against a row nothing else is concurrently changing.
+    """
+    query = (
+        select(ProductMaster)
+        .where(ProductMaster.id == product_id)
+        .options(undefer(ProductMaster.icon_image))
+        .execution_options(populate_existing=True)
+    )
+    if for_update:
+        query = query.with_for_update()
+    return (await db.execute(query)).scalar_one_or_none()
 
 
 async def mark_icon_pending(
@@ -643,7 +672,9 @@ async def stored_icon(
 
 
 def icon_needs_generation(product: ProductMaster, stale_before: datetime) -> bool:
-    """Never generated, failed, or pending so long that its job must have died.
+    """Never generated, failed, pending so long that its job must have died, or `ready`
+    with nothing actually behind it (a pre-Q18-G2 row the migration missed, or any future
+    bug that leaves the two out of step - belt and suspenders over the migration's backfill).
 
     Cleared and exact/cook-emoji products are never picked here: `cleared` is the cook's own
     "do not generate this" and an exact or cook emoji already shows on the tile, so an image
@@ -656,6 +687,8 @@ def icon_needs_generation(product: ProductMaster, stale_before: datetime) -> boo
         return False
     if status is None or status == IconStatus.FAILED:
         return True
+    if status == IconStatus.READY:
+        return product.icon_image is None
     return bool(status == IconStatus.PENDING and product.updated_at < stale_before)
 
 
@@ -674,7 +707,7 @@ async def products_needing_icons(
     query = (
         select(ProductMaster)
         .where(
-            # `cleared` matches none of the three conditions below, so it is already
+            # `cleared` matches none of the four conditions below, so it is already
             # excluded without a separate clause - and a separate `!= CLEARED` would wrongly
             # drop every NULL (never-generated) row too, under SQL's three-valued logic.
             not_shown_as_emoji,
@@ -684,6 +717,12 @@ async def products_needing_icons(
                 and_(
                     ProductMaster.icon_status == IconStatus.PENDING,
                     ProductMaster.updated_at < stale_before,
+                ),
+                # `ready` with nothing behind it: belt and suspenders over the migration's
+                # own backfill (icon_needs_generation's docstring has the full reasoning).
+                and_(
+                    ProductMaster.icon_status == IconStatus.READY,
+                    ProductMaster.icon_image.is_(None),
                 ),
             ),
         )

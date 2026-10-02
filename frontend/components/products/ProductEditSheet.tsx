@@ -46,6 +46,7 @@ import {
   useClearProductIcon,
   useConfirmProductEmoji,
   useEmojiReference,
+  useProduct,
   useRedrawProductIcon,
   useRejectProductEmoji,
   useSetProductEmoji,
@@ -99,10 +100,22 @@ export function ProductEditSheet({
   // act at once, outside Save, so this sheet's own prop is briefly behind the server).
   const [liveAnswer, setLiveAnswer] = useState<ProductMaster | null>(null)
   const [brokenIcon, setBrokenIcon] = useState<number | null>(null)
-  const liveProduct =
-    liveAnswer && Date.parse(liveAnswer.updated_at) >= Date.parse(product.updated_at)
-      ? liveAnswer
-      : product
+  // Polls while the icon is pending (Q18-G2, F4 review), so "Generating..." clears on its
+  // own once the render lands - otherwise nothing tells this open sheet it has.
+  const polled = useProduct(product.id)
+  // `product` (the prop) is the baseline; an instant action's own answer (`liveAnswer`) or
+  // the poll replace it once they are at least as fresh - an action that does not happen to
+  // bump `updated_at` must still win over the prop it was answering (the original reason
+  // for `>=`, before the poll existed), and the poll winning a tie with an *already-applied*
+  // `liveAnswer` is harmless: at that point they describe the same server state.
+  const liveProduct = [liveAnswer, polled.data].reduce<ProductMaster>(
+    (freshest, candidate) =>
+      candidate != null &&
+      Date.parse(candidate.updated_at) >= Date.parse(freshest.updated_at)
+        ? candidate
+        : freshest,
+    product
+  )
   const iconVersion = liveProduct.icon_version ?? null
   const iconStatus = liveProduct.icon_status ?? null
   const generationEnabled = liveProduct.generation_enabled ?? false

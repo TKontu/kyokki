@@ -23,6 +23,11 @@ export function useProduct(id: string | null) {
     queryFn: () => productsAPI.get(id as string),
     enabled: Boolean(id),
     staleTime: 30_000,
+    // While an icon is generating, poll until it lands (Q18-G2, F4 review): without this
+    // the product edit sheet never learns a render finished unless something else happens
+    // to refetch it, and "Generating..." never clears on its own.
+    refetchInterval: (query) =>
+      query.state.data?.icon_status === 'pending' ? 5_000 : false,
   })
 }
 

@@ -25,10 +25,13 @@ Automatic scheduling (a new product, or one just renamed) is gated at generation
 `icon_needs_generation` skips `cleared` and an exact/cook emoji, and a non-food name is always
 skipped - because nothing here has a database session at schedule time to check first. A
 cook's own **Regenerate**, already marked `pending` with a fresh seed before the job runs
-(`request_redraw`), is not second-guessed by that gate: it is the cook asking, explicitly, for
-exactly this image. Only the one always-absolute rule - never for non-food - still applies, so
-that path can never get stuck showing "Generating...": on a non-food name it is marked `failed`
-at once instead of hanging pending forever.
+(`request_redraw`), is not second-guessed on `cleared`: asking to regenerate is how the cook
+un-clears one. An exact or cook emoji is never bypassed either way, explicit or not (F5,
+planner ruling) - `request_redraw` refuses it with 409 before ever marking pending, so the
+cook sees it as "clear the emoji first", not a silent no-op. Non-food is the same absolute
+rule it always was. Both refusals resolve the row (`failed`) instead of leaving it hanging on
+"Generating...", for the same reason: a `pending` row some other path ever left behind must
+never wait forever for a job that will not run.
 
 `schedule_icons` always queues its background task (`draw_icons`, the same name and call shape
 Q18's drawer used - `services/shelf_life_on_create.py` and its tests, a sibling lane, schedule
@@ -76,6 +79,8 @@ ICON_LOCK_KEY = 0x4B794F19  # "KyO" + Q18-G2
 STALE_AFTER_TIMEOUTS = (
     2  # a pending older than this many COMFYUI_TIMEOUTs has no live job
 )
+# How often a job that lost the race for the render lock checks again (F10 review).
+LOCK_POLL_INTERVAL = 2.0
 # `icon_workflow.SEED_MAX` is ComfyUI's full unsigned 64-bit range, but `icon_seed` is a
 # Postgres BIGINT (signed 64-bit): a seed this module picks itself never exceeds that
 # column's range, whatever an explicit seed passed straight to `build_icon_workflow` may be.
@@ -104,16 +109,15 @@ def icon_subject(name: str, hint: str | None = None) -> str:
 # --- eligibility ----------------------------------------------------------------------------
 
 
-def _auto_eligible(product: ProductMaster) -> bool:
-    """Whether the automatic queue (not an explicit Regenerate) may generate for this product.
+def _emoji_already_shown(product: ProductMaster) -> bool:
+    """An exact or cook-chosen emoji already wins the tile (lib/productIcon.ts's precedence).
 
-    `cleared` is the cook's own "do not generate this", and an exact or cook emoji already
-    wins the tile (lib/productIcon.ts's precedence), so an image nobody would ever see is not
-    worth a GPU job. Food-ness is checked separately (it needs a database read).
+    Never overridden, explicit Regenerate or not (F5, planner ruling): the image could never
+    show. `request_redraw` already refuses this with 409 before ever marking the product
+    pending, so a job reaching this check still true is the last line of defense, not the
+    usual path.
     """
-    if product.icon_status == IconStatus.CLEARED:
-        return False
-    return product.emoji_match not in (EmojiMatch.EXACT, EmojiMatch.COOK)
+    return product.emoji_match in (EmojiMatch.EXACT, EmojiMatch.COOK)
 
 
 async def still_needs_generation(db: AsyncSession, product_id: UUID) -> bool:
@@ -161,16 +165,35 @@ async def _gateway_turn() -> AsyncIterator[None]:
     """Hold the database-wide render lock: one render at a time across every process.
 
     Production runs two API workers, and the backfill script is a third process; ComfyUI is
-    one GPU. A Postgres advisory lock on a session of its own is released by
-    `pg_advisory_unlock`, or by the database when the process holding it dies.
+    one GPU. Polls `pg_try_advisory_lock` (non-blocking) rather than the blocking
+    `pg_advisory_lock` (F10 review): the blocking call would hold a pooled connection idle
+    for as long as whoever else's render takes, and a pool only has so many connections to
+    give out. A losing attempt's session is closed before the sleep, so nothing is held idle
+    while waiting; holding one open through the render itself, once the lock is won, is
+    accepted - that is the one connection actually doing something, for as long as one render
+    takes, which is the entire point of serialising on it. Gives up after `COMFYUI_TIMEOUT`
+    seconds of trying. Advisory locks are session-scoped, released by `pg_advisory_unlock` or
+    by the database when the process holding it dies - so winning on one session and using a
+    different one afterwards would not keep the lock; the same `db` is kept for both.
     """
-    async with open_session() as db:
-        await db.execute(select(func.pg_advisory_lock(ICON_LOCK_KEY)))
-        try:
-            yield
-        finally:
-            await db.execute(select(func.pg_advisory_unlock(ICON_LOCK_KEY)))
-            await db.commit()
+    deadline = time.monotonic() + settings.COMFYUI_TIMEOUT
+    while True:
+        async with open_session() as db:
+            got = (
+                await db.execute(select(func.pg_try_advisory_lock(ICON_LOCK_KEY)))
+            ).scalar()
+            if got:
+                try:
+                    yield
+                finally:
+                    await db.execute(select(func.pg_advisory_unlock(ICON_LOCK_KEY)))
+                    await db.commit()
+                return
+        if time.monotonic() >= deadline:
+            raise comfyui.ComfyUITimeout(
+                "Timed out waiting for the ComfyUI render lock"
+            )
+        await asyncio.sleep(LOCK_POLL_INTERVAL)
 
 
 def _downscale(image_bytes: bytes) -> bytes:
@@ -229,11 +252,20 @@ async def _generate(product_id: UUID, hint: str | None) -> None:
         name = str(product.canonical_name)
         # Already `pending` means an explicit Regenerate got here first (`request_redraw`
         # marks it, with a fresh seed, before scheduling this job) - that is the cook asking
-        # for exactly this image, so the automatic gate (cleared, exact/cook emoji) does not
-        # second-guess it. The automatic queue never pre-marks pending, so it always sees
-        # something else here and the gate applies.
+        # for exactly this image, so `cleared` (the cook un-clearing) does not second-guess
+        # it. The automatic queue (rename, a new product) never pre-marks pending, so it
+        # always sees something else here and `cleared` does apply. An exact/cook emoji is
+        # never bypassed either way (F5) - see `_emoji_already_shown`.
         explicit = product.icon_status == IconStatus.PENDING
-        if not explicit and not _auto_eligible(product):
+        if _emoji_already_shown(product):
+            # Unreachable in practice - `request_redraw` already refuses this with 409
+            # before ever marking pending - but if a pending row ever got here some other
+            # way, it still must not hang "Generating..." forever.
+            if explicit:
+                await crud_product.mark_icon_failed(db, product)
+                await _announce(product_id, name)
+            return
+        if not explicit and product.icon_status == IconStatus.CLEARED:
             return
         if await is_non_food(db, name):
             if explicit:
@@ -247,8 +279,12 @@ async def _generate(product_id: UUID, hint: str | None) -> None:
             if explicit and product.icon_seed is not None
             else random.randint(0, RANDOM_SEED_MAX)
         )
-        if not explicit:
-            await crud_product.mark_icon_pending(db, product, job_seed)
+        # Always persist the seed this job is about to use - including the explicit path,
+        # where it is a same-value re-write: `_keep`'s seed check (F3) needs the row to
+        # already carry whichever seed is current before the render starts, and a stale
+        # `pending` the automatic queue just picked back up (its own job died without ever
+        # recording one) would otherwise still have none to compare against.
+        await crud_product.mark_icon_pending(db, product, job_seed)
 
     try:
         started = time.monotonic()
@@ -288,11 +324,23 @@ async def _generate(product_id: UUID, hint: str | None) -> None:
 
 
 async def _keep(product_id: UUID, image: bytes, seed: int) -> bool:
-    """Store the result unless nobody wants it any more. Whether anything was written."""
+    """Store the result unless nobody wants it any more. Whether anything was written.
+
+    Re-reads the row under a lock (`FOR UPDATE`) and stores only if it is still `pending`
+    *with this job's own seed* (F3 review): two Regenerates in flight each mark their own
+    seed when they start, so whichever one is current when this runs is the one the cook
+    asked for last - an older, slower job finishing after a newer one must not overwrite it,
+    seed match or not just status.
+    """
     async with open_session() as db:
-        product = await crud_product.get_icon_subject(db, product_id)
-        if product is None or product.icon_status != IconStatus.PENDING:
-            # Deleted, or the cook chose the emoji while it was being generated: theirs wins.
+        product = await crud_product.get_icon_subject(db, product_id, for_update=True)
+        if (
+            product is None
+            or product.icon_status != IconStatus.PENDING
+            or product.icon_seed != seed
+        ):
+            # Deleted, the cook chose the emoji while it was being generated, or a newer
+            # Regenerate already took over this row: whichever one is current wins.
             logger.info(
                 "Discarding a generated icon nobody wants any more",
                 extra={"product_id": str(product_id)},
@@ -346,15 +394,28 @@ def schedule_icons(
     background_tasks.add_task(draw_icons, list(product_ids), hint)
 
 
+class EmojiAlreadyShown(Exception):
+    """Regenerate was asked for a product whose tile already shows an exact/cook emoji."""
+
+
 async def request_redraw(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
     """Mark the icon pending with a fresh seed, so the sheet says "Generating..." at once.
 
     This is Regenerate (Q18-G2, operator ask 2026-09-30): always a new random seed, and this
-    mark is what tells the job that follows it is explicit - see `_generate`. None: no product.
+    mark is what tells the job that follows it is explicit - see `_generate`. Allowed on a
+    `cleared` product (the cook's latest ask un-clears it); refused for one with an exact or
+    cook emoji (F5, planner ruling) - that image could never show. None: no product.
+
+    Raises:
+        EmojiAlreadyShown: the product's emoji is `exact` or `cook`.
     """
     product = await crud_product.get_icon_subject(db, product_id)
     if product is None:
         return None
+    if _emoji_already_shown(product):
+        raise EmojiAlreadyShown(
+            "This product shows an exact emoji; clear the emoji first"
+        )
     await crud_product.mark_icon_pending(
         db, product, random.randint(0, RANDOM_SEED_MAX)
     )

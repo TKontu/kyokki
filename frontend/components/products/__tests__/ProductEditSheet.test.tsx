@@ -67,6 +67,10 @@ const EMOJI_REFERENCE = [
   { emoji: '🧀', name: 'cheese wedge' },
 ]
 
+// The sheet polls `GET /products/{id}` while its icon is pending (F4 review). Most tests
+// never make it pending, so the poll's request goes unhandled (MSW logs it, harmlessly -
+// `polled.data` just stays undefined and `liveProduct` falls through to `product`/
+// `liveAnswer` as before); only the dedicated polling test below gives it a handler.
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 beforeEach(() => {
   server.use(
@@ -508,6 +512,43 @@ describe('ProductEditSheet icon', () => {
 
     expect(save()).toBeDisabled()
   })
+
+  it(
+    'clears "Generating..." on its own once a poll finds the icon ready (F4)',
+    async () => {
+      let polls = 0
+      server.use(
+        http.get(`${API_URL}/products/p-1`, () => {
+          polls += 1
+          return HttpResponse.json(
+            polls === 1
+              ? { ...PRODUCT, icon_status: 'pending' }
+              : {
+                  ...PRODUCT,
+                  icon_status: 'ready',
+                  icon_version: 1790000001,
+                  updated_at: '2026-09-01T00:00:10Z',
+                }
+          )
+        })
+      )
+      renderSheet({ ...PRODUCT, icon_status: 'pending' })
+
+      expect(
+        screen.getByText('Generating… this takes a few minutes')
+      ).toBeInTheDocument()
+
+      await waitFor(
+        () =>
+          expect(
+            screen.queryByText('Generating… this takes a few minutes')
+          ).toBeNull(),
+        { timeout: 8000, interval: 250 }
+      )
+      expect(polls).toBeGreaterThan(1)
+    },
+    10_000
+  )
 
   it('shows a plain note instead of Regenerate when generation is not configured', () => {
     renderSheet({ ...PRODUCT, generation_enabled: false })
