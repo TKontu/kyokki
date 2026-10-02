@@ -2261,21 +2261,83 @@ emoji. A Lidl receipt read cleanly. The item sheet's "From Lidl, <date>: palvari
 to the audit view.
 - **Q37 — wrong matches are too common.** In the operator's words: "Currently there are too many
   stupid mistakes". Examples: "cashew pähkinät" (cashew nuts) became a dip, and "pesto" became a dip.
-  - Not yet triaged: whether the extractor's generic name, its category, or the product match is
-    wrong.
-  - The audit view (#136) now shows the printed line, the OCR text and the model's answer for a
-    receipt. Triage from `GET /api/receipts/{id}/audit` once the operator shares the receipt id.
+  - **Triaged 2026-10-01** from the Lidl receipt's audit (`e5fb7580-…`, production, read-only). The
+    operator added: "the dip, chicken fillet are also wrong".
+    - **The extractor's generic name snapped to the nearest catalog name.** Pesto and cashew nuts
+      became "Dip", baking chocolate became "Chips", butter (Valio voi) became "Spread", turkey cold
+      cuts became "Ham", and chicken mince became "Chicken fillet". All six were catalog names
+      before the read.
+    - `CATALOG_BLOCK` says "when one is listed here, use its name exactly for g". The resolver's name
+      tier then made each snap a deterministic match, so selection never saw the printed line.
+    - The cook fixed 4 by hand. Butter and turkey were confirmed as Spread and Ham, so production now
+      holds the verified aliases `KARTANON KALKKUNALEIKE → Ham` and
+      `VALIO VOI NORMAALISUOLAI → Spread`.
+    - "Dip" itself came from "KARAMEL&PUNASIPULI" (caramelised red onion, 2026-09-16).
+    - The chain was misread as `lidi-suomi-ky` ("Lidi").
+  - [ ] Fix: round 2026-10-01-1 A1 (`fix/q37-generic-name-snapping`). A listed name is used only for
+    the same product, and a `g`-only name hit goes through selection with the printed line.
+  - [ ] Operator, in production:
+    - remove the two aliases above on `/products`, and move the turkey and butter items;
+    - rename or re-categorise "Dip".
+  - [ ] Next round: recognise the chain despite an OCR misread such as "Lidi" (`store_chain.py`).
 - **Q38 — re-analyse a line while reviewing.**
   - Today the cook can re-read the whole receipt (when it is `completed`), or fix a line's name and
     product by hand.
   - There is no way to ask the model again for one line: its generic name, category and match.
-  - Direction (to rule): a per-line "Re-analyse" on the review screen, optionally with the cook's hint.
+  - **Ruled 2026-10-01:** re-analyse with an optional hint. No alias is learned until confirm.
+    Round 2026-10-01-1 A2 (`feat/q38-q39-review-line`), together with Q39.
 - **Q39 — the original printed title on the review screen.** The review row shows the generic name
   and "→ product", but not the printed receipt line it came from. The cook cannot judge a mismatch
   like Q37's without opening the audit view. Direction: show the printed line, as the audit view does.
 - **Q18 (operator observation):** "Emoji redrawing does not work". This is expected: the product
   sheet's Redraw is the rejected SVG drawer from #121 (`ICON_MODEL`), and Regenerate arrives with
   Q18-G2. Only table names have emoji so far; the rest need `backfill_emoji --propose` or a hand pick.
+
+**Round 2026-10-01-1** (base `1520506`; Sonnet executors; five-lens verdict panels, every PR fix-first;
+fix passes verified at source by the planner). **Merged 2026-10-02 by the operator: #139, #140, #141,
+#143. #142 (Q18-G2) still open, in its fix pass.** Not yet deployed.
+- **Q37 (#143):** the triage found generic-name snapping, not a matching bug. A model's `g` that equals
+  a catalog name only through the model (canonical or model-taught) is now a selection candidate, not a
+  key: the printed line is judged before it becomes a match. Printed-name hits and cook-taught names
+  stay deterministic. The catalog block says a listed name is for the same product only (a longer
+  wording regressed K-Citymarket categories to 0-1/15 and was reverted). The selection prompt gained four
+  general rules (raw vs manufactured, another animal's cut, processing form, broad catch-all words).
+  - **Live result, recorded as partial:** on the Lidl fixture `c2.muse-glimmer` still keeps some snaps
+    (chicken mince -> Chicken fillet in 3/3 runs; butter, chocolate, cashew about half). They now arrive
+    unverified (`selected`) instead of as silent keys. Completeness unchanged: Lidl 14/14, K 15/15,
+    S-kaupat 49/49.
+  - **Ruling recorded (planner, from the operator's Q37 report):** a processing form is a different
+    product (mince is not fillet). MVP-R2's "never per ... cut" means equivalent retail cuts of one form.
+  - [ ] **Q37b (high):** a rejected snap can still land on the snapped product at confirm. If the cook
+    accepts the unmatched row without retyping, `name` defaults to `generic_name` ("Dip") and
+    `product_for_name`'s canonical-name fallback returns Dip (`product_names.py:73-83`,
+    `receipt_confirm.py:137`). Direction: selection returns a corrected generic name on rejection,
+    processing stores it, and confirm refuses to re-attach a rejected snap.
+- **Q38 + Q39 (#141):** every review row shows its printed line and price. "Re-analyse" asks the model
+  again for one line, with an optional hint that outranks the printed text. Nothing is learned until
+  confirm, and the receipt lock is taken only after the model answers (re-checked with fresh data).
+  The audit shows `removed` for a stocked item later deleted (marker written inside confirm's single
+  transaction) and "re-analysed" with the hint.
+- **Live updates (#140, frontier item 1):** `GET /api/events` (SSE) through the Next proxy, so the browser
+  holds no token. `Cache-Control: no-transform` is load-bearing: without it Next's gzip buffered the
+  whole stream (reproduced on the standalone build). A named `ping` every 15 s, a 45 s client watchdog,
+  one pending `resync` per slow client; inventory polls every 5 min while live, 30 s otherwise.
+  - [ ] Shopping keys are not wired yet (`shopping_list_update` maps to nothing); wire after the shopping
+    screen lands.
+- **AG4 + CLI receipts (#139):** `kyokki receipt upload [--wait] | status | confirm --all-matched
+  [--assign N=ID] [--new N=CATEGORY] [--skip-unmatched]`, and `skills/kyokki/SKILL.md` plus examples
+  (every command in them is parse-checked). `--wait` defaults to 1800 s (the server's per-receipt budget).
+  - [ ] AG7 acceptance (a Hermes run against a staging stack) is still the operator's.
+  - [ ] `kyokki stock discard --expired` waits on the agent endpoint (round 2026-10-02-1 A3).
+- **Q18-G2 (#142, open):** ComfyUI PNGs replace the rejected SVG drawer; Regenerate; production stays
+  off until `COMFYUI_BASE_URL` is set. Review found migrated `ready` rows left without an image (404 on
+  every tile), a rename queueing exact-emoji products, a seed race and a stuck busy state. Fixing.
+  - **Ruling (planner):** Regenerate is allowed on a `cleared` product (it un-clears), refused for
+    exact/cook emoji; a rename uses the automatic gate.
+  - [ ] **Operator:** the live ComfyUI check (5 gap products incl. Quark, one Regenerate, 6 images on the
+    PR). The sandbox refused the SSH tunnel; allow it, or run it on the workstation.
+- Process notes: the planner's spec gave `--wait` 600 s and a 72-name count for a 68-name list (both
+  caught in review). A Sonnet session limit stopped four agents overnight; their lenses were re-run.
 
 ---
 
@@ -2427,7 +2489,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [ ] H47
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Next: Q37-Q39 (review-screen quality), Q18-G2 (generation wired in, Regenerate; needs the ComfyUI reachability decision)
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [ ] Q18-G2 generated icons (#142, open)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1 (dispatched, base `1520506`): [ ] shopping screen  [ ] waste rate + trend  [ ] agent discard-expired + Q24 ordering  [ ] undo correction direction  [ ] store chain OCR tolerance. Next: Q37b, Q18-G2 live check
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
