@@ -550,3 +550,41 @@ class TestDiscardExpired:
 
         rows = (await db.execute(select(IdempotencyKey))).scalars().all()
         assert [r.key for r in rows] == ["k"]
+
+    async def test_an_edit_between_the_read_and_the_lock_shows_the_discarded_amount(
+        self, db
+    ) -> None:
+        """F1: the answer must come from what the row-locked re-read actually discarded,
+        not from the first, unlocked read - otherwise a correction landing in between
+        (another request, another cook) is reported as if it had never happened."""
+        from unittest.mock import patch
+
+        from app.crud import inventory_item as crud_inventory
+        from app.models.inventory_item import InventoryItem
+
+        milk = await _product(db, "Milk")
+        gone = await _item(db, milk, "5", expires_in=-2)
+        real_get = crud_inventory.get_inventory_items
+
+        async def edited_after_the_unlocked_read(db_, **kwargs):
+            items = await real_get(db_, **kwargs)
+            # A correction lands after `discard_expired`'s own unlocked read, before it
+            # locks and re-reads the row.
+            await db_.execute(
+                InventoryItem.__table__.update()
+                .where(InventoryItem.id == _id(gone))
+                .values(current_quantity=Decimal("2"))
+            )
+            await db_.commit()
+            return items
+
+        with patch(
+            "app.services.stock.crud_inventory.get_inventory_items",
+            new=edited_after_the_unlocked_read,
+        ):
+            result = await stock.discard_expired(db)
+
+        assert result.response.count == 1
+        (row,) = result.response.items
+        assert row.amount == Decimal("2")
+        assert (await _fresh(db, gone)).current_quantity == Decimal("2")

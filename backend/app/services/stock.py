@@ -21,6 +21,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.logging import get_logger
 from app.crud import inventory_item as crud_inventory
@@ -253,6 +254,12 @@ def _discarded_row(item: Any) -> DiscardedStockItem:
     )
 
 
+def _moved_row(item: Any) -> MovedInventoryItem:
+    return MovedInventoryItem(
+        id=item.id, current_quantity=item.current_quantity, status=item.status
+    )
+
+
 async def discard_expired(
     db: AsyncSession,
     *,
@@ -265,25 +272,34 @@ async def discard_expired(
 
     "Expired" is not restated here: it is the same rule the iPad's expired shelf uses - an
     active item whose expiry is before today - as the `expiring_days=-1` filter already
-    shared by `stock_summary`'s own query answers (`crud.get_inventory_items`). A dry run
-    only lists what that query finds; a real run moves each item through H23's `discard`
-    transition, the one `/inventory/discard` applies, and stores its Idempotency-Key answer
-    in the same transaction as those moves, before the commit the caller broadcasts after
-    (Q24).
+    shared by `stock_summary`'s own query answers (`crud.get_inventory_items`). That first
+    read is unlocked, so for a dry run it is the whole answer; for a real run it is only
+    *candidates* - `_discard_by_id` re-reads them row-locked and `populate_existing`, so an
+    item consumed, corrected or discarded by someone else in between is picked up as it now
+    stands (already gone is simply skipped) rather than as it was a moment ago. The response
+    and the stored Idempotency-Key answer are built from what was *actually* discarded, each
+    at the amount recorded at that moment, not from the unlocked read - and that answer is
+    stored in the same transaction as those moves, before the commit the caller broadcasts
+    after (Q24).
     """
     expired = await crud_inventory.get_inventory_items(
         db, location=location, expiring_days=EXPIRED_WITHIN_DAYS
     )
-    response = DiscardExpiredResponse(
-        items=[_discarded_row(item) for item in expired],
-        count=len(expired),
-        dry_run=dry_run,
-    )
     if dry_run:
+        response = DiscardExpiredResponse(
+            items=[_discarded_row(item) for item in expired],
+            count=len(expired),
+            dry_run=True,
+        )
         return DiscardExpiredResult(response=response)
 
     try:
-        changed = await _discard_by_id(db, [cast(UUID, item.id) for item in expired])
+        discarded = await _discard_by_id(db, [cast(UUID, item.id) for item in expired])
+        response = DiscardExpiredResponse(
+            items=[_discarded_row(item) for item in discarded],
+            count=len(discarded),
+            dry_run=False,
+        )
         if claim is not None:
             await idempotency.remember(db, claim, 200, response.model_dump(mode="json"))
         await db.commit()
@@ -291,6 +307,7 @@ async def discard_expired(
         await db.rollback()
         raise
 
+    changed = [_moved_row(item) for item in discarded]
     logger.info(
         "Expired stock discarded",
         extra={"count": len(changed), "location": location},
@@ -298,12 +315,19 @@ async def discard_expired(
     return DiscardExpiredResult(response=response, changed=changed)
 
 
-async def _discard_by_id(
-    db: AsyncSession, item_ids: list[UUID]
-) -> list[MovedInventoryItem]:
+async def _discard_by_id(db: AsyncSession, item_ids: list[UUID]) -> list[InventoryItem]:
     """Discard these items through H23's transition, as `crud.inventory_item.move_many`
     does - but without its own commit, so the caller can store its idempotency answer
     alongside the moves rather than in a transaction after them (Q24).
+
+    Re-reads and locks each id rather than trusting the caller's own read of it:
+    `populate_existing` refreshes any of these already in this session's identity map (from
+    the unlocked read that found them) to what is on the row now, so a concurrent edit or a
+    racing discard is seen rather than a stale cached copy - the one thing a plain
+    `with_for_update` would not by itself guarantee. Returns the items that actually moved,
+    each as it was discarded, for the caller to answer with and to broadcast; one already
+    thrown away (a racing discard got there first) raises `ItemFrozen` and is skipped, not
+    counted.
     """
     if not item_ids:
         return []
@@ -311,12 +335,14 @@ async def _discard_by_id(
     query = (
         select(InventoryItem)
         .where(InventoryItem.id.in_(item_ids))
+        .options(selectinload(InventoryItem.product_master))
+        .execution_options(populate_existing=True)
         .with_for_update(of=InventoryItem)
     )
     found = list((await db.execute(query)).scalars().all())
 
     batch_id = uuid4()
-    changed: list[MovedInventoryItem] = []
+    changed: list[InventoryItem] = []
     for item in found:
         row: Any = item
         was = str(row.status)
@@ -345,11 +371,7 @@ async def _discard_by_id(
             quantity_after=Decimal(0),
         )
         row.status = new_status
-        changed.append(
-            MovedInventoryItem(
-                id=row.id, current_quantity=row.current_quantity, status=new_status
-            )
-        )
+        changed.append(item)
     return changed
 
 

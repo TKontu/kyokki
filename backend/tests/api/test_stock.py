@@ -952,6 +952,36 @@ class TestStockDiscardExpired:
         assert await _count(seeded_db, ConsumptionLog) == 1
 
 
+class TestStockDiscardExpiredRace:
+    async def test_two_concurrent_keyless_real_runs_discard_once(
+        self, client: AsyncClient, own_sessions: AsyncSession, broadcast
+    ) -> None:
+        """F1: no Idempotency-Key at all here - the two requests race on the same row
+        lock. Both see the item as expired in their own unlocked read; only one gets to
+        discard it, and the other's answer must come from what it actually found still
+        there under the lock (nothing), not from that first, stale read."""
+        milk = await _product(own_sessions, "Milk")
+        await _item(own_sessions, milk, "3", expires_in=-2)
+        real_get = stock_service.crud_inventory.get_inventory_items
+
+        async def slow_get(db, **kwargs):
+            items = await real_get(db, **kwargs)
+            # Both requests' unlocked reads land before either reaches the row lock.
+            await asyncio.sleep(0.3)
+            return items
+
+        with patch("app.crud.inventory_item.get_inventory_items", new=slow_get):
+            first, second = await asyncio.gather(
+                client.post(DISCARD_URL, json={}),
+                client.post(DISCARD_URL, json={}),
+            )
+
+        assert (first.status_code, second.status_code) == (200, 200)
+        counts = sorted([first.json()["count"], second.json()["count"]])
+        assert counts == [0, 1]
+        assert await _count(own_sessions, ConsumptionLog) == 1
+
+
 class TestStockDiscardExpiredAuth:
     async def test_a_read_token_gets_403(
         self,
