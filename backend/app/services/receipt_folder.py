@@ -24,6 +24,7 @@ from time import monotonic
 import anyio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.receipt_ingest import (
     ReceiptTooLarge,
@@ -62,17 +63,31 @@ def _is_ignored(name: str) -> bool:
     return name.endswith(_TEMP_SUFFIXES)
 
 
-def _unique_destination(dest: Path) -> Path:
-    """``dest``, or ``dest`` with a ``-1``, ``-2``, ... suffix if it is already taken."""
-    if not dest.exists():
-        return dest
-    stem, suffix = dest.stem, dest.suffix
-    n = 1
+def _claim_destination(src: Path, target_dir: Path) -> Path:
+    """Atomically claim a free name for ``src`` under ``target_dir``, then move it there.
+
+    Two worker processes could archive a same-named file at the same moment; an
+    ``exists()`` check followed by ``os.replace`` is two steps, not one, so the loser of
+    that race would silently overwrite the winner's already-archived file.
+    ``O_CREAT|O_EXCL`` is a single filesystem operation - only one process can create a
+    given name - so the loser reliably sees ``FileExistsError`` and tries the next
+    candidate (``-1``, ``-2``, ...) instead of clobbering it.
+    """
+    stem, suffix = src.stem, src.suffix
+    name = src.name
+    n = 0
     while True:
-        candidate = dest.with_name(f"{stem}-{n}{suffix}")
-        if not candidate.exists():
-            return candidate
-        n += 1
+        candidate = target_dir / name
+        try:
+            fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            n += 1
+            name = f"{stem}-{n}{suffix}"
+            continue
+        os.close(fd)
+        break
+    os.replace(src, candidate)
+    return candidate
 
 
 @dataclass
@@ -101,6 +116,7 @@ class ReceiptFolderWatcher:
         self.settle_seconds = settle_seconds
         self._clock = clock
         self._seen: dict[str, _Seen] = {}
+        self._warned_symlinks: set[str] = set()
 
     async def scan_once(self, session_factory: SessionFactory) -> int:
         """One pass over the folder. Returns how many files were read this pass."""
@@ -127,6 +143,20 @@ class ReceiptFolderWatcher:
             if name in _OUTPUT_DIRNAMES or _is_ignored(name):
                 continue
             path = self.watch_dir / name
+
+            # F2: a symlink is never followed - is_symlink() uses lstat, so this never
+            # touches whatever the link points at. A planted link is left alone (not
+            # moved, not deleted) and logged once, not on every poll.
+            if path.is_symlink():
+                live_names.add(name)
+                if name not in self._warned_symlinks:
+                    logger.warning(
+                        "Watched folder: ignoring a symlink (never read through a link)",
+                        extra={"dropped_name": name},
+                    )
+                    self._warned_symlinks.add(name)
+                continue
+
             try:
                 if not path.is_file():
                     continue
@@ -144,17 +174,46 @@ class ReceiptFolderWatcher:
             if now - seen.first_seen < self.settle_seconds:
                 continue  # still settling
 
-            if await self._ingest_one(session_factory, path):
+            try:
+                processed = await self._ingest_one(session_factory, path, stat.st_size)
+            except Exception as exc:
+                # F1: isolate this file. A DB outage, a full disk, or any other fault
+                # that is not one of the two *expected* rejections (handled inside
+                # _ingest_one) must not abort the whole pass. The file stays exactly
+                # where it is - its _seen entry is left untouched, already past
+                # settling, so the next poll retries it immediately - and the loop
+                # moves on to the next file.
+                logger.warning(
+                    "Watched folder: could not process a dropped file this pass",
+                    extra={"dropped_name": name, "error": str(exc)},
+                )
+                continue
+
+            if processed:
                 taken += 1
             self._seen.pop(name, None)
 
-        # Forget anything that is no longer there (we moved it, or it was removed).
+        # Forget anything that is no longer there (we moved it, or it was removed) -
+        # including a symlink we already warned about once, so a later regular file
+        # reusing that name is not mistaken for the link and skipped silently.
         for stale in set(self._seen) - live_names:
             self._seen.pop(stale, None)
+        self._warned_symlinks &= live_names
 
         return taken
 
-    async def _ingest_one(self, session_factory: SessionFactory, path: Path) -> bool:
+    async def _ingest_one(
+        self, session_factory: SessionFactory, path: Path, size: int
+    ) -> bool:
+        cap = settings.MAX_RECEIPT_UPLOAD_BYTES
+        if size > cap:
+            # F4: reject by the already-stat'd size, before reading the file at all.
+            self._reject(
+                path,
+                f"Receipt is {size // 1_000_000} MB; the limit is {cap // 1_000_000} MB",
+            )
+            return True
+
         content_type = CONTENT_TYPE_FOR_SUFFIX.get(path.suffix.lower(), "")
         try:
             content = await anyio.Path(path).read_bytes()
@@ -198,8 +257,7 @@ class ReceiptFolderWatcher:
         target_dir = self.watch_dir / dirname
         try:
             target_dir.mkdir(exist_ok=True)
-            dest = _unique_destination(target_dir / path.name)
-            os.replace(path, dest)
+            dest = _claim_destination(path, target_dir)
         except OSError as exc:
             logger.warning(
                 "Could not file a dropped receipt into its destination",

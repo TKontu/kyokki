@@ -270,6 +270,10 @@ Behaviour worth knowing:
   channel); the wrong file type or a file over `MAX_RECEIPT_UPLOAD_BYTES` goes to `rejected/`
   with a `<name>.reason.txt` next to it.
 - Logging is INFO-only and never includes file contents.
+- The watcher assumes a single `kyokki-worker` replica. Archiving is race-safe against a
+  second worker claiming the same name at the same moment (neither file is overwritten),
+  but only one replica should run the scan at a time, or the same dropped file could be
+  read twice.
 
 ## Generated product icons
 
