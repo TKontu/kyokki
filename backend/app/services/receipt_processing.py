@@ -1089,6 +1089,14 @@ class ReceiptProcessingService:
                     pack_grams = float(product.pack_grams)
                 if pack_grams is not None:
                     stored["pack_grams"] = pack_grams
+                resolution_blob = resolution.as_dict()
+                if resolution.corrected_generic:
+                    # Q37b: selection rejected the snap but named the line better than
+                    # the extraction model did. The corrected name becomes what confirm
+                    # defaults to; the model's own guess survives in the resolution blob
+                    # for the audit, not silently dropped.
+                    resolution_blob["generic_from_extraction"] = line.generic_name
+                    stored["generic_name"] = resolution.corrected_generic
                 stored.update(
                     line_id=resolvable_line.line_id,
                     product_id=str(product.id) if product else None,
@@ -1099,7 +1107,7 @@ class ReceiptProcessingService:
                     match_score=None,
                     match_confidence=None,
                     match_source=resolution.source if product else None,
-                    resolution=resolution.as_dict(),
+                    resolution=resolution_blob,
                 )
                 stored_lines.append(stored)
                 if product is not None:

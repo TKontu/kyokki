@@ -35,9 +35,11 @@ from app.services.product_resolution import (
     CANDIDATES_PER_LINE,
     Candidate,
     ProductResolution,
+    Resolution,
     ResolvableLine,
     TrigramRetriever,
 )
+from app.services.product_selection import SelectionResult
 
 CATEGORIES = [("dairy", 7), ("produce", 10), ("meat", 5)]
 
@@ -484,6 +486,79 @@ class TestGenericNameSnapping:
         assert result.product is None
         assert result.source == "none"
         _no_model_selection.assert_awaited_once()
+
+    # Q37b: when selection rejects the snap, the line remembers what it refused.
+    async def test_a_rejected_snap_is_recorded(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        _no_model_selection.side_effect = lambda lines: {}
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("ALESTO SELECTION CASHEWP", "Butter", "pantry")], chain="s-group"
+        )
+
+        result = resolved["ALESTO SELECTION CASHEWP"]
+        assert result.rejected_product_id == catalog["butter"].id
+        assert result.corrected_generic is None
+
+    async def test_a_rejected_snap_may_carry_a_corrected_generic_name(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        _no_model_selection.side_effect = lambda lines: SelectionResult(
+            {}, {lines[0].line_id: "Pesto"}
+        )
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("ALESTO SELECTION CASHEWP", "Butter", "pantry")], chain="s-group"
+        )
+
+        result = resolved["ALESTO SELECTION CASHEWP"]
+        assert result.rejected_product_id == catalog["butter"].id
+        assert result.corrected_generic == "Pesto"
+
+    async def test_a_confirmed_snap_records_no_rejection(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        _no_model_selection.side_effect = lambda lines: {
+            lines[0].line_id: catalog["butter"].id
+        }
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("ALESTO SELECTION CASHEWP", "Butter", "pantry")], chain="s-group"
+        )
+
+        result = resolved["ALESTO SELECTION CASHEWP"]
+        assert result.rejected_product_id is None
+        assert result.corrected_generic is None
+
+    async def test_a_rejection_is_recorded_only_for_the_g_only_proposal(
+        self, db_session: AsyncSession, catalog, _no_model_selection
+    ) -> None:
+        """A line with no `g`-only snap - only trigram candidates - has nothing to
+        reject: `null` there is an ordinary unmatched answer, not a Q37b rejection."""
+        _no_model_selection.side_effect = lambda lines: {}
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("KAURAJUOMA", "Oat drink", "dairy")], chain="s-group"
+        )
+
+        result = resolved["KAURAJUOMA"]
+        assert result.rejected_product_id is None
+        assert result.corrected_generic is None
+
+    async def test_as_dict_carries_the_rejection_only_when_present(
+        self, db_session: AsyncSession, catalog
+    ) -> None:
+        bare = Resolution()
+        assert "rejected_product_id" not in bare.as_dict()
+        assert "corrected_generic" not in bare.as_dict()
+
+        rejected = Resolution(
+            rejected_product_id=catalog["butter"].id, corrected_generic="Pesto"
+        )
+        blob = rejected.as_dict()
+        assert blob["rejected_product_id"] == str(catalog["butter"].id)
+        assert blob["corrected_generic"] == "Pesto"
 
 
 class _FixedRetriever:

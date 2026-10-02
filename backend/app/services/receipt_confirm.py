@@ -36,7 +36,7 @@ from app.services.generic_products import (
 )
 from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import forget_non_food, remember_non_food
-from app.services.product_names import learn_product_name
+from app.services.product_names import learn_product_name, product_for_name
 from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)
@@ -128,13 +128,47 @@ class _Confirmation:
             )
         return item.index, line
 
+    async def _name_without_the_rejected_snap(
+        self, position: int, line: dict[str, Any], name: str | None
+    ) -> str | None:
+        """Refuse a name that would quietly re-attach a snap selection rejected (Q37b).
+
+        Confirm defaults an item with no ``product_id`` to the line's generic name, and
+        a plain product name lookup has no source guard - so a line whose snap was
+        rejected but whose `generic_name` was never corrected (the model gave no better
+        one, or this is a line stored before Q37b existed) would resolve right back to
+        the product the cook never confirmed. Falls back to the line's own (corrected)
+        generic name instead; if even that still names the rejected product, there is no
+        name left to create one under, and the cook has to type one.
+        """
+        resolution = self._resolution(line)
+        rejected_id = resolution.get("rejected_product_id")
+        if rejected_id is None:
+            return name
+        existing = await product_for_name(self.db, name, trust_model=False)
+        if existing is None or str(existing.id) != str(rejected_id):
+            return name
+        corrected = line.get("generic_name") or line.get("name")
+        still_rejected = await product_for_name(self.db, corrected, trust_model=False)
+        if still_rejected is not None and str(still_rejected.id) == str(rejected_id):
+            raise InvalidConfirmItem(
+                f"Item {position}: the only name for this line still names the "
+                "product its snap was rejected for - type a name for this item"
+            )
+        return corrected
+
     async def product(
         self, position: int, item: ConfirmedItemCreate, line: dict[str, Any]
     ) -> ProductMaster:
+        name = item.name or line.get("generic_name") or line.get("name")
+        if item.product_id is None:
+            # The cook's own explicit pick always wins, including the rejected product
+            # itself (Q37b) - only the no-product-id, name-based path needs the guard.
+            name = await self._name_without_the_rejected_snap(position, line, name)
         try:
             product, created = await self.resolver.resolve(
                 product_id=item.product_id,
-                name=item.name or line.get("generic_name") or line.get("name"),
+                name=name,
                 category=item.category or line.get("category"),
                 unit=item.unit,
                 quantity=item.quantity,

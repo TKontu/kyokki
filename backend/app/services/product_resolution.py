@@ -95,6 +95,12 @@ class Resolution:
     # Where the alias itself came from, when `source` is "alias". Confirm reads it back
     # so reinforcing a mapping keeps its provenance instead of claiming the cook's word.
     alias_source: str | None = None
+    # Q37b: the g-only snap selection said no to, and the better name it gave instead -
+    # recorded only for the proposed (g-only) candidate, never a key or alias rejection.
+    # Confirm reads `rejected_product_id` back so the line can never re-attach it
+    # without the cook explicitly choosing it.
+    rejected_product_id: UUID | None = None
+    corrected_generic: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """The blob stored on the receipt line (H12 shape)."""
@@ -106,6 +112,10 @@ class Resolution:
         }
         if self.alias_source is not None:
             blob["alias_source"] = self.alias_source
+        if self.rejected_product_id is not None:
+            blob["rejected_product_id"] = str(self.rejected_product_id)
+        if self.corrected_generic is not None:
+            blob["corrected_generic"] = self.corrected_generic
         return blob
 
 
@@ -364,7 +374,7 @@ class ProductResolution:
             return
 
         try:
-            chosen = await select_products(askable)
+            answer = await select_products(askable)
         except LLMExtractionError as exc:
             # The receipt still completes; these lines are simply new products. The one
             # thing that must not happen is a similarity guess taking their place.
@@ -374,6 +384,13 @@ class ProductResolution:
             )
             return
 
+        # `answer` is ordinarily a `SelectionResult`, but a test double may still hand
+        # back a plain `dict[str, UUID]` (the shape every caller used before Q37b), so
+        # the chosen products are read as a dict either way and `.corrected` is read
+        # only when present.
+        chosen: dict[str, UUID] = dict(answer)
+        corrected: dict[str, str] = dict(getattr(answer, "corrected", None) or {})
+
         for line_id, product_id in chosen.items():
             product = await self.db.get(ProductMaster, product_id)
             if product is None:
@@ -381,6 +398,17 @@ class ProductResolution:
             results[line_id].product = product
             results[line_id].source = "selected"
             results[line_id].verified = False
+
+        # A rejection exists only for the g-only proposal (Q37b): a line whose snap was
+        # offered but whose answer did not land on it - a trigram-only line that stayed
+        # unmatched never proposed anything, so there is nothing to have rejected.
+        for line_id, snap in proposed.items():
+            if line_id in chosen:
+                continue
+            results[line_id].rejected_product_id = cast(UUID, snap.id)
+            name = corrected.get(line_id)
+            if name:
+                results[line_id].corrected_generic = name
 
 
 async def canonical_names(db: AsyncSession, limit: int = 300) -> list[str]:

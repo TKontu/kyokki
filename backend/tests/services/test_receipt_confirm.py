@@ -968,3 +968,116 @@ class TestModelGuessesDoNotBecomeKeys:
 
         alias = await _alias_for(db_session, "HEINZ KETCHUP")
         assert (alias.source, alias.manually_verified) == ("name", False)
+
+
+def _rejected(rejected: ProductMaster, corrected: str | None = None) -> dict:
+    """A resolution recording a g-only snap selection said no to (Q37b)."""
+    blob: dict = {
+        "product_id": None,
+        "source": "none",
+        "verified": False,
+        "candidates": [],
+        "rejected_product_id": str(rejected.id),
+    }
+    if corrected is not None:
+        blob["corrected_generic"] = corrected
+    return blob
+
+
+class TestRejectedSnapAtConfirm:
+    """Q37b: a rejected generic-name snap must not come back at confirm.
+
+    The hole: `receipt_confirm.py` defaulted `name` to the line's `generic_name` when
+    the cook sent no `product_id`, and `product_for_name`'s canonical-name fallback has
+    no source guard - so an unmatched row the cook simply accepted re-attached the exact
+    product selection had just rejected, and confirm learned the printed name as its
+    alias.
+    """
+
+    async def test_confirming_without_a_product_creates_the_corrected_name(
+        self, db_session: AsyncSession, categories
+    ):
+        dip = await _product(db_session, "Dip", "condiments")
+        receipt = await _receipt_with(
+            db_session,
+            "PESTO ALKU",
+            "Pesto",
+            "condiments",
+            _rejected(dip, corrected="Pesto"),
+        )
+
+        result = await confirm_receipt(db_session, receipt.id, [_item(index=0)], [])
+
+        assert result.products_created == 1
+        created = await db_session.get(ProductMaster, result.created_product_ids[0])
+        assert created is not None
+        assert created.canonical_name == "Pesto"
+        assert created.id != dip.id
+
+    async def test_an_explicit_pick_of_the_rejected_product_is_honoured(
+        self, db_session: AsyncSession, categories
+    ):
+        """The cook's word wins even over a snap selection rejected."""
+        dip = await _product(db_session, "Dip", "condiments")
+        receipt = await _receipt_with(
+            db_session,
+            "PESTO ALKU",
+            "Pesto",
+            "condiments",
+            _rejected(dip, corrected="Pesto"),
+        )
+
+        result = await confirm_receipt(
+            db_session, receipt.id, [_item(index=0, product_id=dip.id)], []
+        )
+
+        assert result.products_created == 0
+        assert result.inventory_items[0][1].id == dip.id
+
+    async def test_a_corrected_name_that_matches_another_product_reuses_it(
+        self, db_session: AsyncSession, categories
+    ):
+        """The corrected name happens to already be a catalog product - not the
+        rejected one - so confirm reuses it rather than creating a duplicate (the
+        canonical name is unique)."""
+        dip = await _product(db_session, "Dip", "condiments")
+        pesto = await _product(db_session, "Pesto", "condiments")
+        receipt = await _receipt_with(
+            db_session,
+            "PESTO ALKU",
+            "Pesto",
+            "condiments",
+            _rejected(dip, corrected="Pesto"),
+        )
+
+        result = await confirm_receipt(db_session, receipt.id, [_item(index=0)], [])
+
+        assert result.products_created == 0
+        assert result.inventory_items[0][1].id == pesto.id
+
+    async def test_no_corrected_name_and_the_only_name_is_the_rejected_one_is_400(
+        self, db_session: AsyncSession, categories
+    ):
+        """The model gave no `g` (or this is an old stored line re-read before Q37b
+        without one): the line's own generic name is still the rejected snap's name, so
+        there is no name left to create a product under - confirm must ask the cook to
+        type one rather than silently re-attaching Dip."""
+        dip = await _product(db_session, "Dip", "condiments")
+        receipt = await _receipt_with(
+            db_session, "PESTO ALKU", "Dip", "condiments", _rejected(dip)
+        )
+
+        with pytest.raises(InvalidConfirmItem):
+            await confirm_receipt(db_session, receipt.id, [_item(index=0)], [])
+
+    async def test_old_lines_without_the_new_keys_behave_as_before(
+        self, db_session: AsyncSession, receipt, milk
+    ):
+        """A line stored before Q37b has no `rejected_product_id` key at all; confirm's
+        ordinary name-default path must be unaffected."""
+        result = await confirm_receipt(
+            db_session, receipt.id, [_item(index=0, product_id=milk.id)], []
+        )
+
+        assert result.products_created == 0
+        assert result.inventory_items[0][1].id == milk.id
