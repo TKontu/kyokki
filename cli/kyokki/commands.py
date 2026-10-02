@@ -5,13 +5,16 @@ terminal. The CLI picks one; the handler never prints.
 """
 
 import argparse
+import mimetypes
 import re
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from kyokki import output
-from kyokki.api import ERROR, NOT_FOUND, USAGE, Api, CliError, usage_error
+from kyokki.api import CONFLICT, ERROR, NOT_FOUND, USAGE, Api, CliError, usage_error
 
 UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
@@ -559,3 +562,358 @@ def shopping_export(ctx: Context) -> Outcome:
         expect="text",
     ).body
     return Outcome({"format": a.format, "text": text}, lambda: str(text), raw=True)
+
+
+# --- receipt --------------------------------------------------------------------
+
+RECEIPT_PATH = "/api/receipts/"
+# Not yet read: status/confirm both treat these as "not ready yet".
+IN_PROGRESS_STATUSES = {"uploaded", "queued", "processing"}
+RECEIPT_POLL_SECONDS = 5
+# The server's per-receipt budget is ~28 min: MinerU OCR (120s) plus up to three
+# sequential model calls at 420s each, with margin (`receipt_stale_minutes` in
+# backend/app/core/config.py). 600s produced a false timeout on a receipt needing a
+# re-read. cli.py's `--timeout` default reads this constant, so there is one number.
+DEFAULT_RECEIPT_WAIT_TIMEOUT = 1800
+# The router's plain-string 404 for an unknown receipt id.
+RECEIPT_NOT_FOUND = re.compile(r"^Receipt '\S+' not found$")
+# Why a receipt is not ready for `confirm`, keyed on processing_status.
+NOT_READY_REASON = {
+    "uploaded": "is still queued",
+    "queued": "is still queued",
+    "processing": "is still processing",
+    "failed": "failed to process",
+    "confirmed": "is already confirmed",
+}
+
+
+def _receipt_not_found(exc: CliError) -> CliError:
+    """The router's plain-string 404 for an unknown receipt id is not found (exit 3)."""
+    detail = exc.detail
+    if (
+        exc.status == 404
+        and isinstance(detail, dict)
+        and detail.get("code") == "http_404"
+        and RECEIPT_NOT_FOUND.match(str(detail.get("message", "")))
+    ):
+        return CliError(NOT_FOUND, {**detail, "code": "not_found"}, exc.status)
+    return exc
+
+
+def _duplicate_as_conflict(exc: CliError) -> CliError:
+    """The scan endpoint's 409 for a file already uploaded: conflict (exit 6), the
+    existing receipt id folded into the message when the API gives one."""
+    if exc.status != 409:
+        return exc
+    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    message = str(detail.get("message") or "the receipt was already uploaded")
+    receipt_id = detail.get("receipt_id")
+    if receipt_id:
+        message = f"{message} (receipt {receipt_id})"
+    return CliError(
+        CONFLICT, {**detail, "code": "conflict", "message": message}, exc.status
+    )
+
+
+def _too_large_as_usage(exc: CliError) -> CliError:
+    """413 from /scan (over the server's upload cap): a usage error (exit 2), like a
+    bad argument, not the generic http_413 (exit 1). The server's own message already
+    names the file's size and the limit; only the code and exit change."""
+    if exc.status != 413:
+        return exc
+    detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc)}
+    return CliError(USAGE, {**detail, "code": "usage"}, exc.status)
+
+
+def _not_ready(receipt: dict[str, Any]) -> CliError | None:
+    """None when the receipt is ``completed`` (ready to confirm); otherwise the
+    conflict (exit 6) to raise instead of sending anything."""
+    status = receipt.get("processing_status")
+    if status == "completed":
+        return None
+    reason = NOT_READY_REASON.get(str(status), f"is not ready to confirm ({status})")
+    message = f"receipt {receipt.get('id')} {reason}, not ready to confirm"
+    if status == "failed" and receipt.get("error"):
+        message += f": {receipt['error']}"
+    return CliError(
+        CONFLICT, {"code": "conflict", "message": message, "status": status}
+    )
+
+
+def _read_file(path_text: str) -> tuple[str, bytes]:
+    path = Path(path_text)
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        raise usage_error(f"cannot read {path_text!r}: {exc}") from None
+    return path.name, content
+
+
+def _receipt_line_row(item: dict[str, Any]) -> list[str]:
+    product = item.get("product_name")
+    if product:
+        product = f"{product} (verified)" if item.get("verified") else product
+    return [
+        str(item.get("index", "")),
+        item.get("name", ""),
+        item.get("generic_name") or "",
+        product or "(unmatched)",
+        output.number(item.get("quantity")),
+        item.get("unit", ""),
+        "yes" if item.get("non_food") else "",
+    ]
+
+
+def _receipt_human(receipt: dict[str, Any]) -> str:
+    lines = [f"receipt {receipt.get('id')}: {receipt.get('processing_status')}"]
+    if receipt.get("store_chain"):
+        lines.append(f"store: {receipt['store_chain']}")
+    if receipt.get("purchase_date"):
+        lines.append(f"purchase date: {receipt['purchase_date']}")
+    if receipt.get("error"):
+        lines.append(f"error: {receipt['error']}")
+    items = receipt.get("items") or []
+    if items:
+        lines.append(
+            output.table(
+                ["#", "NAME", "GENERIC", "PRODUCT", "QUANTITY", "UNIT", "NON-FOOD"],
+                [_receipt_line_row(item) for item in items],
+            )
+        )
+    elif receipt.get("processing_status") == "completed":
+        lines.append("No lines were read.")
+    return "\n".join(lines)
+
+
+def _wait_for_receipt(api: Api, receipt_id: str, timeout: float) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout
+    receipt: dict[str, Any] = api.request(
+        "GET", f"{RECEIPT_PATH}{receipt_id}", expect=dict
+    ).body
+    while receipt.get("processing_status") in IN_PROGRESS_STATUSES:
+        if time.monotonic() >= deadline:
+            raise CliError(
+                ERROR,
+                {
+                    "code": "timeout",
+                    "message": f"timed out after {timeout:g}s waiting for receipt "
+                    f"{receipt_id} to finish processing (still "
+                    f"{receipt.get('processing_status')})",
+                },
+            )
+        time.sleep(RECEIPT_POLL_SECONDS)
+        receipt = api.request("GET", f"{RECEIPT_PATH}{receipt_id}", expect=dict).body
+    return receipt
+
+
+def receipt_upload(ctx: Context) -> Outcome:
+    a = ctx.args
+    name, content = _read_file(a.file)
+    content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    try:
+        answer = ctx.api.request(
+            "POST",
+            f"{RECEIPT_PATH}scan",
+            files={"file": (name, content, content_type)},
+            expect=dict,
+        )
+    except CliError as exc:
+        raise _too_large_as_usage(_duplicate_as_conflict(exc)) from None
+    receipt = answer.body
+    if a.wait:
+        receipt = _wait_for_receipt(ctx.api, str(receipt.get("id")), a.timeout)
+
+    def human() -> str:
+        return _receipt_human(receipt)
+
+    return Outcome(receipt, human)
+
+
+def receipt_status(ctx: Context) -> Outcome:
+    a = ctx.args
+    try:
+        receipt = ctx.api.request(
+            "GET", f"{RECEIPT_PATH}{a.receipt_id}", expect=dict
+        ).body
+    except CliError as exc:
+        raise _receipt_not_found(exc) from None
+
+    def human() -> str:
+        return _receipt_human(receipt)
+
+    return Outcome(receipt, human)
+
+
+def _check_line(
+    index: int, by_index: dict[int, dict[str, Any]], seen: set[int]
+) -> dict[str, Any]:
+    """The line --assign/--new names: it must exist, be food, and not already be
+    claimed by an earlier --assign/--new (exit 2 otherwise)."""
+    item = by_index.get(index)
+    if item is None:
+        raise usage_error(f"no line {index} on this receipt; see kyokki receipt status")
+    if item.get("non_food"):
+        raise usage_error(f"line {index} is non-food; it is never stocked")
+    if index in seen:
+        raise usage_error(f"line {index} is named more than once (--assign/--new)")
+    seen.add(index)
+    return item
+
+
+def _resolve_overrides(
+    assign: list[tuple[int, str]],
+    new: list[tuple[int, str]],
+    by_index: dict[int, dict[str, Any]],
+) -> tuple[dict[int, str], dict[int, str]]:
+    """``--assign LINE=PRODUCT_ID`` and ``--new LINE=CATEGORY``, validated against the
+    receipt's own lines. Raises a usage error (exit 2) for an unknown line, a non-food
+    line, or a line named twice, across both options together."""
+    seen: set[int] = set()
+    assignments: dict[int, str] = {}
+    for index, product_id in assign:
+        _check_line(index, by_index, seen)
+        assignments[index] = product_id
+    categories: dict[int, str] = {}
+    for index, category in new:
+        _check_line(index, by_index, seen)
+        categories[index] = category
+    return assignments, categories
+
+
+def _confirm_line(
+    item: dict[str, Any],
+    purchase_date: str,
+    assignments: dict[int, str],
+    categories: dict[int, str],
+) -> dict[str, Any]:
+    index = int(item["index"])
+    line: dict[str, Any] = (
+        {"line_id": str(item["line_id"])} if item.get("line_id") else {"index": index}
+    )
+    if index in categories:
+        line["name"] = item.get("generic_name") or item.get("name")
+        line["category"] = categories[index]
+    else:
+        line["product_id"] = assignments.get(index, item.get("product_id"))
+    line["quantity"] = item.get("quantity")
+    line["unit"] = item.get("unit")
+    line["purchase_date"] = purchase_date
+    return line
+
+
+def _confirm_line_preview(line: dict[str, Any]) -> str:
+    where = line.get("line_id") or f"index {line.get('index')}"
+    what = (
+        f"new product {line['name']!r} ({line['category']})"
+        if "category" in line
+        else f"product {line['product_id']}"
+    )
+    return (
+        f"  {where}: {what} {output.number(line['quantity'])} {line['unit']}, "
+        f"purchased {line['purchase_date']}"
+    )
+
+
+def receipt_confirm(ctx: Context) -> Outcome:
+    a = ctx.args
+    try:
+        receipt = ctx.api.request(
+            "GET", f"{RECEIPT_PATH}{a.receipt_id}", expect=dict
+        ).body
+    except CliError as exc:
+        raise _receipt_not_found(exc) from None
+
+    not_ready = _not_ready(receipt)
+    if not_ready:
+        raise not_ready
+
+    purchase_date = _date(a.purchase_date) or receipt.get("purchase_date")
+    if not purchase_date:
+        raise usage_error(
+            "the receipt has no purchase date; pass --purchase-date YYYY-MM-DD"
+        )
+
+    items = receipt.get("items") or []
+    by_index = {item.get("index"): item for item in items}
+    assignments, categories = _resolve_overrides(a.assign, a.new, by_index)
+    overridden = set(assignments) | set(categories)
+
+    food = [item for item in items if not item.get("non_food")]
+    non_food = [item for item in items if item.get("non_food")]
+    matched = [
+        item
+        for item in food
+        if item.get("product_id") or item.get("index") in overridden
+    ]
+    unmatched = [
+        item
+        for item in food
+        if not item.get("product_id") and item.get("index") not in overridden
+    ]
+
+    if unmatched and not a.skip_unmatched:
+        listed = "; ".join(
+            f"#{item.get('index')} {item.get('name')}" for item in unmatched
+        )
+        raise CliError(
+            CONFLICT,
+            {
+                "code": "conflict",
+                "message": f"{len(unmatched)} food line(s) are unmatched, so nothing "
+                f"was sent: {listed}; resolve them with --assign/--new, or pass "
+                "--skip-unmatched to leave them out",
+                "unmatched": [
+                    {"index": item.get("index"), "name": item.get("name")}
+                    for item in unmatched
+                ],
+            },
+        )
+
+    confirmed_items = [
+        _confirm_line(item, purchase_date, assignments, categories) for item in matched
+    ]
+    body = {
+        "items": confirmed_items,
+        "non_food_indexes": [item.get("index") for item in non_food],
+    }
+    skipped = len(unmatched)
+
+    if a.dry_run:
+        document = {**body, "dry_run": True, "skipped_unmatched": skipped}
+
+        def dry_run_human() -> str:
+            lines = [f"Would confirm receipt {a.receipt_id}:"]
+            lines.extend(_confirm_line_preview(line) for line in confirmed_items)
+            if non_food:
+                lines.append(f"  ({len(non_food)} non-food line(s) left out)")
+            if skipped:
+                lines.append(f"  ({skipped} unmatched line(s) skipped)")
+            return "\n".join(lines)
+
+        return Outcome(document, dry_run_human)
+
+    try:
+        answer = ctx.api.request(
+            "POST", f"{RECEIPT_PATH}{a.receipt_id}/confirm", body=body, expect=dict
+        )
+    except CliError as exc:
+        # No `_confirm_conflict` here on purpose (F3): the confirm endpoint has no
+        # Idempotency-Key, but its 400/409 both carry a plain-string detail, which
+        # `error_from`'s own STRING_DETAIL_EXIT table already maps correctly - 400
+        # (an item the server rejected, e.g. a since-deleted product_id) to usage
+        # (exit 2), 409 (already confirmed) to conflict (exit 6).
+        raise _receipt_not_found(exc) from None
+    result = answer.body
+
+    def human() -> str:
+        lines = [
+            f"Confirmed receipt {a.receipt_id}: "
+            f"{result.get('items_created', 0)} item(s) created, "
+            f"{result.get('products_created', 0)} new product(s), "
+            f"{result.get('aliases_learned', 0)} alias(es) learned"
+        ]
+        if skipped:
+            lines.append(f"skipped {skipped} unmatched line(s)")
+        return "\n".join(lines)
+
+    return Outcome(result, human)

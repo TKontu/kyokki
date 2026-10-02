@@ -2,8 +2,11 @@
 
 import httpx
 import pytest
-from conftest import ITEM_ID, PRODUCT_ID, TOKEN, FakeApi, Runner
+from conftest import ITEM_ID, PRODUCT_ID, RECEIPT_ID, TOKEN, FakeApi, Runner
 from help_pages import HELP_PAGES
+
+# A file guaranteed to exist and be readable, for `receipt upload`.
+UPLOAD_FILE = __file__
 
 COMMANDS = [
     ["doctor"],
@@ -23,6 +26,10 @@ COMMANDS = [
     ["shopping", "generate", "--dry-run"],
     ["shopping", "export"],
     ["shopping", "export", "--format", "markdown"],
+    ["receipt", "upload", UPLOAD_FILE],
+    ["receipt", "status", RECEIPT_ID],
+    ["receipt", "confirm", RECEIPT_ID, "--all-matched"],
+    ["receipt", "confirm", RECEIPT_ID, "--all-matched", "--dry-run"],
 ]
 
 ANSWERS = [
@@ -57,6 +64,31 @@ def ok(request: httpx.Request) -> httpx.Response:
                 "unchanged": empty,
                 "skipped": empty,
                 "dry_run": False,
+            },
+        )
+    if request.url.path == "/api/receipts/scan":
+        return httpx.Response(
+            200, json={"id": RECEIPT_ID, "processing_status": "completed", "items": []}
+        )
+    if request.url.path == f"/api/receipts/{RECEIPT_ID}":
+        return httpx.Response(
+            200,
+            json={
+                "id": RECEIPT_ID,
+                "processing_status": "completed",
+                "purchase_date": "2026-01-01",
+                "items": [],
+            },
+        )
+    if request.url.path == f"/api/receipts/{RECEIPT_ID}/confirm":
+        return httpx.Response(
+            200,
+            json={
+                "success": True,
+                "items_created": 0,
+                "products_created": 0,
+                "aliases_learned": 0,
+                "error": None,
             },
         )
     if request.method == "DELETE":
@@ -106,6 +138,9 @@ def test_no_token_in_output(
             "/api/shopping/export",
             f"/api/shopping/{ITEM_ID}",
             f"/api/shopping/{ITEM_ID}/purchase",
+            "/api/receipts/scan",
+            f"/api/receipts/{RECEIPT_ID}",
+            f"/api/receipts/{RECEIPT_ID}/confirm",
         ):
             if isinstance(response, httpx.Response) and path != "/api/health/live":
                 api.routes[(method, path)] = response
@@ -133,6 +168,8 @@ def test_no_token_in_help(run: Runner, argv: list[str]) -> None:
         ["shopping", "done", TOKEN],
         ["shopping", "add", "Milk", "1", "--priority", TOKEN],
         [f"--token={TOKEN}", "stock", "add", "Milk", TOKEN],
+        ["receipt", "status", TOKEN],
+        ["receipt", "confirm", TOKEN, "--all-matched"],
     ],
 )
 def test_no_token_in_usage_errors(run: Runner, argv: list[str]) -> None:
@@ -147,6 +184,20 @@ def test_no_token_in_a_server_error_that_echoes_it(api: FakeApi, run: Runner) ->
     )
     result = run("stock", "list", "--verbose")
     assert result.code == 7
+    assert_clean(result.out, result.err)
+
+
+def test_no_token_in_a_receipt_duplicate_conflict_that_echoes_it(
+    api: FakeApi, run: Runner
+) -> None:
+    api.error(
+        "POST",
+        "/api/receipts/scan",
+        409,
+        {"message": f"Receipt already uploaded by {TOKEN}", "receipt_id": RECEIPT_ID},
+    )
+    result = run("receipt", "upload", UPLOAD_FILE, "--verbose")
+    assert result.code == 6
     assert_clean(result.out, result.err)
 
 
