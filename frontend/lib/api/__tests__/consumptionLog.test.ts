@@ -61,3 +61,39 @@ describe('consumption log API', () => {
     expect(lastUrl()).toBe(`${API_URL}/consumption-log?inventory_item_id=i1`)
   })
 })
+
+describe('waste rate and trend', () => {
+  it('reads the waste rate for a window', async () => {
+    respond({ discarded: 1, finished: 1, total: 2, rate: 0.5, categories: [] })
+
+    await consumptionLogAPI.waste({ since: '2026-09-01T00:00:00Z' })
+
+    expect(lastUrl()).toBe(
+      `${API_URL}/consumption-log/waste?since=2026-09-01T00%3A00%3A00Z`
+    )
+  })
+
+  it('reads the whole history when no window is given', async () => {
+    respond({ discarded: 0, finished: 0, total: 0, rate: null, categories: [] })
+
+    await consumptionLogAPI.waste()
+
+    expect(lastUrl()).toBe(`${API_URL}/consumption-log/waste`)
+  })
+
+  it('reads the 8-week trend', async () => {
+    respond({ weeks: [] })
+
+    await consumptionLogAPI.wasteTrend()
+
+    expect(lastUrl()).toBe(`${API_URL}/consumption-log/waste/trend`)
+  })
+
+  it('can ask for a different number of weeks', async () => {
+    respond({ weeks: [] })
+
+    await consumptionLogAPI.wasteTrend({ weeks: 4 })
+
+    expect(lastUrl()).toBe(`${API_URL}/consumption-log/waste/trend?weeks=4`)
+  })
+})

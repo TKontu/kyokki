@@ -16,6 +16,12 @@ Native HA integration distributed via HACS. Provides config flow UI, proper devi
 
 ## Phase 1: REST API for Home Assistant
 
+> **Status: implemented** (round 2026-10-02-2, A2). The five endpoints below are live at
+> `/api/ha/*`, behind the same bearer auth as the rest of `/api` (`docs/HOME_ASSISTANT.md`
+> has the corrected HA YAML - real paths, numeric `amount`/`unit` for `consume`, and the
+> `Authorization: Bearer` header). `status` and `consume`'s exact response shapes were
+> narrowed from the sketch below; see `docs/HOME_ASSISTANT.md` for what shipped.
+
 ### Endpoint: `GET /api/ha/status`
 
 Single endpoint optimized for HA REST sensor consumption. Returns all metrics in one call (HA REST platform works best with single-resource, multiple-sensor pattern).

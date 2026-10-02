@@ -15,14 +15,107 @@
 import React, { useState } from 'react'
 import Button from '@/components/ui/Button'
 import { SkeletonCard } from '@/components/ui/Skeleton'
-import { useConsumptionLog, useConsumptionSummary } from '@/hooks/useConsumptionLog'
+import {
+  useConsumptionLog,
+  useConsumptionSummary,
+  useWasteStats,
+  useWasteTrend,
+} from '@/hooks/useConsumptionLog'
 import { useUpdateInventoryItem } from '@/hooks/useInventory'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
-import { GONE_ACTIONS, groupByDay, sinceFor, summaryLine, WINDOWS } from '@/lib/gone'
-import type { ConsumptionLogEntry } from '@/types/consumption'
+import {
+  GONE_ACTIONS,
+  groupByDay,
+  sinceFor,
+  summaryLine,
+  topWastingCategories,
+  wasteRateLine,
+  weekLabel,
+  WINDOWS,
+} from '@/lib/gone'
+import type { ConsumptionLogEntry, WasteStats, WasteTrend } from '@/types/consumption'
 
 const PAGE_SIZE = 50
+
+/** The headline rate, and the categories that waste the most (planner ruling, 2026-10-02). */
+function WasteRateCard({ stats }: { stats: WasteStats | undefined }) {
+  const headline = wasteRateLine(stats)
+  const categories = stats ? topWastingCategories(stats.categories) : []
+
+  return (
+    <section
+      aria-label="Waste rate"
+      className="mb-4 rounded-ui border border-ui-border bg-ui-bg-secondary p-4 dark:border-ui-dark-border dark:bg-ui-dark-bg-secondary"
+    >
+      {headline ? (
+        <p className="text-lg font-semibold text-ui-text dark:text-ui-dark-text">{headline}</p>
+      ) : (
+        <p className="text-ui-text-secondary dark:text-ui-dark-text-secondary">
+          Not enough has gone in this window to show a rate yet.
+        </p>
+      )}
+
+      {categories.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {categories.map((category) => (
+            <li
+              key={category.category}
+              className="flex items-center justify-between gap-4 text-sm"
+            >
+              <span className="text-ui-text-secondary dark:text-ui-dark-text-secondary">
+                {category.display_name}
+              </span>
+              <span className="font-medium text-ui-text dark:text-ui-dark-text">
+                {Math.round(category.rate * 100)} %
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+/** A compact 8-bar week trend, plain divs - no chart dependency. */
+function WasteTrendChart({ trend }: { trend: WasteTrend | undefined }) {
+  const weeks = trend?.weeks ?? []
+  if (weeks.length === 0) return null
+
+  return (
+    <section aria-label="Waste rate, last 8 weeks" className="mb-6">
+      <h2 className="mb-2 text-sm font-medium text-ui-text-secondary dark:text-ui-dark-text-secondary">
+        Last 8 weeks
+      </h2>
+      <div className="flex items-end gap-2">
+        {weeks.map((week) => {
+          const percent = week.rate === null ? 0 : Math.round(week.rate * 100)
+          const title =
+            week.total === 0
+              ? `${weekLabel(week)}: nothing gone`
+              : `${weekLabel(week)}: ${week.discarded} of ${week.total} (${percent} %)`
+          return (
+            <div key={week.week_start} className="flex flex-1 flex-col items-center gap-1">
+              <div
+                className="flex h-20 w-full items-end overflow-hidden rounded-ui-sm bg-ui-bg-tertiary dark:bg-ui-dark-bg-tertiary"
+                title={title}
+              >
+                <div
+                  aria-hidden="true"
+                  className="w-full rounded-ui-sm bg-error/70 dark:bg-error/60"
+                  style={{ height: `${percent}%` }}
+                />
+              </div>
+              <span className="text-xs text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
+                {weekLabel(week)}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
 
 function Row({ row, onRestore }: { row: ConsumptionLogEntry; onRestore: () => void }) {
   const thrownAway = row.action === 'discard'
@@ -70,6 +163,8 @@ export default function Gone() {
     limit,
   })
   const { data: summary } = useConsumptionSummary({ since })
+  const { data: wasteStats } = useWasteStats({ since })
+  const { data: wasteTrend } = useWasteTrend()
 
   const putBack = (row: ConsumptionLogEntry) => {
     if (!row.inventory_item_id) return
@@ -133,6 +228,9 @@ export default function Gone() {
             </dd>
           </div>
         </dl>
+
+        <WasteRateCard stats={wasteStats} />
+        <WasteTrendChart trend={wasteTrend} />
 
         {isLoading && <SkeletonCard />}
 

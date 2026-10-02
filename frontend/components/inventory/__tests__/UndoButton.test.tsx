@@ -10,7 +10,7 @@ import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
 import { UndoButton } from '../UndoButton'
-import type { UndoPreview } from '@/types/consumption'
+import type { UndoPreview } from '@/types/inventory'
 
 const APPLE: UndoPreview = {
   batch_id: 'batch-apple',
@@ -22,6 +22,7 @@ const APPLE: UndoPreview = {
       unit: 'pcs',
       action: 'use_partial',
       quantity_consumed: 1,
+      direction: null,
     },
   ],
 }
