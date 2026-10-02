@@ -7,17 +7,26 @@ filed under a chain no other Lidl receipt will ever have again, and the receipt 
 carries the bad key too.
 
 This lists every distinct chain key the ``receipt``, ``store_product_alias`` and
-``non_food_name`` tables hold, what `normalize_store_chain` would map each one to today, and how
-many rows of each table that key covers. ``--apply`` rewrites the ones that changed, in one
-transaction. ``store_product_alias`` and ``non_food_name`` both have a
-(store_chain, printed name) uniqueness constraint, so moving a row can collide with one already
-filed under the new key, or with a sibling row from a different old key merging into the same
-new key in this same run; the surviving row keeps the higher occurrence/seen count and, for
+``non_food_name`` tables hold, what `normalize_store_chain` would map each one to today, how
+many rows of each table that key covers, and *how* it would be re-keyed: `exact` means the
+stored key, hyphens read back as spaces, now matches a chain pattern exactly - which is
+unexpected for something that was stored as a slug in the first place (a flea market literally
+named "... sale" reads as an exact match on the `SALE` pattern, for instance) and is flagged
+`suspicious` rather than treated the same as a genuine fix. `fuzzy` means the fuzzy pass found a
+one-edit-away chain word: the OCR-misread case this script exists for.
+
+``--apply`` takes the specific old keys to rewrite (after reviewing the plan below) and refuses
+any name that is not a changed key in the current plan - there is no "apply everything" mode,
+precisely because a `suspicious` row should never be rekeyed without a person having looked at
+it. The rewrite happens in one transaction. ``store_product_alias`` and ``non_food_name`` both
+have a (store_chain, printed name) uniqueness constraint, so moving a row can collide with one
+already filed under the new key, or with a sibling row from a different old key merging into the
+same new key in this same run; the surviving row keeps the higher occurrence/seen count and, for
 aliases, the verified flag if either side had it.
 
-    python -m scripts.rekey_store_chains            # dry run (the default)
-    python -m scripts.rekey_store_chains --apply     # rewrites, one transaction
-    python -m scripts.rekey_store_chains --dry-run   # same as no flag, spelled out
+    python -m scripts.rekey_store_chains                        # dry run (the default)
+    python -m scripts.rekey_store_chains --apply lidi-suomi-ky   # rewrites just this key
+    python -m scripts.rekey_store_chains --dry-run               # same as no flag, spelled out
 
 Production is read-only to the agents that build this; the operator runs ``--apply``.
 """
@@ -27,7 +36,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 
@@ -38,7 +47,7 @@ import app.db.session as app_session
 from app.models.non_food_name import NonFoodName
 from app.models.receipt import Receipt
 from app.models.store_product_alias import StoreProductAlias
-from app.services.store_chain import CHAIN_KEYS, normalize_store_chain
+from app.services.store_chain import ChainMatch, match_chain, normalize_store_chain
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -47,28 +56,27 @@ def _default_sessions() -> AbstractAsyncContextManager[AsyncSession]:
     return app_session.AsyncSessionLocal()
 
 
-def _recompute(old_key: str) -> str:
-    """What `normalize_store_chain` would map an already-stored key to today.
+def _recompute(old_key: str) -> ChainMatch | None:
+    """What `match_chain` finds for an already-stored key, re-read as a header - if anything.
 
     A stored key is itself the output of an earlier call: either one of the known chain keys,
     or a slug of the original header (spaces and punctuation collapsed to hyphens). The fuzzy
-    pass works on whitespace-separated header words, so a misread chain's word only surfaces
-    again if the hyphens standing in for the original spaces are put back first. Trying that
-    and keeping it only when it lands on a known chain avoids turning an unrelated slug like
-    ``k-group`` (hyphen as the real separator, not a misread space) into something else: the
-    de-hyphenated candidate round-trips back to ``k-group`` there anyway, since nothing else
-    matches it and the slug fallback rebuilds the same key.
+    (and hyphen-rejoin) passes work on whitespace-separated header words, so a misread chain's
+    word only surfaces again if the hyphens standing in for the original spaces are put back
+    first. This also round-trips an already-correct key like ``k-group`` back to itself (``k
+    group`` rejoins to the literal pattern ``K-GROUP`` by the same hyphen-rejoin rule that
+    recovers a genuine misread), so it needs no special-casing against a key that was never a
+    slug to begin with.
     """
-    candidate = normalize_store_chain(old_key.replace("-", " "))
-    if candidate in CHAIN_KEYS:
-        return candidate
-    return normalize_store_chain(old_key) or old_key
+    return match_chain(old_key.replace("-", " "))
 
 
 @dataclass
 class ChainKeyRow:
     old_key: str
     new_key: str
+    rule: str | None  # "exact", "fuzzy", or None (stayed a slug / unrecognised)
+    token: str | None  # the header word, or hyphen-joined pair, that matched - if any
     receipt_count: int
     alias_count: int
     non_food_count: int
@@ -76,6 +84,17 @@ class ChainKeyRow:
     @property
     def changed(self) -> bool:
         return self.old_key != self.new_key
+
+    @property
+    def suspicious(self) -> bool:
+        """An exact-rule match on an already-stored key is unexpected.
+
+        A key that needed no tolerance at all to match a pattern is not the OCR-misread case
+        this script is for; it is at least as likely to be an ordinary word that happens to
+        contain one (``kirpputori-sale``, a flea market, next to the `SALE` pattern). Flagged
+        so the operator reviews it instead of it being auto-applied the same as a `fuzzy` fix.
+        """
+        return self.changed and self.rule == "exact"
 
 
 async def _counts(db: AsyncSession, model: type, column) -> dict[str, int]:
@@ -93,16 +112,24 @@ async def plan(db: AsyncSession) -> list[ChainKeyRow]:
     aliases = await _counts(db, StoreProductAlias, StoreProductAlias.store_chain)
     non_food = await _counts(db, NonFoodName, NonFoodName.store_chain)
     keys = set(receipts) | set(aliases) | set(non_food)
-    return [
-        ChainKeyRow(
-            old_key=key,
-            new_key=_recompute(key),
-            receipt_count=receipts.get(key, 0),
-            alias_count=aliases.get(key, 0),
-            non_food_count=non_food.get(key, 0),
+    rows = []
+    for key in sorted(keys):
+        match = _recompute(key)
+        new_key = (
+            match.key if match is not None else (normalize_store_chain(key) or key)
         )
-        for key in sorted(keys)
-    ]
+        rows.append(
+            ChainKeyRow(
+                old_key=key,
+                new_key=new_key,
+                rule=match.rule if match is not None else None,
+                token=match.token if match is not None else None,
+                receipt_count=receipts.get(key, 0),
+                alias_count=aliases.get(key, 0),
+                non_food_count=non_food.get(key, 0),
+            )
+        )
+    return rows
 
 
 async def _merge_unique(
@@ -158,12 +185,29 @@ async def _merge_unique(
     return touched
 
 
-async def apply(db: AsyncSession, rows: list[ChainKeyRow]) -> int:
-    """Rewrite every changed key's rows, in one transaction. Returns rows touched."""
+async def apply(db: AsyncSession, rows: list[ChainKeyRow], keys: Sequence[str]) -> int:
+    """Rewrite exactly the named keys, in one transaction. Returns rows touched.
+
+    Refuses (raises `ValueError`, nothing written) if a name is not a changed key in `rows` -
+    there is no "apply everything" mode. The operator names each key after reading the plan,
+    especially a `suspicious` one, rather than this script deciding on its own which rekeys are
+    safe.
+    """
+    by_key = {row.old_key: row for row in rows}
+    wanted = []
+    unknown = []
+    for name in keys:
+        row = by_key.get(name)
+        if row is None or not row.changed:
+            unknown.append(name)
+        else:
+            wanted.append(row)
+    if unknown:
+        raise ValueError(
+            "not a key the current plan would re-key: " + ", ".join(unknown)
+        )
     touched = 0
-    for row in rows:
-        if not row.changed:
-            continue
+    for row in wanted:
         result = await db.execute(
             update(Receipt)
             .where(Receipt.store_chain == row.old_key)
@@ -198,22 +242,33 @@ def _print_plan(rows: list[ChainKeyRow]) -> None:
         print("No chain keys need re-keying.")
         return
     for row in changed:
+        flag = (
+            "  [SUSPICIOUS: exact match on a stored key - review before applying]"
+            if row.suspicious
+            else ""
+        )
         print(
             f"  {row.old_key} -> {row.new_key}  "
-            f"(receipt={row.receipt_count} alias={row.alias_count} "
-            f"non_food={row.non_food_count})"
+            f"(rule={row.rule or '?'} token={row.token!r} "
+            f"receipt={row.receipt_count} alias={row.alias_count} "
+            f"non_food={row.non_food_count}){flag}"
         )
 
 
-async def run(apply_changes: bool, sessions: SessionFactory = _default_sessions) -> int:
+async def run(
+    keys: Sequence[str] | None, sessions: SessionFactory = _default_sessions
+) -> int:
     async with sessions() as db:
         rows = await plan(db)
         _print_plan(rows)
-        if apply_changes:
-            touched = await apply(db, rows)
-            print(f"applied: {touched} row(s) rewritten")
+        if keys:
+            touched = await apply(db, rows, keys)
+            print(f"applied: {touched} row(s) rewritten across {len(keys)} key(s)")
         else:
-            print("dry run: nothing written (pass --apply to rewrite)")
+            print(
+                "dry run: nothing written "
+                "(pass --apply <key> [<key> ...] to rewrite those keys)"
+            )
     return 0
 
 
@@ -221,13 +276,20 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
-        "--apply", action="store_true", help="rewrite the rows, in one transaction"
+        "--apply",
+        nargs="+",
+        metavar="KEY",
+        help="rewrite exactly these old chain keys (each must be a changed key in the plan)",
     )
     group.add_argument(
         "--dry-run", action="store_true", help="list what would change (default)"
     )
     args = parser.parse_args(argv)
-    return asyncio.run(run(args.apply))
+    try:
+        return asyncio.run(run(args.apply))
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
