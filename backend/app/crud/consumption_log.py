@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import Select, func, select
@@ -17,6 +17,7 @@ from app.schemas.consumption_log import ConsumptionAction
 __all__ = [
     "ConsumptionAction",
     "add_consumption_log",
+    "correction_direction",
     "list_consumption_logs",
     "newest_batch",
     "newest_batch_before",
@@ -60,6 +61,29 @@ def add_consumption_log(
     )
     db.add(log)
     return log
+
+
+def correction_direction(row: Any) -> Literal["up", "down"] | None:
+    """Which way a `correct` row moved the quantity, from data every row already keeps.
+
+    None for every action but `correct`. `quantity_consumed` stays unsigned (do not read
+    it for this), but `previous` holds the item as it was just before the event, so the
+    sign comes from comparing that to `quantity_after` instead - nothing new is stored.
+    None too for a `correct` row with no `previous`, or whose `previous` was taken before
+    it carried a quantity: there is nothing to compare against.
+    """
+    if str(row.action) != ConsumptionAction.CORRECT:
+        return None
+    previous = row.previous
+    if not previous or "current_quantity" not in previous:
+        return None
+    before = Decimal(str(previous["current_quantity"]))
+    after = Decimal(str(row.quantity_after))
+    if after > before:
+        return "up"
+    if after < before:
+        return "down"
+    return None
 
 
 async def list_consumption_logs(
