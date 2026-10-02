@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.icon_workflow import build_icon_workflow
+from app.services.icon_workflow import NEGATIVE_PROMPT, build_icon_workflow
 
 
 class TestGraphShape:
@@ -224,3 +224,34 @@ class TestStyles:
     def test_flat_strength_out_of_range_is_rejected(self, strength: float) -> None:
         with pytest.raises(ValueError):
             build_icon_workflow("Leek", style="flat", seed=1, lora_strength=strength)
+
+
+class TestCompositionTuning:
+    """Q18 subjects (docs/spikes/q18_subjects/): the measured fix for the tiled/
+    multiple-subject failures `docs/spikes/Q18_icon_styles.md` and
+    `docs/spikes/q18_g2_live/README.md` both saw (Fish fingers, Karelian pasty, Tomato
+    puree), on top of the visual-subject fix. Added through the existing `subject` text
+    and `NEGATIVE_PROMPT` only - the graph shape, the trigger words and "Flat. No faces"
+    are unchanged."""
+
+    def test_the_positive_prompt_still_starts_with_the_trigger_and_subject(
+        self,
+    ) -> None:
+        # Composition terms are additive; the part other code and tests key off (the
+        # trigger, then the subject, straight after) must still come first.
+        text = build_icon_workflow("Leek", style="flat", seed=1)["3"]["inputs"]["text"]
+        assert text.startswith("flat, Leek,")
+
+    def test_the_positive_prompt_asks_for_a_single_centred_object(self) -> None:
+        text = build_icon_workflow("Leek", style="flat", seed=1)["3"]["inputs"]["text"]
+        assert "single object" in text
+        assert "centred" in text
+
+    def test_the_negative_prompt_still_starts_with_the_original_terms(self) -> None:
+        # F11's pinned assertion (`test_negative_prompt_excludes_faces_in_both_styles`)
+        # checks this prefix too; a composition addition must only ever append.
+        assert NEGATIVE_PROMPT.startswith("blurry, text, watermark, face")
+
+    def test_the_negative_prompt_excludes_multiple_objects_and_collage(self) -> None:
+        assert "multiple objects" in NEGATIVE_PROMPT
+        assert "collage" in NEGATIVE_PROMPT

@@ -44,7 +44,11 @@ GOOD = _png()
 
 
 class TestIconSubject:
-    def test_a_plain_name_has_no_brief(self) -> None:
+    def test_a_plain_name_with_no_brief_or_cached_subject_is_used_as_is(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(product_icons, "subject_for", lambda name: None)
+
         assert icon_subject("Quark") == "Quark"
 
     def test_a_gap_product_with_a_brief_gets_it_appended(self) -> None:
@@ -74,8 +78,64 @@ class TestIconSubject:
             "Tomato puree, a small can or squeeze out tube, in a yellow tube"
         )
 
-    def test_a_blank_hint_is_ignored(self) -> None:
+    def test_a_blank_hint_is_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(product_icons, "subject_for", lambda name: None)
+
         assert icon_subject("Quark", hint="   ") == "Quark"
+
+    def test_a_cached_visual_subject_replaces_the_bare_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repeating the bare name alongside the subject would reintroduce the same
+        misreading the subject exists to fix (Q18 subjects), so it is replaced, not
+        joined - unlike an operator brief, which is appended to the name."""
+        monkeypatch.setattr(
+            product_icons,
+            "subject_for",
+            lambda name: (
+                "a tub of smooth white soft cheese, a spoon resting in it"
+                if name == "Quark"
+                else None
+            ),
+        )
+
+        assert (
+            icon_subject("Quark")
+            == "a tub of smooth white soft cheese, a spoon resting in it"
+        )
+
+    def test_an_operator_brief_wins_over_a_cached_subject(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            product_icons, "subject_for", lambda name: "this must never be used"
+        )
+
+        assert icon_subject("Tomato puree") == (
+            "Tomato puree, a small can or squeeze out tube"
+        )
+
+    def test_the_cooks_hint_is_appended_after_a_cached_subject(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            product_icons,
+            "subject_for",
+            lambda name: (
+                "a tub of smooth white soft cheese" if name == "Quark" else None
+            ),
+        )
+
+        assert icon_subject("Quark", hint="with berries on top") == (
+            "a tub of smooth white soft cheese, with berries on top"
+        )
+
+    def test_a_product_with_no_cached_subject_falls_back_to_its_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(product_icons, "subject_for", lambda name: None)
+
+        assert icon_subject("Leek") == "Leek"
 
 
 # --- scheduling --------------------------------------------------------------------------

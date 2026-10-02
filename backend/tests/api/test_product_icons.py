@@ -127,8 +127,17 @@ class TestRegenerate:
         broadcast.assert_awaited()
 
     async def test_the_cooks_hint_reaches_the_subject(
-        self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        model,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        # No cached Q18 subject here (monkeypatched to None): the hint must still reach
+        # the subject built from the bare name, same as a product the gateway was never
+        # asked about.
+        monkeypatch.setattr(product_icons, "subject_for", lambda name: None)
         product = await _product(seeded_db, "Karelian pasty")
 
         await client.post(
@@ -139,6 +148,38 @@ class TestRegenerate:
         (workflow,), _ = model.await_args
         assert "oval rye pastry with rice filling" in workflow["3"]["inputs"]["text"]
         assert "Karelian pasty" in workflow["3"]["inputs"]["text"]
+
+    async def test_the_cooks_hint_reaches_a_cached_visual_subject_too(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        model,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Q18 subjects: a cached visual subject replaces the bare name in the sent
+        prompt (see `app.services.product_icons.icon_subject`), but the cook's own hint
+        is still appended after it."""
+        monkeypatch.setattr(
+            product_icons,
+            "subject_for",
+            lambda name: (
+                "oval rye pastry, scalloped crimped edge"
+                if name == "Karelian pasty"
+                else None
+            ),
+        )
+        product = await _product(seeded_db, "Karelian pasty")
+
+        await client.post(
+            f"/api/products/{product.id}/icon",
+            json={"hint": "oval rye pastry with rice filling"},
+        )
+
+        (workflow,), _ = model.await_args
+        text = workflow["3"]["inputs"]["text"]
+        assert "oval rye pastry, scalloped crimped edge" in text
+        assert "oval rye pastry with rice filling" in text
 
     async def test_no_body_is_fine(
         self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast

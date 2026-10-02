@@ -14,6 +14,14 @@ strength range:
 Operator ruling (2026-09-30), quoted in full: "Flat. No faces" - ``flat`` is therefore the
 default style (``emoji`` stays available for an explicit call), and the negative prompt
 excludes faces and characters in both styles.
+
+Q18 subjects (`docs/spikes/q18_subjects/`) added composition terms on top of that, measured
+against the tiled/multiple-subject failures both `docs/spikes/Q18_icon_styles.md` and
+`docs/spikes/q18_g2_live/README.md` saw (Fish fingers and Karelian pasty tiled; Tomato puree
+split into two compositions in one frame): the positive prompt now also asks for a single,
+centred object on a plain background, and the negative prompt excludes multiple objects and
+collages. Added through the existing prompt text only - the trigger words, "Flat. No faces"
+and the graph shape are unchanged.
 """
 
 from __future__ import annotations
@@ -26,9 +34,12 @@ CHECKPOINT = "sd_xl_base_1.0.safetensors"
 LORA_NAME = "SDXL-Emoji-Lora-r4.safetensors"
 # Operator ruling (2026-09-30): "Flat. No faces". The face/character terms apply to both
 # styles - emoji stays available, but nothing generated may show a face or a character.
+# "multiple objects, collage" (Q18 subjects) was added after the tiled/split-composition
+# failures measured in docs/spikes/q18_subjects/ - appended, never inserted, so the pinned
+# "starts with blurry, text, watermark, face" assertion keeps holding.
 NEGATIVE_PROMPT = (
     "blurry, text, watermark, face, eyes, mouth, smile, cartoon character, mascot, "
-    "anthropomorphic"
+    "anthropomorphic, multiple objects, collage"
 )
 BIREFNET_MODEL = "General.safetensors"
 
@@ -84,8 +95,13 @@ def build_icon_workflow(
             f"{style} LoRA strength must be between {low} and {high}, got {strength}"
         )
 
-    # The flat form swaps the trigger word and must never say "emoji".
-    positive_text = f"{TRIGGERS[style]}, {subject}, simple flat icon, white background"
+    # The flat form swaps the trigger word and must never say "emoji". The composition
+    # terms (Q18 subjects) are appended after the trigger and subject, never inserted
+    # before them - callers and tests key off that prefix staying put.
+    positive_text = (
+        f"{TRIGGERS[style]}, {subject}, simple flat icon, single object, centred, "
+        "plain white background"
+    )
 
     graph: dict[str, Any] = {
         "1": {
