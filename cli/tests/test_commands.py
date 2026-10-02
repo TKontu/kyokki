@@ -333,6 +333,125 @@ def test_replayed_is_in_the_json_document(api: FakeApi, run: Runner) -> None:
     assert fresh.json() == {"item": ITEM, "product_created": False, "replayed": False}
 
 
+# --- stock discard --------------------------------------------------------------
+
+DISCARDED_ITEM = {
+    "item_id": ITEM_ID,
+    "product_name": "Milk",
+    "amount": 2.0,
+    "unit": "dl",
+    "expiry_date": "2026-09-20",
+    "location": "main_fridge",
+}
+
+
+def test_stock_discard_needs_the_expired_flag(api: FakeApi, run: Runner) -> None:
+    result = run("stock", "discard")
+    assert result.code == 2
+    assert api.requests == []
+
+
+def test_stock_discard_dry_run_sends_no_key(api: FakeApi, run: Runner) -> None:
+    api.on(
+        "POST",
+        "/api/stock/discard-expired",
+        body={"items": [DISCARDED_ITEM], "count": 1, "dry_run": True},
+    )
+    result = run("stock", "discard", "--expired", "--dry-run", "--idempotency-key", "k")
+    assert result.code == 0
+    assert api.last.method == "POST"
+    assert api.last_json() == {"dry_run": True}
+    assert "Idempotency-Key" not in api.last.headers
+    assert result.json() == {
+        "items": [DISCARDED_ITEM],
+        "count": 1,
+        "dry_run": True,
+        "replayed": False,
+    }
+
+
+def test_stock_discard_for_real_sends_a_key_and_a_location(
+    api: FakeApi, run: Runner
+) -> None:
+    api.on(
+        "POST",
+        "/api/stock/discard-expired",
+        body={"items": [DISCARDED_ITEM], "count": 1, "dry_run": False},
+    )
+    result = run("stock", "discard", "--expired", "--location", "main_fridge")
+    assert result.code == 0
+    assert api.last_json() == {"dry_run": False, "location": "main_fridge"}
+    assert len(api.last.headers["Idempotency-Key"]) == 64
+    assert result.json() == {
+        "items": [DISCARDED_ITEM],
+        "count": 1,
+        "dry_run": False,
+        "replayed": False,
+    }
+
+
+def test_stock_discard_explicit_idempotency_key(api: FakeApi, run: Runner) -> None:
+    api.on(
+        "POST",
+        "/api/stock/discard-expired",
+        body={"items": [], "count": 0, "dry_run": False},
+    )
+    run("stock", "discard", "--expired", "--idempotency-key", "my-discard-1")
+    assert api.last.headers["Idempotency-Key"] == "my-discard-1"
+
+
+def test_stock_discard_replayed(api: FakeApi, run: Runner) -> None:
+    api.on(
+        "POST",
+        "/api/stock/discard-expired",
+        body={"items": [DISCARDED_ITEM], "count": 1, "dry_run": False},
+        headers={"Idempotent-Replayed": "true"},
+    )
+    result = run("stock", "discard", "--expired")
+    assert result.json() == {
+        "items": [DISCARDED_ITEM],
+        "count": 1,
+        "dry_run": False,
+        "replayed": True,
+    }
+
+
+def test_stock_discard_human_lists_items(api: FakeApi, run: Runner, tty: None) -> None:
+    api.on(
+        "POST",
+        "/api/stock/discard-expired",
+        body={"items": [DISCARDED_ITEM], "count": 1, "dry_run": False},
+    )
+    result = run("stock", "discard", "--expired")
+    assert result.code == 0
+    assert "Discarded 1 item(s)" in result.out
+    assert "Milk" in result.out and "2026-09-20" in result.out
+
+
+def test_stock_discard_human_dry_run_says_would(
+    api: FakeApi, run: Runner, tty: None
+) -> None:
+    api.on(
+        "POST",
+        "/api/stock/discard-expired",
+        body={"items": [DISCARDED_ITEM], "count": 1, "dry_run": True},
+    )
+    result = run("stock", "discard", "--expired", "--dry-run")
+    assert "Would discard 1 item(s)" in result.out
+
+
+def test_stock_discard_human_nothing_expired(
+    api: FakeApi, run: Runner, tty: None
+) -> None:
+    api.on(
+        "POST",
+        "/api/stock/discard-expired",
+        body={"items": [], "count": 0, "dry_run": False},
+    )
+    result = run("stock", "discard", "--expired")
+    assert "nothing was expired" in result.out.lower()
+
+
 # --- product ------------------------------------------------------------------
 
 

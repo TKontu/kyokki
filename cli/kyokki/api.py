@@ -145,7 +145,7 @@ def error_from(response: httpx.Response) -> CliError:
     )
 
 
-STRING_DETAIL_EXIT = {400: USAGE, 409: CONFLICT}
+STRING_DETAIL_EXIT = {400: USAGE, 404: NOT_FOUND, 409: CONFLICT}
 
 # What ``expect="text"`` accepts: the export's bodies, never an HTML login page.
 TEXT_MEDIA_TYPES = ("text/plain", "text/markdown")

@@ -240,6 +240,55 @@ def stock_consume(ctx: Context) -> Outcome:
     return Outcome(result, human, answer.replayed)
 
 
+DISCARD_EXPIRED_PATH = "/api/stock/discard-expired"
+
+
+def stock_discard(ctx: Context) -> Outcome:
+    a = ctx.args
+    body: dict[str, Any] = {"dry_run": a.dry_run}
+    if a.location:
+        body["location"] = a.location
+    answer = ctx.api.request(
+        "POST",
+        DISCARD_EXPIRED_PATH,
+        body=body,
+        idempotency_key=None if a.dry_run else ctx.idempotency_key,
+        expect=dict,
+    )
+    result = answer.body
+
+    def human() -> str:
+        items = result.get("items") or []
+        dry = bool(result.get("dry_run"))
+        where = f" in {a.location}" if a.location else ""
+        if not items:
+            return (
+                f"Nothing would be discarded{where}; nothing is expired"
+                if dry
+                else f"Nothing discarded{where}; nothing was expired"
+            )
+        verb = "Would discard" if dry else "Discarded"
+        lines = [f"{verb} {result.get('count', len(items))} item(s):"]
+        lines.append(
+            output.table(
+                ["PRODUCT", "AMOUNT", "UNIT", "EXPIRED", "WHERE"],
+                [
+                    [
+                        item.get("product_name", ""),
+                        output.number(item.get("amount")),
+                        item.get("unit", ""),
+                        f"{item.get('expiry_date', '')}",
+                        item.get("location", ""),
+                    ]
+                    for item in items
+                ],
+            )
+        )
+        return "\n".join(lines)
+
+    return Outcome(result, human, answer.replayed)
+
+
 # --- product ------------------------------------------------------------------
 
 
@@ -329,41 +378,9 @@ DEFAULT_SHOPPING_UNIT = "pcs"
 GENERATE_SOURCES = {"low-stock": "low_stock"}
 # The API's largest page; list asks for pages of this size until one comes back short.
 SHOPPING_PAGE_SIZE = 500
-# The router's plain-string 404 for an unknown item id (a coded not_found is exit 3
-# already). Any other 404, a wrong route or a proxy's page, stays an error (exit 1).
-ITEM_NOT_FOUND = re.compile(r"^Shopping list item \S+ not found$")
-# handle_integrity_errors' 400 for an insert that points at a missing row.
-MISSING_REFERENCE = "Referenced record does not exist."
-
-
-def _item_not_found(exc: CliError) -> CliError:
-    """The router's plain-string 404 for an unknown item is not found (exit 3)."""
-    detail = exc.detail
-    if (
-        exc.status == 404
-        and isinstance(detail, dict)
-        and detail.get("code") == "http_404"
-        and ITEM_NOT_FOUND.match(str(detail.get("message", "")))
-    ):
-        return CliError(NOT_FOUND, {**detail, "code": "not_found"}, exc.status)
-    return exc
-
-
-def _unknown_product(exc: CliError, product_id: str | None) -> CliError:
-    """add with an unknown --product-id gets a foreign-key 400; that is not found."""
-    detail = exc.detail
-    if (
-        product_id
-        and exc.status == 400
-        and isinstance(detail, dict)
-        and detail.get("message") == MISSING_REFERENCE
-    ):
-        return CliError(
-            NOT_FOUND,
-            {"code": "not_found", "message": f"no product has the id {product_id}"},
-            exc.status,
-        )
-    return exc
+# The server now codes every shopping 404 as `not_found` itself (an unknown item, or an
+# unknown --product-id), so the CLI no longer guesses at it from plain-string text; the
+# generic exit_code_for already maps detail.code == "not_found" to exit 3.
 
 
 def shopping_list(ctx: Context) -> Outcome:
@@ -434,16 +451,13 @@ def shopping_add(ctx: Context) -> Outcome:
         body["priority"] = a.priority
     if a.product_id:
         body["product_master_id"] = a.product_id
-    try:
-        answer = ctx.api.request(
-            "POST",
-            SHOPPING_PATH,
-            body=body,
-            idempotency_key=ctx.idempotency_key,
-            expect=dict,
-        )
-    except CliError as exc:
-        raise _unknown_product(exc, a.product_id) from None
+    answer = ctx.api.request(
+        "POST",
+        SHOPPING_PATH,
+        body=body,
+        idempotency_key=ctx.idempotency_key,
+        expect=dict,
+    )
     item = answer.body
 
     def human() -> str:
@@ -458,16 +472,13 @@ def shopping_add(ctx: Context) -> Outcome:
 
 def shopping_done(ctx: Context) -> Outcome:
     a = ctx.args
-    try:
-        answer = ctx.api.request(
-            "POST",
-            f"{SHOPPING_PATH}{a.item_id}/purchase",
-            params={"purchased": "false" if a.undo else "true"},
-            idempotency_key=ctx.idempotency_key,
-            expect=dict,
-        )
-    except CliError as exc:
-        raise _item_not_found(exc) from None
+    answer = ctx.api.request(
+        "POST",
+        f"{SHOPPING_PATH}{a.item_id}/purchase",
+        params={"purchased": "false" if a.undo else "true"},
+        idempotency_key=ctx.idempotency_key,
+        expect=dict,
+    )
     item = answer.body
 
     def human() -> str:
@@ -481,23 +492,30 @@ def shopping_done(ctx: Context) -> Outcome:
 
 def shopping_remove(ctx: Context) -> Outcome:
     a = ctx.args
-    # No Idempotency-Key: the server ignores it on DELETE, so nothing could replay.
-    # Deleting is safe to repeat instead; a repeat of one that applied is exit 3.
+    # An Idempotency-Key like the other mutations: a retry with the same key replays
+    # the first 204 instead of a second (harmless) delete. Removing is safe to repeat
+    # even without one: a repeat of one that already applied is just exit 3.
     try:
-        ctx.api.request("DELETE", f"{SHOPPING_PATH}{a.item_id}")
+        answer = ctx.api.request(
+            "DELETE",
+            f"{SHOPPING_PATH}{a.item_id}",
+            idempotency_key=ctx.idempotency_key,
+        )
     except CliError as exc:
+        # Nothing was sent (a connect error/timeout): a read timeout instead becomes
+        # unknown_outcome, which already carries the generic retry hint.
         if exc.code == "connection" and isinstance(exc.detail, dict):
             exc.detail["hint"] = (
-                "rerun the same command: removing twice removes nothing more, and "
-                "exit 3 then means the item is already removed"
+                "rerun the same command: it sends the same Idempotency-Key, so a "
+                "retry is safe, and exit 3 just means the item is already removed"
             )
-        raise _item_not_found(exc) from None
+        raise
     document = {"id": a.item_id, "removed": True}
 
     def human() -> str:
         return f"Removed {a.item_id} from the shopping list"
 
-    return Outcome(document, human)
+    return Outcome(document, human, answer.replayed)
 
 
 def shopping_generate(ctx: Context) -> Outcome:

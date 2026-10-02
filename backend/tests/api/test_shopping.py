@@ -508,9 +508,13 @@ class TestShoppingIntegrityErrors:
     """Every shopping write went through CRUDBase, which commits inside the crud
     call, with no handler above it - so a constraint violation was a 500 (H05)."""
 
-    async def test_unknown_product_answers_400(
+    async def test_unknown_product_on_create_is_a_coded_not_found(
         self, client: AsyncClient, test_db: AsyncSession
     ):
+        """AG3 follow-up: an unknown `product_master_id` on create used to be
+        handle_integrity_errors' plain-string 400; it is a stable `AgentError`
+        `not_found` now, like `stock.py`'s own 404s, so the CLI can map the code
+        instead of matching the text."""
         response = await client.post(
             "/api/shopping/",
             json={
@@ -523,12 +527,19 @@ class TestShoppingIntegrityErrors:
             },
         )
 
-        assert response.status_code == 400
-        assert "Key (" not in response.json()["detail"]
+        assert response.status_code == 404
+        detail = response.json()["detail"]
+        assert detail["code"] == "not_found"
+        assert "Key (" not in detail["message"]
+        assert "00000000-0000-0000-0000-000000000000" in detail["message"]
 
-    async def test_updating_onto_an_unknown_product_answers_400(
+    async def test_updating_onto_an_unknown_product_is_a_coded_not_found(
         self, client: AsyncClient, test_db: AsyncSession
     ):
+        """F2 fix-pass follow-up to test_unknown_product_on_create_is_a_coded_not_found:
+        an unknown `product_master_id` on update used to stay `handle_integrity_errors`'
+        plain-string 400, unlike create's coded 404; it gets the same `AgentError`
+        `not_found` now, via the same `_unknown_product_as_not_found` helper."""
         created = await client.post(
             "/api/shopping/",
             json={
@@ -546,7 +557,10 @@ class TestShoppingIntegrityErrors:
             json={"product_master_id": "00000000-0000-0000-0000-000000000000"},
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 404
+        detail = response.json()["detail"]
+        assert detail["code"] == "not_found"
+        assert "00000000-0000-0000-0000-000000000000" in detail["message"]
 
 
 BANANAS = {
@@ -658,7 +672,8 @@ class TestIdempotentCreate:
 
         refused = await client.post("/api/shopping/", json=body, headers=headers)
 
-        assert refused.status_code == 400
+        assert refused.status_code == 404
+        assert refused.json()["detail"]["code"] == "not_found"
         assert await _count(test_db, IdempotencyKey) == 0
         shopping_broadcast.assert_not_awaited()
 
@@ -730,3 +745,78 @@ class TestIdempotentPurchase:
         assert response.status_code == 404
         assert await _count(test_db, IdempotencyKey) == 0
         shopping_broadcast.assert_not_awaited()
+
+
+class TestIdempotentDelete:
+    """AG3 follow-up: `DELETE /api/shopping/{id}` used to ignore `Idempotency-Key`
+    entirely; a retried `kyokki shopping remove` is safe now, like every other
+    mutation."""
+
+    async def test_a_repeated_key_replays_the_204_without_deleting_again(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        item = await _unpurchased(test_db)
+        url = f"/api/shopping/{item.id}"
+        headers = {"Idempotency-Key": "shop-rm-1"}
+
+        first = await client.delete(url, headers=headers)
+        second = await client.delete(url, headers=headers)
+
+        assert (first.status_code, second.status_code) == (204, 204)
+        assert "Idempotent-Replayed" not in first.headers
+        assert second.headers.get("Idempotent-Replayed") == "true"
+        assert await _count(test_db, IdempotencyKey) == 1
+        shopping_broadcast.assert_awaited_once()
+
+    async def test_the_same_key_for_another_item_is_a_conflict(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        item = await _unpurchased(test_db)
+        other = await _unpurchased(test_db)
+        headers = {"Idempotency-Key": "shop-rm-2"}
+        await client.delete(f"/api/shopping/{item.id}", headers=headers)
+
+        elsewhere = await client.delete(f"/api/shopping/{other.id}", headers=headers)
+
+        assert elsewhere.status_code == 409
+        assert elsewhere.json()["detail"]["code"] == "conflict"
+        shopping_broadcast.assert_awaited_once()
+
+    async def test_no_key_runs_every_time(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        first_item = await _unpurchased(test_db)
+        second_item = await _unpurchased(test_db)
+
+        first = await client.delete(f"/api/shopping/{first_item.id}")
+        second = await client.delete(f"/api/shopping/{second_item.id}")
+
+        assert (first.status_code, second.status_code) == (204, 204)
+        assert "Idempotent-Replayed" not in second.headers
+        assert await _count(test_db, IdempotencyKey) == 0
+        assert shopping_broadcast.await_count == 2
+
+    async def test_an_unknown_item_is_not_remembered(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        headers = {"Idempotency-Key": "shop-rm-3"}
+
+        response = await client.delete(f"/api/shopping/{uuid4()}", headers=headers)
+
+        assert response.status_code == 404
+        assert response.json()["detail"]["code"] == "not_found"
+        assert await _count(test_db, IdempotencyKey) == 0
+        shopping_broadcast.assert_not_awaited()
+
+    async def test_a_repeat_without_a_key_after_deletion_is_not_found(
+        self, client: AsyncClient, test_db: AsyncSession, shopping_broadcast
+    ):
+        item = await _unpurchased(test_db)
+        url = f"/api/shopping/{item.id}"
+
+        first = await client.delete(url)
+        second = await client.delete(url)
+
+        assert first.status_code == 204
+        assert second.status_code == 404
+        assert second.json()["detail"]["code"] == "not_found"

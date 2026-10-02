@@ -281,13 +281,14 @@ def test_add_a_blank_name_is_usage(api: FakeApi, run: Runner, name: str) -> None
     assert api.requests == []
 
 
-def test_add_an_unknown_product_id_is_not_found(api: FakeApi, run: Runner) -> None:
+def test_add_a_plain_400_is_usage_even_with_a_product_id(
+    api: FakeApi, run: Runner
+) -> None:
+    """The CLI no longer guesses `not_found` from a plain-string 400 (the server now
+    codes an unknown --product-id itself: test_add_a_coded_not_found_product_is_3)."""
     api.error("POST", LIST_PATH, 400, "Referenced record does not exist.")
     result = run("shopping", "add", "Milk", "1", "l", "--product-id", PRODUCT_ID)
-    assert result.code == 3
-    body = result.json()
-    assert body["code"] == "not_found"
-    assert PRODUCT_ID in body["message"]
+    assert result.code == 2
 
 
 def test_add_a_coded_not_found_product_is_3(api: FakeApi, run: Runner) -> None:
@@ -412,25 +413,23 @@ def test_remove_deletes(api: FakeApi, run: Runner) -> None:
     assert result.code == 0
     assert api.last.method == "DELETE"
     assert api.last.url.path == ITEM_PATH
-    assert "Idempotency-Key" not in api.last.headers
-    assert result.json() == {"id": ITEM_ID, "removed": True}
+    assert len(api.last.headers["Idempotency-Key"]) == 64
+    assert result.json() == {"id": ITEM_ID, "removed": True, "replayed": False}
 
 
-def test_remove_takes_no_idempotency_key(api: FakeApi, run: Runner) -> None:
-    result = run("shopping", "remove", ITEM_ID, "--idempotency-key", "k")
-    assert result.code == 2
-    assert api.requests == []
+def test_remove_explicit_idempotency_key(api: FakeApi, run: Runner) -> None:
+    api.routes[("DELETE", ITEM_PATH)] = httpx.Response(204)
+    run("shopping", "remove", ITEM_ID, "--idempotency-key", "shop-rm-1")
+    assert api.last.headers["Idempotency-Key"] == "shop-rm-1"
 
 
-def test_remove_a_read_timeout_is_connection_and_says_rerun(
-    api: FakeApi, run: Runner
-) -> None:
-    api.routes[("DELETE", ITEM_PATH)] = _times_out
+def test_remove_replayed(api: FakeApi, run: Runner) -> None:
+    api.routes[("DELETE", ITEM_PATH)] = httpx.Response(
+        204, headers={"Idempotent-Replayed": "true"}
+    )
     result = run("shopping", "remove", ITEM_ID)
-    assert result.code == 1
-    detail = result.json()
-    assert detail["code"] == "connection"
-    assert "exit 3" in detail["hint"]
+    assert result.code == 0
+    assert result.json() == {"id": ITEM_ID, "removed": True, "replayed": True}
 
 
 def test_remove_human(api: FakeApi, run: Runner, tty: None) -> None:
@@ -445,6 +444,22 @@ def test_remove_needs_a_uuid(api: FakeApi, run: Runner) -> None:
     assert api.requests == []
 
 
+def test_remove_a_connection_error_says_a_retry_is_safe(
+    api: FakeApi, run: Runner
+) -> None:
+    """F3: nothing was sent (api.down simulates a ConnectError, like a real
+    ConnectTimeout), so the generic unknown_outcome retry hint never fires; remove gets
+    its own hint instead, saying a rerun is safe because it sends the same
+    Idempotency-Key (derived from the same command line within the same minute)."""
+    api.down = True
+    result = run("shopping", "remove", ITEM_ID)
+    assert result.code == 1
+    detail = result.json()
+    assert detail["code"] == "connection"
+    assert "Idempotency-Key" in detail["hint"]
+    assert "exit 3" in detail["hint"]
+
+
 # --- 404 on an item id --------------------------------------------------------------
 
 
@@ -455,22 +470,16 @@ def test_remove_needs_a_uuid(api: FakeApi, run: Runner) -> None:
         ("DELETE", ITEM_PATH, ["shopping", "remove", ITEM_ID]),
     ],
 )
-@pytest.mark.parametrize(
-    "detail",
-    [
-        f"Shopping list item {ITEM_ID} not found",
-        {"code": "not_found", "message": f"Shopping list item {ITEM_ID} not found"},
-    ],
-    ids=["string", "coded"],
-)
 def test_an_unknown_item_is_not_found(
     api: FakeApi,
     run: Runner,
     method: str,
     path: str,
     argv: list[str],
-    detail: Any,
 ) -> None:
+    """The server codes an unknown item's 404 itself now; the CLI no longer guesses
+    at it from the plain-string shape (test_another_404_stays_1's "plain-not-found")."""
+    detail = {"code": "not_found", "message": f"Shopping list item {ITEM_ID} not found"}
     api.error(method, path, 404, detail)
     result = run(*argv)
     assert result.code == 3
@@ -490,12 +499,12 @@ def test_an_unknown_item_is_not_found(
     "answer",
     [
         httpx.Response(404, json={"detail": "Not Found"}),
-        httpx.Response(404, text="<html>404 Not Found</html>"),
         httpx.Response(404, json={"detail": "Product 42 not found"}),
+        httpx.Response(404, json={"detail": f"Shopping list item {ITEM_ID} not found"}),
     ],
-    ids=["route", "proxy-html", "other-string"],
+    ids=["route", "other-string", "plain-not-found"],
 )
-def test_another_404_stays_1(
+def test_a_plain_string_404_is_also_not_found(
     api: FakeApi,
     run: Runner,
     method: str,
@@ -503,14 +512,38 @@ def test_another_404_stays_1(
     argv: list[str],
     answer: httpx.Response,
 ) -> None:
+    """F1: dropped the text match (AG3 follow-up), but any plain-string 404 is still
+    `not_found` (exit 3) globally now (`STRING_DETAIL_EXIT` in `api.py`) - whatever its
+    exact text, including one shaped exactly like the old "Shopping list item ... not
+    found" - with a generic `http_404` code since nothing recognised its shape. Only a
+    coded detail gets the nicer `not_found` code (test_an_unknown_item_is_not_found)."""
     api.routes[(method, path)] = answer
+    result = run(*argv)
+    assert result.code == 3
+    assert result.json()["code"] == "http_404"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "argv"),
+    [
+        ("POST", PURCHASE_PATH, ["shopping", "done", ITEM_ID]),
+        ("DELETE", ITEM_PATH, ["shopping", "remove", ITEM_ID]),
+    ],
+)
+def test_a_non_json_404_stays_1(
+    api: FakeApi, run: Runner, method: str, path: str, argv: list[str]
+) -> None:
+    """A 404 that is not even JSON (a wrong route, a proxy's page) is not the API's own
+    answer, so it stays the generic error (exit 1), not `not_found`."""
+    api.routes[(method, path)] = httpx.Response(404, text="<html>404 Not Found</html>")
     result = run(*argv)
     assert result.code == 1
     assert result.json()["code"] == "http_404"
 
 
 def test_an_unknown_item_human(api: FakeApi, run: Runner, tty: None) -> None:
-    api.error("DELETE", ITEM_PATH, 404, f"Shopping list item {ITEM_ID} not found")
+    detail = {"code": "not_found", "message": f"Shopping list item {ITEM_ID} not found"}
+    api.error("DELETE", ITEM_PATH, 404, detail)
     result = run("shopping", "remove", ITEM_ID)
     assert result.code == 3
     assert result.err.startswith("error")
@@ -711,8 +744,8 @@ EVERY_COMMAND: list[tuple[str, str, list[str]]] = [
     ("POST", GENERATE_PATH, ["shopping", "generate"]),
     ("GET", EXPORT_PATH, ["shopping", "export"]),
 ]
-# remove sends no key: the server ignores Idempotency-Key on DELETE.
-MUTATIONS = [case for case in EVERY_COMMAND if case[0] == "POST"]
+# remove now sends a key too, like every other mutation.
+MUTATIONS = [case for case in EVERY_COMMAND if case[0] in ("POST", "DELETE")]
 IDS = [" ".join(case[2][:2]) for case in EVERY_COMMAND]
 MUTATION_IDS = [" ".join(case[2][:2]) for case in MUTATIONS]
 

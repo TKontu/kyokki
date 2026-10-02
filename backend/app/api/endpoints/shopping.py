@@ -3,7 +3,7 @@
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +24,7 @@ from app.schemas.shopping_list_item import (
 )
 from app.services import idempotency, shopping_generate
 from app.services.broadcast_helpers import broadcast_shopping_list_update
+from app.services.idempotency import IdempotencyClaim, IdempotencyConflict
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -31,8 +32,27 @@ logger = get_logger(__name__)
 GENERATE_ROUTE = "POST /api/shopping/generate"
 CREATE_ROUTE = "POST /api/shopping/"
 PURCHASE_ROUTE = "POST /api/shopping/{id}/purchase"
+DELETE_ROUTE = "DELETE /api/shopping/{id}"
 GeneratedAction = Literal["created", "updated"]
 EXPORT_MEDIA_TYPES = {"text": "text/plain", "markdown": "text/markdown"}
+# handle_integrity_errors' plain-string 400 for an insert whose foreign key points at a
+# missing row; shopping_list_item has exactly one FK (product_master_id), so this 400 is
+# unambiguous.
+MISSING_REFERENCE = "Referenced record does not exist."
+
+
+def _unknown_product_as_not_found(
+    exc: HTTPException, product_master_id: UUID | None
+) -> HTTPException:
+    """handle_integrity_errors' plain-string 400 for an unknown ``product_master_id``,
+    mapped to an agent-stable `not_found` (same shape as `stock.py`'s own 404s)."""
+    if (
+        product_master_id is not None
+        and exc.status_code == status.HTTP_400_BAD_REQUEST
+        and exc.detail == MISSING_REFERENCE
+    ):
+        return AgentError("not_found", f"no product has the id {product_master_id}")
+    return exc
 
 
 class _PurchaseRequest(BaseModel):
@@ -172,15 +192,15 @@ async def get_shopping_item(
     item_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
-    """Get a specific shopping list item by ID."""
+    """Get a specific shopping list item by ID.
+
+    Errors: 404 `not_found` (no item has this id).
+    """
     logger.info("get_shopping_item", extra={"item_id": str(item_id)})
 
     item = await shopping_list_item.get(db, id=item_id)
     if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Shopping list item {item_id} not found",
-        )
+        raise AgentError("not_found", f"Shopping list item {item_id} not found")
 
     return item
 
@@ -202,6 +222,8 @@ async def create_shopping_item(
     With an Idempotency-Key, the same key and body within 24 h replays the first 201
     (`Idempotent-Replayed: true`) without adding or broadcasting again; the same key
     with another body is 409 `conflict`.
+
+    Errors: 404 `not_found` (no product has `product_master_id`).
     """
     logger.info(
         "create_shopping_item",
@@ -228,8 +250,14 @@ async def create_shopping_item(
     async with idempotency.held(db, claim):
         if (stored := await replayed(db, claim)) is not None:
             return stored
-        async with handle_integrity_errors():
-            item = await shopping_generate.create_item(db, item_in, claim=claim)
+        try:
+            async with handle_integrity_errors():
+                item = await shopping_generate.create_item(db, item_in, claim=claim)
+        except HTTPException as exc:
+            mapped = _unknown_product_as_not_found(exc, item_in.product_master_id)
+            if mapped is exc:
+                raise
+            raise mapped from exc
 
     # Broadcast creation
     await broadcast_shopping_list_update(
@@ -254,18 +282,25 @@ async def update_shopping_item(
     """Update a shopping list item.
 
     Can update name, quantity, unit, priority, or purchase status.
+
+    Errors: 404 `not_found` (no item has this id, or no product has `product_master_id`).
     """
     logger.info("update_shopping_item", extra={"item_id": str(item_id)})
 
     item = await shopping_list_item.get(db, id=item_id)
     if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Shopping list item {item_id} not found",
-        )
+        raise AgentError("not_found", f"Shopping list item {item_id} not found")
 
-    async with handle_integrity_errors():
-        updated_item = await shopping_list_item.update(db, db_obj=item, obj_in=item_in)
+    try:
+        async with handle_integrity_errors():
+            updated_item = await shopping_list_item.update(
+                db, db_obj=item, obj_in=item_in
+            )
+    except HTTPException as exc:
+        mapped = _unknown_product_as_not_found(exc, item_in.product_master_id)
+        if mapped is exc:
+            raise
+        raise mapped from exc
 
     # Broadcast update
     await broadcast_shopping_list_update(
@@ -319,10 +354,7 @@ async def mark_item_purchased(
                 db, item_id, purchased=purchased, claim=claim
             )
     if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Shopping list item {item_id} not found",
-        )
+        raise AgentError("not_found", f"Shopping list item {item_id} not found")
 
     # Broadcast purchase status change
     await broadcast_shopping_list_update(
@@ -338,29 +370,66 @@ async def mark_item_purchased(
     return item
 
 
-@router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def _replayed_delete(
+    db: AsyncSession, claim: IdempotencyClaim | None
+) -> Response | None:
+    """The reply to a retried delete: no body, just the 204 again. ``None`` means this
+    key (or the lack of one) has nothing stored yet, so the caller should go ahead."""
+    if claim is None:
+        return None
+    try:
+        stored = await idempotency.replay(db, claim)
+    except IdempotencyConflict as exc:
+        raise AgentError("conflict", str(exc)) from exc
+    if stored is None:
+        return None
+    return Response(
+        status_code=stored.status_code, headers={"Idempotent-Replayed": "true"}
+    )
+
+
+@router.delete(
+    "/{item_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None
+)
 async def delete_shopping_item(
     item_id: UUID,
+    idempotency_key: str | None = IdempotencyKeyHeader,
     db: AsyncSession = Depends(get_db),
-):
-    """Delete a shopping list item."""
+) -> Any:
+    """Delete a shopping list item.
+
+    With an Idempotency-Key, the same key for this item within 24 h replays the first
+    204 (`Idempotent-Replayed: true`) without deleting or broadcasting again - a retry
+    is then indistinguishable from the first delete, rather than a second 404. An
+    unknown item (404) is not remembered.
+
+    Errors: 404 `not_found` (no item has this id).
+    """
     logger.info("delete_shopping_item", extra={"item_id": str(item_id)})
 
-    item = await shopping_list_item.get(db, id=item_id)
-    if not item:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Shopping list item {item_id} not found",
-        )
+    claim = idempotency.claim_for(
+        idempotency_key, DELETE_ROUTE, {"path": {"item_id": str(item_id)}}
+    )
+    async with idempotency.held(db, claim):
+        if (stored := await _replayed_delete(db, claim)) is not None:
+            return stored
 
-    # Store item data before deletion for broadcast
-    item_name = item.name
-    item_quantity = item.quantity
-    item_unit = item.unit
-    item_priority = item.priority
+        item = await shopping_list_item.get(db, id=item_id)
+        if not item:
+            raise AgentError("not_found", f"Shopping list item {item_id} not found")
 
-    async with handle_integrity_errors():
-        await shopping_list_item.remove(db, id=item_id)
+        # Store item data before deletion for broadcast
+        item_name = item.name
+        item_quantity = item.quantity
+        item_unit = item.unit
+        item_priority = item.priority
+
+        async with handle_integrity_errors():
+            await shopping_list_item.remove(db, id=item_id)
+
+        if claim is not None:
+            await idempotency.remember(db, claim, status.HTTP_204_NO_CONTENT, None)
+            await db.commit()
 
     # Broadcast deletion
     await broadcast_shopping_list_update(

@@ -19,6 +19,7 @@ HELP_PAGES: dict[str, list[str]] = {
     "stock-list": ["stock", "list", "-h"],
     "stock-add": ["stock", "add", "-h"],
     "stock-consume": ["stock", "consume", "-h"],
+    "stock-discard": ["stock", "discard", "-h"],
     "product": ["product", "-h"],
     "product-resolve": ["product", "resolve", "-h"],
     "product-name": ["product", "name", "-h"],
