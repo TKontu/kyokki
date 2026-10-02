@@ -31,6 +31,22 @@ LINE = SelectionLine(
     candidate_names=("Orange juice", "Apple juice"),
 )
 
+# A line reached a candidate only through the model's g (Q37): one candidate is the
+# rejected snap itself (F4, PR #153 review distinguishes it from an ordinary trigram
+# candidate like "Raisin" here).
+LINE_WITH_SNAP = SelectionLine(
+    line_id="l2",
+    printed="ALESTO SELECTION CASHEWP",
+    generic="Dip",
+    category="snacks",
+    candidate_ids=(
+        "0b0e9d2a-4c1f-4a5e-9e4b-1f1f1f1f1f03",
+        "0b0e9d2a-4c1f-4a5e-9e4b-1f1f1f1f1f04",
+    ),
+    candidate_names=("Raisin", "Dip"),
+    proposed_name="Dip",
+)
+
 
 def _answer(rows: list[dict]) -> str:
     return json.dumps({"r": rows})
@@ -142,22 +158,48 @@ class TestParse:
         assert answer.products == {}
         assert answer.corrected == {"l1": "Pear nectar"}
 
-    def test_a_corrected_name_equal_to_a_candidate_is_ignored(self) -> None:
-        """Repeating back a name it was offered - and rejected - is not a correction."""
+    def test_a_corrected_name_equal_to_a_non_proposed_candidate_is_kept(self) -> None:
+        """F4 (PR #153 review): only the rejected *snap's* own name is a non-answer -
+        an ordinary trigram candidate the model also declined is unrelated, and its
+        name might genuinely be the correction, so `LINE` (no g-only snap among its
+        candidates) must not throw this away."""
         answer = parse_selection(
             _answer([{"id": "l1", "p": None, "g": "Orange Juice"}]), [LINE]
         )
 
-        assert answer.corrected == {}
+        assert answer.corrected == {"l1": "Orange Juice"}
 
-    def test_a_corrected_name_is_ignored_case_and_whitespace_insensitively(
+    def test_a_corrected_name_equal_to_the_rejected_snaps_name_is_ignored(
         self,
     ) -> None:
+        """Repeating back the g-only snap it was offered - and rejected - is not a
+        correction."""
         answer = parse_selection(
-            _answer([{"id": "l1", "p": None, "g": "  apple   juice  "}]), [LINE]
+            _answer([{"id": "l2", "p": None, "g": "Dip"}]), [LINE_WITH_SNAP]
         )
 
         assert answer.corrected == {}
+
+    def test_the_snaps_name_is_ignored_case_and_whitespace_insensitively(
+        self,
+    ) -> None:
+        answer = parse_selection(
+            _answer([{"id": "l2", "p": None, "g": "  dip  "}]), [LINE_WITH_SNAP]
+        )
+
+        assert answer.corrected == {}
+
+    def test_a_corrected_name_equal_to_a_different_candidate_on_a_snap_line_is_kept(
+        self,
+    ) -> None:
+        """The snap line also offers an ordinary trigram candidate ("Raisin"); a
+        correction that happens to equal that name is not repeating the rejected
+        snap and is kept."""
+        answer = parse_selection(
+            _answer([{"id": "l2", "p": None, "g": "Raisin"}]), [LINE_WITH_SNAP]
+        )
+
+        assert answer.corrected == {"l2": "Raisin"}
 
     def test_a_corrected_name_alongside_a_pick_is_ignored(self) -> None:
         """`g` is only solicited for a null answer; a pick needs no correction."""

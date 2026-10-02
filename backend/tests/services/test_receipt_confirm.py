@@ -1081,3 +1081,129 @@ class TestRejectedSnapAtConfirm:
 
         assert result.products_created == 0
         assert result.inventory_items[0][1].id == milk.id
+
+
+class TestTheGuardOnlyCoversTheServedName:
+    """F1 (PR #153 review, planner ruling): the guard must not override a cook who
+    retyped a name - even one that happens to land on the rejected product. It applies
+    only when the item sends no name, or sends back exactly the name the server served
+    this line with (`generic_name`, possibly already corrected); a different typed name
+    is the cook's explicit word."""
+
+    async def test_a_different_typed_name_is_the_cooks_word_even_onto_the_rejected_product(
+        self, db_session: AsyncSession, categories
+    ):
+        """Green olives: the snap (Olive) was rejected and corrected to "Olive paste".
+        The cook disagrees with the correction and types "Olive" - the guard must not
+        override that, even though it is the exact product that was rejected."""
+        olive = await _product(db_session, "Olive", "condiments")
+        receipt = await _receipt_with(
+            db_session,
+            "BARESA VIHREA OLLIVI PAP",
+            "Olive paste",
+            "condiments",
+            _rejected(olive, corrected="Olive paste"),
+        )
+
+        result = await confirm_receipt(
+            db_session,
+            receipt.id,
+            [_item(index=0, name="Olive", category="condiments")],
+            [],
+        )
+
+        assert result.products_created == 0
+        assert result.inventory_items[0][1].id == olive.id
+
+    async def test_the_served_name_still_guards_an_old_line_with_no_correction(
+        self, db_session: AsyncSession, categories
+    ):
+        """The cook sends back exactly the served name ("Dip", never corrected) - that
+        is not a retype, so the guard still applies and still refuses Dip."""
+        dip = await _product(db_session, "Dip", "condiments")
+        receipt = await _receipt_with(
+            db_session, "PESTO ALKU", "Dip", "condiments", _rejected(dip)
+        )
+
+        with pytest.raises(InvalidConfirmItem):
+            await confirm_receipt(
+                db_session,
+                receipt.id,
+                [_item(index=0, name="Dip", category="condiments")],
+                [],
+            )
+
+    async def test_the_served_corrected_name_still_resolves_through_the_guard(
+        self, db_session: AsyncSession, categories
+    ):
+        """The cook sends back exactly the served (corrected) name "Pesto" - still not
+        a retype, so the guard still applies, and creates Pesto as it would with no
+        name sent at all."""
+        dip = await _product(db_session, "Dip", "condiments")
+        receipt = await _receipt_with(
+            db_session,
+            "PESTO ALKU",
+            "Pesto",
+            "condiments",
+            _rejected(dip, corrected="Pesto"),
+        )
+
+        result = await confirm_receipt(
+            db_session,
+            receipt.id,
+            [_item(index=0, name="Pesto", category="condiments")],
+            [],
+        )
+
+        assert result.products_created == 1
+        created = await db_session.get(ProductMaster, result.created_product_ids[0])
+        assert created is not None
+        assert created.canonical_name == "Pesto"
+        assert created.id != dip.id
+
+
+class TestCorrectedProposalIsNotTheCooksWord:
+    """F3 (PR #153 review): accepting a rejected-snap line exactly as served - the
+    corrected generic name the server proposed - is a model guess the cook did not
+    contradict, not their word; one flaky selection call must not permanently teach
+    the chain's alias table as if it had been. A different typed name still is the
+    cook's word, same as any other line."""
+
+    async def test_accepting_the_corrected_name_as_served_is_model_sourced_and_unverified(
+        self, db_session: AsyncSession, categories
+    ):
+        dip = await _product(db_session, "Dip", "condiments")
+        receipt = await _receipt_with(
+            db_session,
+            "PESTO ALKU",
+            "Pesto",
+            "condiments",
+            _rejected(dip, corrected="Pesto"),
+        )
+
+        await confirm_receipt(db_session, receipt.id, [_item(index=0)], [])
+
+        alias = await _alias_for(db_session, "PESTO ALKU")
+        assert (alias.source, alias.manually_verified) == ("model", False)
+
+    async def test_typing_a_different_name_is_still_the_cooks_word(
+        self, db_session: AsyncSession, categories
+    ):
+        dip = await _product(db_session, "Dip", "condiments")
+        receipt = await _receipt_with(
+            db_session,
+            "PESTO ALKU",
+            "Pesto",
+            "condiments",
+            _rejected(dip, corrected="Pesto"),
+        )
+
+        await confirm_receipt(
+            db_session,
+            receipt.id,
+            [_item(index=0, name="Basil pesto", category="condiments")],
+            [],
+        )
+
+        alias = await _alias_for(db_session, "PESTO ALKU")
+        assert (alias.source, alias.manually_verified) == ("cook", True)

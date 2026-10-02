@@ -367,6 +367,12 @@ class ProductResolution:
                     category=line.category,
                     candidate_ids=tuple(str(c.product_id) for c in candidates),
                     candidate_names=tuple(c.name for c in candidates),
+                    # So a correction equal to the snap's own name reads as "no
+                    # correction", while one equal to any other candidate's does not
+                    # (F4, PR #153 review).
+                    proposed_name=str(snap.canonical_name)
+                    if snap is not None
+                    else None,
                 )
             )
 

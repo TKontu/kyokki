@@ -36,7 +36,11 @@ from app.services.generic_products import (
 )
 from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import forget_non_food, remember_non_food
-from app.services.product_names import learn_product_name, product_for_name
+from app.services.product_names import (
+    learn_product_name,
+    normalize_product_name,
+    product_for_name,
+)
 from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)
@@ -157,13 +161,27 @@ class _Confirmation:
             )
         return corrected
 
+    @staticmethod
+    def _is_the_served_name(item: ConfirmedItemCreate, line: dict[str, Any]) -> bool:
+        """Whether `item.name` is absent, or merely echoes back the name the server
+        served this line with (F1, planner ruling): only then may the rejected-snap
+        guard override it. A cook who typed something else - even the exact product a
+        snap selection rejected, as happened live with green olives corrected to "Olive
+        paste" - has given their own word, and it is honoured even onto that product.
+        """
+        if item.name is None:
+            return True
+        return normalize_product_name(item.name) == normalize_product_name(
+            line.get("generic_name")
+        )
+
     async def product(
         self, position: int, item: ConfirmedItemCreate, line: dict[str, Any]
     ) -> ProductMaster:
         name = item.name or line.get("generic_name") or line.get("name")
-        if item.product_id is None:
+        if item.product_id is None and self._is_the_served_name(item, line):
             # The cook's own explicit pick always wins, including the rejected product
-            # itself (Q37b) - only the no-product-id, name-based path needs the guard.
+            # itself (Q37b) - only the no-product-id, served-name path needs the guard.
             name = await self._name_without_the_rejected_snap(position, line, name)
         try:
             product, created = await self.resolver.resolve(
@@ -202,8 +220,28 @@ class _Confirmation:
         return proposed is not None and str(proposed) == str(product.id)
 
     @classmethod
+    def _is_the_accepted_correction(
+        cls, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
+    ) -> bool:
+        """Whether this item is a rejected-snap line left exactly as served (F3, PR
+        #153 review): no product id, no retyped name, and the product it resolved to
+        is the server's own `corrected_generic` - a selection call's correction the
+        cook did not so much as glance past, not their word. One flaky selection
+        answer must not permanently teach the chain's alias table as if it had been.
+        """
+        if item.product_id is not None:
+            return False
+        resolution = cls._resolution(line)
+        corrected = resolution.get("corrected_generic")
+        if not corrected or not cls._is_the_served_name(item, line):
+            return False
+        return normalize_product_name(
+            str(product.canonical_name)
+        ) == normalize_product_name(corrected)
+
+    @classmethod
     def _provenance(
-        cls, line: dict[str, Any], product: ProductMaster
+        cls, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
     ) -> tuple[str, bool]:
         """How the cook's choice relates to what was proposed (spec §3.4).
 
@@ -212,6 +250,8 @@ class _Confirmation:
         line, so a guess the cook merely did not notice became a key that won outright
         for every later receipt from that chain.
         """
+        if cls._is_the_accepted_correction(line, product, item):
+            return "model", False
         if not cls._kept(line, product):
             # Changed, attached or detached: the cook's own word either way.
             return "cook", True
@@ -241,16 +281,22 @@ class _Confirmation:
         product, or typed the name. Keeping what was proposed - an alias, a name hit, a
         selection - says nothing about the model's generic name for the line, so that is
         learned as the model's (H51). A cook-verified alias for TUMMA RYPÄLE says the
-        line is Grape; it does not make "Raisin" the cook's word for it.
+        line is Grape; it does not make "Raisin" the cook's word for it. The same holds
+        for a rejected snap's own corrected name left unchanged (F3) - still the
+        model's word, not the cook's.
         """
-        cook_acted = not self._kept(line, product) or item.name is not None
+        cook_acted = not self._is_the_accepted_correction(line, product, item) and (
+            not self._kept(line, product) or item.name is not None
+        )
         learned = item.name or line.get("generic_name")
         if learned:
             await learn_product_name(
                 self.db, product, learned, "cook" if cook_acted else "model"
             )
 
-    async def learn_alias(self, line: dict[str, Any], product: ProductMaster) -> None:
+    async def learn_alias(
+        self, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
+    ) -> None:
         receipt_name = normalize_receipt_name(str(line["name"]))
         if not receipt_name:
             return
@@ -269,7 +315,7 @@ class _Confirmation:
                 .first()
             )
         now = datetime.now(UTC)
-        source, verified = self._provenance(line, product)
+        source, verified = self._provenance(line, product, item)
 
         if alias is None:
             alias = StoreProductAlias(
@@ -328,7 +374,7 @@ class _Confirmation:
         self.result.inventory_items.append((inventory_item, product))
         self.result.items_created += 1
         if line:
-            await self.learn_alias(line, product)
+            await self.learn_alias(line, product, item)
             await self.learn_names(line, product, item)
 
 

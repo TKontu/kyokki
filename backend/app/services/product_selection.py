@@ -92,6 +92,11 @@ class SelectionLine:
     category: str | None
     candidate_ids: tuple[str, ...]
     candidate_names: tuple[str, ...]
+    # The g-only snap's own name (Q37/Q37b), when one of the candidates is that
+    # proposal rather than an ordinary trigram hit - not sent to the model, read only
+    # by `parse_selection` to tell "the rejected snap's name" apart from every other
+    # candidate's (F4, PR #153 review).
+    proposed_name: str | None = None
 
 
 def build_prompt(lines: list[SelectionLine]) -> str:
@@ -134,6 +139,13 @@ class SelectionResult(dict[str, UUID]):
     ``dict[str, UUID]`` (as every caller before Q37b did) keeps working unchanged; the
     corrected generic names Q37b adds ride along on ``.corrected`` for the one caller
     that reads it (`ProductResolution._select`).
+
+    Caveat (F5, PR #153 review): ``.corrected`` is an extra attribute, not part of
+    ``dict``'s own data, so anything that goes through `dict`'s machinery drops it
+    silently rather than erroring - ``dict(result)`` and ``result == {"l1": some_id}``
+    both compare/copy only the product mapping, same as for any dict subclass. Read
+    ``.corrected`` directly; do not round-trip this value through `dict()` or rely on
+    `==` to notice a difference in it.
     """
 
     def __init__(
@@ -149,13 +161,15 @@ def parse_selection(content: str, lines: list[SelectionLine]) -> SelectionAnswer
     A model that invents a product id, repeats one from another line, or answers for a
     line that was not asked about is ignored rather than trusted. A corrected generic
     name (Q37b) is kept only for a line whose pick was null, and only when it is not
-    merely the name of a candidate that line was offered and the model just rejected -
-    repeating a rejected name back is not a correction.
+    merely the g-only snap's own name the model just rejected (F4, PR #153 review): an
+    ordinary trigram candidate the model also declined is unrelated and may well be the
+    correction, so only the rejected snap's exact name is thrown away as a non-answer.
     """
     offered = {
         line.line_id: dict(zip(line.candidate_ids, line.candidate_names, strict=True))
         for line in lines
     }
+    proposed_names = {line.line_id: line.proposed_name for line in lines}
     data = extract_json_object(content)
     answers = data.get("r") if isinstance(data, dict) else None
     if not isinstance(answers, list):
@@ -197,8 +211,10 @@ def parse_selection(content: str, lines: list[SelectionLine]) -> SelectionAnswer
         tidy = " ".join(corrected_name.split())
         if not tidy:
             continue
-        rejected_names = {normalize_product_name(name) for name in candidates.values()}
-        if normalize_product_name(tidy) in rejected_names:
+        proposed_name = proposed_names.get(line_id)
+        if proposed_name is not None and normalize_product_name(
+            tidy
+        ) == normalize_product_name(proposed_name):
             continue
         corrected[line_id] = tidy
     return SelectionAnswer(products=chosen, corrected=corrected)
