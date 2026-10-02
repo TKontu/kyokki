@@ -419,7 +419,50 @@ class TestReanalyseLine:
 class TestResolutionWithCatalog:
     """F4: the real resolver tiers, exercised for this call site with a real catalog."""
 
-    async def test_a_matching_catalog_name_resolves(
+    async def test_a_catalog_name_reached_through_g_is_kept_when_selection_keeps_it(
+        self,
+        db_session: AsyncSession,
+        sample_category: Category,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Q37: a g-only catalog hit is a proposal the selection model judges, not a key."""
+        product = ProductMaster(
+            id=uuid4(),
+            canonical_name="Cashew nuts",
+            category="dairy",
+            storage_type="pantry",
+            default_shelf_life_days=180,
+            unit_type="count",
+            default_unit="pcs",
+        )
+        db_session.add(product)
+        await db_session.commit()
+
+        line_id = uuid4()
+        receipt = await _receipt(
+            db_session,
+            status="completed",
+            ocr_structured={
+                "lines": [{"name": "PESTO JA CASHEW", "line_id": str(line_id)}]
+            },
+        )
+        _stub(monkeypatch, json.dumps({"g": "Cashew nuts", "c": "dairy"}))
+
+        async def fake_select_products(lines):
+            return {lines[0].line_id: product.id}
+
+        monkeypatch.setattr(
+            "app.services.product_resolution.select_products", fake_select_products
+        )
+
+        item = await receipt_line_reanalyse.reanalyse_line(
+            db_session, receipt.id, line_id, None
+        )
+
+        assert item.product_id == product.id
+        assert item.match_source == "selected"
+
+    async def test_a_catalog_name_reached_through_g_stays_unmatched_when_selection_rejects_it(
         self,
         db_session: AsyncSession,
         sample_category: Category,
@@ -451,8 +494,7 @@ class TestResolutionWithCatalog:
             db_session, receipt.id, line_id, None
         )
 
-        assert item.product_id == product.id
-        assert item.match_source == "name"
+        assert item.product_id is None
 
     async def test_an_alias_for_the_printed_name_resolves(
         self,
