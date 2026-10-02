@@ -20,8 +20,10 @@ from sqlalchemy import (
     DateTime,
     Integer,
     String,
+    and_,
     bindparam,
     func,
+    or_,
     select,
     text,
 )
@@ -53,13 +55,35 @@ def _not_reversed_by_a_restore() -> ColumnElement[bool]:
     A discarded item is frozen until an explicit restore (``is_frozen`` in
     ``app/services/item_status.py``), so it cannot be discarded a second time before being
     restored. A restore logged after a discard on the same item can therefore only be the one
-    undoing that discard.
+    undoing that discard - while the item still exists, matching on ``inventory_item_id``
+    is exact.
+
+    ``inventory_item_id`` is ``ON DELETE SET NULL`` (H46): once the item is hard-deleted,
+    *every* row that named it - the discard and the restore both - goes to NULL, and they can
+    no longer be matched by id. Matching ``NULL = NULL`` would be worse than not matching at
+    all: it would pair one deleted item's discard with a different deleted item's restore
+    (`consumption_log.previous` holds the item's quantity/status fields, not its id - nothing
+    stored survives the delete to tell two deleted items apart, and adding a column is a
+    migration, out of scope here). So once both sides are NULL, this falls back to same
+    product, same unit, same amount: what "Put it back" on *that* discard would have written -
+    the restore returns exactly what was taken away, and nothing can change the amount while
+    the item is frozen. This is a best-effort rule, not a guarantee: two different deleted
+    items of the same product, same unit, discarded for the same amount, one restored and one
+    not, are indistinguishable by it.
     """
+    same_item = _Restore.inventory_item_id == ConsumptionLog.inventory_item_id
+    same_item_once_deleted = and_(
+        _Restore.inventory_item_id.is_(None),
+        ConsumptionLog.inventory_item_id.is_(None),
+        _Restore.product_master_id == ConsumptionLog.product_master_id,
+        _Restore.unit == ConsumptionLog.unit,
+        _Restore.quantity_consumed == ConsumptionLog.quantity_consumed,
+    )
     reversed_by = (
         select(_Restore.id)
         .where(
             _Restore.action == _RESTORE,
-            _Restore.inventory_item_id == ConsumptionLog.inventory_item_id,
+            or_(same_item, same_item_once_deleted),
             _Restore.logged_at > ConsumptionLog.logged_at,
         )
         .exists()
@@ -197,6 +221,9 @@ _TREND_SQL = text(
         )::date AS week_start
     ),
     countable AS (
+        -- Restore pairing: see _not_reversed_by_a_restore()'s docstring for why, once a
+        -- deleted item nulls both rows' inventory_item_id, this falls back to same
+        -- product/unit/amount rather than matching NULL = NULL across unrelated items.
         SELECT
             cl.action,
             (date_trunc('week', cl.logged_at AT TIME ZONE :tz))::date AS week_start
@@ -206,8 +233,17 @@ _TREND_SQL = text(
               cl.action = :discard AND EXISTS (
                   SELECT 1 FROM consumption_log r
                   WHERE r.action = :restore
-                    AND r.inventory_item_id = cl.inventory_item_id
                     AND r.logged_at > cl.logged_at
+                    AND (
+                        r.inventory_item_id = cl.inventory_item_id
+                        OR (
+                            r.inventory_item_id IS NULL
+                            AND cl.inventory_item_id IS NULL
+                            AND r.product_master_id = cl.product_master_id
+                            AND r.unit = cl.unit
+                            AND r.quantity_consumed = cl.quantity_consumed
+                        )
+                    )
               )
           )
     )

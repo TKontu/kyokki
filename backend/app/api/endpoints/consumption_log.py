@@ -145,7 +145,8 @@ async def waste_trend(
         db: Database session.
 
     Returns:
-        One entry per week, oldest first; weeks with nothing logged still appear, at 0 %.
+        One entry per week, oldest first; weeks with nothing logged still appear, with a
+        null rate rather than 0 % - there is nothing to take a rate of.
     """
     figures = await waste_stats.trend_figures(db, weeks=weeks)
     return WasteTrend(

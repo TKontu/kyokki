@@ -68,13 +68,14 @@ async def _log(
     action: str,
     *,
     logged_at: datetime,
+    quantity: str = "1",
 ) -> ConsumptionLog:
     log = ConsumptionLog(
         inventory_item_id=item.id,
         product_master_id=product.id,
         action=action,
-        quantity_consumed=Decimal("1"),
-        quantity_after=Decimal("0") if action == "discard" else Decimal("1"),
+        quantity_consumed=Decimal(quantity),
+        quantity_after=Decimal("0") if action == "discard" else Decimal(quantity),
         unit="dl",
         batch_id=uuid4(),
         previous={},
@@ -83,6 +84,13 @@ async def _log(
     db.add(log)
     await db.commit()
     return log
+
+
+async def _hard_delete(db: AsyncSession, item: InventoryItem) -> None:
+    """Delete the item for good (H46): its history rows keep their fields, but
+    `inventory_item_id` goes to NULL on every one of them (`ON DELETE SET NULL`)."""
+    await db.delete(item)
+    await db.commit()
 
 
 class TestWasteFigures:
@@ -128,6 +136,74 @@ class TestWasteFigures:
 
         assert (figures.discarded, figures.finished, figures.total) == (0, 0, 0)
         assert figures.rate is None
+
+    async def test_a_restored_discard_stays_excluded_after_the_item_is_deleted(
+        self, db: AsyncSession
+    ) -> None:
+        """`inventory_item_id` is `ON DELETE SET NULL` (F1): deleting the item nulls it on
+        *both* the discard and the restore row, so they can no longer be paired by id. The
+        fallback (same product, same unit, same amount) must still find the restore."""
+        product = await _product(db, "Milk")
+        item = await _item(db, product)
+        discarded_at = datetime.now(UTC) - timedelta(hours=1)
+        await _log(db, item, product, "discard", logged_at=discarded_at, quantity="4")
+        await _log(
+            db,
+            item,
+            product,
+            "restore",
+            logged_at=discarded_at + timedelta(minutes=5),
+            quantity="4",
+        )
+
+        await _hard_delete(db, item)
+
+        figures = await waste_stats.waste_figures(db)
+
+        assert (figures.discarded, figures.finished, figures.total) == (0, 0, 0)
+
+    async def test_two_deleted_items_one_restored_one_not_gives_exactly_one_waste(
+        self, db: AsyncSession
+    ) -> None:
+        """Two different items of the same product, discarded for different amounts, both
+        later deleted - only the restored one's discard is excluded; the other still counts
+        as waste, since nothing pairs it with anyone else's restore."""
+        product = await _product(db, "Milk")
+        restored_item = await _item(db, product)
+        kept_discarded_item = await _item(db, product)
+        now = datetime.now(UTC)
+        await _log(
+            db,
+            restored_item,
+            product,
+            "discard",
+            logged_at=now - timedelta(hours=2),
+            quantity="4",
+        )
+        await _log(
+            db,
+            restored_item,
+            product,
+            "restore",
+            logged_at=now - timedelta(hours=1),
+            quantity="4",
+        )
+        await _log(
+            db,
+            kept_discarded_item,
+            product,
+            "discard",
+            logged_at=now - timedelta(minutes=30),
+            quantity="7",
+        )
+
+        await _hard_delete(db, restored_item)
+        await _hard_delete(db, kept_discarded_item)
+
+        figures = await waste_stats.waste_figures(db)
+
+        assert figures.discarded == 1
+        assert figures.finished == 0
 
     async def test_an_unrestored_discard_still_counts(self, db: AsyncSession) -> None:
         """A restore on a *different* item must not clear this one's discard."""
@@ -311,3 +387,67 @@ class TestTrend:
         weeks = await waste_stats.trend_figures(db, now=now)
 
         assert all(w.discarded == 0 for w in weeks)
+
+    async def test_a_restored_discard_stays_excluded_from_the_trend_after_deletion(
+        self, db: AsyncSession
+    ) -> None:
+        """F1: the restore-pairing fallback (same product/unit/amount once `inventory_item_id`
+        is nulled by the item's deletion) must also apply inside `_TREND_SQL`."""
+        product = await _product(db, "Milk")
+        item = await _item(db, product)
+        now = datetime(2026, 1, 21, 12, 0, tzinfo=UTC)
+        discarded_at = datetime(2026, 1, 20, 10, 0, tzinfo=UTC)
+        await _log(db, item, product, "discard", logged_at=discarded_at, quantity="4")
+        await _log(
+            db,
+            item,
+            product,
+            "restore",
+            logged_at=discarded_at + timedelta(minutes=5),
+            quantity="4",
+        )
+
+        await _hard_delete(db, item)
+
+        weeks = await waste_stats.trend_figures(db, now=now)
+
+        assert all(w.discarded == 0 for w in weeks)
+
+    async def test_two_deleted_items_in_the_trend_one_restored_one_not(
+        self, db: AsyncSession
+    ) -> None:
+        product = await _product(db, "Milk")
+        restored_item = await _item(db, product)
+        kept_discarded_item = await _item(db, product)
+        now = datetime(2026, 1, 21, 12, 0, tzinfo=UTC)
+        await _log(
+            db,
+            restored_item,
+            product,
+            "discard",
+            logged_at=datetime(2026, 1, 20, 8, 0, tzinfo=UTC),
+            quantity="4",
+        )
+        await _log(
+            db,
+            restored_item,
+            product,
+            "restore",
+            logged_at=datetime(2026, 1, 20, 9, 0, tzinfo=UTC),
+            quantity="4",
+        )
+        await _log(
+            db,
+            kept_discarded_item,
+            product,
+            "discard",
+            logged_at=datetime(2026, 1, 20, 10, 0, tzinfo=UTC),
+            quantity="7",
+        )
+
+        await _hard_delete(db, restored_item)
+        await _hard_delete(db, kept_discarded_item)
+
+        weeks = await waste_stats.trend_figures(db, now=now)
+
+        assert sum(w.discarded for w in weeks) == 1
