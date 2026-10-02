@@ -8,8 +8,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { useBulkInventoryMove } from '../useInventory'
-import { useConsumptionLog } from '../useConsumptionLog'
-import type { ConsumptionLogEntry } from '@/types/consumption'
+import { useConsumptionLog, useWasteStats, useWasteTrend } from '../useConsumptionLog'
+import type { ConsumptionLogEntry, WasteStats, WasteTrend } from '@/types/consumption'
 
 const entry = (overrides: Partial<ConsumptionLogEntry> = {}): ConsumptionLogEntry => ({
   id: 'l1',
@@ -94,5 +94,50 @@ describe('useConsumptionLog', () => {
     await act(() => move.result.current.mutateAsync({ ids: ['i1'], event: 'discard' }))
 
     await waitFor(() => expect(history.result.current.data).toEqual([entry()]))
+  })
+})
+
+const wasteStats = (overrides: Partial<WasteStats> = {}): WasteStats => ({
+  discarded: 2,
+  finished: 3,
+  total: 5,
+  rate: 0.4,
+  categories: [],
+  ...overrides,
+})
+
+describe('useWasteStats', () => {
+  it('reads the waste rate back', async () => {
+    let asked = ''
+    server.use(
+      http.get(`${API_URL}/consumption-log/waste`, ({ request }) => {
+        asked = new URL(request.url).search
+        return HttpResponse.json(wasteStats())
+      })
+    )
+
+    const { result } = renderHook(() => useWasteStats({ since: '2026-09-01T00:00:00Z' }), {
+      wrapper: wrapper(newClient()),
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toEqual(wasteStats())
+    expect(asked).toBe('?since=2026-09-01T00%3A00%3A00Z')
+  })
+})
+
+describe('useWasteTrend', () => {
+  it('reads the 8-week trend back', async () => {
+    const trend: WasteTrend = {
+      weeks: [{ week_start: '2026-09-15', discarded: 1, finished: 1, total: 2, rate: 0.5 }],
+    }
+    server.use(
+      http.get(`${API_URL}/consumption-log/waste/trend`, () => HttpResponse.json(trend))
+    )
+
+    const { result } = renderHook(() => useWasteTrend(), { wrapper: wrapper(newClient()) })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data).toEqual(trend)
   })
 })

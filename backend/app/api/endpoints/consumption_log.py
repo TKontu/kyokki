@@ -10,9 +10,14 @@ from app.crud import consumption_log as crud_consumption_log
 from app.db.session import get_db
 from app.schemas.consumption_log import (
     ActionSummary,
+    CategoryWaste,
     ConsumptionAction,
     ConsumptionLogResponse,
+    WasteStats,
+    WasteTrend,
+    WasteWeek,
 )
+from app.services import waste_stats
 
 router = APIRouter()
 
@@ -84,3 +89,74 @@ async def summarise_consumption_log(
         db, since=since, until=until
     )
     return {action: ActionSummary(**counts) for action, counts in summary.items()}
+
+
+@router.get("/waste", response_model=WasteStats)
+async def waste_rate(
+    since: datetime | None = None,
+    db: AsyncSession = Depends(get_db),
+) -> WasteStats:
+    """ "You threw away X of Y things (Z %)", for a window, plus where it is worst.
+
+    Counted by events (items), not amounts - grams and pieces do not add up. A discard a later
+    restore undid is not waste; corrections, part-uses and restores never enter this count,
+    exactly as the Gone list leaves them out (planner ruling, 2026-10-02).
+
+    Args:
+        since: Only events logged at or after this moment; omitted means every event on record.
+        db: Database session.
+
+    Returns:
+        The window's discarded/finished counts and rate, plus every category with at least 3
+        events, worst waste rate first.
+    """
+    figures = await waste_stats.waste_figures(db, since=since)
+    return WasteStats(
+        discarded=figures.discarded,
+        finished=figures.finished,
+        total=figures.total,
+        rate=figures.rate,
+        categories=[
+            CategoryWaste(
+                category=category.category,
+                display_name=category.display_name,
+                discarded=category.discarded,
+                finished=category.finished,
+                total=category.total,
+                rate=category.rate,
+            )
+            for category in figures.categories
+        ],
+    )
+
+
+@router.get("/waste/trend", response_model=WasteTrend)
+async def waste_trend(
+    weeks: int = Query(waste_stats.TREND_WEEKS, ge=1, le=52),
+    db: AsyncSession = Depends(get_db),
+) -> WasteTrend:
+    """The waste rate and counts per ISO week for the last `weeks` weeks, oldest first.
+
+    Weeks are Europe/Helsinki (the app's timezone), Monday start. The window filter on
+    `GET .../waste` does not apply here - the trend always looks back from today.
+
+    Args:
+        weeks: How many ISO weeks to return, most recent included. Defaults to 8.
+        db: Database session.
+
+    Returns:
+        One entry per week, oldest first; weeks with nothing logged still appear, at 0 %.
+    """
+    figures = await waste_stats.trend_figures(db, weeks=weeks)
+    return WasteTrend(
+        weeks=[
+            WasteWeek(
+                week_start=week.week_start,
+                discarded=week.discarded,
+                finished=week.finished,
+                total=week.total,
+                rate=week.rate,
+            )
+            for week in figures
+        ]
+    )
