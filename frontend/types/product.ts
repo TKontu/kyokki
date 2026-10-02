@@ -55,6 +55,13 @@ export interface ProductMaster {
   // Optional so fixtures written before this build still type-check.
   emoji?: string | null
   emoji_match?: EmojiMatch | null
+  // The product's name by language code (Post-MVP frontier item 13), e.g. { fi: 'Maito' };
+  // a language with no entry falls back to canonical_name (English). Optional so fixtures
+  // written before this lane still type-check.
+  display_names?: Record<string, string>
+  // Whose word each display_names entry is ('cook' or 'model'), by the same language code;
+  // the product sheet marks a 'model' name as proposed. Optional, same reason.
+  display_name_sources?: Record<string, NameSource>
   created_at: string // ISO datetime
   updated_at: string // ISO datetime
 }
@@ -92,6 +99,10 @@ export interface ProductMasterUpdate {
   min_stock_quantity?: number | null // >= 0
   reorder_quantity?: number | null // > 0
   off_product_id?: string | null
+  // The cook's own name per language, e.g. { fi: 'Maito' } (Post-MVP frontier item 13);
+  // written as source "cook", which a later model proposal never overwrites. Only the
+  // languages included are touched - a partial update of the map, not a replacement of it.
+  display_names?: Record<string, string>
 }
 
 /** Regenerate a product's icon (Q18-G2), optionally in the cook's words. */

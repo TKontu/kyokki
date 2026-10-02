@@ -42,8 +42,9 @@
 1	app/models/category.py	misc
 1	app/models/consumption_log.py	misc
 1	app/models/inventory_item.py	misc
-4	app/models/inventory_item.py	no-any-return
+5	app/models/inventory_item.py	no-any-return
 1	app/models/non_food_name.py	misc
+1	app/models/product_display_name.py	misc
 1	app/models/product_emoji_learned.py	misc
 1	app/models/product_master.py	misc
 1	app/models/product_name.py	misc

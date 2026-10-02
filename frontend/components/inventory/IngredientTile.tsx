@@ -13,6 +13,8 @@
 
 import { useState } from 'react'
 import { iconUrl } from '@/lib/api/products'
+import { displayName } from '@/lib/displayName'
+import { useLanguage } from '@/lib/language'
 import { productIconGlyph, resolveProductIcon } from '@/lib/productIcon'
 import { STALENESS, stalenessOf } from '@/lib/staleness'
 import type { InventoryItem } from '@/types/inventory'
@@ -26,6 +28,8 @@ export interface IngredientTileProps {
 }
 
 export function IngredientTile({ item, onSelect, onMore }: IngredientTileProps) {
+  const [language] = useLanguage()
+  const name = displayName(item.product_display_names, item.product_name, language)
   const tier = stalenessOf(item)
   const style = STALENESS[tier]
   const icon = resolveProductIcon({
@@ -64,7 +68,7 @@ export function IngredientTile({ item, onSelect, onMore }: IngredientTileProps) 
           (tier === 'consumed' ? ' line-through' : '')
         }
       >
-        {item.product_name}
+        {name}
       </span>
     </>
   )
@@ -77,21 +81,21 @@ export function IngredientTile({ item, onSelect, onMore }: IngredientTileProps) 
       {onSelect ? (
         <button
           type="button"
-          aria-label={`${item.product_name}, ${style.label}`}
+          aria-label={`${name}, ${style.label}`}
           onClick={() => onSelect(item.id)}
           className={`${box} focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2`}
         >
           {face}
         </button>
       ) : (
-        <div aria-label={`${item.product_name}, ${style.label}`} className={box}>
+        <div aria-label={`${name}, ${style.label}`} className={box}>
           {face}
         </div>
       )}
       {onMore && (
         <button
           type="button"
-          aria-label={`More for ${item.product_name}`}
+          aria-label={`More for ${name}`}
           onClick={() => onMore(item.id)}
           className="absolute right-0 top-0 flex h-touch w-touch items-center justify-center rounded-full text-lg leading-none opacity-70 hover:opacity-100"
         >

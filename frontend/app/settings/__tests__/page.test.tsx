@@ -5,6 +5,7 @@
 import React from 'react'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { LANGUAGE_KEY } from '@/lib/language'
 import { THEME_KEY } from '@/lib/theme'
 import SettingsPage from '../page'
 
@@ -16,6 +17,37 @@ beforeEach(() => {
 })
 
 describe('Settings page', () => {
+  describe('display language (Post-MVP frontier item 13)', () => {
+    it('offers English and Suomi, English checked by default', () => {
+      render(<SettingsPage />)
+
+      const group = screen.getByRole('radiogroup', { name: 'Display language' })
+      expect(group).toBeInTheDocument()
+      expect(screen.getByRole('radio', { name: /^English/ })).toBeChecked()
+      expect(screen.getByRole('radio', { name: /^Suomi/ })).toBeInTheDocument()
+    })
+
+    it('switches to Suomi and keeps it on this device', async () => {
+      const user = userEvent.setup()
+      render(<SettingsPage />)
+
+      await user.click(screen.getByRole('radio', { name: /^Suomi/ }))
+
+      expect(window.localStorage.getItem(LANGUAGE_KEY)).toBe('fi')
+      expect(screen.getByRole('radio', { name: /^Suomi/ })).toBeChecked()
+
+      await user.click(screen.getByRole('radio', { name: /^English/ }))
+      expect(window.localStorage.getItem(LANGUAGE_KEY)).toBeNull()
+    })
+
+    it('shows the stored choice when opened again', () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      render(<SettingsPage />)
+
+      expect(screen.getByRole('radio', { name: /^Suomi/ })).toBeChecked()
+    })
+  })
+
   it('has a heading and a Theme choice of System, Light and Dark', () => {
     render(<SettingsPage />)
 

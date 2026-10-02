@@ -120,3 +120,13 @@ class InventoryItem(Base):
         """
         version = self.product_master.icon_version
         return None if version is None else int(version)
+
+    @property
+    def product_display_names(self) -> dict[str, str]:
+        """The product's per-language names (Post-MVP frontier item 13), by language code.
+
+        `ProductMaster.display_name_rows` loads itself (`lazy="selectin"`) however
+        `product_master` got here, so this needs no eager-load option added to this
+        query's own chain (`crud/inventory_item.py`, a sibling lane's file this round).
+        """
+        return self.product_master.display_names

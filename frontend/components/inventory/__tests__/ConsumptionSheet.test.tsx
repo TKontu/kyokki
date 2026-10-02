@@ -47,6 +47,7 @@ let mutate: jest.Mock
 beforeEach(() => {
   mutate = jest.fn()
   mockUseConsume.mockReturnValue({ mutate, isPending: false })
+  window.localStorage.clear()
 })
 
 function renderSheet(item: InventoryItem | null, onClose = jest.fn(), onEdit?: () => void) {
@@ -150,6 +151,25 @@ describe('ConsumptionSheet', () => {
       act(() => lastMutateOptions().onError?.(new Error('')))
 
       expect(screen.getByRole('alert')).toHaveTextContent('Could not update Oat Milk')
+    })
+  })
+
+  describe('display language (Post-MVP frontier item 13)', () => {
+    it('shows the Finnish name once the cook has chosen Suomi', () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      renderSheet({ ...MILK, product_display_names: { fi: 'Kauramaito' } })
+
+      expect(screen.getByRole('dialog', { name: 'Kauramaito' })).toBeInTheDocument()
+    })
+
+    it('uses the Finnish name in the success toast too', () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      renderSheet({ ...MILK, product_display_names: { fi: 'Kauramaito' } })
+
+      fireEvent.click(screen.getByRole('button', { name: 'Used up' }))
+      act(() => lastMutateOptions().onSuccess?.())
+
+      expect(screen.getByRole('status')).toHaveTextContent('Used up · Kauramaito')
     })
   })
 })

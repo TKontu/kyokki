@@ -43,7 +43,7 @@ from app.schemas.product_names import (
     ProductNamesResponse,
 )
 from app.schemas.stock import ResolveResponse, TeachNameRequest
-from app.services import product_emoji, product_icons, product_lookup
+from app.services import display_names, product_emoji, product_icons, product_lookup
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
     broadcast_product_update,
@@ -90,6 +90,15 @@ async def list_products(
         db, search=search, emoji_match=emoji_match
     )
     return products
+
+
+# Declared before `/{product_id}`, for the same reason as `/resolve` above.
+@router.get("/languages", response_model=list[str])
+async def list_display_languages() -> list[str]:
+    """The display-language codes a product's `display_names` may carry (Post-MVP frontier
+    item 13), e.g. `["fi"]`. English is not among them - it is always `canonical_name`.
+    """
+    return list(display_names.SUPPORTED_LANGUAGES)
 
 
 # Declared before `/{product_id}`, for the same reason as `/resolve` above.

@@ -10,8 +10,9 @@ every path that creates products schedules it once its own transaction has commi
     receipt confirm          every product the confirm created, in one batched request
     POST /products           never: the cook typed that number
 
-The same call queues each new product's icon (Q18, `product_icons`) and its exact emoji (Q18
-build, `product_emoji`), after the estimate.
+The same call queues each new product's icon (Q18, `product_icons`), its exact emoji (Q18
+build, `product_emoji`) and a proposed Finnish display name (Post-MVP frontier item 13,
+`services/display_names.py`), after the estimate.
 
 It runs as a FastAPI background task, after the response has gone: the cook never waits for
 the model. It opens its own session, because the request's is closed by then, and it never
@@ -32,6 +33,7 @@ from app.core.logging import get_logger
 from app.models.product_master import ProductMaster
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.catalog_estimates import estimate_products
+from app.services.display_names import schedule_display_names
 from app.services.llm_extractor import LLMExtractionError
 from app.services.product_emoji import schedule_emoji
 from app.services.product_icons import schedule_icons
@@ -49,14 +51,16 @@ def schedule_estimates(
 ) -> None:
     """Ask about these new products once the response has been sent. None: nothing.
 
-    Each new product also gets its icon drawn (Q18) and its exact emoji looked up or
-    proposed (Q18 build), after the estimate: the shelf life dates the food, the icon and
-    the emoji only decorate its tile.
+    Each new product also gets its icon drawn (Q18), its exact emoji looked up or proposed
+    (Q18 build), and a Finnish display name proposed (Post-MVP frontier item 13), after the
+    estimate: the shelf life dates the food, the icon, the emoji and the display name only
+    decorate its tile.
     """
     if product_ids:
         background_tasks.add_task(estimate_new_products, list(product_ids))
         schedule_icons(background_tasks, product_ids)
         schedule_emoji(background_tasks, product_ids)
+        schedule_display_names(background_tasks, product_ids)
 
 
 async def estimate_new_products(product_ids: Sequence[UUID]) -> None:

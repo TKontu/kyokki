@@ -28,6 +28,10 @@ export interface InventoryItem {
   // `cook` match; null otherwise, even mid-proposal (lib/productIcon.ts has the precedence).
   // Optional so fixtures written before this build still type-check.
   product_emoji?: string | null
+  // The product's name by language code (Post-MVP frontier item 13), e.g. { fi: 'Maito' };
+  // a language with no entry falls back to product_name (the English canonical name).
+  // Optional so fixtures written before this lane still type-check.
+  product_display_names?: Record<string, string>
   receipt_id: string | null // UUID
   initial_quantity: number // Decimal, sent as a JSON number (DEC-2)
   current_quantity: number // Decimal, sent as a JSON number (DEC-2)

@@ -39,6 +39,8 @@ import {
 } from '@/hooks/useProducts'
 import { isAPIError } from '@/lib/api/errors'
 import type { EstimateScope } from '@/lib/api/products'
+import { displayName } from '@/lib/displayName'
+import { useLanguage } from '@/lib/language'
 import { auditRows, type AuditRow, type Edge } from '@/lib/shelfLifeAudit'
 import type { CatalogEstimateResponse, ProductMaster } from '@/types/product'
 
@@ -71,6 +73,7 @@ function ProductRow({
   product: ProductMaster
   onOpen: () => void
 }) {
+  const [language] = useLanguage()
   const shelfLife = shelfLifeNote(product)
   const size = sizeNote(product)
 
@@ -87,7 +90,7 @@ function ProductRow({
       >
         <span className="min-w-0">
           <span className="block truncate text-base text-ui-text dark:text-ui-dark-text">
-            {product.canonical_name}
+            {displayName(product.display_names, product.canonical_name, language)}
           </span>
           <span
             className={
@@ -125,6 +128,7 @@ function AuditList({
   categoryName: (id: string) => string
   onOpen: (product: ProductMaster) => void
 }) {
+  const [language] = useLanguage()
   return (
     <ul aria-label="Shelf-life audit" className="flex flex-col gap-2">
       {rows.map(({ product, edge, band }) => {
@@ -145,7 +149,7 @@ function AuditList({
                   data-name
                   className="truncate text-base text-ui-text dark:text-ui-dark-text"
                 >
-                  {product.canonical_name}
+                  {displayName(product.display_names, product.canonical_name, language)}
                 </span>
                 <span className="shrink-0 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
                   {categoryName(product.category)}

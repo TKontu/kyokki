@@ -144,12 +144,123 @@ let moved: (next: Partial<ProductMaster>) => void
 const save = () => screen.getByRole('button', { name: 'Save' })
 
 describe('ProductEditSheet', () => {
+  beforeEach(() => window.localStorage.clear())
+
   it('prefills from the product', () => {
     renderSheet()
 
     expect(screen.getByLabelText('Name')).toHaveValue('Ground beef')
     expect(screen.getByLabelText('Keeps for')).toHaveValue(5)
     expect(screen.getByLabelText('Once opened')).toHaveValue(null)
+  })
+
+  describe('display language and the Finnish name (Post-MVP frontier item 13)', () => {
+    it('is blank with no proposal yet', () => {
+      renderSheet()
+
+      expect(screen.getByLabelText('Finnish name')).toHaveValue('')
+      expect(screen.getByText(/Blank until proposed/)).toBeInTheDocument()
+    })
+
+    it('marks a model proposal as proposed', () => {
+      renderSheet({
+        ...PRODUCT,
+        display_names: { fi: 'Jauheliha' },
+        display_name_sources: { fi: 'model' },
+      })
+
+      expect(screen.getByLabelText('Finnish name')).toHaveValue('Jauheliha')
+      expect(screen.getByText(/Proposed by the model/)).toBeInTheDocument()
+    })
+
+    it("says it is the cook's own once set by hand", () => {
+      renderSheet({
+        ...PRODUCT,
+        display_names: { fi: 'Jauheliha' },
+        display_name_sources: { fi: 'cook' },
+      })
+
+      expect(screen.getByText(/Your own name/)).toBeInTheDocument()
+    })
+
+    it('sends an edited Finnish name on Save', async () => {
+      const patches = mockApi()
+      renderSheet({
+        ...PRODUCT,
+        display_names: { fi: 'Jauheliha' },
+        display_name_sources: { fi: 'model' },
+      })
+
+      fireEvent.change(screen.getByLabelText('Finnish name'), {
+        target: { value: 'Naudan jauheliha' },
+      })
+      fireEvent.click(save())
+
+      await waitFor(() => expect(patches).toHaveLength(1))
+      expect(patches[0]).toEqual({ display_names: { fi: 'Naudan jauheliha' } })
+    })
+
+    it('does not send a blank Finnish name - there is no clear affordance yet', () => {
+      renderSheet({ ...PRODUCT, display_names: { fi: 'Jauheliha' } })
+
+      fireEvent.change(screen.getByLabelText('Finnish name'), { target: { value: '' } })
+
+      expect(save()).toBeDisabled()
+    })
+
+    it('shows the title in Suomi once the cook has chosen it', () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      renderSheet({ ...PRODUCT, display_names: { fi: 'Jauheliha' } })
+
+      expect(screen.getByRole('heading', { name: 'Edit Jauheliha' })).toBeInTheDocument()
+    })
+  })
+
+  describe('Minimum stock (folded in: A1 needs the field below it)', () => {
+    it('is blank with no minimum set', () => {
+      renderSheet()
+
+      expect(screen.getByLabelText('Minimum stock')).toHaveValue(null)
+    })
+
+    it('prefills an existing minimum', () => {
+      renderSheet({ ...PRODUCT, min_stock_quantity: 200 })
+
+      expect(screen.getByLabelText('Minimum stock')).toHaveValue(200)
+    })
+
+    it('sends a changed minimum on Save', async () => {
+      const patches = mockApi()
+      renderSheet()
+
+      fireEvent.change(screen.getByLabelText('Minimum stock'), { target: { value: '200' } })
+      fireEvent.click(save())
+
+      await waitFor(() => expect(patches).toHaveLength(1))
+      expect(patches[0]).toEqual({ min_stock_quantity: 200 })
+    })
+
+    it('accepts zero, unlike the gram fields', async () => {
+      const patches = mockApi()
+      renderSheet({ ...PRODUCT, min_stock_quantity: 200 })
+
+      fireEvent.change(screen.getByLabelText('Minimum stock'), { target: { value: '0' } })
+      fireEvent.click(save())
+
+      await waitFor(() => expect(patches).toHaveLength(1))
+      expect(patches[0]).toEqual({ min_stock_quantity: 0 })
+    })
+
+    it('clears a minimum the cook empties', async () => {
+      const patches = mockApi()
+      renderSheet({ ...PRODUCT, min_stock_quantity: 200 })
+
+      fireEvent.change(screen.getByLabelText('Minimum stock'), { target: { value: '' } })
+      fireEvent.click(save())
+
+      await waitFor(() => expect(patches).toHaveLength(1))
+      expect(patches[0]).toEqual({ min_stock_quantity: null })
+    })
   })
 
   it('sends only what changed', async () => {

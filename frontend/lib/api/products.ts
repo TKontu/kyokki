@@ -118,6 +118,14 @@ export async function rejectEmoji(id: string): Promise<ProductMaster> {
   return apiClient.post<ProductMaster>(`/products/${id}/emoji/reject`, {})
 }
 
+/**
+ * The display-language codes a product's `display_names` may carry (Post-MVP frontier
+ * item 13), e.g. `["fi"]`. English is not among them - it is always `canonical_name`.
+ */
+export async function languages(): Promise<string[]> {
+  return apiClient.get<string[]>('/products/languages')
+}
+
 const productsAPI = {
   list,
   get,
@@ -133,5 +141,6 @@ const productsAPI = {
   setEmoji,
   confirmEmoji,
   rejectEmoji,
+  languages,
 }
 export default productsAPI

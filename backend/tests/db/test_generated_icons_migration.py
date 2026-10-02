@@ -46,12 +46,9 @@ class TestTheRevision:
     def test_it_follows_the_exact_emoji_gap_list(self) -> None:
         assert _load_migration().down_revision == "fbf2c08da52d"
 
-    def test_it_is_the_only_head(self) -> None:
-        script = _script()
-        (head,) = script.get_heads()
-        assert head == _load_migration().revision
-
     def test_history_stays_one_line_through_it(self) -> None:
+        # Was "the only head" until Post-MVP frontier item 13's 61f6f69cc22f followed it;
+        # that test owns the head now (tests/db/test_display_names_migration.py).
         script = _script()
         (head,) = script.get_heads()
         ancestors = {rev.revision for rev in script.walk_revisions("base", head)}

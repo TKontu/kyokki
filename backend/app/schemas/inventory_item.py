@@ -247,6 +247,14 @@ class InventoryItemResponse(InventoryItemBase):
             "set by the cook; null otherwise, even if the product has a proposal pending"
         ),
     )
+    product_display_names: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "The product's name by language code (Post-MVP frontier item 13), e.g. "
+            "{'fi': 'Maito'}; a language with no entry falls back to product_name (the "
+            "English canonical name)."
+        ),
+    )
     created_at: datetime
     consumed_at: datetime | None = None
 

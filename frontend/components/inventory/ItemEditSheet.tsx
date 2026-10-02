@@ -24,6 +24,8 @@ import { useItemSource } from '@/hooks/useItemSource'
 import { useProduct } from '@/hooks/useProducts'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
+import { displayName } from '@/lib/displayName'
+import { useLanguage } from '@/lib/language'
 import { receiptDate, storeName } from '@/lib/receipts'
 import { isInactive, locationOptions } from '@/lib/stock'
 import type { InventoryItem, InventoryItemUpdate } from '@/types/inventory'
@@ -55,7 +57,8 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   // Nothing to fetch for a hand-added item (Q26): it has no receipt to ask about.
   const source = useItemSource(item.receipt_id ? item.id : null)
 
-  const name = item.product_name
+  const [language] = useLanguage()
+  const name = displayName(item.product_display_names, item.product_name, language)
 
   // Only what the cook touched and actually changed: what moved underneath is not theirs
   const changes: InventoryItemUpdate = {}

@@ -172,6 +172,40 @@ function addButton() {
 }
 
 describe('QuickAddSheet', () => {
+  beforeEach(() => window.localStorage.clear())
+
+  describe('display language (Post-MVP frontier item 13)', () => {
+    it('lists a found product by its Finnish name once Suomi is chosen', async () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      mockApi({ products: [{ ...MILK, display_names: { fi: 'Maito' } }] })
+      renderSheet()
+
+      search('mil')
+
+      expect(await screen.findByRole('button', { name: 'Maito' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Milk' })).not.toBeInTheDocument()
+    })
+
+    it('confirms the add with the Finnish name', async () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      mockApi({
+        products: [{ ...MILK, display_names: { fi: 'Maito' } }],
+        addResponse: () =>
+          HttpResponse.json(
+            created({ product_display_names: { fi: 'Maito' } }),
+            { status: 201 }
+          ),
+      })
+      renderSheet()
+
+      search('mil')
+      fireEvent.click(await screen.findByRole('button', { name: 'Maito' }))
+      fireEvent.click(addButton())
+
+      expect(await screen.findByText('Added · Maito')).toBeInTheDocument()
+    })
+  })
+
   it('adds an existing product with its defaults', async () => {
     const bodies = mockApi()
     const onClose = renderSheet()
