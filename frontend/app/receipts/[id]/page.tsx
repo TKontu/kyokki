@@ -25,6 +25,10 @@ function OutcomeBadge({ outcome }: { outcome: ReceiptAuditLine['outcome'] }) {
       return <Badge variant="default">Household</Badge>
     case 'skipped':
       return <Badge variant="warning">Skipped</Badge>
+    case 'removed':
+      // Stocked at confirm, but every item it produced has since been deleted - not the
+      // same as the cook having left the line out (audit follow-up).
+      return <Badge variant="warning">Removed from stock</Badge>
     default:
       return <Badge variant="info">Pending</Badge>
   }
@@ -97,6 +101,12 @@ function LineRow({ line }: { line: ReceiptAuditLine }) {
         <span className="text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
           {line.price.toFixed(2)}
         </span>
+      )}
+      {line.reanalysed && (
+        <p className="mt-1 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
+          <Badge variant="info">Re-analysed</Badge>
+          {line.reanalyse_hint && ` · hint: "${line.reanalyse_hint}"`}
+        </p>
       )}
       <StockedItems items={line.items} />
     </li>

@@ -14,12 +14,14 @@ import {
   listPollInterval,
   READING_POLL_MS,
   receiptKeys,
+  replaceReceiptItem,
   useConfirmReceipt,
+  useReanalyseLine,
   useReceipt,
   useReceiptAudit,
   useReceiptList,
 } from '../useReceipts'
-import type { Receipt } from '@/types/receipt'
+import type { ExtractedItem, Receipt } from '@/types/receipt'
 
 const receipt = (overrides: Partial<Receipt> = {}) =>
   ({
@@ -213,5 +215,60 @@ describe('useConfirmReceipt', () => {
     })
 
     expect(posts).toBe(1)
+  })
+})
+
+describe('useReanalyseLine', () => {
+  it('posts the hint and resolves with the updated item', async () => {
+    let body: unknown
+    server.use(
+      http.post(`${API_URL}/receipts/r1/lines/l1/reanalyse`, async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ index: 0, line_id: 'l1', name: 'X', generic_name: 'Cashew nuts' })
+      })
+    )
+    const { result } = renderHook(() => useReanalyseLine(), { wrapper: wrapper(newClient()) })
+
+    await act(async () => {
+      await result.current.mutateAsync({ receiptId: 'r1', lineId: 'l1', hint: 'cashew nuts' })
+    })
+
+    expect(body).toEqual({ hint: 'cashew nuts' })
+    expect(result.current.data?.generic_name).toBe('Cashew nuts')
+  })
+
+  it('never retries: a lost response retried automatically could re-ask twice', async () => {
+    let posts = 0
+    server.use(
+      http.post(`${API_URL}/receipts/r1/lines/l1/reanalyse`, () => {
+        posts += 1
+        return HttpResponse.json({ detail: 'boom' }, { status: 503 })
+      })
+    )
+    const queryClient = new QueryClient({ defaultOptions: { mutations: { retry: 1 } } })
+    const { result } = renderHook(() => useReanalyseLine(), { wrapper: wrapper(queryClient) })
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({ receiptId: 'r1', lineId: 'l1' })
+        .catch(() => {})
+    })
+
+    expect(posts).toBe(1)
+  })
+})
+
+describe('replaceReceiptItem', () => {
+  it('replaces only the item with the matching index', () => {
+    const a = { index: 0, line_id: 'a', name: 'A', generic_name: 'A' } as ExtractedItem
+    const b = { index: 1, line_id: 'b', name: 'B', generic_name: 'B' } as ExtractedItem
+    const original = receipt({ items: [a, b] })
+    const updatedA = { ...a, generic_name: 'A-new' } as ExtractedItem
+
+    const next = replaceReceiptItem(original, updatedA)
+
+    expect(next.items).toEqual([updatedA, b])
+    // The rest of the receipt (and the other item) is untouched
+    expect(next.items[1]).toBe(b)
   })
 })
