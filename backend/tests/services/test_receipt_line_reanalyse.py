@@ -19,6 +19,7 @@ from app.services import receipt_line_reanalyse
 from app.services.llm_extractor import CategoryOption
 from app.services.llm_http import LLMAuthError
 from app.services.matching_service import normalize_receipt_name
+from app.services.product_selection import SelectionResult
 from app.services.product_selection import select_products as real_select_products
 from app.services.receipt_confirm import UNKNOWN_CHAIN
 
@@ -495,6 +496,59 @@ class TestResolutionWithCatalog:
         )
 
         assert item.product_id is None
+
+    async def test_a_rejected_snaps_corrected_name_is_promoted_to_generic_name(
+        self,
+        db_session: AsyncSession,
+        sample_category: Category,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """F2 (PR #153 review): `receipt_processing.py` promotes a rejected snap's
+        `corrected_generic` into the line's `generic_name`; re-analyse must do the same,
+        or confirm can 400 needlessly on a line this fresh re-ask just fixed - the
+        re-ask's own `g` survives in `resolution.generic_from_extraction` for the audit,
+        same as processing's contract."""
+        dip = ProductMaster(
+            id=uuid4(),
+            canonical_name="Dip",
+            category="dairy",
+            storage_type="pantry",
+            default_shelf_life_days=180,
+            unit_type="count",
+            default_unit="pcs",
+        )
+        db_session.add(dip)
+        await db_session.commit()
+
+        line_id = uuid4()
+        receipt = await _receipt(
+            db_session,
+            status="completed",
+            ocr_structured={
+                "lines": [{"name": "PESTO JA CASHEW", "line_id": str(line_id)}]
+            },
+        )
+        _stub(monkeypatch, json.dumps({"g": "Dip", "c": "dairy"}))
+
+        async def fake_select_products(lines):
+            return SelectionResult({}, {lines[0].line_id: "Pesto"})
+
+        monkeypatch.setattr(
+            "app.services.product_resolution.select_products", fake_select_products
+        )
+
+        item = await receipt_line_reanalyse.reanalyse_line(
+            db_session, receipt.id, line_id, None
+        )
+
+        assert item.generic_name == "Pesto"
+        assert item.product_id is None
+        await db_session.refresh(receipt)
+        (line,) = receipt.ocr_structured["lines"]
+        assert line["generic_name"] == "Pesto"
+        assert line["resolution"]["rejected_product_id"] == str(dip.id)
+        assert line["resolution"]["corrected_generic"] == "Pesto"
+        assert line["resolution"]["generic_from_extraction"] == "Dip"
 
     async def test_an_alias_for_the_printed_name_resolves(
         self,

@@ -463,6 +463,65 @@ class TestConfirmNewProducts:
 
         assert response.status_code == 422
 
+    async def test_a_rejected_snap_with_no_name_left_is_a_400(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        processed_receipt: dict,
+        sample_category: Category,
+    ):
+        """Q37b: a line whose g-only snap was rejected, and whose generic name was never
+        corrected, has no name left to create a product under once that snap is
+        refused - confirm answers 400 instead of silently re-attaching it."""
+        dip = ProductMaster(
+            id=uuid4(),
+            canonical_name="Dip",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=14,
+            unit_type="weight",
+            default_unit="g",
+        )
+        test_db.add(dip)
+        await test_db.commit()
+
+        receipt = await test_db.get(Receipt, UUID(processed_receipt["id"]))
+        assert receipt is not None
+        receipt.ocr_structured = {
+            "lines": [
+                {
+                    "name": "PESTO ALKU",
+                    "generic_name": "Dip",
+                    "category": "dairy",
+                    "resolution": {
+                        "product_id": None,
+                        "source": "none",
+                        "verified": False,
+                        "candidates": [],
+                        "rejected_product_id": str(dip.id),
+                    },
+                }
+            ]
+        }
+        await test_db.commit()
+
+        response = await client.post(
+            f"/api/receipts/{processed_receipt['id']}/confirm",
+            json={
+                "items": [
+                    {
+                        "index": 0,
+                        "quantity": 1,
+                        "unit": "pcs",
+                        "purchase_date": "2026-09-26",
+                    }
+                ]
+            },
+        )
+
+        assert response.status_code == 400, response.text
+        assert "rejected" in response.json()["detail"]
+
 
 class TestConfirmMovesStock:
     """Q19: a confirm whose receipt replaces a product's placeholder shelf life re-dates the

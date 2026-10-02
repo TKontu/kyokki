@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.services.llm_extractor import LLMExtractionError, extract_json_object
 from app.services.llm_http import LLMAuthError, post_chat
+from app.services.product_names import normalize_product_name
 
 logger = get_logger(__name__)
 
@@ -62,6 +63,10 @@ The candidates are only the nearest names in the catalog, not a list that contai
 answer. If none of them is the same thing, answer null: null is a good answer, and a
 wrong pick is worse than none.
 Only pick a product whose id appears in that line's candidates.
+When you answer null, you may also give "g": the generic English shopping-list name the
+line actually is - singular, no brand, the same rule the line's own "g" follows. Give it
+only when the candidates' names are wrong for this line, not when you are simply
+declining to confirm a right one.
 
 Example. Lines:
 [{"id": "a", "n": "ARLA LAKTOOSITON MAITO", "g": "Lactose-free milk", "c": "dairy",
@@ -70,7 +75,8 @@ Example. Lines:
   "candidates": [{"p": "p3", "name": "Orange juice"}, {"p": "p4", "name": "Lemon"}]}]
 Answer: {"r": [{"id": "a", "p": "p1"}, {"id": "b", "p": null}]}
 
-Answer with JSON only: {"r": [{"id": "<line id>", "p": "<product id>" or null}]}
+Answer with JSON only: {"r": [{"id": "<line id>", "p": "<product id>" or null,
+"g": "<optional corrected generic name, only when p is null>"}]}
 
 Lines:
 """
@@ -86,6 +92,11 @@ class SelectionLine:
     category: str | None
     candidate_ids: tuple[str, ...]
     candidate_names: tuple[str, ...]
+    # The g-only snap's own name (Q37/Q37b), when one of the candidates is that
+    # proposal rather than an ordinary trigram hit - not sent to the model, read only
+    # by `parse_selection` to tell "the rejected snap's name" apart from every other
+    # candidate's (F4, PR #153 review).
+    proposed_name: str | None = None
 
 
 def build_prompt(lines: list[SelectionLine]) -> str:
@@ -109,42 +120,107 @@ def build_prompt(lines: list[SelectionLine]) -> str:
     return INSTRUCTIONS + json.dumps(payload, ensure_ascii=False)
 
 
-def parse_selection(content: str, lines: list[SelectionLine]) -> dict[str, UUID]:
+@dataclass(frozen=True)
+class SelectionAnswer:
+    """What `parse_selection` read out of one response: picks, plus corrections.
+
+    ``corrected`` is only ever populated for a line whose answer was ``null`` (Q37b):
+    a pick needs no corrected name, it already is one of the offered candidates.
+    """
+
+    products: dict[str, UUID]
+    corrected: dict[str, str]
+
+
+class SelectionResult(dict[str, UUID]):
+    """Line id -> chosen product, same shape `select_products` always returned.
+
+    A plain ``dict`` subclass, so any caller or test double that only reads this as
+    ``dict[str, UUID]`` (as every caller before Q37b did) keeps working unchanged; the
+    corrected generic names Q37b adds ride along on ``.corrected`` for the one caller
+    that reads it (`ProductResolution._select`).
+
+    Caveat (F5, PR #153 review): ``.corrected`` is an extra attribute, not part of
+    ``dict``'s own data, so anything that goes through `dict`'s machinery drops it
+    silently rather than erroring - ``dict(result)`` and ``result == {"l1": some_id}``
+    both compare/copy only the product mapping, same as for any dict subclass. Read
+    ``.corrected`` directly; do not round-trip this value through `dict()` or rely on
+    `==` to notice a difference in it.
+    """
+
+    def __init__(
+        self, products: dict[str, UUID], corrected: dict[str, str] | None = None
+    ) -> None:
+        super().__init__(products)
+        self.corrected: dict[str, str] = dict(corrected or {})
+
+
+def parse_selection(content: str, lines: list[SelectionLine]) -> SelectionAnswer:
     """Line id -> chosen product, keeping only answers we actually offered.
 
     A model that invents a product id, repeats one from another line, or answers for a
-    line that was not asked about is ignored rather than trusted.
+    line that was not asked about is ignored rather than trusted. A corrected generic
+    name (Q37b) is kept only for a line whose pick was null, and only when it is not
+    merely the g-only snap's own name the model just rejected (F4, PR #153 review): an
+    ordinary trigram candidate the model also declined is unrelated and may well be the
+    correction, so only the rejected snap's exact name is thrown away as a non-answer.
     """
-    offered = {line.line_id: set(line.candidate_ids) for line in lines}
+    offered = {
+        line.line_id: dict(zip(line.candidate_ids, line.candidate_names, strict=True))
+        for line in lines
+    }
+    proposed_names = {line.line_id: line.proposed_name for line in lines}
     data = extract_json_object(content)
     answers = data.get("r") if isinstance(data, dict) else None
     if not isinstance(answers, list):
         raise LLMExtractionError("Selection response has no 'r' list")
 
     chosen: dict[str, UUID] = {}
+    corrected: dict[str, str] = {}
     for answer in answers:
         if not isinstance(answer, dict):
             continue
-        line_id, product_id = answer.get("id"), answer.get("p")
-        if product_id is None or line_id is None:
+        line_id = answer.get("id")
+        if line_id is None:
             continue
-        line_id, product_id = str(line_id), str(product_id)
-        if product_id not in offered.get(line_id, set()):
-            logger.warning(
-                "Ignoring a selection that was never offered",
-                extra={"line_id": line_id, "product_id": product_id},
-            )
+        line_id = str(line_id)
+        candidates = offered.get(line_id)
+        if candidates is None:
             continue
-        try:
-            chosen[line_id] = UUID(product_id)
-        except ValueError:
-            logger.warning(
-                "Ignoring an unparseable product id", extra={"line_id": line_id}
-            )
-    return chosen
+
+        product_id = answer.get("p")
+        if product_id is not None:
+            product_id = str(product_id)
+            if product_id not in candidates:
+                logger.warning(
+                    "Ignoring a selection that was never offered",
+                    extra={"line_id": line_id, "product_id": product_id},
+                )
+                continue
+            try:
+                chosen[line_id] = UUID(product_id)
+            except ValueError:
+                logger.warning(
+                    "Ignoring an unparseable product id", extra={"line_id": line_id}
+                )
+            continue
+
+        corrected_name = answer.get("g")
+        if not isinstance(corrected_name, str):
+            continue
+        tidy = " ".join(corrected_name.split())
+        if not tidy:
+            continue
+        proposed_name = proposed_names.get(line_id)
+        if proposed_name is not None and normalize_product_name(
+            tidy
+        ) == normalize_product_name(proposed_name):
+            continue
+        corrected[line_id] = tidy
+    return SelectionAnswer(products=chosen, corrected=corrected)
 
 
-async def select_products(lines: list[SelectionLine]) -> dict[str, UUID]:
+async def select_products(lines: list[SelectionLine]) -> SelectionResult:
     """One request for the whole receipt. Returns line id -> product.
 
     Raises:
@@ -152,7 +228,7 @@ async def select_products(lines: list[SelectionLine]) -> dict[str, UUID]:
             The caller leaves those lines unresolved rather than guessing.
     """
     if not lines:
-        return {}
+        return SelectionResult({})
 
     payload: dict[str, Any] = {
         "model": settings.LLM_MODEL,
@@ -183,14 +259,15 @@ async def select_products(lines: list[SelectionLine]) -> dict[str, UUID]:
     except (KeyError, IndexError, TypeError) as exc:
         raise LLMExtractionError("Selection response has no message content") from exc
 
-    chosen = parse_selection(content, lines)
+    answer = parse_selection(content, lines)
     logger.info(
         "Products selected",
         extra={
             "model": settings.LLM_MODEL,
             "asked": len(lines),
-            "answered": len(chosen),
+            "answered": len(answer.products),
+            "corrected": len(answer.corrected),
             "seconds": round(time.monotonic() - started, 1),
         },
     )
-    return chosen
+    return SelectionResult(answer.products, answer.corrected)

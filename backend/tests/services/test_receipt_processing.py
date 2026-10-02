@@ -24,6 +24,7 @@ from app.services.llm_extractor import (
     number_receipt_lines,
 )
 from app.services.ocr_service import OCRUnavailableError
+from app.services.product_selection import SelectionResult
 from app.services.receipt_processing import (
     ProcessingResult,
     ReceiptProcessingService,
@@ -500,6 +501,51 @@ class TestPersistence:
         assert str(beef.id) in {
             c["product_id"] for c in line["resolution"]["candidates"]
         }
+
+    async def test_a_rejected_snap_with_a_corrected_name_replaces_the_generic_name(
+        self, service, pdf_receipt, sample_category, db_session, _no_model_selection
+    ):
+        """Q37b: when selection rejects the snap but gives a better name, the stored
+        line's `generic_name` becomes that name - so confirm later defaults to it
+        rather than to the snapped product's own name - and the resolution blob keeps
+        both the rejection and the model's original guess for the audit."""
+        dip = ProductMaster(
+            id=uuid4(),
+            canonical_name="Dip",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=14,
+            unit_type="weight",
+            default_unit="g",
+        )
+        db_session.add(dip)
+        await db_session.commit()
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(
+                    name="PESTO ALKU",
+                    generic_name="Dip",
+                    quantity=1,
+                    category="dairy",
+                )
+            ]
+        )
+        _no_model_selection.side_effect = lambda lines: SelectionResult(
+            {}, {lines[0].line_id: "Pesto"}
+        )
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=_text_for(extraction)),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        await db_session.refresh(pdf_receipt)
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["generic_name"] == "Pesto"
+        assert line["product_id"] is None
+        assert line["resolution"]["rejected_product_id"] == str(dip.id)
+        assert line["resolution"]["corrected_generic"] == "Pesto"
+        assert line["resolution"]["generic_from_extraction"] == "Dip"
 
     async def test_alias_match_is_stored_per_line(
         self, service, pdf_receipt, sample_product, db_session

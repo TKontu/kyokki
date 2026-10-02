@@ -335,6 +335,15 @@ async def reanalyse_line(
         raise LineNotFound(f"Receipt has no line '{line_id}'")
     index, line = found
 
+    resolution_blob = resolution.as_dict()
+    if resolution.corrected_generic:
+        # Q37b/F2: selection rejected the snap but named the line better than this
+        # re-ask did. The corrected name becomes what confirm defaults to - mirroring
+        # `receipt_processing.py` - and the re-ask's own guess survives in the
+        # resolution blob for the audit rather than being silently dropped.
+        resolution_blob["generic_from_extraction"] = generic
+        generic = resolution.corrected_generic
+
     line["generic_name"] = generic
     line["category"] = None if non_food else category
     line["non_food"] = non_food
@@ -351,7 +360,7 @@ async def reanalyse_line(
     # resets the same pair when it writes a line).
     line["match_score"] = None
     line["match_confidence"] = None
-    line["resolution"] = resolution.as_dict()
+    line["resolution"] = resolution_blob
     line["reanalysed"] = True
     line["reanalyse_hint"] = hint
 
