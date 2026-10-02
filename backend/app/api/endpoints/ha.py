@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.endpoints.stock import (
     IdempotencyKeyHeader,
+    _broadcast_if_now_low,
     claim_request,
     lookup_error,
     replayed,
@@ -116,6 +117,7 @@ async def ha_consume(
             status=used.status,
             product_name=result.product_name,
         )
+    await _broadcast_if_now_low(db, result.product_id)
     return response
 
 

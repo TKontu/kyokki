@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.main import app
 from app.models.consumption_log import ConsumptionLog
 from app.models.product_master import ProductMaster
+from app.models.shopping_list_item import ShoppingListItem
 
 
 @pytest.fixture
@@ -1595,6 +1596,130 @@ class TestConsumeBounds:
         )
 
         assert response.json()["current_quantity"] == 8
+
+
+async def _product_with_min_stock(
+    client: AsyncClient,
+    *,
+    min_stock: float,
+    reorder: float | None = None,
+    name: str = "Min Stock Milk",
+) -> dict:
+    body = {
+        "canonical_name": name,
+        "category": "dairy",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 7,
+        "unit_type": "volume",
+        "default_unit": "dl",
+        "min_stock_quantity": min_stock,
+    }
+    if reorder is not None:
+        body["reorder_quantity"] = reorder
+    response = await client.post("/api/products", json=body)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def _shopping_items(db: AsyncSession) -> list[ShoppingListItem]:
+    rows = await db.execute(
+        select(ShoppingListItem).execution_options(populate_existing=True)
+    )
+    return list(rows.scalars().all())
+
+
+class TestConsumeBelowMinimumStock:
+    """A1: a consume that leaves a product's stock below its minimum auto-adds an open
+    shopping item for it (`services.min_stock`), once, and broadcasts."""
+
+    async def test_consuming_below_the_minimum_adds_one_open_item(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=10)
+        item = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        with patch(
+            "app.api.endpoints.inventory.broadcast_shopping_list_update",
+            new_callable=AsyncMock,
+        ) as shopping_broadcast:
+            response = await client.post(
+                f"/api/inventory/{item['id']}/consume", json={"quantity": 6}
+            )
+
+        assert response.status_code == 200, response.text
+        rows = await _shopping_items(seeded_db)
+        assert len(rows) == 1
+        [added] = rows
+        assert (added.product_master_id, added.source) == (
+            UUID(product["id"]),
+            "auto_restock",
+        )
+        assert added.quantity == 6  # the shortfall: 10 - 4 on hand
+        shopping_broadcast.assert_awaited_once()
+        assert shopping_broadcast.await_args.kwargs["action"] == "created"
+        assert shopping_broadcast.await_args.kwargs["shopping_list_item_id"] == added.id
+
+    async def test_a_second_consume_adds_nothing_more(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=10)
+        item = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+        first = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 6}
+        )
+        assert first.status_code == 200, first.text
+
+        second = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 1}
+        )
+
+        assert second.status_code == 200, second.text
+        assert len(await _shopping_items(seeded_db)) == 1
+
+    async def test_an_existing_open_manual_item_suppresses_it(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=10)
+        item = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+        manual = await client.post(
+            "/api/shopping/",
+            json={
+                "product_master_id": product["id"],
+                "name": product["canonical_name"],
+                "quantity": 3,
+                "unit": "dl",
+            },
+        )
+        assert manual.status_code == 201, manual.text
+
+        response = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 6}
+        )
+
+        assert response.status_code == 200, response.text
+        rows = await _shopping_items(seeded_db)
+        assert len(rows) == 1
+        assert rows[0].source == "manual"
+
+    async def test_no_minimum_does_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession, test_product: dict
+    ) -> None:
+        item = await _create_item(
+            client, test_product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        response = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 6}
+        )
+
+        assert response.status_code == 200, response.text
+        assert await _shopping_items(seeded_db) == []
 
 
 class TestCreateRefusesIncoherentRows:

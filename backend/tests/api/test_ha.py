@@ -356,6 +356,68 @@ class TestConsume:
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "conflict"
 
+    async def test_below_the_minimum_adds_one_open_item_and_broadcasts(
+        self, client: AsyncClient, db: AsyncSession, broadcast
+    ) -> None:
+        milk = await _product(db, "Milk", min_stock_quantity=Decimal("10"))
+        await _item(db, milk, "10")
+
+        # `ha_consume` broadcasts this through `_broadcast_if_now_low`, which it shares
+        # with the agent's own `/api/stock/consume` (it is defined, and imported, there) -
+        # so the mock that catches it is `stock`'s, not `ha`'s own `broadcast` fixture.
+        with patch(
+            "app.api.endpoints.stock.broadcast_shopping_list_update",
+            new_callable=AsyncMock,
+        ) as shopping_broadcast:
+            response = await client.post(
+                "/api/ha/consume", json={"name": "milk", "amount": 6, "unit": "dl"}
+            )
+
+        assert response.status_code == 200, response.text
+        rows = await _shopping_rows(db)
+        assert len(rows) == 1
+        [added] = rows
+        assert (added.product_master_id, added.source) == (milk.id, "auto_restock")
+        shopping_broadcast.assert_awaited_once()
+        assert shopping_broadcast.await_args.kwargs["action"] == "created"
+
+    async def test_a_second_consume_adds_nothing_more(
+        self, client: AsyncClient, db: AsyncSession, broadcast
+    ) -> None:
+        milk = await _product(db, "Milk", min_stock_quantity=Decimal("10"))
+        await _item(db, milk, "10")
+        first = await client.post(
+            "/api/ha/consume", json={"name": "milk", "amount": 6, "unit": "dl"}
+        )
+        assert first.status_code == 200, first.text
+
+        second = await client.post(
+            "/api/ha/consume", json={"name": "milk", "amount": 1, "unit": "dl"}
+        )
+
+        assert second.status_code == 200, second.text
+        assert len(await _shopping_rows(db)) == 1
+
+    async def test_no_minimum_does_nothing(
+        self, client: AsyncClient, db: AsyncSession, broadcast
+    ) -> None:
+        milk = await _product(db, "Milk")
+        await _item(db, milk, "10")
+
+        response = await client.post(
+            "/api/ha/consume", json={"name": "milk", "amount": 6, "unit": "dl"}
+        )
+
+        assert response.status_code == 200, response.text
+        assert await _shopping_rows(db) == []
+
+
+async def _shopping_rows(db: AsyncSession) -> list[ShoppingListItem]:
+    rows = await db.execute(
+        select(ShoppingListItem).execution_options(populate_existing=True)
+    )
+    return list(rows.scalars().all())
+
 
 class TestShoppingAdd:
     async def test_response_shape_defaults_and_broadcast(

@@ -24,6 +24,24 @@ describe('ShoppingItemRow', () => {
     expect(screen.getByText('6 pcs')).toBeInTheDocument()
   })
 
+  it('marks an auto-added item with an icon and the word "Auto"', () => {
+    render(
+      <ShoppingItemRow
+        item={{ ...ITEM, source: 'auto_restock' }}
+        onToggle={jest.fn()}
+        onRemove={jest.fn()}
+      />
+    )
+
+    expect(screen.getByText('Auto')).toBeInTheDocument()
+  })
+
+  it('does not mark a manually added item', () => {
+    render(<ShoppingItemRow item={ITEM} onToggle={jest.fn()} onRemove={jest.fn()} />)
+
+    expect(screen.queryByText('Auto')).not.toBeInTheDocument()
+  })
+
   it('badges an open urgent item, and nothing once it is bought', () => {
     const { rerender } = render(
       <ShoppingItemRow item={ITEM} onToggle={jest.fn()} onRemove={jest.fn()} />
