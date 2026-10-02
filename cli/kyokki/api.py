@@ -200,11 +200,14 @@ class Api:
         *,
         params: dict[str, Any] | None = None,
         body: Any = None,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
         idempotency_key: str | None = None,
         expect: type[list[Any]] | type[dict[str, Any]] | Literal["text"] | None = None,
     ) -> Answer:
         """One request. ``expect`` is the JSON type a success must carry, or
-        ``"text"`` for a text/plain or text/markdown body, returned as a string."""
+        ``"text"`` for a text/plain or text/markdown body, returned as a string.
+        ``files`` sends a multipart upload instead of a JSON ``body`` (the two are
+        mutually exclusive; httpx encodes multipart and sets its own Content-Type)."""
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else {}
         if expect == "text":
             headers["Accept"] = ", ".join(TEXT_MEDIA_TYPES)
@@ -214,7 +217,12 @@ class Api:
             print(f"> {method} {self.url}{path}{key}", file=sys.stderr)
         try:
             response = self._client.request(
-                method, path, params=query or None, json=body, headers=headers
+                method,
+                path,
+                params=query or None,
+                json=None if files else body,
+                files=files,
+                headers=headers,
             )
         except httpx.TransportError as exc:
             # Only the class name: the text of a header error quotes the header.

@@ -1245,3 +1245,133 @@ describe('ReceiptReviewPage receipt text (Q28)', () => {
     expect(screen.queryByRole('button', { name: /receipt text/i })).not.toBeInTheDocument()
   })
 })
+
+describe('ReceiptReviewPage printed line (Q39)', () => {
+  it('shows the printed line and its price, matched or not', async () => {
+    mockApi(
+      receipt({}, [
+        item(0, { price: 1.49 }),
+        item(1, { product_id: 'p-milk', product_name: 'Milk', price: 2 }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0 · 1.49')
+    expect(screen.getByText('PRINTED 1 · 2.00')).toBeInTheDocument()
+  })
+
+  it('shows the printed line alone when no price is stored', async () => {
+    mockApi(receipt({}, [item(0, { price: null })]))
+    renderPage()
+
+    expect(await screen.findByText('PRINTED 0')).toBeInTheDocument()
+  })
+})
+
+describe('ReceiptReviewPage re-analyse (Q38)', () => {
+  function withReanalyse(result: Partial<ExtractedItem>, status = 200) {
+    server.use(
+      http.post(`${API_URL}/receipts/r1/lines/line-0/reanalyse`, () =>
+        HttpResponse.json(result, { status })
+      )
+    )
+  }
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('takes the fresh name, category and product on success', async () => {
+    mockApi(receipt())
+    withReanalyse({ ...item(0), generic_name: 'Cashew nuts', suggested_category: 'meat' })
+    renderPage()
+    await screen.findByText('PRINTED 0')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }))
+    fireEvent.change(screen.getByPlaceholderText(/what is it/i), {
+      target: { value: 'cashew nuts' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }))
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Product name')).toHaveValue('Cashew nuts')
+    )
+    expect(screen.getByLabelText('Category')).toHaveValue('meat')
+  })
+
+  it('asks before overwriting a row the cook has edited by hand', async () => {
+    mockApi(receipt())
+    withReanalyse({ ...item(0), generic_name: 'Model name' })
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false)
+    renderPage()
+    await screen.findByText('PRINTED 0')
+
+    fireEvent.change(screen.getByLabelText('Product name'), {
+      target: { value: 'My own name' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }))
+
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled())
+    // Declined: the cook's own edit stands
+    expect(screen.getByLabelText('Product name')).toHaveValue('My own name')
+  })
+
+  it('applies the result once the cook confirms the overwrite', async () => {
+    mockApi(receipt())
+    withReanalyse({ ...item(0), generic_name: 'Model name' })
+    jest.spyOn(window, 'confirm').mockReturnValue(true)
+    renderPage()
+    await screen.findByText('PRINTED 0')
+
+    fireEvent.change(screen.getByLabelText('Product name'), {
+      target: { value: 'My own name' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }))
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Product name')).toHaveValue('Model name')
+    )
+  })
+
+  it("does not reset another row's unsaved edit", async () => {
+    mockApi(receipt({}, [item(0), item(1)]))
+    withReanalyse({ ...item(0), generic_name: 'Model name' })
+    renderPage()
+    await screen.findByText('PRINTED 0')
+
+    const nameFields = screen.getAllByLabelText('Product name')
+    fireEvent.change(nameFields[1], { target: { value: 'Row 1 edit' } })
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Re-analyse' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }))
+
+    await waitFor(() =>
+      expect(screen.getAllByLabelText('Product name')[0]).toHaveValue('Model name')
+    )
+    expect(screen.getAllByLabelText('Product name')[1]).toHaveValue('Row 1 edit')
+  })
+
+  it('shows a toast and leaves the row unchanged on error', async () => {
+    mockApi(receipt())
+    server.use(
+      http.post(`${API_URL}/receipts/r1/lines/line-0/reanalyse`, () =>
+        HttpResponse.json(
+          { detail: 'The model did not answer in time' },
+          { status: 504 }
+        )
+      )
+    )
+    renderPage()
+    await screen.findByText('PRINTED 0')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Re-analyse' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Ask again' }))
+
+    expect(
+      await screen.findByText('The model did not answer in time')
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Product name')).toHaveValue('Generic 0')
+  })
+})

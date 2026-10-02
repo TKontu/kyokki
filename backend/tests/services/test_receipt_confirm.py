@@ -799,12 +799,19 @@ class TestModelGuessesDoNotBecomeKeys:
         self,
         db_session: AsyncSession,
         categories,
+        _no_model_selection,
         printed,
         generic,
         wrong,
         right,
         category,
     ):
+        """Old contract (pre-Q37): a `model`-sourced generic name was a deterministic
+        key on the next receipt (`source == "name"`), merely unverified. Q37 contract:
+        a hit reached only through the generic name is a proposal regardless of its
+        source, so the next receipt routes it through one selection call (stubbed here
+        to confirm it, the same way the cook's original confirm did) and it resolves
+        as `selected`/unverified - still never "known", one layer further out."""
         guessed = await _product(db_session, wrong, category)
         receipt = await _receipt_with(
             db_session, printed, generic, category, _selected(guessed)
@@ -818,9 +825,10 @@ class TestModelGuessesDoNotBecomeKeys:
         assert row is not None
         assert (row.product_master_id, row.source) == (guessed.id, "model")
 
+        _no_model_selection.side_effect = lambda lines: {lines[0].line_id: guessed.id}
         again = await _resolve_again(db_session, printed, generic, category)
         assert again.product is not None and again.product.id == guessed.id
-        assert (again.source, again.verified) == ("name", False)
+        assert (again.source, again.verified) == ("selected", False)
 
     @pytest.mark.parametrize(
         ("printed", "generic", "wrong", "right", "category"), REPORTED_PAIRS

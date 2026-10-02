@@ -23,6 +23,8 @@ commands:
     product      resolve and teach product names
     category     the category ids for --category
     shopping     read, add to, tick off and generate the shopping list
+    receipt      upload a receipt, watch it process, and confirm its matched
+                 lines
 
 examples:
   kyokki doctor

@@ -101,4 +101,25 @@ describe('receipts API', () => {
     expect(receiptsAPI.fileUrl('r1')).toBe(`${API_URL}/receipts/r1/file`)
     expect(global.fetch).not.toHaveBeenCalled()
   })
+
+  it('re-analyses one line with a hint (Q38)', async () => {
+    const item = { index: 0, line_id: 'l1', name: 'PESTO JA CASHEW', generic_name: 'Cashew nuts' }
+    respond(item)
+
+    const result = await receiptsAPI.reanalyseLine('r1', 'l1', 'cashew nuts')
+
+    expect(result).toEqual(item)
+    const call = lastCall()
+    expect(call.url).toBe(`${API_URL}/receipts/r1/lines/l1/reanalyse`)
+    expect(call.method).toBe('POST')
+    expect(call.body).toEqual({ hint: 'cashew nuts' })
+  })
+
+  it('sends null, not undefined, when no hint is given', async () => {
+    respond({ index: 0, line_id: 'l1', name: 'X' })
+
+    await receiptsAPI.reanalyseLine('r1', 'l1')
+
+    expect(lastCall().body).toEqual({ hint: null })
+  })
 })

@@ -2,7 +2,9 @@
 
 Q26: which printed receipt line an inventory item came from, for the item's sheet.
 Q28: everything the cook can check about how a receipt became stock - the original file, the
-OCR text, the model's raw answer, and each printed line's outcome.
+OCR text, the model's raw answer, and each printed line's outcome. A line's `removed` outcome
+(stocked at confirm, item since hard-deleted) reads a mark `receipt_confirm._mark_stocked`
+writes in the same transaction as the items; nothing here writes it.
 """
 
 from pathlib import Path
@@ -186,11 +188,20 @@ async def build_receipt_audit(
             # `non_food`: the model's or a remembered name's guess at extraction time.
             # `confirmed_non_food`: the cook folded this line away *in this confirm*
             # (`receipt_confirm._mark_confirmed_non_food`) - a never-seen line has no
-            # other record of that on this receipt.
+            # other record of that on this receipt. Checked before `removed`: confirm
+            # never sets `stocked_at_confirm` on a line it folded away as household, but
+            # if a line were ever marked both, household - what the cook actually did
+            # with it - is the more useful answer.
             outcome = "household"
+        elif raw_line.get("stocked_at_confirm"):
+            # `receipt_confirm._mark_stocked` marked this line when it was confirmed;
+            # the item(s) it produced are gone now (hard-deleted - nothing else leaves
+            # a trace), but that is not the same as the cook having left the line out.
+            outcome = "removed"
         else:
             outcome = "skipped"
         price = raw_line.get("price")
+        hint = raw_line.get("reanalyse_hint")
         lines.append(
             ReceiptAuditLine(
                 index=index,
@@ -198,6 +209,8 @@ async def build_receipt_audit(
                 price=float(price) if isinstance(price, int | float) else None,
                 outcome=outcome,
                 items=stocked or [],
+                reanalysed=bool(raw_line.get("reanalysed")),
+                reanalyse_hint=hint if isinstance(hint, str) else None,
             )
         )
 

@@ -69,6 +69,7 @@ class ExtractedItem(BaseModel):
         ),
     )
     name: str = Field(..., description="Product name as printed")
+    price: float | None = Field(None, description="The line total as printed (Q39)")
     generic_name: str | None = Field(
         None, description="Brand-free generic name suggested for a new product"
     )
@@ -247,10 +248,12 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
         )
         if storage not in ("refrigerator", "freezer", "pantry"):
             storage = storage_type_for_category(category)
+        price = line.get("price")
         items.append(
             ExtractedItem(
                 index=index,
                 name=line["name"],
+                price=float(price) if isinstance(price, int | float) else None,
                 generic_name=line.get("generic_name"),
                 quantity=quantity,
                 unit=unit,
@@ -507,8 +510,10 @@ class ItemSourceResponse(BaseModel):
 
 # How a receipt line's outcome reads on the audit view (Q28). `pending`: the receipt has
 # not been confirmed yet. `stocked`: it became one or more inventory items. `household`:
-# folded away as non-food. `skipped`: neither - the cook left it out.
-ReceiptLineOutcome = Literal["pending", "stocked", "household", "skipped"]
+# folded away as non-food. `skipped`: neither - the cook left it out. `removed`: it was
+# stocked at confirm, but every item it produced has since been hard-deleted - there is no
+# inventory_item row left to point at, only the mark confirm left on the line itself.
+ReceiptLineOutcome = Literal["pending", "stocked", "household", "skipped", "removed"]
 
 
 class ReceiptAuditItemRef(BaseModel):
@@ -528,6 +533,13 @@ class ReceiptAuditLine(BaseModel):
     outcome: ReceiptLineOutcome
     items: list[ReceiptAuditItemRef] = Field(
         default_factory=list, description="Set when outcome is 'stocked'"
+    )
+    reanalysed: bool = Field(
+        False, description="The cook asked the model again for this line alone (Q38)"
+    )
+    reanalyse_hint: str | None = Field(
+        None,
+        description="The cook's hint on the re-analyse that last touched this line",
     )
 
 
@@ -569,3 +581,29 @@ class ReceiptAuditResponse(BaseModel):
             "shown as 'created from this receipt (line unknown)'"
         ),
     )
+
+
+# The cook's hint outranks the printed text (Q38); a longer one is more likely pasted
+# junk than a real answer, and the service - not this schema - is where that becomes a
+# precise 400 rather than FastAPI's generic 422.
+REANALYSE_HINT_MAX_LENGTH = 200
+
+
+class ReanalyseLineRequest(BaseModel):
+    """`POST /api/receipts/{id}/lines/{line_id}/reanalyse` (Q38).
+
+    An empty or whitespace-only hint is the same as no hint at all. The length limit is
+    enforced in `services/receipt_line_reanalyse.py`, which answers 400 for a hint over
+    `REANALYSE_HINT_MAX_LENGTH` characters.
+    """
+
+    hint: str | None = Field(
+        None, description="What the cook says this line actually is, e.g. 'cashew nuts'"
+    )
+
+    @model_validator(mode="after")
+    def trim_hint(self) -> "ReanalyseLineRequest":
+        if self.hint is not None:
+            trimmed = self.hint.strip()
+            self.hint = trimmed or None
+        return self

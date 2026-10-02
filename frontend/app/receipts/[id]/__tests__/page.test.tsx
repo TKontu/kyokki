@@ -94,6 +94,55 @@ describe('ReceiptAuditPage', () => {
     expect(screen.getByRole('link', { name: 'Milk' })).toHaveAttribute('href', '/products')
   })
 
+  it('shows a stocked-then-hard-deleted line as removed, not skipped', async () => {
+    renderPage(
+      audit({
+        lines: [
+          { index: 0, name: 'VALIO MAITO 1L', price: 1.49, outcome: 'removed', items: [] },
+        ],
+      })
+    )
+
+    expect(await screen.findByText('VALIO MAITO 1L')).toBeInTheDocument()
+    expect(screen.getByText('Removed from stock')).toBeInTheDocument()
+    expect(screen.queryByText('Skipped')).not.toBeInTheDocument()
+  })
+
+  it('shows a re-analysed line and its hint', async () => {
+    renderPage(
+      audit({
+        lines: [
+          {
+            index: 0,
+            name: 'PESTO JA CASHEW',
+            price: 2.49,
+            outcome: 'stocked',
+            items: [],
+            reanalysed: true,
+            reanalyse_hint: 'cashew nuts',
+          },
+        ],
+      })
+    )
+
+    expect(await screen.findByText('PESTO JA CASHEW')).toBeInTheDocument()
+    expect(screen.getByText('Re-analysed')).toBeInTheDocument()
+    expect(screen.getByText(/cashew nuts/)).toBeInTheDocument()
+  })
+
+  it('shows no re-analysed marker for an untouched line', async () => {
+    renderPage(
+      audit({
+        lines: [
+          { index: 0, name: 'X', price: 1, outcome: 'stocked', items: [] },
+        ],
+      })
+    )
+
+    await screen.findByText('X')
+    expect(screen.queryByText('Re-analysed')).not.toBeInTheDocument()
+  })
+
   it('lists items created before the line index existed, unattributed', async () => {
     renderPage(
       audit({
