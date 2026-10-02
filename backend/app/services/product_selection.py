@@ -23,6 +23,19 @@ from app.services.llm_http import LLMAuthError, post_chat
 
 logger = get_logger(__name__)
 
+# The last four rules below (raw ingredient vs. manufactured product, one animal's cut
+# vs. another's, a processing form vs. a named kind, a broad catalog word vs. a
+# catch-all) were added from the Q37 live runs on c2.muse-glimmer against the reported
+# pairs (reported_pairs.json): before them, the model confirmed butter as "Spread",
+# turkey cold cuts as "Ham" and pesto as "Dip" - the exact wrong snaps Q37 reports. With
+# them, 3 consecutive runs of the 15 reported-pair cases (6 pre-Q37 H53 cases, 9 Q37
+# ones) passed 12, 13 and 12 of 15; the pre-Q37 cases always pass, and butter/Spread,
+# baking chocolate/Chips, cashew nuts/Dip and chicken mince/Chicken fillet remain
+# flaky - a real limit of this model at LLM_REASONING_STRENGTH=low, not a wiring gap
+# (see PR #143). This prompt is used only for the lines deterministic keys could not
+# resolve, never for the main extraction read, so it does not touch the fixtures'
+# completeness or category counts (K-Citymarket 15/15, S-kaupat 49/49, REWE DE
+# synthetic 6/6, all measured unchanged against base in the same PR).
 INSTRUCTIONS = """For each line, pick the catalog product that is the same thing, or null if none is.
 
 Same thing means a home cook would put them on one shopping-list line.
@@ -31,9 +44,20 @@ milk, a different cut, a smaller or processed form:
 - "Oat milk" is not "Milk". "Sour cream" is not "Cream". "Peanut butter" is not "Butter".
 - "Cherry tomato" is not "Tomato". "Pineapple" is not "Apple".
 A named kind of the same food, bought and used the same way, is the SAME product:
-"Granny Smith" is "Apple", "Clementine" is "Mandarin".
+"Granny Smith" is "Apple", "Clementine" is "Mandarin". A processing form - ground,
+minced, sliced, whole - is not a named kind: a milled grain is still a different,
+processed form of the crop it is milled from, the same as any other different or
+processed form above - "Flour" is not "Wheat".
 Sharing a word does not make two products the same: "Tortilla chips" is not "Tortilla",
 "Lemonade" is not "Lemon", "Chocolate milk" is not "Chocolate".
+A raw ingredient is not a manufactured product made from it, however near they sit on a
+shelf: "Cucumber" is not "Pickle". "Milk" is not "Cheese".
+Meat from one animal is not the same product as a cut or cold cut from another, even
+when a shopper would reach for either from the same fridge case: "Duck" is not
+"Goose". "Lamb" is not "Beef".
+A broad word for a whole aisle or kind of food is not a match for one specific thing
+that could plausibly be filed there: it has to be the SAME product, not merely a
+plausible shelf for it.
 The candidates are only the nearest names in the catalog, not a list that contains the
 answer. If none of them is the same thing, answer null: null is a good answer, and a
 wrong pick is worse than none.
