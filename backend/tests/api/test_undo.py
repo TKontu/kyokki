@@ -137,8 +137,61 @@ class TestThePreview:
                 "unit": "dl",
                 "action": "use_partial",
                 "quantity_consumed": 2.5,
+                "direction": None,
             }
         ]
+
+
+class TestCorrectionDirection:
+    """The undo preview says which way a `correct` went (docs/TODO.md, 2026-09-26-9)."""
+
+    async def test_a_downward_correction_previews_as_down(
+        self, client: AsyncClient, cream: dict
+    ) -> None:
+        item = await _item(client, cream["id"])
+
+        await client.patch(f"/api/inventory/{item['id']}", json={"current_quantity": 4})
+
+        preview = (await client.get(URL)).json()
+        assert preview["steps"][0]["action"] == "correct"
+        assert preview["steps"][0]["direction"] == "down"
+
+    async def test_an_upward_correction_previews_as_up(
+        self, client: AsyncClient, cream: dict
+    ) -> None:
+        item = await _item(client, cream["id"])
+        await client.patch(f"/api/inventory/{item['id']}", json={"current_quantity": 4})
+
+        await client.patch(f"/api/inventory/{item['id']}", json={"current_quantity": 9})
+
+        preview = (await client.get(URL)).json()
+        assert preview["steps"][0]["action"] == "correct"
+        assert preview["steps"][0]["direction"] == "up"
+
+    async def test_an_old_correction_without_the_data_needed_has_no_direction(
+        self, client: AsyncClient, seeded_db: AsyncSession, cream: dict
+    ) -> None:
+        """A `correct` row whose `previous` snapshot does not carry a quantity - the shape an
+        old row could have, before the undo preview could tell direction - reads as unknown
+        rather than guessing."""
+        item = await _item(client, cream["id"])
+        seeded_db.add(
+            ConsumptionLog(
+                inventory_item_id=UUID(item["id"]),
+                product_master_id=UUID(cream["id"]),
+                action="correct",
+                quantity_consumed=Decimal("1"),
+                quantity_after=Decimal("9"),
+                unit="dl",
+                batch_id=uuid4(),
+                previous={"status": "sealed"},
+            )
+        )
+        await seeded_db.commit()
+
+        preview = (await client.get(URL)).json()
+
+        assert preview["steps"][0]["direction"] is None
 
 
 class TestUndoingAConsume:

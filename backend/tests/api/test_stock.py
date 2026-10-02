@@ -324,23 +324,48 @@ class TestStockAdd:
 
         assert await _count(seeded_db, InventoryItem) == 2
 
+    async def test_a_broadcast_failure_after_commit_does_not_lose_the_answer(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        """Q24: the item and its idempotency answer commit before anything broadcasts, so
+        a crash right there - a Redis hang is enough, no exception required - cannot
+        duplicate the item on retry."""
+        broadcast.side_effect = RuntimeError("redis hung")
+        body = {"name": "Peas", "category": "frozen", "quantity": 500, "unit": "g"}
+        headers = {"Idempotency-Key": "add-crash"}
+
+        with pytest.raises(RuntimeError):
+            await client.post("/api/stock/add", json=body, headers=headers)
+        assert await _count(seeded_db, InventoryItem) == 1
+
+        broadcast.side_effect = None
+        retry = await client.post("/api/stock/add", json=body, headers=headers)
+
+        assert retry.status_code == 201, retry.text
+        assert await _count(seeded_db, InventoryItem) == 1
+
 
 class TestStockAddRace:
     async def test_two_concurrent_adds_with_one_key_make_one_item(
         self, client: AsyncClient, own_sessions: AsyncSession, broadcast
     ) -> None:
-        """A client that times out and retries while its first request still runs."""
-        real_quick_add = stock_service.quick_add
+        """A client that times out and retries while its first request still runs.
 
-        async def slow_quick_add(db, request):
-            result = await real_quick_add(db, request)
-            # Quick add has committed; its answer is not remembered yet.
+        Both requests reach `replay`'s transaction-scoped advisory lock before either
+        writes anything; whichever gets there first holds it until its commit (item and
+        idempotency answer together, Q24), so the other blocks here rather than racing it,
+        and finds the answer already stored once it wakes.
+        """
+        real_reload = stock_service.crud_inventory.get_inventory_item
+
+        async def slow_reload(db, item_id):
+            result = await real_reload(db, item_id)
             await asyncio.sleep(0.3)
             return result
 
         body = {"name": "Peas", "category": "frozen", "quantity": 500, "unit": "g"}
         headers = {"Idempotency-Key": "add-race"}
-        with patch("app.services.stock.quick_add", new=slow_quick_add):
+        with patch("app.crud.inventory_item.get_inventory_item", new=slow_reload):
             first, second = await asyncio.gather(
                 client.post("/api/stock/add", json=body, headers=headers),
                 client.post("/api/stock/add", json=body, headers=headers),
@@ -647,13 +672,6 @@ class TestStockAddLearnsFromATypedDate:
         """The background estimate opens its own session; here it is the test's."""
         monkeypatch.setattr(shelf_life_on_create, "open_session", session_factory)
 
-    @pytest.fixture
-    def sibling_broadcast(self):
-        with patch(
-            "app.services.quick_add.broadcast_inventory_update", new_callable=AsyncMock
-        ) as mock:
-            yield mock
-
     async def _product(self, db: AsyncSession, product_id: str) -> ProductMaster:
         product = await db.get(ProductMaster, UUID(product_id), populate_existing=True)
         assert product is not None
@@ -689,7 +707,7 @@ class TestStockAddLearnsFromATypedDate:
         )
 
     async def test_a_calculated_sibling_moves_and_is_announced(
-        self, client: AsyncClient, seeded_db, sibling_broadcast
+        self, client: AsyncClient, seeded_db, broadcast
     ) -> None:
         older = (
             await client.post(
@@ -710,10 +728,13 @@ class TestStockAddLearnsFromATypedDate:
         )
         assert moved is not None
         assert moved.expiry_date == TODAY + timedelta(days=55)
-        announced = [
-            c.kwargs["inventory_item_id"] for c in sibling_broadcast.await_args_list
+        # Announced as the bulk discard/restore siblings are: "updated", not "created".
+        updated = [
+            c.kwargs["inventory_item_id"]
+            for c in broadcast.await_args_list
+            if c.kwargs["action"] == "updated"
         ]
-        assert list(map(str, announced)) == [older["id"]]
+        assert list(map(str, updated)) == [older["id"]]
 
     async def test_a_replay_learns_nothing_new(
         self, client: AsyncClient, seeded_db
@@ -736,3 +757,250 @@ class TestStockAddLearnsFromATypedDate:
             30,
             "cook",
         )
+
+
+DISCARD_URL = "/api/stock/discard-expired"
+
+
+async def _status(db: AsyncSession, item: InventoryItem) -> str:
+    found = await db.get(InventoryItem, _id(item), populate_existing=True)
+    assert found is not None
+    return str(found.status)
+
+
+class TestStockDiscardExpired:
+    """AG7 task 6: an agent can throw away everything expired, by name, not by id."""
+
+    async def test_dry_run_lists_without_discarding(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        milk = await _product(seeded_db, "Milk")
+        gone = await _item(seeded_db, milk, "3", expires_in=-2)
+        await _item(seeded_db, milk, "5", expires_in=5)
+
+        response = await client.post(DISCARD_URL, json={"dry_run": True})
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["dry_run"] is True
+        assert body["count"] == 1
+        (row,) = body["items"]
+        assert row["item_id"] == str(_id(gone))
+        assert row["product_name"] == "Milk"
+        assert row["amount"] == 3.0
+        assert row["unit"] == "dl"
+        assert row["location"] == "main_fridge"
+        assert await _status(seeded_db, gone) == "sealed"
+        assert await _count(seeded_db, ConsumptionLog) == 0
+        broadcast.assert_not_awaited()
+
+    async def test_an_expiry_of_today_is_not_expired(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        """The iPad's expired shelf rule: strictly before today, not "today or earlier"."""
+        milk = await _product(seeded_db, "Milk")
+        await _item(seeded_db, milk, "3", expires_in=0)
+
+        response = await client.post(DISCARD_URL, json={"dry_run": True})
+
+        assert response.json()["count"] == 0
+
+    async def test_real_run_discards_logs_and_broadcasts(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        milk = await _product(seeded_db, "Milk")
+        gone = await _item(seeded_db, milk, "3", expires_in=-1)
+        kept = await _item(seeded_db, milk, "5", expires_in=5)
+
+        response = await client.post(DISCARD_URL, json={})
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert (body["dry_run"], body["count"]) == (False, 1)
+        assert await _status(seeded_db, gone) == "discarded"
+        assert await _status(seeded_db, kept) == "sealed"
+        logs = (await seeded_db.execute(select(ConsumptionLog))).scalars().all()
+        assert len(logs) == 1
+        assert logs[0].action == "discard"
+        assert logs[0].inventory_item_id == _id(gone)
+        broadcast.assert_awaited_once()
+        assert broadcast.await_args.kwargs["inventory_item_id"] == _id(gone)
+        assert broadcast.await_args.kwargs["action"] == "updated"
+
+    async def test_a_location_filter(self, client: AsyncClient, seeded_db) -> None:
+        milk = await _product(seeded_db, "Milk")
+        fridge_item = await _item(
+            seeded_db, milk, "3", expires_in=-2, location="main_fridge"
+        )
+        freezer_item = await _item(
+            seeded_db, milk, "3", expires_in=-2, location="freezer"
+        )
+
+        response = await client.post(DISCARD_URL, json={"location": "freezer"})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["count"] == 1
+        assert await _status(seeded_db, freezer_item) == "discarded"
+        assert await _status(seeded_db, fridge_item) == "sealed"
+
+    async def test_an_unknown_location_is_a_422(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        response = await client.post(DISCARD_URL, json={"location": "garage"})
+
+        assert response.status_code == 422
+
+    async def test_no_change_to_inventory_discard(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        """Bulk discard by id still works and is untouched by this endpoint."""
+        milk = await _product(seeded_db, "Milk")
+        item = await _item(seeded_db, milk, "3", expires_in=5)
+
+        response = await client.post(
+            "/api/inventory/discard", json={"ids": [str(_id(item))]}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"changed": 1, "refused": 0, "missing": 0}
+        assert await _status(seeded_db, item) == "discarded"
+
+    async def test_discarded_restores_via_the_general_undo(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        milk = await _product(seeded_db, "Milk")
+        gone = await _item(seeded_db, milk, "3", expires_in=-2)
+
+        await client.post(DISCARD_URL, json={})
+        preview = (await client.get("/api/inventory/undo")).json()
+        undone = await client.post(
+            "/api/inventory/undo", json={"batch_id": preview["batch_id"]}
+        )
+
+        assert undone.status_code == 200, undone.text
+        # The general undo puts the item's fields back exactly as `previous` snapshotted
+        # them - sealed, here, since that was the status before the discard.
+        assert await _status(seeded_db, gone) == "sealed"
+
+    async def test_a_repeated_key_replays_without_discarding_twice(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        milk = await _product(seeded_db, "Milk")
+        await _item(seeded_db, milk, "3", expires_in=-2)
+        headers = {"Idempotency-Key": "discard-1"}
+
+        first = await client.post(DISCARD_URL, json={}, headers=headers)
+        second = await client.post(DISCARD_URL, json={}, headers=headers)
+
+        assert (first.status_code, second.status_code) == (200, 200)
+        assert second.json() == first.json()
+        assert await _count(seeded_db, ConsumptionLog) == 1
+        assert broadcast.await_count == 1
+
+    async def test_the_same_key_with_another_body_is_a_conflict(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        headers = {"Idempotency-Key": "discard-2"}
+        await client.post(DISCARD_URL, json={}, headers=headers)
+
+        response = await client.post(
+            DISCARD_URL, json={"location": "freezer"}, headers=headers
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"]["code"] == "conflict"
+
+    async def test_a_dry_run_is_not_remembered(
+        self, client: AsyncClient, seeded_db
+    ) -> None:
+        milk = await _product(seeded_db, "Milk")
+        gone = await _item(seeded_db, milk, "3", expires_in=-2)
+        headers = {"Idempotency-Key": "discard-3"}
+
+        await client.post(DISCARD_URL, json={"dry_run": True}, headers=headers)
+        real = await client.post(DISCARD_URL, json={}, headers=headers)
+
+        assert real.status_code == 200
+        assert real.json()["dry_run"] is False
+        assert await _status(seeded_db, gone) == "discarded"
+
+    async def test_nothing_expired_is_a_no_op(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        response = await client.post(DISCARD_URL, json={})
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"items": [], "count": 0, "dry_run": False}
+        broadcast.assert_not_awaited()
+
+    async def test_a_broadcast_failure_after_commit_does_not_lose_the_answer(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        milk = await _product(seeded_db, "Milk")
+        gone = await _item(seeded_db, milk, "3", expires_in=-2)
+        broadcast.side_effect = RuntimeError("redis hung")
+        headers = {"Idempotency-Key": "discard-crash"}
+
+        with pytest.raises(RuntimeError):
+            await client.post(DISCARD_URL, json={}, headers=headers)
+        assert await _status(seeded_db, gone) == "discarded"
+
+        broadcast.side_effect = None
+        retry = await client.post(DISCARD_URL, json={}, headers=headers)
+
+        assert retry.status_code == 200, retry.text
+        assert await _count(seeded_db, ConsumptionLog) == 1
+
+
+class TestStockDiscardExpiredRace:
+    async def test_two_concurrent_keyless_real_runs_discard_once(
+        self, client: AsyncClient, own_sessions: AsyncSession, broadcast
+    ) -> None:
+        """F1: no Idempotency-Key at all here - the two requests race on the same row
+        lock. Both see the item as expired in their own unlocked read; only one gets to
+        discard it, and the other's answer must come from what it actually found still
+        there under the lock (nothing), not from that first, stale read."""
+        milk = await _product(own_sessions, "Milk")
+        await _item(own_sessions, milk, "3", expires_in=-2)
+        real_get = stock_service.crud_inventory.get_inventory_items
+
+        async def slow_get(db, **kwargs):
+            items = await real_get(db, **kwargs)
+            # Both requests' unlocked reads land before either reaches the row lock.
+            await asyncio.sleep(0.3)
+            return items
+
+        with patch("app.crud.inventory_item.get_inventory_items", new=slow_get):
+            first, second = await asyncio.gather(
+                client.post(DISCARD_URL, json={}),
+                client.post(DISCARD_URL, json={}),
+            )
+
+        assert (first.status_code, second.status_code) == (200, 200)
+        counts = sorted([first.json()["count"], second.json()["count"]])
+        assert counts == [0, 1]
+        assert await _count(own_sessions, ConsumptionLog) == 1
+
+
+class TestStockDiscardExpiredAuth:
+    async def test_a_read_token_gets_403(
+        self,
+        client: AsyncClient,
+        seeded_db,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.core.api_tokens import hash_secret
+        from app.core.config import settings
+
+        secret = "read-only-secret-0000000000000"
+        monkeypatch.setattr(
+            settings, "KYOKKI_API_TOKENS", [f"probe:read:{hash_secret(secret)}"]
+        )
+
+        response = await client.post(
+            DISCARD_URL,
+            json={},
+            headers={"Authorization": f"Bearer {secret}"},
+        )
+
+        assert response.status_code == 403

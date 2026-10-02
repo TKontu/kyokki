@@ -10,7 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { consumptionLogKeys } from '@/hooks/useConsumptionLog'
 import { inventoryKeys } from '@/hooks/useInventory'
 import inventoryAPI from '@/lib/api/inventory'
-import type { UndoPreview } from '@/types/consumption'
+import type { UndoPreview } from '@/types/inventory'
 
 export const undoKeys = {
   preview: () => [...consumptionLogKeys.all, 'undo'] as const,

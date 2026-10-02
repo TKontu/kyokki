@@ -29,7 +29,7 @@ from app.parsers.receipt_lines import is_skip_line
 from app.services.store_chain import normalize_store_chain
 
 _QUANTITY = re.compile(r"^(\d+)\s*(?:KPL|x)\s+\d+[,.]\d{2}", re.IGNORECASE)
-_WEIGHT = re.compile(r"^(\d+[,.]\d{3})\s*kg\b", re.IGNORECASE)
+_WEIGHT = re.compile(r"^(\d+[,.]\d{1,3})\s*kg\b", re.IGNORECASE)
 _PRODUCT = re.compile(
     r"^(?P<name>.+?)\s+(?P<price>-?\d+[,.]\d{2})(?P<minus>-)?"
     r"(?:\s+-?\d+[,.]\d{2})?(?:\s+[A-C])?\s*(?:€|EUR)?$"

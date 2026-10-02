@@ -11,7 +11,7 @@ import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
 import Gone from '../page'
-import type { ConsumptionLogEntry, ConsumptionSummary } from '@/types/consumption'
+import type { ConsumptionLogEntry, ConsumptionSummary, WasteStats, WasteTrend } from '@/types/consumption'
 
 const NOW = new Date('2026-09-22T12:00:00Z')
 
@@ -45,6 +45,52 @@ const SUMMARY = {
   use_full: { events: 34, totals: { dl: 120 } },
 }
 
+const WASTE: WasteStats = {
+  discarded: 8,
+  finished: 34,
+  total: 42,
+  rate: 8 / 42,
+  categories: [
+    {
+      category: 'meat',
+      display_name: 'Meat & Poultry',
+      discarded: 5,
+      finished: 1,
+      total: 6,
+      rate: 5 / 6,
+    },
+    {
+      category: 'dairy',
+      display_name: 'Dairy & Eggs',
+      discarded: 2,
+      finished: 10,
+      total: 12,
+      rate: 2 / 12,
+    },
+  ],
+}
+
+const EMPTY_WASTE: WasteStats = {
+  discarded: 0,
+  finished: 0,
+  total: 0,
+  rate: null,
+  categories: [],
+}
+
+const TREND: WasteTrend = {
+  weeks: [
+    '2026-07-27',
+    '2026-08-03',
+    '2026-08-10',
+    '2026-08-17',
+    '2026-08-24',
+    '2026-08-31',
+    '2026-09-07',
+    '2026-09-14',
+  ].map((week_start) => ({ week_start, discarded: 0, finished: 0, total: 0, rate: null })),
+}
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 beforeEach(() => {
   jest.useFakeTimers({ doNotFake: ['setTimeout', 'clearTimeout', 'queueMicrotask'] })
@@ -56,11 +102,18 @@ afterEach(() => {
 })
 afterAll(() => server.close())
 
-/** The two requests the screen makes; `asked` records what it asked for. */
-function api(rows: ConsumptionLogEntry[], summary: ConsumptionSummary = SUMMARY) {
+/** The requests the screen makes; `asked` records what it asked for. */
+function api(
+  rows: ConsumptionLogEntry[],
+  summary: ConsumptionSummary = SUMMARY,
+  waste: WasteStats = WASTE,
+  trend: WasteTrend = TREND
+) {
   const asked: { list: URLSearchParams[]; patched: string[] } = { list: [], patched: [] }
   server.use(
     http.get(`${API_URL}/consumption-log/summary`, () => HttpResponse.json(summary)),
+    http.get(`${API_URL}/consumption-log/waste`, () => HttpResponse.json(waste)),
+    http.get(`${API_URL}/consumption-log/waste/trend`, () => HttpResponse.json(trend)),
     http.get(`${API_URL}/consumption-log`, ({ request }) => {
       asked.list.push(new URL(request.url).searchParams)
       return HttpResponse.json(rows)
@@ -157,5 +210,42 @@ describe('The Gone screen', () => {
     renderGone()
 
     expect(await screen.findByText(/Nothing has been thrown away or finished/i)).toBeInTheDocument()
+  })
+
+  it('shows the waste rate and the categories that waste the most', async () => {
+    api([MEAT, MILK])
+
+    renderGone()
+
+    expect(
+      await screen.findByText('You threw away 8 of 42 things (19 %)')
+    ).toBeInTheDocument()
+    const rate = screen.getByLabelText('Waste rate')
+    expect(within(rate).getByText('Meat & Poultry')).toBeInTheDocument()
+    expect(within(rate).getByText('83 %')).toBeInTheDocument()
+    expect(within(rate).getByText('Dairy & Eggs')).toBeInTheDocument()
+    expect(within(rate).getByText('17 %')).toBeInTheDocument()
+  })
+
+  it('shows a plain empty state for the rate, not 0 % or NaN, when nothing has gone', async () => {
+    api([], {}, EMPTY_WASTE)
+
+    renderGone()
+
+    expect(
+      await screen.findByText('Not enough has gone in this window to show a rate yet.')
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/0 %/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument()
+  })
+
+  it('shows a bar for each of the last 8 weeks', async () => {
+    api([MEAT, MILK])
+
+    renderGone()
+
+    const trend = (await screen.findByText('Last 8 weeks')).closest('section') as HTMLElement
+    // en-GB's short month is usually 3 letters ("Jan") but 4 for September ("Sept")
+    expect(within(trend).getAllByText(/^\d{1,2} \w{3,4}$/)).toHaveLength(8)
   })
 })

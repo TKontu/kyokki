@@ -1,4 +1,4 @@
-"""Stock routes for agents (AG2): per-product totals, add, and consume by name.
+"""Stock routes for agents (AG2): per-product totals, add, consume and discard-expired.
 
 Names in, decisions out. Every failure is an `AgentError` with a stable ``detail.code``;
 the mutations take an optional ``Idempotency-Key`` and replay their first response to it.
@@ -17,6 +17,8 @@ from app.api.exceptions import handle_integrity_errors
 from app.db.session import get_db
 from app.schemas.inventory_item import QuickAddRequest, StorageLocation
 from app.schemas.stock import (
+    DiscardExpiredRequest,
+    DiscardExpiredResponse,
     StockAddResponse,
     StockConsumeRequest,
     StockConsumeResponse,
@@ -34,6 +36,7 @@ router = APIRouter()
 
 ADD_ROUTE = "POST /api/stock/add"
 CONSUME_ROUTE = "POST /api/stock/consume"
+DISCARD_EXPIRED_ROUTE = "POST /api/stock/discard-expired"
 ADD_HINT = (
     "Add it with POST /api/stock/add (name, category, quantity, unit), or teach an "
     "existing product this name with POST /api/products/{id}/names"
@@ -122,28 +125,28 @@ async def add_stock(
 ) -> Any:
     """Quick add for agents: the created item and whether its product was new.
 
-    With an Idempotency-Key, a retry that arrives while the first request still runs
-    waits for it and replays its answer: the key is held until that answer is stored.
-    A new product is estimated in the background once this has answered (Q19); a replay
-    schedules nothing, because the first request already did.
+    With an Idempotency-Key, the item and the stored answer commit together (Q24): a
+    crash during the broadcast that follows - even a Redis hang - cannot duplicate the
+    item, because a retry finds the key already there and replays. A new product is
+    estimated in the background once this has answered (Q19); a replay schedules
+    nothing, because the first request already did.
 
     Errors: 404 `not_found` (unknown product id, as stock/consume answers it), 400
     `invalid` (a new product without a valid category), 409 `conflict` (Idempotency-Key
     reused with another body).
     """
     claim = claim_request(body, idempotency_key, ADD_ROUTE)
-    async with idempotency.held(db, claim):
-        if (stored := await replayed(db, claim)) is not None:
-            return stored
-        try:
-            async with handle_integrity_errors():
-                result = await stock_service.add_stock(db, body, claim=claim)
-        except UnknownProduct as exc:
-            raise AgentError("not_found", str(exc)) from exc
-        except InvalidProductRequest as exc:
-            raise AgentError("invalid", str(exc)) from exc
+    if (stored := await replayed(db, claim)) is not None:
+        return stored
+    try:
+        async with handle_integrity_errors():
+            result = await stock_service.add_stock(db, body, claim=claim)
+    except UnknownProduct as exc:
+        raise AgentError("not_found", str(exc)) from exc
+    except InvalidProductRequest as exc:
+        raise AgentError("invalid", str(exc)) from exc
 
-    item = result.item
+    item = result.response.item
     await broadcast_inventory_update(
         inventory_item_id=item.id,
         action="created",
@@ -151,9 +154,58 @@ async def add_stock(
         status=str(item.status),
         product_name=item.product_name,
     )
+    for sibling in result.moved:
+        await broadcast_inventory_update(
+            inventory_item_id=sibling.id,
+            action="updated",
+            current_quantity=sibling.current_quantity,
+            status=str(sibling.status),
+            product_name=item.product_name,
+        )
     if result.product_created:
         schedule_estimates(background_tasks, [item.product_master_id])
-    return result
+    return result.response
+
+
+@router.post("/discard-expired", response_model=DiscardExpiredResponse)
+async def discard_expired_stock(
+    body: DiscardExpiredRequest,
+    idempotency_key: str | None = IdempotencyKeyHeader,
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Throw away everything past its expiry date (AG7 task 6), by name, not by id.
+
+    "Expired" is the iPad's expired shelf rule, reused rather than restated: an active
+    item whose expiry date is before today. A dry run answers with what would be
+    discarded and changes nothing; a real run moves each item through the same
+    status-machine transition `/inventory/discard` applies, so it is logged as `discard`
+    in `consumption_log`, can be undone by the general undo, and shows up on the Gone
+    screen. With an Idempotency-Key, the discards and the stored answer commit together
+    (Q24), exactly as `stock add`'s do; a dry run is never remembered against a key, as
+    `stock/consume`'s isn't.
+
+    Errors: 409 `conflict` (Idempotency-Key reused with another body).
+    """
+    claim = (
+        None
+        if body.dry_run
+        else claim_request(body, idempotency_key, DISCARD_EXPIRED_ROUTE)
+    )
+    if (stored := await replayed(db, claim)) is not None:
+        return stored
+    async with handle_integrity_errors():
+        result = await stock_service.discard_expired(
+            db, location=body.location, dry_run=body.dry_run, claim=claim
+        )
+
+    for item in result.changed:
+        await broadcast_inventory_update(
+            inventory_item_id=item.id,
+            action="updated",
+            current_quantity=item.current_quantity,
+            status=item.status,
+        )
+    return result.response
 
 
 @router.post("/consume", response_model=StockConsumeResponse)
