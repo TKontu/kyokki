@@ -3,11 +3,13 @@
  * TanStack Query hooks for inventory management
  */
 
+import { useSyncExternalStore } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import inventoryAPI from '@/lib/api/inventory'
 import { consumptionLogKeys } from '@/hooks/useConsumptionLog'
 import { productKeys } from '@/hooks/useProducts'
 import { applyConsume } from '@/lib/consumption'
+import { getLiveStatus, subscribeLiveStatus } from '@/lib/live'
 import type {
   InventoryItem,
   InventoryItemCreate,
@@ -20,8 +22,14 @@ import type {
 /**
  * The stock list is the always-on fridge display: nobody focuses it or reloads it, so it has
  * to refresh itself (MVP-P2). Receipts have their own cadence in `useReceipts.ts`.
+ *
+ * This is the fallback cadence: with no live stream (A5, `useLiveUpdates.ts`), or while it is
+ * down, the list polls exactly this often, as it always did.
  */
 export const INVENTORY_POLL_MS = 30_000
+/** While the live stream is connected, a broadcast invalidates the list already; this is
+ *  just the backstop for a message that was somehow missed (A5). */
+export const INVENTORY_LIVE_POLL_MS = 5 * 60_000
 /** Short enough that a mount or a regained focus shows fresh stock rather than the cache. */
 const INVENTORY_STALE_MS = 10_000
 
@@ -38,10 +46,15 @@ export const inventoryKeys = {
  * Query: List inventory items
  */
 export function useInventoryList(params?: InventoryListParams) {
+  const liveStatus = useSyncExternalStore(
+    subscribeLiveStatus,
+    getLiveStatus,
+    () => 'disconnected' as const
+  )
   return useQuery({
     queryKey: inventoryKeys.list(params),
     queryFn: () => inventoryAPI.list(params),
-    refetchInterval: INVENTORY_POLL_MS,
+    refetchInterval: liveStatus === 'connected' ? INVENTORY_LIVE_POLL_MS : INVENTORY_POLL_MS,
     staleTime: INVENTORY_STALE_MS,
   })
 }
