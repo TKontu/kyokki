@@ -47,6 +47,12 @@ x-backend-env: &backend-env
   RECEIPT_WORKER_POLL_SECONDS: ${RECEIPT_WORKER_POLL_SECONDS:-2}
   # Empty: the window follows the per-receipt budget (28 minutes with the defaults)
   RECEIPT_STALE_MINUTES: ${RECEIPT_STALE_MINUTES:-}
+  # Watched folder receipt drop-in (docs/DEPLOY.md "Watched folder"). Empty disables the
+  # scan; only kyokki-worker has the folder mounted (below), but harmless on the other
+  # services, which never read it.
+  RECEIPT_WATCH_DIR: ${RECEIPT_WATCH_DIR:-}
+  RECEIPT_WATCH_POLL_SECONDS: ${RECEIPT_WATCH_POLL_SECONDS:-10}
+  RECEIPT_WATCH_SETTLE_SECONDS: ${RECEIPT_WATCH_SETTLE_SECONDS:-5}
   # Containers default to UTC; the cook reads Helsinki dates.
   TZ: ${TZ:-Europe/Helsinki}
   TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
@@ -114,9 +120,15 @@ services:
   kyokki-worker:
     # Reads queued receipts one at a time (OCR/LLM extraction, matching). Same image as the
     # API; uploads from the iPad and the Telegram bot are queued in Postgres. No port.
+    # Also the only service with the watched folder mounted (docs/DEPLOY.md "Watched
+    # folder"): RECEIPT_WATCH_HOST_DIR, a host path, or the internal kyokki_watch volume by
+    # default - either way, scanning stays off until RECEIPT_WATCH_DIR names this path.
     <<: *backend-image
     command: python -m app.worker
-    volumes: *backend-volumes
+    volumes:
+      - kyokki_data:/app/data
+      - kyokki_logs:/app/logs
+      - ${RECEIPT_WATCH_HOST_DIR:-kyokki_watch}:/app/receipt-watch
     environment:
       <<: *backend-env
     networks:
@@ -200,6 +212,8 @@ volumes:
   postgres_data:
   kyokki_data:
   kyokki_logs:
+  # Only used when RECEIPT_WATCH_HOST_DIR is unset; a host path there bind-mounts instead.
+  kyokki_watch:
 
 networks:
   kyokki_net:

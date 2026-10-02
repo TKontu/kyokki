@@ -197,3 +197,76 @@ async def test_run_survives_an_unexpected_error(session_factory):
 
     assert calls == 2
     assert sleeps == [2.0]
+
+
+class _FakeFolderWatcher:
+    def __init__(self):
+        self.scans = 0
+
+    async def scan_once(self, session_factory):
+        self.scans += 1
+
+
+async def test_run_with_no_watcher_never_scans_a_folder(session_factory):
+    """RECEIPT_WATCH_DIR empty -> folder_watcher is None -> no scan, ever."""
+    results = iter([False, False])
+    sleeps: list[float] = []
+
+    async def fake_run_once(factory):
+        try:
+            return next(results)
+        except StopIteration:
+            raise asyncio.CancelledError from None
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    with (
+        patch.object(receipt_worker, "run_once", fake_run_once),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await receipt_worker.run(
+            session_factory, poll_seconds=1.0, sleep=fake_sleep, folder_watcher=None
+        )
+
+
+async def test_run_scans_the_folder_between_claims_at_its_own_pace(session_factory):
+    """The folder is scanned on the first iteration, then only once its own poll
+    interval has elapsed - independent of the receipt queue's poll_seconds.
+
+    Five loop iterations happen (four successful ``run_once`` calls, then a fifth whose
+    ``run_once`` call raises to stop the loop); ``clock()`` is read once per iteration,
+    before ``run_once`` runs.
+    """
+    results = iter([False, False, False, False])
+    clock_values = iter([0.0, 4.0, 10.0, 10.0, 10.0])
+    watcher = _FakeFolderWatcher()
+
+    async def fake_run_once(factory):
+        try:
+            return next(results)
+        except StopIteration:
+            raise asyncio.CancelledError from None
+
+    async def fake_sleep(seconds):
+        pass
+
+    def fake_clock():
+        return next(clock_values)
+
+    with (
+        patch.object(receipt_worker, "run_once", fake_run_once),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await receipt_worker.run(
+            session_factory,
+            poll_seconds=1.0,
+            sleep=fake_sleep,
+            folder_watcher=watcher,
+            folder_poll_seconds=5.0,
+            clock=fake_clock,
+        )
+
+    # t=0 scans (first iteration, nothing scanned yet), t=4 does not (only 4s since
+    # t=0), t=10 (twice) scans once more (10s since t=0 >= 5s) and then holds.
+    assert watcher.scans == 2

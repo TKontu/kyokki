@@ -8,6 +8,7 @@ both land in that queue.
 import asyncio
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractAsyncContextManager
+from time import monotonic
 from typing import Any, cast
 from uuid import UUID
 
@@ -18,6 +19,7 @@ from app.models.receipt import Receipt
 from app.schemas.receipt import ReceiptStatus
 from app.services import receipt_queue
 from app.services.broadcast_helpers import broadcast_receipt_status
+from app.services.receipt_folder import ReceiptFolderWatcher
 from app.services.receipt_processing import MAX_ERROR_CHARS, ReceiptProcessingService
 
 logger = get_logger(__name__)
@@ -71,9 +73,30 @@ async def run(
     session_factory: SessionFactory,
     poll_seconds: float,
     sleep: Callable[[float], Awaitable[Any]] = asyncio.sleep,
+    *,
+    folder_watcher: ReceiptFolderWatcher | None = None,
+    folder_poll_seconds: float = 10.0,
+    clock: Callable[[], float] = monotonic,
 ) -> None:
-    """Read the queue forever; wait ``poll_seconds`` only when it is empty or on errors."""
+    """Read the queue forever; wait ``poll_seconds`` only when it is empty or on errors.
+
+    Between claims, also scans the watched folder (RECEIPT_WATCH_DIR) when
+    ``folder_watcher`` is given - at most once every ``folder_poll_seconds``, independent
+    of the queue's own pace, so a slow queue does not starve the folder scan and a busy
+    queue does not scan on every single claim. ``folder_watcher`` is ``None`` (no scan at
+    all) when RECEIPT_WATCH_DIR is empty.
+    """
+    last_folder_scan = float("-inf")
     while True:
+        if folder_watcher is not None:
+            now = clock()
+            if now - last_folder_scan >= folder_poll_seconds:
+                try:
+                    await folder_watcher.scan_once(session_factory)
+                except Exception:
+                    logger.exception("Receipt folder scan failed")
+                last_folder_scan = now
+
         try:
             worked = await run_once(session_factory)
         except Exception:

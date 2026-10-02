@@ -236,6 +236,41 @@ other chats get no reply except their chat id on `/start`, and nothing they send
 Keep the token secret: anyone with it can read what is sent to the bot. If it leaks, use
 `/revoke` in @BotFather and update `stack.env`.
 
+## Watched folder
+
+A third way receipts arrive, alongside the iPad upload and the Telegram bot: drop a PDF or
+photo into a folder on the server and `kyokki-worker` reads it like an upload, within a poll
+interval. Point a phone or computer sync app at it - Syncthing, a network share, e-receipts
+saved from mail - and nothing needs to be manually uploaded.
+
+**Off by default** (`RECEIPT_WATCH_DIR` empty). To turn it on:
+
+1. The compose file already mounts a volume at `/app/receipt-watch` on `kyokki-worker`, named
+   `kyokki_watch` by default. To use a real folder on the host instead (so Syncthing or a share
+   can write to it directly), set `RECEIPT_WATCH_HOST_DIR` in `stack.env` to that host path,
+   e.g. `RECEIPT_WATCH_HOST_DIR=/srv/kyokki/receipt-watch` (create it first; it is bind-mounted
+   as-is).
+2. Set `RECEIPT_WATCH_DIR=/app/receipt-watch` in `stack.env` - this is the container-side path
+   from step 1, and the setting that actually turns scanning on; the mount alone does nothing.
+3. Restart the worker: `docker compose --env-file stack.env -f docker-compose.prod.yml up -d
+   kyokki-worker`.
+4. Point Syncthing (a receive-only folder on the server, synced from the phone's camera roll or
+   a "receipts" folder) or your network share client at `RECEIPT_WATCH_HOST_DIR`.
+
+Two more settings, both optional:
+- `RECEIPT_WATCH_POLL_SECONDS` (default 10) - how often the folder is scanned.
+- `RECEIPT_WATCH_SETTLE_SECONDS` (default 5) - a file must sit unchanged in size and mtime for
+  this long before it is taken, so a sync still writing it is never read half-finished.
+
+Behaviour worth knowing:
+- The scan is not recursive, and ignores dotfiles, `.syncthing.*` temp files, and files ending
+  in `.part`, `.tmp` or `~`.
+- A taken file is moved (never deleted) into `processed/` inside the watched folder; the same
+  bytes dropped again go to `duplicates/` (the 409 duplicate check, same as every other
+  channel); the wrong file type or a file over `MAX_RECEIPT_UPLOAD_BYTES` goes to `rejected/`
+  with a `<name>.reason.txt` next to it.
+- Logging is INFO-only and never includes file contents.
+
 ## Generated product icons
 
 **Off until the server can reach ComfyUI.** A food product with no exact Apple emoji (the
