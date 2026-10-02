@@ -413,8 +413,57 @@ class TestPersistence:
         assert pdf_receipt.items_matched == 1
 
     async def test_generic_name_is_stored_and_used_for_matching(
+        self, service, pdf_receipt, sample_category, db_session, _no_model_selection
+    ):
+        """Old contract (H12/H13): a catalog name hit through the generic name alone
+        was a deterministic key (`match_source == "name"`), the same as a printed-name
+        hit. Q37 contract: a hit reached *only* through the generic name is a proposal,
+        not a key - it is offered to one selection call (stubbed here to confirm it),
+        and resolves as `selected`/unverified rather than `name`/verified."""
+        beef = ProductMaster(
+            id=uuid4(),
+            canonical_name="Ground beef",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=3,
+            unit_type="weight",
+            default_unit="g",
+        )
+        db_session.add(beef)
+        await db_session.commit()
+        extraction = _extraction(
+            lines=[
+                ExtractedLine(
+                    name="SNELLMAN NAUDAN JAUHELIHA 10%",
+                    generic_name="Ground beef",
+                    quantity=1,
+                    category="dairy",
+                )
+            ]
+        )
+        _no_model_selection.side_effect = lambda lines: {lines[0].line_id: beef.id}
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=_text_for(extraction)),
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction) as text,
+        ):
+            await service.process_receipt(pdf_receipt)
+
+        # The catalog's names are offered to the model so it reuses them
+        assert text.await_args.args[2] == ["Ground beef"]
+        await db_session.refresh(pdf_receipt)
+        (line,) = pdf_receipt.ocr_structured["lines"]
+        assert line["generic_name"] == "Ground beef"
+        assert line["product_id"] == str(beef.id)
+        assert line["match_source"] == "selected"
+        assert line["resolution"]["verified"] is False
+
+    async def test_a_rejected_generic_name_snap_leaves_the_line_unmatched(
         self, service, pdf_receipt, sample_category, db_session
     ):
+        """Q37: when selection is not told to confirm the generic-name-only hit (the
+        autouse `_no_model_selection` fixture's default: the model answers nothing),
+        the line stays unmatched rather than being handed the catalog's product - the
+        catalog name is still offered as a candidate, for the review screen."""
         beef = ProductMaster(
             id=uuid4(),
             canonical_name="Ground beef",
@@ -438,18 +487,19 @@ class TestPersistence:
         )
         with (
             patch(OCR, new_callable=AsyncMock, return_value=_text_for(extraction)),
-            patch(TEXT, new_callable=AsyncMock, return_value=extraction) as text,
+            patch(TEXT, new_callable=AsyncMock, return_value=extraction),
         ):
             await service.process_receipt(pdf_receipt)
 
-        # The catalog's names are offered to the model so it reuses them
-        assert text.await_args.args[2] == ["Ground beef"]
         await db_session.refresh(pdf_receipt)
         (line,) = pdf_receipt.ocr_structured["lines"]
         assert line["generic_name"] == "Ground beef"
-        assert line["product_id"] == str(beef.id)
-        # `exact` in the old vocabulary; a known catalog name is now `name` (H12/H13)
-        assert line["match_source"] == "name"
+        assert line["product_id"] is None
+        assert line["match_source"] is None
+        assert line["resolution"]["source"] == "none"
+        assert str(beef.id) in {
+            c["product_id"] for c in line["resolution"]["candidates"]
+        }
 
     async def test_alias_match_is_stored_per_line(
         self, service, pdf_receipt, sample_product, db_session
@@ -2812,10 +2862,13 @@ class TestCompletenessIsPersisted:
 
 class TestPrintedPackSizeWins:
     async def test_the_printed_size_beats_the_catalogs(
-        self, service, pdf_receipt, sample_category, db_session
+        self, service, pdf_receipt, sample_category, db_session, _no_model_selection
     ):
         """Q27: "Helmitomaatti pikari 200g" matched Cherry tomato (250 g) and was stored
-        as 250 g."""
+        as 250 g. Q37: the match here is reached only through the generic name, so it
+        now takes one selection call (stubbed here to confirm it) rather than resolving
+        as a deterministic key outright; the printed size still wins over the
+        catalog's own regardless of how the match was reached."""
         tomato = ProductMaster(
             id=uuid4(),
             canonical_name="Cherry tomato",
@@ -2837,6 +2890,7 @@ class TestPrintedPackSizeWins:
                 )
             ]
         )
+        _no_model_selection.side_effect = lambda lines: {lines[0].line_id: tomato.id}
         with (
             patch(OCR, new_callable=AsyncMock, return_value=_text_for(extraction)),
             patch(TEXT, new_callable=AsyncMock, return_value=extraction),

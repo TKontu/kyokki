@@ -10,6 +10,7 @@
 import React, { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { useQueryClient } from '@tanstack/react-query'
 import Button from '@/components/ui/Button'
 import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
 import { fieldInputClass, fieldLabelClass } from '@/components/ui/formStyles'
@@ -20,7 +21,13 @@ import {
   type ReviewRow,
 } from '@/components/receipts/ReceiptItemRow'
 import { useCategories } from '@/hooks/useCategories'
-import { useConfirmReceipt, useReceipt, useReprocessReceipt } from '@/hooks/useReceipts'
+import {
+  receiptKeys,
+  replaceReceiptItem,
+  useConfirmReceipt,
+  useReceipt,
+  useReprocessReceipt,
+} from '@/hooks/useReceipts'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { toISODate } from '@/lib/dates'
@@ -326,6 +333,7 @@ function Frame({
 export default function ReceiptReviewPage({ params }: { params: { id: string } }) {
   const router = useRouter()
   const toast = useToast()
+  const queryClient = useQueryClient()
   const { data: receipt, isLoading, isError } = useReceipt(params.id)
   const { data: categories } = useCategories()
   const confirm = useConfirmReceipt()
@@ -333,6 +341,24 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
   // Edits live here, keyed by line index; a row not touched yet uses the read values.
   const [edits, setEdits] = useState<Record<number, Partial<ReviewRow>>>({})
+
+  // A re-analyse (Q38) answered for this line: it takes over, and its own edits are
+  // dropped so the new generic name, category and product show through. Other rows'
+  // `edits` are untouched - re-analysing one row must not reset the rest.
+  const applyReanalysed = (updated: ExtractedItem) => {
+    setEdits((current) => {
+      if (!(updated.index in current)) return current
+      const next = { ...current }
+      delete next[updated.index]
+      return next
+    })
+    if (receipt) {
+      queryClient.setQueryData(
+        receiptKeys.detail(receipt.id),
+        replaceReceiptItem(receipt, updated)
+      )
+    }
+  }
   // null until the cook taps Show/Hide: the fold starts open when it holds a recovered row.
   const [showHousehold, setShowHousehold] = useState<boolean | null>(null)
   // Whether the cook has ever opened the household fold on this receipt. Folding
@@ -604,6 +630,11 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
                 item={item}
                 row={row}
                 categories={sortedCategories}
+                receiptId={receipt.id}
+                dirty={Boolean(
+                  edits[item.index] && Object.keys(edits[item.index]).length > 0
+                )}
+                onReanalysed={applyReanalysed}
                 onChange={(changes) =>
                   setEdits((current) => ({
                     ...current,

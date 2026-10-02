@@ -32,6 +32,10 @@ HELP_PAGES: dict[str, list[str]] = {
     "shopping-remove": ["shopping", "remove", "-h"],
     "shopping-generate": ["shopping", "generate", "-h"],
     "shopping-export": ["shopping", "export", "-h"],
+    "receipt": ["receipt", "-h"],
+    "receipt-upload": ["receipt", "upload", "-h"],
+    "receipt-status": ["receipt", "status", "-h"],
+    "receipt-confirm": ["receipt", "confirm", "-h"],
 }
 
 

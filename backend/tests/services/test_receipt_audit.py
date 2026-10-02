@@ -247,6 +247,117 @@ class TestBuildReceiptAudit:
         assert audit.file_content_type == "image/png"
 
 
+class TestRemovedOutcome:
+    """A stocked item that is later hard-deleted must not read `skipped`."""
+
+    async def test_a_line_marked_stocked_at_confirm_with_no_live_item_reads_removed(
+        self, db_session: AsyncSession
+    ):
+        receipt = await _receipt(
+            db_session,
+            status="confirmed",
+            ocr_structured={
+                "lines": [
+                    {
+                        "name": "VALIO MAITO 1L",
+                        "price": 1.49,
+                        "stocked_at_confirm": True,
+                    }
+                ]
+            },
+        )
+
+        audit = await receipt_audit.build_receipt_audit(db_session, receipt.id)
+
+        assert audit.lines[0].outcome == "removed"
+        assert audit.lines[0].items == []
+
+    async def test_a_currently_stocked_line_still_reads_stocked(
+        self, db_session: AsyncSession, sample_product: ProductMaster
+    ):
+        receipt = await _receipt(
+            db_session,
+            status="confirmed",
+            ocr_structured={
+                "lines": [
+                    {
+                        "name": "VALIO MAITO 1L",
+                        "price": 1.49,
+                        "stocked_at_confirm": True,
+                    }
+                ]
+            },
+        )
+        item = build_inventory_item(
+            sample_product,
+            quantity=Decimal("1"),
+            purchase_date=PURCHASED,
+            receipt_id=receipt.id,
+        )
+        item.receipt_line_index = 0
+        db_session.add(item)
+        await db_session.commit()
+
+        audit = await receipt_audit.build_receipt_audit(db_session, receipt.id)
+
+        assert audit.lines[0].outcome == "stocked"
+
+    async def test_a_household_line_is_unaffected_by_the_new_outcome(
+        self, db_session: AsyncSession
+    ):
+        """`stocked_at_confirm` is never set for a household line in practice (confirm
+        only marks lines that produced an inventory item), but household must still win
+        if a line were ever marked both: it is checked first."""
+        receipt = await _receipt(
+            db_session,
+            status="confirmed",
+            ocr_structured={
+                "lines": [{"name": "X", "non_food": True, "stocked_at_confirm": True}]
+            },
+        )
+
+        audit = await receipt_audit.build_receipt_audit(db_session, receipt.id)
+
+        assert audit.lines[0].outcome == "household"
+
+
+class TestReanalysedOutcome:
+    """A re-analysed line shows 're-analysed' (and the hint) in the audit view (Q38)."""
+
+    async def test_shows_reanalysed_and_the_hint(self, db_session: AsyncSession):
+        receipt = await _receipt(
+            db_session,
+            status="completed",
+            ocr_structured={
+                "lines": [
+                    {
+                        "name": "PESTO JA CASHEW",
+                        "price": 2.49,
+                        "reanalysed": True,
+                        "reanalyse_hint": "cashew nuts",
+                    }
+                ]
+            },
+        )
+
+        audit = await receipt_audit.build_receipt_audit(db_session, receipt.id)
+
+        assert audit.lines[0].reanalysed is True
+        assert audit.lines[0].reanalyse_hint == "cashew nuts"
+
+    async def test_an_untouched_line_defaults_false_and_none(
+        self, db_session: AsyncSession
+    ):
+        receipt = await _receipt(
+            db_session, status="completed", ocr_structured={"lines": [{"name": "X"}]}
+        )
+
+        audit = await receipt_audit.build_receipt_audit(db_session, receipt.id)
+
+        assert audit.lines[0].reanalysed is False
+        assert audit.lines[0].reanalyse_hint is None
+
+
 class TestResolveReceiptFile:
     """The file endpoint must not become a path-traversal or arbitrary-file read."""
 

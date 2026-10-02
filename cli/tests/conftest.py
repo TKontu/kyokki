@@ -14,6 +14,7 @@ URL = "http://kyokki.test:8000"
 TOKEN = "s3cr3t-t0ken-VALUE-9f8e7d"
 PRODUCT_ID = "0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01"
 ITEM_ID = "5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
+RECEIPT_ID = "7b2e4d6a-1c3f-4a5b-9d8e-0f1a2b3c4d5e"
 
 Handler = Callable[[httpx.Request], httpx.Response]
 
