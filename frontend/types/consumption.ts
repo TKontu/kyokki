@@ -41,13 +41,19 @@ export interface ConsumptionLogParams {
   offset?: number
 }
 
-/** One change the header's Undo would reverse. */
+/**
+ * One change the header's Undo would reverse. Mirrors `schemas/inventory_item.py`'s
+ * `UndoStepResponse`.
+ */
 export interface UndoStep {
   inventory_item_id: string
   product_name: string
   unit: string
   action: Vocabulary<ConsumptionAction>
   quantity_consumed: number
+  // Which way a `correct` moved the quantity; null for any other action, and for a
+  // `correct` logged before the backend could tell (operator, 2026-10-02).
+  direction: 'up' | 'down' | null
 }
 
 /** The most recent action on stock, as one step for Undo: one item, or a whole cleared shelf. */

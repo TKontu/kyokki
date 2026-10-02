@@ -72,6 +72,7 @@ it('reads "Undo Put back · Potato" after a grey tile is tapped back', async () 
             unit: 'pcs',
             action: 'correct',
             quantity_consumed: body.current_quantity,
+            direction: 'up',
           },
         ],
       }

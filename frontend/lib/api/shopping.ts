@@ -81,9 +81,15 @@ export async function purchase(
   })
 }
 
-/** Remove one item from the list. */
-export async function remove(id: string): Promise<void> {
-  return apiClient.delete<void>(`/shopping/${id}`)
+/**
+ * Remove one item from the list. `idempotencyKey` replays the first answer on a retry for the
+ * same item within 24 h, instead of removing it (or whatever comes after it) twice - same
+ * pattern as `purchase`.
+ */
+export async function remove(id: string, idempotencyKey: string): Promise<void> {
+  return apiClient.request<void>('DELETE', `/shopping/${id}`, {
+    headers: { 'Idempotency-Key': idempotencyKey },
+  })
 }
 
 /** Clear every bought item. */

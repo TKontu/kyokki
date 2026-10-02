@@ -5,7 +5,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import shoppingAPI from '@/lib/api/shopping'
+import shoppingAPI, { newIdempotencyKey } from '@/lib/api/shopping'
 import type {
   ShoppingGenerateRequest,
   ShoppingListItemCreate,
@@ -109,13 +109,25 @@ export function usePurchaseShoppingItem() {
   })
 }
 
-/** Mutation: remove one item. */
+/**
+ * Mutation: remove one item. `idempotencyKey` is the caller's to mint and manage (F1), same as
+ * `purchase`: minted once per user action and reused on a retry of that same action, so a lost
+ * response plus a retry cannot remove (or 404 on) the wrong item.
+ *
+ * A bare id is still accepted - today's only caller has no retry path for a remove, so there is
+ * nothing to reuse a key across; a fresh one is minted for it here. A caller that does retry
+ * should pass `{ id, idempotencyKey }` instead, exactly like `usePurchaseShoppingItem`.
+ */
 export function useRemoveShoppingItem() {
   const queryClient = useQueryClient()
 
   return useMutation({
     meta: { label: 'Remove' },
-    mutationFn: (id: string) => shoppingAPI.remove(id),
+    mutationFn: (vars: string | { id: string; idempotencyKey: string }) => {
+      const { id, idempotencyKey } =
+        typeof vars === 'string' ? { id: vars, idempotencyKey: newIdempotencyKey() } : vars
+      return shoppingAPI.remove(id, idempotencyKey)
+    },
     retry: false,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: shoppingKeys.all })

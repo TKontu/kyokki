@@ -183,6 +183,53 @@ describe('APIClient', () => {
       })
     })
 
+    it('reads code from detail.code for a coded AgentError response', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        json: async () => ({
+          detail: { code: 'not_found', message: 'Item not found' },
+        }),
+      })
+
+      await expect(client.get('/test')).rejects.toMatchObject({
+        status: 404,
+        code: 'not_found',
+        message: 'Item not found',
+      })
+    })
+
+    it('reads code from detail.code for a conflict too, not just not_found', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        statusText: 'Conflict',
+        json: async () => ({
+          detail: { code: 'conflict', message: 'Already purchased' },
+        }),
+      })
+
+      await expect(client.post('/test', {})).rejects.toMatchObject({
+        status: 409,
+        code: 'conflict',
+      })
+    })
+
+    it('falls back to UNKNOWN_ERROR for a plain-string detail, as before', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 400,
+        statusText: 'Bad Request',
+        json: async () => ({ detail: 'Cannot consume 500 - only 100 available' }),
+      })
+
+      await expect(client.post('/test', {})).rejects.toMatchObject({
+        status: 400,
+        code: 'UNKNOWN_ERROR',
+      })
+    })
+
     it('uses a FastAPI string detail as the error message', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: false,

@@ -165,19 +165,71 @@ describe('usePurchaseShoppingItem', () => {
 })
 
 describe('useRemoveShoppingItem', () => {
-  it('removes the item and invalidates the list', async () => {
+  it('removes the item with the caller-supplied key, and invalidates the list', async () => {
+    let header: string | null = null
     server.use(
-      http.delete(`${API_URL}/shopping/i-1`, () => new HttpResponse(null, { status: 204 }))
+      http.delete(`${API_URL}/shopping/i-1`, ({ request }) => {
+        header = request.headers.get('Idempotency-Key')
+        return new HttpResponse(null, { status: 204 })
+      })
     )
     const { Wrapper, queryClient } = wrapper()
     const keys = invalidatedKeys(queryClient)
 
     const { result } = renderHook(() => useRemoveShoppingItem(), { wrapper: Wrapper })
     await act(async () => {
+      await result.current.mutateAsync({ id: 'i-1', idempotencyKey: 'remove-key' })
+    })
+
+    expect(header).toBe('remove-key')
+    expect(keys()).toEqual([shoppingKeys.all])
+  })
+
+  it('reuses the same key across a retry of the same action', async () => {
+    const headers: Array<string | null> = []
+    let attempt = 0
+    server.use(
+      http.delete(`${API_URL}/shopping/i-1`, ({ request }) => {
+        headers.push(request.headers.get('Idempotency-Key'))
+        attempt += 1
+        if (attempt === 1) return HttpResponse.json({ detail: 'Nope' }, { status: 503 })
+        return new HttpResponse(null, { status: 204 })
+      })
+    )
+    const { Wrapper } = wrapper()
+    const { result } = renderHook(() => useRemoveShoppingItem(), { wrapper: Wrapper })
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: 'i-1', idempotencyKey: 'retry-key' }).catch(() => {})
+    })
+    await act(async () => {
+      await result.current.mutateAsync({ id: 'i-1', idempotencyKey: 'retry-key' })
+    })
+
+    expect(headers).toEqual(['retry-key', 'retry-key'])
+  })
+
+  it('still accepts a bare id (today\'s only caller has no retry of its own), minting a fresh key each time', async () => {
+    const headers: Array<string | null> = []
+    server.use(
+      http.delete(`${API_URL}/shopping/i-1`, ({ request }) => {
+        headers.push(request.headers.get('Idempotency-Key'))
+        return new HttpResponse(null, { status: 204 })
+      })
+    )
+    const { Wrapper } = wrapper()
+    const { result } = renderHook(() => useRemoveShoppingItem(), { wrapper: Wrapper })
+
+    await act(async () => {
+      await result.current.mutateAsync('i-1')
+    })
+    await act(async () => {
       await result.current.mutateAsync('i-1')
     })
 
-    expect(keys()).toEqual([shoppingKeys.all])
+    expect(headers).toHaveLength(2)
+    expect(headers[0]).toEqual(expect.any(String))
+    expect(headers[0]).not.toBe(headers[1])
   })
 })
 

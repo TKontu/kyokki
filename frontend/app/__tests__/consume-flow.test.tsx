@@ -146,6 +146,7 @@ describe('One tap on the tile', () => {
               unit: 'dl',
               action: 'use_full',
               quantity_consumed: 1000,
+              direction: null,
             },
           ],
         }

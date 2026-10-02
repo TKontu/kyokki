@@ -37,6 +37,30 @@ function errorMessage(
   return response.statusText || `Request failed (${response.status})`
 }
 
+/**
+ * The error code for a failed response. `AgentError` (backend/app/api/errors.py) answers
+ * `{"detail": {"code": "...", "message": "...", ...}}`; a coded error there wins over any
+ * top-level `code`. A plain FastAPI `HTTPException` (`{"detail": "text"}`) or a validation
+ * error (`{"detail": [...]}`) has no coded detail, so this falls back to a top-level `code`
+ * (today's behaviour) and then `UNKNOWN_ERROR`.
+ */
+function errorCode(errorData: { code?: unknown; detail?: unknown }): string {
+  if (
+    errorData.detail &&
+    typeof errorData.detail === 'object' &&
+    !Array.isArray(errorData.detail)
+  ) {
+    const { code } = errorData.detail as { code?: unknown }
+    if (typeof code === 'string' && code) {
+      return code
+    }
+  }
+  if (typeof errorData.code === 'string' && errorData.code) {
+    return errorData.code
+  }
+  return 'UNKNOWN_ERROR'
+}
+
 /** Everything the caller may need beyond the message; FastAPI puts it in `detail`. */
 function errorDetails(errorData: {
   details?: unknown
@@ -100,7 +124,7 @@ export class APIClient {
         const errorData = await response.json().catch(() => ({}))
         const error = new APIError(
           response.status,
-          errorData.code || 'UNKNOWN_ERROR',
+          errorCode(errorData),
           errorMessage(errorData, response),
           errorDetails(errorData)
         )
@@ -188,7 +212,7 @@ export class APIClient {
         const errorData = await response.json().catch(() => ({}))
         const error = new APIError(
           response.status,
-          errorData.code || 'UNKNOWN_ERROR',
+          errorCode(errorData),
           errorMessage(errorData, response),
           errorDetails(errorData)
         )
