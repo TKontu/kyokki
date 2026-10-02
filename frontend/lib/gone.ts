@@ -5,7 +5,14 @@
  * for good - metrics will be built on it - so the screen, not the data, is what has a window.
  */
 
-import type { ActionSummary, ConsumptionAction, ConsumptionLogEntry } from '@/types/consumption'
+import type {
+  ActionSummary,
+  CategoryWaste,
+  ConsumptionAction,
+  ConsumptionLogEntry,
+  WasteStats,
+  WasteWeek,
+} from '@/types/consumption'
 
 /**
  * Gone means gone: thrown away, or finished. A part-used pack is still in the kitchen, and a
@@ -74,4 +81,31 @@ export function groupByDay(
 export function summaryLine(summary: ActionSummary | undefined): string {
   if (!summary || summary.events === 0) return 'none'
   return `${summary.events} ${summary.events === 1 ? 'item' : 'items'}`
+}
+
+/**
+ * "You threw away 3 of 10 things (30 %)" - the Gone screen's headline (planner ruling,
+ * 2026-10-02). `null` means too little happened in the window to say anything honest; the
+ * screen shows a plain empty state rather than a 0 % or a NaN.
+ */
+export function wasteRateLine(stats: WasteStats | undefined): string | null {
+  if (!stats || stats.total === 0 || stats.rate === null) return null
+  const percent = Math.round(stats.rate * 100)
+  return `You threw away ${stats.discarded} of ${stats.total} things (${percent} %)`
+}
+
+/**
+ * The categories that waste the most. The service already sorts worst-first and leaves out
+ * anything with too few events to mean something; the screen just takes the top few.
+ */
+export function topWastingCategories(categories: CategoryWaste[], count = 3): CategoryWaste[] {
+  return categories.slice(0, count)
+}
+
+/** A short label for one week's bar on the trend: "12 Jan". */
+export function weekLabel(week: WasteWeek): string {
+  return new Date(`${week.week_start}T00:00:00`).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+  })
 }

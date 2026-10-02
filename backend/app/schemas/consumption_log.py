@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from uuid import UUID
 
@@ -62,3 +62,60 @@ class ConsumptionLogResponse(BaseModel):
     logged_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CategoryWaste(BaseModel):
+    """How one category's events split between thrown away and finished.
+
+    Only categories with enough events to mean something reach this far (the service applies
+    the threshold); the schema just carries what comes out.
+    """
+
+    category: str = Field(..., description="The category's id")
+    display_name: str = Field(..., description="The category's display name")
+    discarded: int = Field(..., description="Discard events, restores excluded")
+    finished: int = Field(..., description="use_full events")
+    total: int = Field(..., description="discarded + finished")
+    rate: float = Field(..., ge=0, le=1, description="discarded / total")
+
+
+class WasteStats(BaseModel):
+    """The Gone screen's headline: "You threw away X of Y things (Z %)", and where it is worst.
+
+    Counted by events (items), not by amount - grams and pieces do not add up (`ActionSummary`).
+    A discard a later restore undid is not waste (planner ruling, 2026-10-02); corrections,
+    part-uses and restores never enter this count, exactly as the Gone list leaves them out.
+    """
+
+    discarded: int = Field(
+        ..., description="Discard events in the window, restores excluded"
+    )
+    finished: int = Field(..., description="use_full events in the window")
+    total: int = Field(..., description="discarded + finished")
+    rate: float | None = Field(
+        None,
+        ge=0,
+        le=1,
+        description="discarded / total, or None with nothing in the window",
+    )
+    categories: list[CategoryWaste] = Field(
+        ..., description="Categories with at least 3 events, worst waste rate first"
+    )
+
+
+class WasteWeek(BaseModel):
+    """One ISO week of the trend, binned in Europe/Helsinki (the app's timezone)."""
+
+    week_start: date = Field(..., description="The week's Monday, in Europe/Helsinki")
+    discarded: int = Field(
+        ..., description="Discard events that week, restores excluded"
+    )
+    finished: int = Field(..., description="use_full events that week")
+    total: int = Field(..., description="discarded + finished")
+    rate: float | None = Field(None, ge=0, le=1, description="discarded / total")
+
+
+class WasteTrend(BaseModel):
+    """The last 8 ISO weeks, oldest first. The window filter (`since`) never applies here."""
+
+    weeks: list[WasteWeek]
