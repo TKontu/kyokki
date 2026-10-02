@@ -19,7 +19,7 @@ from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
 from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
-from app.services import shelf_life_on_create
+from app.services import min_stock, shelf_life_on_create
 from app.services import stock as stock_service
 from app.services.catalog_estimates import Estimate, EstimateRequest
 
@@ -681,7 +681,7 @@ class TestStockConsumeBelowMinimumStock:
         await _item(seeded_db, milk, "10")
 
         with patch(
-            "app.api.endpoints.stock.broadcast_shopping_list_update",
+            "app.services.min_stock.broadcast_shopping_list_update",
             new_callable=AsyncMock,
         ) as shopping_broadcast:
             response = await client.post(
@@ -741,6 +741,26 @@ class TestStockConsumeBelowMinimumStock:
         assert response.status_code == 200, response.text
         assert await _shopping_rows(seeded_db) == []
 
+    async def test_a_failed_auto_add_still_leaves_the_consume_applied(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        """F2: a failure deciding whether to auto-add must never fail an otherwise
+        successful consume - the stock change has already committed."""
+        milk = await _product(seeded_db, "Milk", min_stock="10")
+        await _item(seeded_db, milk, "10")
+
+        with patch(
+            "app.services.min_stock.maybe_auto_add",
+            side_effect=RuntimeError("boom"),
+        ):
+            response = await client.post(
+                URL, json={"product": "milk", "amount": 6, "unit": "dl"}
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["remaining_total"] == 4.0
+        assert await _shopping_rows(seeded_db) == []
+
 
 class TestStockConsumeBelowMinimumStockRace:
     async def test_two_concurrent_consumes_add_exactly_one_item(
@@ -753,7 +773,7 @@ class TestStockConsumeBelowMinimumStockRace:
         await _item(own_sessions, milk, "10", location="main_fridge")
         await _item(own_sessions, milk, "10", location="pantry")
 
-        real_on_hand = stock_service.min_stock._on_hand
+        real_on_hand = min_stock._on_hand
 
         async def slow_on_hand(db, product):
             result = await real_on_hand(db, product)

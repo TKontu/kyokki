@@ -1,5 +1,6 @@
 """Tests for Scanner API endpoints."""
 
+import json
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -15,6 +16,7 @@ from app.main import app
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
+from app.models.shopping_list_item import ShoppingListItem
 from app.services.off_service import OffApiError, OffProductNotFoundError
 
 
@@ -381,6 +383,137 @@ class TestScanBarcodeConsume:
             )
 
         assert response.status_code == 404
+
+
+class TestScanConsumeBelowMinimumStock:
+    """A1/F1: the scanner's consume mode lowers active stock exactly as every other
+    consume path does (`services.min_stock.after_stock_decrease`), so a scan that takes
+    a product below its minimum adds an open shopping item for it too."""
+
+    async def test_scan_consume_below_minimum_adds_one_open_item(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        mock_redis: AsyncMock,
+    ) -> None:
+        from datetime import date, timedelta
+
+        product = ProductMaster(
+            id=uuid4(),
+            canonical_name="Scanner Milk",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=7,
+            unit_type="volume",
+            default_unit="dl",
+            off_product_id="5555500000000",
+            min_stock_quantity=Decimal("10"),
+        )
+        seeded_db.add(product)
+        await seeded_db.commit()
+
+        inv = InventoryItem(
+            id=uuid4(),
+            product_master_id=product.id,
+            initial_quantity=Decimal("10"),
+            current_quantity=Decimal("10"),
+            unit="dl",
+            status="sealed",
+            expiry_date=date.today() + timedelta(days=7),
+        )
+        seeded_db.add(inv)
+        await seeded_db.commit()
+
+        with (
+            patch(
+                "app.services.scanner_service.get_redis_client",
+                return_value=mock_redis,
+            ),
+            patch(
+                "app.services.broadcast_helpers.get_redis_client",
+                return_value=mock_redis,
+            ),
+        ):
+            response = await client.post(
+                "/api/scanner/scan",
+                json={"barcode": "5555500000000", "mode": "consume", "quantity": "6"},
+            )
+
+        assert response.status_code == 200, response.text
+
+        rows = (await seeded_db.execute(select(ShoppingListItem))).scalars().all()
+        assert len(rows) == 1
+        assert (rows[0].product_master_id, rows[0].source) == (
+            product.id,
+            "auto_restock",
+        )
+
+        published_types = [
+            json.loads(call.args[1])["type"]
+            for call in mock_redis.publish.await_args_list
+        ]
+        assert "shopping_list_update" in published_types
+
+    async def test_scan_consume_failed_auto_add_still_returns_200(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        mock_redis: AsyncMock,
+    ) -> None:
+        """F2: a failure deciding whether to auto-add must never fail an otherwise
+        successful scan - the stock change has already committed."""
+        from datetime import date, timedelta
+
+        product = ProductMaster(
+            id=uuid4(),
+            canonical_name="Scanner Oats",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=7,
+            unit_type="volume",
+            default_unit="dl",
+            off_product_id="5555500000001",
+            min_stock_quantity=Decimal("10"),
+        )
+        seeded_db.add(product)
+        await seeded_db.commit()
+
+        inv = InventoryItem(
+            id=uuid4(),
+            product_master_id=product.id,
+            initial_quantity=Decimal("10"),
+            current_quantity=Decimal("10"),
+            unit="dl",
+            status="sealed",
+            expiry_date=date.today() + timedelta(days=7),
+        )
+        seeded_db.add(inv)
+        await seeded_db.commit()
+
+        with (
+            patch(
+                "app.services.scanner_service.get_redis_client",
+                return_value=mock_redis,
+            ),
+            patch(
+                "app.services.broadcast_helpers.get_redis_client",
+                return_value=mock_redis,
+            ),
+            patch(
+                "app.services.min_stock.maybe_auto_add",
+                side_effect=RuntimeError("boom"),
+            ),
+        ):
+            response = await client.post(
+                "/api/scanner/scan",
+                json={"barcode": "5555500000001", "mode": "consume", "quantity": "6"},
+            )
+
+        assert response.status_code == 200, response.text
+        found = await seeded_db.get(InventoryItem, inv.id)
+        assert found is not None
+        assert found.current_quantity == Decimal("4")
+        assert (await seeded_db.execute(select(ShoppingListItem))).scalars().all() == []
 
 
 class TestScanBarcodeLookup:

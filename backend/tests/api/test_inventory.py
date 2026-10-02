@@ -15,6 +15,7 @@ from app.main import app
 from app.models.consumption_log import ConsumptionLog
 from app.models.product_master import ProductMaster
 from app.models.shopping_list_item import ShoppingListItem
+from app.services import min_stock
 
 
 @pytest.fixture
@@ -1641,7 +1642,7 @@ class TestConsumeBelowMinimumStock:
         )
 
         with patch(
-            "app.api.endpoints.inventory.broadcast_shopping_list_update",
+            "app.services.min_stock.broadcast_shopping_list_update",
             new_callable=AsyncMock,
         ) as shopping_broadcast:
             response = await client.post(
@@ -1720,6 +1721,153 @@ class TestConsumeBelowMinimumStock:
 
         assert response.status_code == 200, response.text
         assert await _shopping_items(seeded_db) == []
+
+    async def test_a_free_text_item_with_the_same_name_suppresses_it(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """F3: a free-text item nobody linked to the product still speaks for it, if the
+        name matches once normalised (stripped, casefolded)."""
+        product = await _product_with_min_stock(client, min_stock=10, name="Oat Milk")
+        item = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+        manual = await client.post(
+            "/api/shopping/",
+            json={"name": "  OAT milk  ", "quantity": 1, "unit": "dl"},
+        )
+        assert manual.status_code == 201, manual.text
+
+        response = await client.post(
+            f"/api/inventory/{item['id']}/consume", json={"quantity": 6}
+        )
+
+        assert response.status_code == 200, response.text
+        rows = await _shopping_items(seeded_db)
+        assert len(rows) == 1
+        assert rows[0].source == "manual"
+
+    async def test_a_failed_auto_add_still_leaves_the_consume_applied(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """F2: the stock change has already committed by the time the auto-add check
+        runs, so a failure there must never turn an otherwise-successful consume into a
+        500 - and the quantity it already applied must stay applied."""
+        product = await _product_with_min_stock(client, min_stock=10)
+        item = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        with patch(
+            "app.services.min_stock.maybe_auto_add",
+            side_effect=RuntimeError("boom"),
+        ):
+            response = await client.post(
+                f"/api/inventory/{item['id']}/consume", json={"quantity": 6}
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["current_quantity"] == 4
+        assert await _shopping_items(seeded_db) == []
+
+
+class TestDiscardAndCorrectionBelowMinimumStock:
+    """F1 (ruling): the auto-add check runs after any change that lowers a product's
+    active stock, not only a consume - discarding (`PATCH .../{id}`, `POST .../discard`)
+    or correcting the quantity down counts too. A restore never lowers stock."""
+
+    async def test_patch_discard_below_the_minimum_adds_one_open_item(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=5)
+        item = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        response = await client.patch(
+            f"/api/inventory/{item['id']}", json={"status": "discarded"}
+        )
+
+        assert response.status_code == 200, response.text
+        rows = await _shopping_items(seeded_db)
+        assert len(rows) == 1
+        assert rows[0].source == "auto_restock"
+
+    async def test_patch_lower_correction_below_the_minimum_adds_one_open_item(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=5)
+        item = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        response = await client.patch(
+            f"/api/inventory/{item['id']}", json={"current_quantity": 2}
+        )
+
+        assert response.status_code == 200, response.text
+        assert len(await _shopping_items(seeded_db)) == 1
+
+    async def test_patch_correction_that_raises_quantity_adds_nothing(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """Only a *lower* correction counts - raising it (even while still below the
+        minimum) is not itself a reason to check again."""
+        product = await _product_with_min_stock(client, min_stock=5)
+        item = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=2
+        )
+
+        response = await client.patch(
+            f"/api/inventory/{item['id']}", json={"current_quantity": 8}
+        )
+
+        assert response.status_code == 200, response.text
+        assert await _shopping_items(seeded_db) == []
+
+    async def test_bulk_discard_below_the_minimum_adds_one_open_item(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=5)
+        first = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+        second = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+
+        with patch(
+            "app.services.min_stock.maybe_auto_add",
+            wraps=min_stock.maybe_auto_add,
+        ) as spy:
+            response = await client.post(
+                "/api/inventory/discard",
+                json={"ids": [first["id"], second["id"]]},
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json() == {"changed": 2, "refused": 0, "missing": 0}
+        rows = await _shopping_items(seeded_db)
+        assert len(rows) == 1
+        # Once per distinct product, not once per item discarded.
+        assert spy.call_count == 1
+
+    async def test_bulk_restore_never_lowers_stock(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=5)
+        item = await _create_item(
+            client, product["id"], initial_quantity=10, current_quantity=10
+        )
+        await client.post("/api/inventory/discard", json={"ids": [item["id"]]})
+        assert len(await _shopping_items(seeded_db)) == 1  # the discard's own add
+
+        response = await client.post(
+            "/api/inventory/restore", json={"ids": [item["id"]]}
+        )
+
+        assert response.status_code == 200, response.text
+        # Still just the one item the discard added; restoring added no second one.
+        assert len(await _shopping_items(seeded_db)) == 1
 
 
 class TestCreateRefusesIncoherentRows:

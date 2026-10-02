@@ -6,7 +6,6 @@ the mutations take an optional ``Idempotency-Key`` and replay their first respon
 
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, status
 from fastapi.responses import JSONResponse
@@ -25,36 +24,15 @@ from app.schemas.stock import (
     StockConsumeResponse,
     StockRow,
 )
-from app.services import idempotency
+from app.services import idempotency, min_stock
 from app.services import stock as stock_service
-from app.services.broadcast_helpers import (
-    broadcast_inventory_update,
-    broadcast_shopping_list_update,
-)
+from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest, UnknownProduct
 from app.services.idempotency import IdempotencyClaim, IdempotencyConflict
 from app.services.product_lookup import AmbiguousProduct, ProductNotFound
 from app.services.shelf_life_on_create import schedule_estimates
 
 router = APIRouter()
-
-
-async def _broadcast_if_now_low(db: AsyncSession, product_id: UUID) -> None:
-    """Auto-add to the shopping list once this consume's own commit has landed, and tell
-    every open iPad when it did (`services.min_stock`, below the minimum stock)."""
-    # Any: the models declare untyped `Column`s, which mypy reads as Column[...], not values.
-    added: Any = await stock_service.auto_add_after_consume(db, product_id)
-    if added is None:
-        return
-    await broadcast_shopping_list_update(
-        shopping_list_item_id=added.id,
-        action="created",
-        name=added.name,
-        quantity=added.quantity,
-        unit=added.unit,
-        priority=added.priority,
-        is_purchased=False,
-    )
 
 
 ADD_ROUTE = "POST /api/stock/add"
@@ -271,5 +249,5 @@ async def consume_stock(
                 status=used.status,
                 product_name=result.product_name,
             )
-        await _broadcast_if_now_low(db, result.product_id)
+        await min_stock.after_stock_decrease(db, result.product_id)
     return result

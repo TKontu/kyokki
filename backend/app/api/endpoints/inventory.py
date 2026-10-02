@@ -32,7 +32,6 @@ from app.services import min_stock, receipt_audit
 from app.services import undo as undo_service
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
-    broadcast_shopping_list_update,
 )
 from app.services.generic_products import InvalidProductRequest
 from app.services.item_status import ItemEvent, ItemFrozen
@@ -263,24 +262,6 @@ async def update_inventory_item(
     return item
 
 
-async def _broadcast_if_now_low(db: AsyncSession, product: Any) -> None:
-    """Auto-add to the shopping list once this consume's own commit has landed, and tell
-    every open iPad when it did (`services.min_stock`, below the minimum stock)."""
-    # Any: the models declare untyped `Column`s, which mypy reads as Column[...], not values.
-    added: Any = await min_stock.maybe_auto_add(db, product)
-    if added is None:
-        return
-    await broadcast_shopping_list_update(
-        shopping_list_item_id=added.id,
-        action="created",
-        name=added.name,
-        quantity=added.quantity,
-        unit=added.unit,
-        priority=added.priority,
-        is_purchased=False,
-    )
-
-
 async def _announce_moved(
     items: list[MovedInventoryItem], product_name: str | None
 ) -> None:
@@ -411,7 +392,10 @@ async def consume_inventory_item(
             status=item.status,
             product_name=item.product_name,
         )
-        await _broadcast_if_now_low(db, item.product_master)
+        # Any: the models declare untyped `Column`s, which mypy reads as Column[...], not
+        # values.
+        product_id: Any = item.product_master_id
+        await min_stock.after_stock_decrease(db, product_id)
 
         return item
     except ItemFrozen as exc:

@@ -362,11 +362,12 @@ class TestConsume:
         milk = await _product(db, "Milk", min_stock_quantity=Decimal("10"))
         await _item(db, milk, "10")
 
-        # `ha_consume` broadcasts this through `_broadcast_if_now_low`, which it shares
-        # with the agent's own `/api/stock/consume` (it is defined, and imported, there) -
-        # so the mock that catches it is `stock`'s, not `ha`'s own `broadcast` fixture.
+        # `ha_consume` reaches this through `services.min_stock.after_stock_decrease`,
+        # which broadcasts itself (shared by every stock-decreasing path, not just this
+        # one) - so the mock that catches it is `min_stock`'s, not `ha`'s own `broadcast`
+        # fixture (which only patches `ha.py`'s own, locally-triggered broadcasts).
         with patch(
-            "app.api.endpoints.stock.broadcast_shopping_list_update",
+            "app.services.min_stock.broadcast_shopping_list_update",
             new_callable=AsyncMock,
         ) as shopping_broadcast:
             response = await client.post(
@@ -409,6 +410,26 @@ class TestConsume:
         )
 
         assert response.status_code == 200, response.text
+        assert await _shopping_rows(db) == []
+
+    async def test_a_failed_auto_add_still_leaves_the_consume_applied(
+        self, client: AsyncClient, db: AsyncSession, broadcast
+    ) -> None:
+        """F2: a failure deciding whether to auto-add must never fail an otherwise
+        successful consume - the stock change has already committed."""
+        milk = await _product(db, "Milk", min_stock_quantity=Decimal("10"))
+        await _item(db, milk, "10")
+
+        with patch(
+            "app.services.min_stock.maybe_auto_add",
+            side_effect=RuntimeError("boom"),
+        ):
+            response = await client.post(
+                "/api/ha/consume", json={"name": "milk", "amount": 6, "unit": "dl"}
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["item"]["quantity_after"] == 4.0
         assert await _shopping_rows(db) == []
 
 

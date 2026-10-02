@@ -31,7 +31,6 @@ from app.crud.product_master import MovedInventoryItem
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
-from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
 from app.schemas.inventory_item import InventoryItemResponse, QuickAddRequest
 from app.schemas.stock import (
@@ -44,7 +43,7 @@ from app.schemas.stock import (
     StockConsumeResponse,
     StockRow,
 )
-from app.services import idempotency, min_stock
+from app.services import idempotency
 from app.services.generic_products import (
     ProductResolver,
     build_inventory_item,
@@ -478,17 +477,3 @@ async def _consume(
         unit=unit,
         dry_run=request.dry_run,
     )
-
-
-async def auto_add_after_consume(
-    db: AsyncSession, product_id: UUID
-) -> ShoppingListItem | None:
-    """`services.min_stock.maybe_auto_add` for a caller that only has the id - the agent's
-    and Home Assistant's `/consume` routes, once `consume`'s own commit has landed.
-
-    None, writing nothing, when the id no longer names a product (nothing to check).
-    """
-    product = await db.get(ProductMaster, product_id)
-    if product is None:
-        return None
-    return await min_stock.maybe_auto_add(db, product)
