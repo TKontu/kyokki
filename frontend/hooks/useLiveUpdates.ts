@@ -37,6 +37,7 @@ import { inventoryKeys } from '@/hooks/useInventory'
 import { receiptKeys } from '@/hooks/useReceipts'
 import { productKeys } from '@/hooks/useProducts'
 import { consumptionLogKeys } from '@/hooks/useConsumptionLog'
+import { shoppingKeys } from '@/hooks/useShopping'
 import {
   EVENTS_PATH,
   INITIAL_BACKOFF_MS,
@@ -57,12 +58,13 @@ const STALE_CHECK_INTERVAL_MS = 5_000
 /** Connection attempts in a row with no successful open before `'failing'` (F8). */
 const FAILURE_THRESHOLD = 5
 
-/** The smallest set of query keys a message type implies. Shopping has no frontend hook
- *  yet (it owns no query keys to invalidate), so `shopping_list_update` maps to none. */
+/** The smallest set of query keys a message type implies. */
 function keysForMessage(message: LiveMessage): QueryKey[] {
   switch (message.type) {
     case 'inventory_update':
       return [inventoryKeys.lists(), consumptionLogKeys.all]
+    case 'shopping_list_update':
+      return [shoppingKeys.all]
     case 'receipt_status': {
       const keys: QueryKey[] = [receiptKeys.all]
       // Only a confirm actually moves stock or can create a product; every other status

@@ -11,6 +11,7 @@ import { inventoryKeys } from '../useInventory'
 import { receiptKeys } from '../useReceipts'
 import { productKeys } from '../useProducts'
 import { consumptionLogKeys } from '../useConsumptionLog'
+import { shoppingKeys } from '../useShopping'
 import { getLiveStatus, resetLiveStatusForTests, EVENTS_PATH } from '@/lib/live'
 
 /** F5: models everything the hook relies on, including "open, then silent" - which
@@ -180,6 +181,27 @@ describe('useLiveUpdates', () => {
       ([arg]) => JSON.stringify(arg?.queryKey) === JSON.stringify(inventoryKeys.lists())
     )
     expect(inventoryCalls).toHaveLength(1)
+  })
+
+  it('invalidates shoppingKeys.all once per burst for shopping_list_update, and leaves inventory alone', () => {
+    const queryClient = newClient()
+    const invalidate = jest.spyOn(queryClient, 'invalidateQueries')
+    renderHook(() => useLiveUpdates(queryClient))
+
+    act(() => {
+      const source = latestSource()
+      for (let i = 0; i < 15; i += 1) {
+        source.emitMessage(message('shopping_list_update', { action: 'purchased' }))
+      }
+      jest.advanceTimersByTime(300)
+    })
+
+    const shoppingCalls = invalidate.mock.calls.filter(
+      ([arg]) => JSON.stringify(arg?.queryKey) === JSON.stringify(shoppingKeys.all)
+    )
+    expect(shoppingCalls).toHaveLength(1)
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: inventoryKeys.lists() })
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: consumptionLogKeys.all })
   })
 
   it('invalidates everything once on a resync event', () => {
