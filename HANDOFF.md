@@ -1,40 +1,49 @@
 # Handoff
-Generated-UTC: 2026-10-02T04:20:00Z
-Base-SHA: 20fb183a7010f9dd510bba0b4be7d17f4cab1609
+Generated-UTC: 2026-10-02T17:22:38Z
+Base-SHA: f4874abfc3f5ce3d996933a4452e2eca733dfc37
 
 ## Round delta
-- **Round 2026-10-01-1:** #139 (AG4 skill + CLI receipts), #140 (live updates over SSE), #141 (Q38 re-analyse + Q39 printed line) and #143 (Q37 snapping) are merged by the operator (2026-10-02), **not deployed**. #142 (Q18-G2 generated icons) is open, in its fix pass.
-- **Round 2026-10-02-1** is dispatched from `1520506` while the above were open. Its lanes:
-  - A1: shopping screen;
-  - A2: waste rate and trend;
-  - A3: agent discard-expired and the Q24 ordering;
-  - A4: undo correction direction;
-  - A5: store chain OCR tolerance. A5 is #144, under review.
-- Outcomes and follow-ups are in `docs/TODO.md`, in the round block after the Q37-Q39 friction log. The round logs are `.rounds/2026-10-01-1/round.md` and `.rounds/2026-10-02-1/round.md`.
+- **Merged on 2026-10-02 (not deployed):**
+  - round 2026-10-02-1, complete: #144 store chain, #147 agent discard-expired, #148 shopping screen,
+    #149 undo direction, #150 waste trend;
+  - round 2026-10-02-2, partial: #151 H27 parser, #154 Home Assistant REST.
+- **Open and ready:**
+  - #153 Q37b;
+  - #152 shopping live updates and #155 CLI discard with coded shopping errors. Both were retargeted
+    from their stacked parents to `main`, and `main` was merged in so CI runs.
+- **#142 Q18-G2:** the live ComfyUI check is running through the operator's tunnel.
+- Outcomes are in `docs/TODO.md` after the round 2026-10-01-1 block. The logs are `.rounds/2026-10-02-1`
+  and `.rounds/2026-10-02-2`.
 
 ## Active PRs and conflicts
-- #142: must merge `main` (now 20fb183); it owns the only new Alembic head (on `fbf2c08da52d`).
-- Round 2 lanes cut from `1520506` and must merge `main` before merge.
-  - A4 edits `schemas/inventory_item.py` and `frontend/types/inventory.ts`, in the undo-step region only. #142 edits the icon fields in the same files. The hunks are disjoint.
+- None of #142, #152, #153 or #155 share files.
+- #142 owns the only new Alembic head (c715f1ea4510, on fbf2c08da52d).
 
 ## Non-obvious decisions or blockers
-- **Q37 (#143) is partial by design.** `c2.muse-glimmer` still keeps some snaps, but they now arrive unverified.
-  - **Q37b (high, next):** a rejected snap can re-attach at confirm through `product_for_name`'s canonical fallback (`receipt_confirm.py:137`). It needs `receipt_processing.py` and `receipt_confirm.py`, both on `main` now.
-- **Ruling:** a processing form (mince vs fillet) is a different product. MVP-R2's "cut" means equivalent retail cuts.
-- **#140:** `Cache-Control: no-transform` on `/api/events` is load-bearing; Next's gzip otherwise buffers the stream.
-- **#142 Regenerate ruling:** allowed on `cleared` products, refused for exact/cook emoji; a rename uses the automatic gate.
-- **Operator actions:**
-  - the live ComfyUI check for #142: allow `ssh -N -L 19292:127.0.0.1:9292 sandbox-host` and an agent runs it, or run it on the workstation;
-  - in production, remove the aliases `KARTANON KALKKUNALEIKE → Ham` and `VALIO VOI NORMAALISUOLAI → Spread`, and rename or re-categorise "Dip";
-  - after #144 merges, run `scripts/rekey_store_chains.py` (dry run first);
+- **Q37b rulings:**
+  - the confirm guard applies only to the name the server served;
+  - a name the cook typed is explicit;
+  - an accepted correction learns an unverified alias.
+- **CI runs only for PRs into `main`.** A stacked PR needs a retarget plus a push before real CI runs.
+- **The agent sandbox refuses `ssh`** ("Containment Escape"). The operator opens the tunnel:
+  `ssh -f -N -L 19292:127.0.0.1:9292 sandbox-host` on devbox. Close it with
+  `pkill -f "19292:127.0.0.1:9292"`.
+- **The agent is denied `gh pr merge` and force-push.** Lanes merge `main` and never rebase.
+- **The Sonnet session limit has stopped agents three times.** Re-run lost lenses; executors push early.
+- **Operator, in production:**
+  - remove the aliases `KARTANON KALKKUNALEIKE → Ham` and `VALIO VOI NORMAALISUOLAI → Spread`;
+  - rename "Dip";
+  - run `scripts.rekey_store_chains` (dry run, then `--apply lidi-suomi-ky`);
+  - deploy, including `alembic upgrade head` once #142 merges;
   - `LLM_MAX_TOKENS`;
-  - "Re-estimate all";
   - the AG7 Hermes run.
-- **Environment:**
-  - `backend/.venv/bin` is broken; use `/usr/bin/python3.12` with the venv's site-packages (see the preamble).
-  - The agent is denied `gh pr merge` and force-push; the operator merges.
-  - Executors run on Sonnet (operator). Its session limit stopped four agents once; re-run any lens that dies.
+- **Round 4 candidates:**
+  - the iPad reads `detail.code` and sends an Idempotency-Key on shopping remove;
+  - dedupe the undo TS types;
+  - update `PRODUCT_RESOLUTION_SPEC.md` for Q37/Q37b;
+  - H47 Telegram hygiene.
 - Do not stage `.claude/README.md` or `.claude/templates/profiles/python-fastapi.md`.
 
 ## Next action
-Finish round 2026-10-02-1: review #144 and the four lanes still running, verify #142's fix pass, and have the operator merge. Then reconcile and plan the next round with Q37b first.
+When the CI watcher and the live check report: post the #142 live-check verdict and have the operator
+merge #142, #152, #153 and #155. Then reconcile and plan round 4.
