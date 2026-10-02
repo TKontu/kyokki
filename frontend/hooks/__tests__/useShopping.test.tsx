@@ -81,33 +81,50 @@ describe('useShoppingList', () => {
 })
 
 describe('useCreateShoppingItem', () => {
-  it('creates the item and invalidates shoppingKeys.all, not inventory', async () => {
-    server.use(http.post(`${API_URL}/shopping/`, () => HttpResponse.json(ITEM, { status: 201 })))
+  it('creates the item with the caller-supplied Idempotency-Key, and invalidates shoppingKeys.all, not inventory', async () => {
+    let header: string | null = null
+    server.use(
+      http.post(`${API_URL}/shopping/`, async ({ request }) => {
+        header = request.headers.get('Idempotency-Key')
+        return HttpResponse.json(ITEM, { status: 201 })
+      })
+    )
     const { Wrapper, queryClient } = wrapper()
     const keys = invalidatedKeys(queryClient)
 
     const { result } = renderHook(() => useCreateShoppingItem(), { wrapper: Wrapper })
     await act(async () => {
-      await result.current.mutateAsync({ name: 'Bananas', quantity: 6, unit: 'pcs' })
+      await result.current.mutateAsync({
+        data: { name: 'Bananas', quantity: 6, unit: 'pcs' },
+        idempotencyKey: 'key-from-caller',
+      })
     })
 
+    // F1: the hook forwards the key it was given rather than minting its own, so the caller -
+    // the one place that knows whether this is a fresh action or a retry of one - decides it.
+    expect(header).toBe('key-from-caller')
     expect(keys()).toEqual([shoppingKeys.all])
   })
 })
 
 describe('usePurchaseShoppingItem', () => {
-  it('marks an item bought and invalidates shoppingKeys.all only', async () => {
+  it('marks an item bought with the caller-supplied key, and invalidates shoppingKeys.all only', async () => {
+    let header: string | null = null
     server.use(
-      http.post(`${API_URL}/shopping/i-1/purchase`, () =>
-        HttpResponse.json({ ...ITEM, is_purchased: true })
-      )
+      http.post(`${API_URL}/shopping/i-1/purchase`, ({ request }) => {
+        header = request.headers.get('Idempotency-Key')
+        return HttpResponse.json({ ...ITEM, is_purchased: true })
+      })
     )
     const { Wrapper, queryClient } = wrapper()
     const keys = invalidatedKeys(queryClient)
 
     const { result } = renderHook(() => usePurchaseShoppingItem(), { wrapper: Wrapper })
-    const item = await act(() => result.current.mutateAsync({ id: 'i-1', purchased: true }))
+    const item = await act(() =>
+      result.current.mutateAsync({ id: 'i-1', purchased: true, idempotencyKey: 'tick-key' })
+    )
 
+    expect(header).toBe('tick-key')
     expect(item.is_purchased).toBe(true)
     expect(keys()).toEqual([shoppingKeys.all])
     expect(keys()).not.toContainEqual(['inventory'])
@@ -123,8 +140,27 @@ describe('usePurchaseShoppingItem', () => {
     const { Wrapper } = wrapper()
     const { result } = renderHook(() => usePurchaseShoppingItem(), { wrapper: Wrapper })
 
-    const undone = await act(() => result.current.mutateAsync({ id: 'i-1', purchased: false }))
+    const undone = await act(() =>
+      result.current.mutateAsync({ id: 'i-1', purchased: false, idempotencyKey: 'undo-key' })
+    )
     expect(undone.is_purchased).toBe(false)
+  })
+
+  it('cancels in-flight list queries before purchasing, so a stale refetch cannot overwrite it (F3)', async () => {
+    server.use(
+      http.post(`${API_URL}/shopping/i-1/purchase`, () =>
+        HttpResponse.json({ ...ITEM, is_purchased: true })
+      )
+    )
+    const { Wrapper, queryClient } = wrapper()
+    const cancel = jest.spyOn(queryClient, 'cancelQueries')
+
+    const { result } = renderHook(() => usePurchaseShoppingItem(), { wrapper: Wrapper })
+    await act(async () => {
+      await result.current.mutateAsync({ id: 'i-1', purchased: true, idempotencyKey: 'k' })
+    })
+
+    expect(cancel).toHaveBeenCalledWith({ queryKey: shoppingKeys.all })
   })
 })
 

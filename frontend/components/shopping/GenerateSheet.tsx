@@ -11,6 +11,7 @@ import Button from '@/components/ui/Button'
 import { useGenerateShoppingList } from '@/hooks/useShopping'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
+import { newIdempotencyKey } from '@/lib/api/shopping'
 import type { ShoppingGenerateResponse } from '@/types/shopping'
 
 export interface GenerateSheetProps {
@@ -31,6 +32,10 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
   const toast = useToast()
   const [preview, setPreview] = useState<ShoppingGenerateResponse | null>(null)
   const asked = useRef(false)
+  // F1: one key for the whole apply action. Minted the first time "Add to list" is pressed,
+  // and reused by a later press while the sheet is still open - a retry of the same action,
+  // not a new one - then forgotten once it succeeds (the sheet closes anyway).
+  const applyKey = useRef<string | null>(null)
 
   useEffect(() => {
     if (asked.current) return
@@ -50,10 +55,13 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
   }, [])
 
   const apply = () => {
+    const idempotencyKey = applyKey.current ?? newIdempotencyKey()
+    applyKey.current = idempotencyKey
     generate.mutate(
-      { sources: ['low_stock'], dry_run: false },
+      { sources: ['low_stock'], dry_run: false, idempotencyKey },
       {
         onSuccess: (result) => {
+          applyKey.current = null
           const count = changeCount(result)
           toast.success(count > 0 ? `Added ${count} item${count === 1 ? '' : 's'}` : 'Nothing to add')
           onClose()

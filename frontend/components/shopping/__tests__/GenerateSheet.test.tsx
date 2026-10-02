@@ -81,6 +81,59 @@ describe('GenerateSheet', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
+  it('sends a fresh Idempotency-Key on apply, and reuses it on a retry (F1)', async () => {
+    let attempts = 0
+    const headers: Array<string | null> = []
+    server.use(
+      http.post(`${API_URL}/shopping/generate`, async ({ request }) => {
+        const body = (await request.json()) as { dry_run: boolean }
+        if (body.dry_run) {
+          return HttpResponse.json({
+            added: [
+              {
+                product_id: 'p1',
+                name: 'Milk',
+                need: 4,
+                unit: 'dl',
+                on_hand: 1,
+                min_stock: 5,
+                item_id: null,
+                reason: null,
+              },
+            ],
+            updated: [],
+            unchanged: [],
+            skipped: [],
+            dry_run: true,
+          })
+        }
+        attempts += 1
+        headers.push(request.headers.get('Idempotency-Key'))
+        if (attempts === 1) {
+          return HttpResponse.json({ detail: 'boom' }, { status: 500 })
+        }
+        return HttpResponse.json({
+          added: [],
+          updated: [],
+          unchanged: [],
+          skipped: [],
+          dry_run: false,
+        })
+      })
+    )
+    renderSheet()
+    await screen.findByText(/Milk/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to list' }))
+    expect(await screen.findByText('Could not generate the list')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to list' }))
+    await waitFor(() => expect(attempts).toBe(2))
+
+    expect(headers[0]).toBeTruthy()
+    expect(headers[0]).toBe(headers[1])
+  })
+
   it('disables "Add to list" when nothing is short', async () => {
     api({ added: [], updated: [], unchanged: [], skipped: [], dry_run: true })
 

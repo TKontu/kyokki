@@ -7,10 +7,12 @@
  */
 
 import React, { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import Button from '@/components/ui/Button'
 import { SkeletonCard } from '@/components/ui/Skeleton'
 import { boughtItems, GenerateSheet, groupOpenItems, QuickAddRow, ShoppingItemRow } from '@/components/shopping'
 import {
+  shoppingKeys,
   useClearPurchasedShoppingItems,
   useCreateShoppingItem,
   usePurchaseShoppingItem,
@@ -19,6 +21,7 @@ import {
 } from '@/hooks/useShopping'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
+import { newIdempotencyKey } from '@/lib/api/shopping'
 import type { ShoppingListItem } from '@/types/shopping'
 
 function errorText(error: unknown, fallback: string): string {
@@ -32,31 +35,54 @@ export default function Shopping() {
   const removeItem = useRemoveShoppingItem()
   const clearBought = useClearPurchasedShoppingItems()
   const toast = useToast()
+  const queryClient = useQueryClient()
   const [boughtOpen, setBoughtOpen] = useState(false)
   const [generateOpen, setGenerateOpen] = useState(false)
 
   const openGroups = groupOpenItems(items ?? [])
   const bought = boughtItems(items ?? [])
 
-  const toggle = (item: ShoppingListItem) => {
-    const next = !item.is_purchased
+  /**
+   * One tick, undo or retry of either is a single user action (F1): `idempotencyKey` is minted
+   * once - by `toggle` for a tick, or by the "Undo" toast's own `onClick` for an undo - and
+   * `retry` (the error toast's own action) reuses that same key rather than minting a new one.
+   */
+  const purchaseItem = (item: ShoppingListItem, purchased: boolean, idempotencyKey: string) => {
+    const retry = () => purchaseItem(item, purchased, idempotencyKey)
     purchase.mutate(
-      { id: item.id, purchased: next },
+      { id: item.id, purchased, idempotencyKey },
       {
         onSuccess: () => {
-          if (next) {
+          if (purchased) {
             toast.success(`Bought · ${item.name}`, {
               action: {
                 label: 'Undo',
-                onClick: () => purchase.mutate({ id: item.id, purchased: false }),
+                onClick: () => purchaseItem(item, false, newIdempotencyKey()),
               },
             })
           }
         },
-        onError: (error) => toast.error(errorText(error, `Could not update ${item.name}`)),
+        onError: (error) => {
+          if (!purchased) {
+            // F2: an undo (including a plain un-tick) used to have no onError, so a failure
+            // was silent and the item stayed bought. F3 cancelled the in-flight list fetch for
+            // this mutation, so refetch explicitly rather than leave a possibly stale cache.
+            toast.error("Couldn't undo; it's still ticked", {
+              action: { label: 'Retry', onClick: retry },
+            })
+            queryClient.invalidateQueries({ queryKey: shoppingKeys.all })
+          } else {
+            toast.error(errorText(error, `Could not update ${item.name}`), {
+              action: { label: 'Retry', onClick: retry },
+            })
+          }
+        },
       }
     )
   }
+
+  const toggle = (item: ShoppingListItem) =>
+    purchaseItem(item, !item.is_purchased, newIdempotencyKey())
 
   const remove = (item: ShoppingListItem) => {
     removeItem.mutate(item.id, {
@@ -64,11 +90,11 @@ export default function Shopping() {
     })
   }
 
-  const addItem: React.ComponentProps<typeof QuickAddRow>['onAdd'] = (data) => {
-    createItem.mutate(data, {
-      onError: (error) => toast.error(errorText(error, `Could not add ${data.name}`)),
+  const addItem: React.ComponentProps<typeof QuickAddRow>['onAdd'] = (data, idempotencyKey) =>
+    createItem.mutateAsync({ data, idempotencyKey }).catch((error: unknown) => {
+      toast.error(errorText(error, `Could not add ${data.name}`))
+      throw error
     })
-  }
 
   const clear = () => {
     clearBought.mutate(undefined, {

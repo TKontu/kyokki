@@ -59,9 +59,19 @@ afterAll(() => server.close())
 /** The requests the screen can make; each test registers the rows it needs. */
 function api(rows: ShoppingListItem[]) {
   let list = [...rows]
-  const asked = { created: [] as unknown[], purchased: [] as Record<string, unknown>[], removed: [] as string[], cleared: 0 }
+  const asked = {
+    created: [] as unknown[],
+    purchased: [] as Record<string, unknown>[],
+    purchaseKeys: [] as Array<string | null>,
+    removed: [] as string[],
+    cleared: 0,
+    listCalls: 0,
+  }
   server.use(
-    http.get(`${API_URL}/shopping/`, () => HttpResponse.json(list)),
+    http.get(`${API_URL}/shopping/`, () => {
+      asked.listCalls += 1
+      return HttpResponse.json(list)
+    }),
     http.post(`${API_URL}/shopping/`, async ({ request }) => {
       const body = (await request.json()) as Record<string, unknown>
       asked.created.push(body)
@@ -83,6 +93,7 @@ function api(rows: ShoppingListItem[]) {
     http.post(`${API_URL}/shopping/:id/purchase`, ({ request, params }) => {
       const purchased = new URL(request.url).searchParams.get('purchased') === 'true'
       asked.purchased.push({ id: params.id, purchased })
+      asked.purchaseKeys.push(request.headers.get('Idempotency-Key'))
       list = list.map((item) =>
         item.id === params.id
           ? { ...item, is_purchased: purchased, purchased_at: purchased ? '2026-10-01T11:00:00Z' : null }
@@ -186,6 +197,69 @@ describe('The Shopping screen', () => {
         { id: 'i-bananas', purchased: false },
       ])
     )
+    // F1: the tick and the undo are two different user actions, so each mints its own key.
+    expect(asked.purchaseKeys[0]).toBeTruthy()
+    expect(asked.purchaseKeys[1]).toBeTruthy()
+    expect(asked.purchaseKeys[0]).not.toBe(asked.purchaseKeys[1])
+  })
+
+  it('retries a failed tick with the same Idempotency-Key (F1)', async () => {
+    let attempts = 0
+    const headers: Array<string | null> = []
+    server.use(
+      http.get(`${API_URL}/shopping/`, () => HttpResponse.json([BANANAS])),
+      http.post(`${API_URL}/shopping/:id/purchase`, ({ request }) => {
+        attempts += 1
+        headers.push(request.headers.get('Idempotency-Key'))
+        if (attempts === 1) {
+          return HttpResponse.json({ detail: 'boom' }, { status: 500 })
+        }
+        return HttpResponse.json({ ...BANANAS, is_purchased: true })
+      })
+    )
+
+    renderShopping()
+    await screen.findByText('Bananas')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark Bananas bought' }))
+    expect(await screen.findByText('Could not update Bananas')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(attempts).toBe(2))
+
+    expect(headers[0]).toBeTruthy()
+    expect(headers[0]).toBe(headers[1])
+  })
+
+  it("tells the cook when undo fails, and refetches the list (F2)", async () => {
+    let listCalls = 0
+    server.use(
+      http.get(`${API_URL}/shopping/`, () => {
+        listCalls += 1
+        return HttpResponse.json([BANANAS])
+      }),
+      http.post(`${API_URL}/shopping/:id/purchase`, ({ request }) => {
+        const purchased = new URL(request.url).searchParams.get('purchased') === 'true'
+        if (!purchased) {
+          return HttpResponse.json({ detail: 'boom' }, { status: 500 })
+        }
+        return HttpResponse.json({ ...BANANAS, is_purchased: true })
+      })
+    )
+
+    renderShopping()
+    await screen.findByText('Bananas')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark Bananas bought' }))
+    await screen.findByText('Bought · Bananas')
+    const callsBeforeUndo = listCalls
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+
+    expect(await screen.findByText("Couldn't undo; it's still ticked")).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    // F2: a failed undo refetches the list, rather than leaving a possibly stale cache.
+    await waitFor(() => expect(listCalls).toBeGreaterThan(callsBeforeUndo))
   })
 
   it('removes an item', async () => {
