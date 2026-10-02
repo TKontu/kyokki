@@ -448,3 +448,105 @@ async def _items_of(db: AsyncSession, product: ProductMaster) -> list[InventoryI
         .scalars()
         .all()
     )
+
+
+class TestDiscardExpired:
+    """AG7 task 6: an agent can throw away everything expired, by name, not by id."""
+
+    async def test_matches_get_inventory_items_expiring_minus_one(self, db) -> None:
+        """ "Expired" is not restated: it is the same rule `stock_summary`'s own query
+        (and the iPad's expired shelf) already filters on."""
+        milk = await _product(db, "Milk")
+        gone = await _item(db, milk, "3", expires_in=-5)
+        await _item(db, milk, "5", expires_in=0)
+        await _item(db, milk, "1", expires_in=-1, status="discarded")
+
+        from app.crud import inventory_item as crud_inventory
+
+        directly = await crud_inventory.get_inventory_items(db, expiring_days=-1)
+        result = await stock.discard_expired(db, dry_run=True)
+
+        assert [item.id for item in directly] == [gone.id]
+        assert [row.item_id for row in result.response.items] == [gone.id]
+
+    async def test_dry_run_changes_nothing(self, db) -> None:
+        milk = await _product(db, "Milk")
+        gone = await _item(db, milk, "3", expires_in=-2)
+
+        result = await stock.discard_expired(db, dry_run=True)
+
+        assert (result.response.dry_run, result.response.count) == (True, 1)
+        assert result.changed == []
+        assert (await _fresh(db, gone)).status == "sealed"
+        assert await _log_rows(db) == []
+
+    async def test_real_run_discards_through_h23s_transition(self, db) -> None:
+        milk = await _product(db, "Milk")
+        gone = await _item(db, milk, "3", expires_in=-2)
+        kept = await _item(db, milk, "5", expires_in=5)
+
+        result = await stock.discard_expired(db)
+
+        assert (result.response.dry_run, result.response.count) == (False, 1)
+        assert (await _fresh(db, gone)).status == "discarded"
+        assert (await _fresh(db, kept)).status == "sealed"
+        (log,) = await _log_rows(db)
+        assert (log.action, log.inventory_item_id, log.quantity_after) == (
+            "discard",
+            _id(gone),
+            0,
+        )
+        (changed,) = result.changed
+        assert (changed.id, changed.status) == (_id(gone), "discarded")
+
+    async def test_a_location_filter(self, db) -> None:
+        milk = await _product(db, "Milk")
+        fridge_item = await _item(db, milk, "3", expires_in=-2, location="main_fridge")
+        freezer_item = await _item(db, milk, "3", expires_in=-2, location="freezer")
+
+        result = await stock.discard_expired(db, location="freezer")
+
+        assert result.response.count == 1
+        assert (await _fresh(db, freezer_item)).status == "discarded"
+        assert (await _fresh(db, fridge_item)).status == "sealed"
+
+    async def test_nothing_expired_changes_nothing(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _item(db, milk, "3", expires_in=5)
+
+        result = await stock.discard_expired(db)
+
+        assert result.response == stock.DiscardExpiredResponse(
+            items=[], count=0, dry_run=False
+        )
+        assert result.changed == []
+
+    async def test_calling_it_again_discards_nothing_a_second_time(self, db) -> None:
+        """Not frozen on the way back (H23): a re-run after the shelf is already empty is
+        simply a no-op, same as a retried Idempotency-Key would replay to."""
+        milk = await _product(db, "Milk")
+        gone = await _item(db, milk, "3", expires_in=-2)
+
+        await stock.discard_expired(db)
+        second = await stock.discard_expired(db)
+
+        assert second.response.count == 0
+        assert second.changed == []
+        assert len(await _log_rows(db)) == 1
+        assert (await _fresh(db, gone)).status == "discarded"
+
+    async def test_stores_the_idempotency_answer_with_the_discards(self, db) -> None:
+        from app.services.idempotency import IdempotencyClaim
+
+        milk = await _product(db, "Milk")
+        await _item(db, milk, "3", expires_in=-2)
+        claim = IdempotencyClaim(
+            key="k", route="POST /api/stock/discard-expired", request_hash="h"
+        )
+
+        await stock.discard_expired(db, claim=claim)
+
+        from app.models.idempotency_key import IdempotencyKey
+
+        rows = (await db.execute(select(IdempotencyKey))).scalars().all()
+        assert [r.key for r in rows] == ["k"]

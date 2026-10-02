@@ -34,6 +34,34 @@ class StockAddResponse(BaseModel):
     product_created: bool
 
 
+class DiscardExpiredRequest(BaseModel):
+    """Throw away everything past its expiry date (AG7 task 6), optionally one location."""
+
+    location: StorageLocation | None = Field(None, description="Only this location")
+    dry_run: bool = Field(
+        False, description="List what would be discarded; nothing is written"
+    )
+
+
+class DiscardedStockItem(BaseModel):
+    """One item that is, or would be, thrown away as expired."""
+
+    item_id: UUID
+    product_name: str
+    amount: JsonDecimal = Field(..., description="current_quantity, in its unit")
+    unit: str
+    expiry_date: date
+    location: StorageLocation
+
+
+class DiscardExpiredResponse(BaseModel):
+    """What was (or would be) discarded: the iPad's expired shelf, in one tap."""
+
+    items: list[DiscardedStockItem]
+    count: int
+    dry_run: bool
+
+
 class StockConsumeRequest(BaseModel):
     """Consume by product name (or id), first to expire first, across items."""
 
