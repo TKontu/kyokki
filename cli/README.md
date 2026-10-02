@@ -36,6 +36,9 @@ character is refused with exit 2 before anything is sent, without repeating it.
 | `kyokki shopping remove ID` | Delete an item from the list |
 | `kyokki shopping generate [--from low-stock] [--dry-run]` | Put what the kitchen is short of on the list |
 | `kyokki shopping export [--format text\|markdown]` | The open list as plain text or a Markdown checklist |
+| `kyokki receipt upload FILE [--wait] [--timeout SECONDS]` | Upload a receipt image or PDF; `--wait` polls until it is read |
+| `kyokki receipt status ID` | A receipt's status, and once read, its lines |
+| `kyokki receipt confirm ID --all-matched [--assign LINE=PRODUCT_ID] [--new LINE=CATEGORY] [--skip-unmatched] [--purchase-date DATE] [--dry-run]` | Confirm the receipt's matched lines into stock |
 
 A NAME that looks like a UUID is sent as a product id (`stock` commands). Units are `dl`,
 `tsp`, `tbsp`, `g` and `pcs`; the server converts `l`, `kg` and the like on write.
@@ -68,6 +71,39 @@ The shopping commands call `/api/shopping/`:
 - `remove` sends no Idempotency-Key, because the server ignores it on DELETE: nothing
   could replay. Removing is safe to repeat instead. If a remove got no answer, run it
   again; exit 3 then means the first one removed it.
+
+The receipt commands call `/api/receipts`:
+
+| Command | Request | Exit codes beyond 0, 1, 2 and 7 |
+| ------- | ------- | ------------------------------- |
+| `receipt upload` | `POST /api/receipts/scan` (multipart `file`); with `--wait`, `GET /api/receipts/{ID}` every few seconds until it is read | 2 (413 too large), 6 (409 duplicate, the existing receipt id in the message) |
+| `receipt status` | `GET /api/receipts/{ID}` | 3 (no such receipt) |
+| `receipt confirm` | `GET /api/receipts/{ID}`, then `POST /api/receipts/{ID}/confirm` `{items, non_food_indexes}` | 2 (an `--assign`/`--new` line is unknown, non-food or named twice, or the server rejected the confirm, 400), 3 (no such receipt), 6 (unmatched food lines, an unready receipt, or a confirm already applied, 409) |
+
+- `upload`: a file that cannot be read, or is over the server's upload limit (413,
+  mapped locally to usage: the caller must shrink the file, as with a bad argument), is
+  exit 2 before anything is sent. `--wait` polls every few seconds, bounded by
+  `--timeout` (default 1800 s / ~30 min: the server's own per-receipt budget, for a
+  receipt the model has to re-read); a timeout that is never reached is exit 1.
+- `confirm` sends every food line with a matched product, in its own quantity and
+  unit, with the receipt's purchase date (or `--purchase-date`, required when the
+  receipt has none: exit 2). Non-food lines are never stocked. If any food line is
+  unmatched, nothing is sent and the exit is 6, unless `--assign LINE=PRODUCT_ID`
+  attaches it to an existing product, `--new LINE=CATEGORY` creates one for it (named
+  by the line's generic name, falling back to its printed name), or `--skip-unmatched`
+  leaves it out — both options are repeatable and count their line as matched.
+  `product name add` does not reach a receipt already read, so it cannot fix an
+  unmatched line by itself; `--assign`/`--new` are the only way. A receipt that is not
+  `completed` (still queued or processing, failed, or already confirmed) is exit 6,
+  with its status in the message. `--dry-run` prints exactly what would be sent and
+  sends nothing.
+- `confirm` has **no Idempotency-Key**: the endpoint does not support one, unlike the
+  stock and shopping mutations. A retried confirm therefore answers from the server
+  instead of replaying the first answer: 409 (already confirmed) is `conflict`, exit 6;
+  400 (the request was rejected, e.g. a product id that no longer exists — re-run
+  `receipt status` and retry) is `invalid`, exit 2, the same as any other bad confirm.
+- `upload` also has no Idempotency-Key (the server already deduplicates by content
+  hash): a retried upload of the same bytes answers the same 409 duplicate, exit 6.
 
 ## Output
 
@@ -119,7 +155,9 @@ explicitly. A dry run sends none. The keyed mutations are `stock add`, `stock
 consume`, `product name add`, `shopping add`, `shopping done` and `shopping generate`;
 `shopping done ID` and `shopping done ID --undo` are different command lines, so they
 get different keys. `shopping remove` sends no key (see above): a repeat is harmless and
-exits 3.
+exits 3. Neither `receipt upload` nor `receipt confirm` sends one either (see above):
+upload is deduplicated by the server's own content hash instead, and confirm has no
+Idempotency-Key support at all.
 
 When a change was sent but no answer came back (a read timeout), the CLI exits 1 with
 `unknown_outcome`, prints the key it used and the command to retry with
@@ -141,9 +179,8 @@ applying twice.
 
 Exit 2 for a 400 `invalid` is the CLI's choice beyond the spec's "422 → 2": the server
 understood the request and refused its content, which the caller must change, as with a
-422. One exception: `stock add` with an unknown product id gets 400 `invalid` from the
-server where `stock consume` gets 404 `not_found`; the CLI reports both as `not_found`,
-exit 3.
+422. `stock add` and `stock consume` both answer an unknown product id with 404
+`not_found` (since #112), so both map to exit 3 the ordinary way.
 
 ## Development
 

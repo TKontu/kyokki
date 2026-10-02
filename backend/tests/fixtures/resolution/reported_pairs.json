@@ -94,6 +94,142 @@
       ],
       "must_offer": null,
       "answer": null
+    },
+    {
+      "id": "q37-pesto-not-dip",
+      "about": "Q37: the Lidl receipt (e5fb7580, lidl_espoo_q37.txt). The catalog held Dip (from caramelised red onion), not Pesto; the model's g snapped to it.",
+      "printed": "Baresa Pesto genovese",
+      "generic": "Dip",
+      "category": "condiments",
+      "catalog": [
+        ["Dip", "condiments"],
+        ["Dip spice", "condiments"],
+        ["Ketchup", "condiments"],
+        ["Hummus", "condiments"],
+        ["Taco sauce", "condiments"]
+      ],
+      "must_offer": null,
+      "answer": null
+    },
+    {
+      "id": "q37-cashew-nuts-not-dip",
+      "about": "Q37: ALESTO SELECTION CASHEWP - cashew nuts, not a dip.",
+      "printed": "Alesto Selection Cashewp",
+      "generic": "Dip",
+      "category": "snacks",
+      "catalog": [
+        ["Dip", "snacks"],
+        ["Raisin", "snacks"],
+        ["Popcorn", "snacks"],
+        ["Pretzel", "snacks"]
+      ],
+      "must_offer": null,
+      "answer": null
+    },
+    {
+      "id": "q37-baking-chocolate-not-chips",
+      "about": "Q37: FinCarre taloussuklaa - baking chocolate, not a savoury snack.",
+      "printed": "FinCarre taloussuklaa",
+      "generic": "Chips",
+      "category": "snacks",
+      "catalog": [
+        ["Chips", "snacks"],
+        ["Pretzel", "snacks"],
+        ["Popcorn", "snacks"],
+        ["Crackers", "snacks"]
+      ],
+      "must_offer": null,
+      "answer": null
+    },
+    {
+      "id": "q37-butter-not-spread",
+      "about": "Q37: Valio voi normaalisuolai - butter, not the catalog's processed spread.",
+      "printed": "Valio voi normaalisuolai",
+      "generic": "Spread",
+      "category": "dairy",
+      "catalog": [
+        ["Spread", "dairy"],
+        ["Cream", "dairy"],
+        ["Sour cream", "dairy"],
+        ["Cottage cheese", "dairy"]
+      ],
+      "must_offer": null,
+      "answer": null
+    },
+    {
+      "id": "q37-turkey-not-ham",
+      "about": "Q37: Kartanon kalkkunaleike - turkey cold cuts, not ham.",
+      "printed": "Kartanon kalkkunaleike",
+      "generic": "Ham",
+      "category": "meat",
+      "catalog": [
+        ["Ham", "meat"],
+        ["Bacon", "meat"],
+        ["Sausage", "meat"],
+        ["Meat balls", "meat"]
+      ],
+      "must_offer": null,
+      "answer": null
+    },
+    {
+      "id": "q37-chicken-mince-not-fillet",
+      "about": "Q37: Kananestari kanan jauhel - chicken mince, not a whole fillet.",
+      "printed": "Kananestari kanan jauhel",
+      "generic": "Chicken fillet",
+      "category": "meat",
+      "catalog": [
+        ["Chicken fillet", "meat"],
+        ["Chicken", "meat"],
+        ["Ground beef", "meat"],
+        ["Meat balls", "meat"]
+      ],
+      "must_offer": null,
+      "answer": null
+    },
+    {
+      "id": "q37-mozzarella-kept",
+      "about": "Q37: the model's g is right here - mozzarella really is the catalog's Mozzarella - and must still resolve, via selection rather than an automatic generic-name hit.",
+      "printed": "Lovilio mozzarella",
+      "generic": "Mozzarella",
+      "category": "cheese",
+      "catalog": [
+        ["Mozzarella", "cheese"],
+        ["Cheddar", "cheese"],
+        ["Feta", "cheese"],
+        ["Cottage cheese", "dairy"]
+      ],
+      "must_offer": "Mozzarella",
+      "answer": "Mozzarella"
+    },
+    {
+      "id": "q37-farfalle-kept",
+      "about": "Q37: Combino Farfalle genuinely is Pasta.",
+      "printed": "Combino Farfalle",
+      "generic": "Pasta",
+      "category": "pantry",
+      "catalog": [
+        ["Pasta", "pantry"],
+        ["Rice", "pantry"],
+        ["Wheat flour", "pantry"],
+        ["Tortilla", "bread"]
+      ],
+      "must_offer": "Pasta",
+      "answer": "Pasta"
+    },
+    {
+      "id": "q37-green-olives-kept",
+      "about": "Q37: Baresa Vihrea ollivi pap genuinely is Olive.",
+      "printed": "Baresa Vihrea ollivi pap",
+      "generic": "Olive",
+      "category": "condiments",
+      "catalog": [
+        ["Olive", "condiments"],
+        ["Olive oil", "condiments"],
+        ["Dip", "condiments"],
+        ["Ketchup", "condiments"]
+      ],
+      "must_offer": "Olive",
+      "answer": "Olive"
     }
   ]
 }

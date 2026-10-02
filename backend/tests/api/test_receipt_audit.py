@@ -226,6 +226,8 @@ class TestReceiptAudit:
                 "price": 1.49,
                 "outcome": "pending",
                 "items": [],
+                "reanalysed": False,
+                "reanalyse_hint": None,
             }
         ]
         assert body["unlinked_items"] == []
@@ -302,6 +304,8 @@ class TestReceiptAudit:
                 "price": 0.10,
                 "outcome": "household",
                 "items": [],
+                "reanalysed": False,
+                "reanalyse_hint": None,
             }
         ]
 
@@ -326,6 +330,142 @@ class TestReceiptAudit:
 
         await test_db.refresh(receipt)
         assert receipt.ocr_structured["lines"][0]["confirmed_non_food"] is True
+
+
+class TestRemovedOutcome:
+    """Audit follow-up: a stocked item that is later hard-deleted must not read
+    `skipped` - indistinguishable from a line the cook genuinely left out.
+    """
+
+    async def test_a_hard_deleted_stocked_items_line_reads_removed(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        sample_product: ProductMaster,
+    ):
+        """Confirm by index (so `record_stocked_lines` has something to mark), hard-delete
+        the item it created through the real inventory endpoint, then check the audit."""
+        receipt = await _receipt(
+            test_db,
+            processing_status="completed",
+            ocr_structured={"lines": [{"name": "VALIO MAITO 1L", "price": 1.49}]},
+        )
+
+        confirm = await client.post(
+            f"/api/receipts/{receipt.id}/confirm",
+            json={
+                "items": [
+                    {
+                        "index": 0,
+                        "product_id": str(sample_product.id),
+                        "quantity": 1,
+                        "unit": "pcs",
+                        "purchase_date": "2026-09-26",
+                    }
+                ]
+            },
+        )
+        assert confirm.status_code == 200, confirm.text
+
+        from sqlalchemy import select
+
+        from app.models.inventory_item import InventoryItem
+
+        item = (
+            (
+                await test_db.execute(
+                    select(InventoryItem).where(InventoryItem.receipt_id == receipt.id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+
+        delete = await client.delete(f"/api/inventory/{item.id}")
+        assert delete.status_code == 204
+
+        response = await client.get(f"/api/receipts/{receipt.id}/audit")
+
+        assert response.status_code == 200
+        lines = response.json()["lines"]
+        assert lines[0]["outcome"] == "removed"
+        assert lines[0]["items"] == []
+
+    async def test_a_line_confirmed_without_an_index_is_unaffected(
+        self,
+        client: AsyncClient,
+        test_db: AsyncSession,
+        sample_product: ProductMaster,
+    ):
+        """No `index` on the confirmed item - as a hand-added or product-id-only line
+        sends - means nothing to mark; this must not raise."""
+        receipt = await _receipt(
+            test_db,
+            processing_status="completed",
+            ocr_structured={"lines": []},
+        )
+
+        confirm = await client.post(
+            f"/api/receipts/{receipt.id}/confirm",
+            json={
+                "items": [
+                    {
+                        "product_id": str(sample_product.id),
+                        "quantity": 1,
+                        "unit": "pcs",
+                        "purchase_date": "2026-09-26",
+                    }
+                ]
+            },
+        )
+        assert confirm.status_code == 200, confirm.text
+
+        response = await client.get(f"/api/receipts/{receipt.id}/audit")
+        assert response.status_code == 200
+
+
+class TestReanalysedInAudit:
+    """A re-analysed line shows 're-analysed' (and the hint) in the audit view (Q38)."""
+
+    async def test_shows_reanalysed_and_the_hint(
+        self, client: AsyncClient, test_db: AsyncSession
+    ):
+        receipt = await _receipt(
+            test_db,
+            processing_status="completed",
+            ocr_structured={
+                "lines": [
+                    {
+                        "name": "PESTO JA CASHEW",
+                        "price": 2.49,
+                        "reanalysed": True,
+                        "reanalyse_hint": "cashew nuts",
+                    }
+                ]
+            },
+        )
+
+        response = await client.get(f"/api/receipts/{receipt.id}/audit")
+
+        assert response.status_code == 200
+        line = response.json()["lines"][0]
+        assert line["reanalysed"] is True
+        assert line["reanalyse_hint"] == "cashew nuts"
+
+    async def test_an_untouched_line_is_not_marked_reanalysed(
+        self, client: AsyncClient, test_db: AsyncSession
+    ):
+        receipt = await _receipt(
+            test_db,
+            processing_status="completed",
+            ocr_structured={"lines": [{"name": "X", "price": 1.0}]},
+        )
+
+        response = await client.get(f"/api/receipts/{receipt.id}/audit")
+
+        line = response.json()["lines"][0]
+        assert line["reanalysed"] is False
+        assert line["reanalyse_hint"] is None
 
 
 class TestReceiptFile:

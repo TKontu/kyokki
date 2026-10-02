@@ -333,6 +333,33 @@ async def _apply_non_food(
     _mark_confirmed_non_food(confirmation, skipped)
 
 
+def _mark_stocked(confirmation: "_Confirmation") -> None:
+    """Record, on the receipt's own stored lines, which ones this confirm stocked.
+
+    A hard-deleted `InventoryItem` leaves no other trace anywhere: no soft-delete
+    column, no audit table, and `crud.inventory_item.delete_inventory_item` does a
+    plain `db.delete` that nothing else logs. Without this mark, the audit view cannot
+    tell "the cook never stocked this line" from "the cook stocked it and the item is
+    gone since" - both look identical once the row is gone, and the line would read
+    `skipped` either way (audit follow-up from round 2026-09-30-1). Written in the same
+    transaction as the items it describes, on the receipt `confirm_receipt` already
+    holds `FOR UPDATE`, so it either lands with the rest of the confirm or not at all.
+
+    Same in-place-mutation / `flag_modified` pattern as `_mark_confirmed_non_food`.
+    """
+    marked = False
+    for item, _product in confirmation.result.inventory_items:
+        index = cast("int | None", item.receipt_line_index)
+        if index is None or not (0 <= index < len(confirmation.lines)):
+            continue
+        line = confirmation.lines[index]
+        if isinstance(line, dict) and not line.get("stocked_at_confirm"):
+            line["stocked_at_confirm"] = True
+            marked = True
+    if marked:
+        flag_modified(confirmation.receipt, "ocr_structured")
+
+
 def _mark_confirmed_non_food(
     confirmation: "_Confirmation", skipped: Iterable[int]
 ) -> None:
@@ -400,6 +427,7 @@ async def confirm_receipt(
                 included_indexes.add(item.index)
         # Only lines the cook marked; an ordinary skip must not teach anything (Q1)
         await _apply_non_food(db, confirmation, non_food_indexes, included_indexes)
+        _mark_stocked(confirmation)
         receipt_row: Any = receipt
         receipt_row.processing_status = ReceiptStatus.CONFIRMED
         await db.commit()

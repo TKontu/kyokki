@@ -61,6 +61,36 @@ class TestPrompt:
         for word in ("Ketchup", "Taco", "Melon", "Pear"):
             assert word not in INSTRUCTIONS
 
+    def test_its_examples_are_not_the_q37_reported_pairs(self) -> None:
+        """Q37: the live test asks the model about butter vs Spread and turkey vs Ham
+        among others - the prompt must not have told it the answer. ("Butter" and
+        "Chicken" are not included: both were already general words in the prompt
+        before Q37, for a different pairing.)"""
+        for word in ("Pesto", "Cashew", "Spread", "Turkey", "Mozzarella", "Farfalle"):
+            assert word not in INSTRUCTIONS
+
+    def test_a_raw_ingredient_is_not_what_is_made_from_it(self) -> None:
+        """Q37 live run: the model answered Spread for plain salted butter - a
+        manufactured product is not its raw ingredient, however near on the shelf."""
+        assert "is not a manufactured product made from it" in INSTRUCTIONS
+
+    def test_one_animals_cut_is_not_anothers(self) -> None:
+        """Q37 live run: the model answered Ham for turkey cold cuts."""
+        assert "Meat from one animal is not the same product as a cut" in INSTRUCTIONS
+
+    def test_a_processing_form_is_not_a_named_kind(self) -> None:
+        """Q37 live run: the model answered Chicken fillet for chicken mince - a
+        processed form read as a 'named kind' like Granny Smith is Apple."""
+        glossary = " ".join(INSTRUCTIONS.split())
+        assert "is not a named kind" in glossary
+        assert '"Flour" is not "Wheat"' in glossary
+
+    def test_a_broad_word_is_not_a_catch_all(self) -> None:
+        """Q37 live run: the model answered Dip for cashew nuts and Chips for baking
+        chocolate - a broad catalog word is not a match for everything that could be
+        filed under it."""
+        assert "is not a match for one specific thing" in INSTRUCTIONS
+
     def test_it_carries_every_candidate_of_every_line(self) -> None:
         prompt = build_prompt([LINE])
 

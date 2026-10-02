@@ -487,6 +487,14 @@ async def main(argv: list[str] | None = None) -> int:
         help=f"offer the {len(OVERLAP_CATALOG)}-name catalog holding the fixtures' names",
     )
     parser.add_argument(
+        "--catalog-file",
+        type=Path,
+        help=(
+            "offer the newline-separated catalog names in this file instead of "
+            "--catalog/--catalog-overlap (Q37: an exact snapshot of a production catalog)"
+        ),
+    )
+    parser.add_argument(
         "--old-catalog-wording",
         action="store_true",
         help="word the catalog block as it was before Q27",
@@ -505,16 +513,25 @@ async def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     fixtures = args.fixtures or [DEFAULT_FIXTURE]
     options = categories()
-    catalog: Sequence[str] = (
-        OVERLAP_CATALOG if args.catalog_overlap else CATALOG[: max(args.catalog, 0)]
-    )
+    catalog_source = "fixed"
+    if args.catalog_file:
+        catalog: Sequence[str] = [
+            line.strip()
+            for line in args.catalog_file.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        catalog_source = args.catalog_file.name
+    elif args.catalog_overlap:
+        catalog = OVERLAP_CATALOG
+    else:
+        catalog = CATALOG[: max(args.catalog, 0)]
     if catalog and not settings.EXTRACTION_OFFERS_CATALOG:
         parser.error("--catalog needs EXTRACTION_OFFERS_CATALOG on")
     if args.old_catalog_wording:
         llm_extractor.CATALOG_BLOCK = OLD_CATALOG_BLOCK
     wording = "old" if args.old_catalog_wording else "reworded"
     offered = (
-        f"{len(catalog)}-name catalog ({wording} wording)"
+        f"{len(catalog)}-name catalog ({catalog_source}, {wording} wording)"
         if catalog
         else "empty catalog"
     )
