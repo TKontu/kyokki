@@ -30,5 +30,5 @@ exit codes:
     --product-id (add)
   4 ambiguous name: does not occur for this command
   5 insufficient stock: does not occur for this command
-  6 conflict: a reused Idempotency-Key (409) (add, done, generate)
+  6 conflict: a reused Idempotency-Key (409) (add, done, generate, remove)
   7 auth: missing or unknown token (401), or a read token on a write (403)

@@ -87,6 +87,18 @@ kyokki product resolve "kevytmaito"
 kyokki stock list --expiring 3
 ```
 
+### Throw away what's expired
+
+Dry-run it first and show the user what would go, before discarding for real:
+
+```
+kyokki stock discard --expired --dry-run
+kyokki stock discard --expired
+```
+
+`--location` narrows it to one place (`main_fridge`, `freezer`, `pantry`). Each item is
+logged as a discard and can be undone with the general undo.
+
 ### A receipt
 
 ```

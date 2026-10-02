@@ -360,12 +360,13 @@ def build_parser() -> argparse.ArgumentParser:
     stock = group(
         top,
         "stock",
-        summary="list, add and consume stock",
+        summary="list, add, consume and discard stock",
         description="What is in the kitchen, per product, and changing it.",
         examples=[
             "kyokki stock list --location freezer",
             "kyokki stock add milk 1 l --category dairy",
             "kyokki stock consume milk 2 dl",
+            "kyokki stock discard --expired --dry-run",
         ],
     )
 
@@ -486,6 +487,39 @@ def build_parser() -> argparse.ArgumentParser:
     add_idempotency_option(consume)
     add_connection_options(consume, top=False)
 
+    discard = leaf(
+        stock,
+        "discard",
+        summary="throw away everything past its expiry date",
+        description="Discard every active item whose expiry date is before today: the\n"
+        "iPad's expired shelf, in one tap, by name rather than by item id.\n"
+        "--expired is the only reason there is today, so it is required (a\n"
+        "future reason would be its own flag). --dry-run lists what would be\n"
+        "discarded and changes nothing; without it, the items are discarded for\n"
+        "real, logged as a discard in consumption_log, can be undone by the\n"
+        "general undo, and show up on the Gone screen.",
+        examples=[
+            "kyokki stock discard --expired --dry-run",
+            "kyokki stock discard --expired",
+            "kyokki stock discard --expired --location pantry",
+        ],
+        handler=commands.stock_discard,
+    )
+    discard.add_argument(
+        "--expired",
+        action="store_true",
+        required=True,
+        help="the only reason to discard there is today; required",
+    )
+    discard.add_argument("--location", choices=LOCATIONS, help="only this location")
+    discard.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would be discarded; change nothing (no Idempotency-Key)",
+    )
+    add_idempotency_option(discard)
+    add_connection_options(discard, top=False)
+
     # product
     product = group(
         top,
@@ -593,7 +627,7 @@ def add_shopping_commands(top: "argparse._SubParsersAction[Parser]") -> None:
             answer="the expected JSON (or text, for export)",
             not_found=f"{item_missing} (done, remove), or no product has the "
             "--product-id (add)",
-            conflict=f"{reused_key} (add, done, generate)",
+            conflict=f"{reused_key} (add, done, generate, remove)",
         ),
     )
 
@@ -700,18 +734,19 @@ def add_shopping_commands(top: "argparse._SubParsersAction[Parser]") -> None:
         "remove",
         summary="delete an item from the list",
         description="Delete item ID from the shopping list, bought or not. Exit 3 when\n"
-        "no item has the id.\n\n"
-        "The server ignores Idempotency-Key on a delete, so none is sent and\n"
-        "it takes no retry key. Removing is safe to repeat instead: if a\n"
-        "remove got no answer, run it again, and exit 3 then means it was\n"
-        "already removed.",
+        "no item has the id, also when an earlier remove already deleted it.\n\n"
+        "Sends an Idempotency-Key like the other mutations: a retry with the\n"
+        "same key replays the first 204 instead of a second (harmless) delete.\n"
+        "Removing is safe to repeat even without one: if a remove got no\n"
+        "answer, run it again, and exit 3 then means it was already removed.",
         examples=[
             "kyokki shopping remove 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
             "kyokki shopping remove 5c1e2d3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f --json",
         ],
         handler=commands.shopping_remove,
         exit_codes=shopping_exit_codes(
-            not_found=f"{item_missing}, also when an earlier remove already deleted it"
+            not_found=f"{item_missing}, also when an earlier remove already deleted it",
+            conflict=reused_key,
         ),
     )
     remove.add_argument(
@@ -720,6 +755,7 @@ def add_shopping_commands(top: "argparse._SubParsersAction[Parser]") -> None:
         metavar="ID",
         help="the item's id (a UUID), from shopping list",
     )
+    add_idempotency_option(remove)
     add_connection_options(remove, top=False)
 
     generate = leaf(

@@ -67,12 +67,23 @@ kyokki product name add 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01 "ARLA BARISTA"
 
 ## 6. "Throw away everything expired."
 
-Not available through the CLI yet: the agent-facing API has `stock list`, `stock add`
-and `stock consume`, but no bulk discard-by-expiry endpoint (the iPad's discard lives at
-`/api/inventory/discard`, which takes specific item ids and is not exposed to agents).
-Tell the user this needs a follow-up on the backend before it can be automated, and
-offer `kyokki stock list --expiring 0` so they can see what is already expired in the
-meantime.
+Dry-run it first and show the user what would be discarded:
+
+```
+kyokki stock discard --expired --dry-run
+```
+
+Then, once they confirm, discard it for real:
+
+```
+kyokki stock discard --expired
+```
+
+This is the iPad's expired shelf, in one tap: it discards every active item whose expiry
+date is before today, by name rather than by item id. Each discard is logged
+(`consumption_log`), can be undone with the general undo, and shows up on the Gone
+screen. Narrow it to one place with `--location main_fridge|freezer|pantry` if that is
+all the user asked about.
 
 ## 7. "What can I cook tonight with what's in the fridge?"
 

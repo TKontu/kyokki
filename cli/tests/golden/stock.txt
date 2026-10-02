@@ -10,11 +10,13 @@ commands:
     list      stock per product, soonest to expire first
     add       add stock of a product, by name or id
     consume   use up an amount of a product, first to expire first
+    discard   throw away everything past its expiry date
 
 examples:
   kyokki stock list --location freezer
   kyokki stock add milk 1 l --category dairy
   kyokki stock consume milk 2 dl
+  kyokki stock discard --expired --dry-run
 
 exit codes:
   0 ok

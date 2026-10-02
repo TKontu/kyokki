@@ -1,0 +1,49 @@
+usage: kyokki stock discard [-h] --expired
+                            [--location {main_fridge,freezer,pantry}]
+                            [--dry-run] [--idempotency-key KEY] [--url URL]
+                            [--token TOKEN] [--json] [--verbose]
+
+Discard every active item whose expiry date is before today: the
+iPad's expired shelf, in one tap, by name rather than by item id.
+--expired is the only reason there is today, so it is required (a
+future reason would be its own flag). --dry-run lists what would be
+discarded and changes nothing; without it, the items are discarded for
+real, logged as a discard in consumption_log, can be undone by the
+general undo, and show up on the Gone screen.
+
+options:
+  -h, --help            show this help message and exit
+  --expired             the only reason to discard there is today; required
+  --location {main_fridge,freezer,pantry}
+                        only this location
+  --dry-run             show what would be discarded; change nothing (no
+                        Idempotency-Key)
+  --idempotency-key KEY
+                        retry key (at most 255 characters); default: SHA-256
+                        of this command line and the UTC minute, so a retry
+                        within the minute is safe
+
+connection and output:
+  --url URL             Kyokki base URL, e.g. http://kyokki.lan:17300
+                        (default: $KYOKKI_URL)
+  --token TOKEN         API token, sent as a Bearer header and never printed
+                        (default: $KYOKKI_TOKEN)
+  --json                print JSON: the API's answer, or an error's detail
+                        object (the default when stdout is not a terminal)
+  --verbose             log each request and its status to stderr
+
+examples:
+  kyokki stock discard --expired --dry-run
+  kyokki stock discard --expired
+  kyokki stock discard --expired --location pantry
+
+exit codes:
+  0 ok
+  1 error: cannot reach the server, a 5xx, an answer that is not the expected
+    JSON, or a change sent that got no answer (it may have been applied)
+  2 usage: bad arguments, or the API rejected the request (400 invalid, 422)
+  3 not found: nothing matches the name, or no product has the id
+  4 ambiguous name: the candidates are printed on stdout
+  5 insufficient stock
+  6 conflict: the name belongs to another product, or a reused Idempotency-Key
+  7 auth: missing or unknown token (401), or a read token on a write (403)

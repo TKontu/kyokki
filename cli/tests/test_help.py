@@ -53,7 +53,8 @@ def test_help_documents_invalid_and_uses_the_lan_port(name: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["stock-list", "stock-add", "stock-consume", "product-name-add"]
+    "name",
+    ["stock-list", "stock-add", "stock-consume", "stock-discard", "product-name-add"],
 )
 def test_help_describes_units_and_locations(name: str) -> None:
     text = render(HELP_PAGES[name])
@@ -76,6 +77,7 @@ def test_shopping_add_help_describes_units_and_priorities() -> None:
         "shopping-add",
         "shopping-done",
         "shopping-generate",
+        "shopping-remove",
     ],
 )
 def test_shopping_mutation_help_offers_the_idempotency_key(name: str) -> None:
@@ -84,8 +86,7 @@ def test_shopping_mutation_help_offers_the_idempotency_key(name: str) -> None:
 
 def test_shopping_remove_help_is_honest_about_retries() -> None:
     text = " ".join(render(HELP_PAGES["shopping-remove"]).split())
-    assert "--idempotency-key" not in text
-    assert "ignores Idempotency-Key" in text
+    assert "replays the first 204" in text
     assert "already removed" in text and "exit 3" in text
 
 
@@ -133,7 +134,7 @@ def test_shopping_exit_codes_speak_of_shopping(name: str) -> None:
         ("shopping-export", [3, 4, 5, 6]),
         ("shopping-generate", [3, 4, 5]),
         ("shopping-done", [4, 5]),
-        ("shopping-remove", [4, 5, 6]),
+        ("shopping-remove", [4, 5]),
         ("shopping-add", [4, 5]),
     ],
 )
