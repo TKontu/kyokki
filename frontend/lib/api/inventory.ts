@@ -16,8 +16,9 @@ import type {
   InventoryListParams,
   QuickAddRequest,
   Unit,
+  UndoPreview,
 } from '@/types/inventory'
-import type { UndoPreview, UndoResponse } from '@/types/consumption'
+import type { UndoResponse } from '@/types/consumption'
 import type { ItemSource } from '@/types/receipt'
 import type { Vocabulary } from '@/types/vocabulary'
 

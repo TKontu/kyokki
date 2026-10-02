@@ -4,7 +4,7 @@
  */
 
 import { describeUndo } from '../undo'
-import type { UndoPreview, UndoStep } from '@/types/consumption'
+import type { UndoPreview, UndoStep } from '@/types/inventory'
 
 const step = (overrides: Partial<UndoStep> = {}): UndoStep => ({
   inventory_item_id: 'i1',
@@ -12,6 +12,7 @@ const step = (overrides: Partial<UndoStep> = {}): UndoStep => ({
   unit: 'pcs',
   action: 'use_partial',
   quantity_consumed: 1,
+  direction: null,
   ...overrides,
 })
 
@@ -31,6 +32,13 @@ describe('describeUndo', () => {
     [step({ action: 'restore' }), 'Put back · Apples'],
     // A grey "used today" tile tapped back is logged as a correction (Q22)
     [step({ action: 'correct', quantity_consumed: 6 }), 'Put back · Apples'],
+    // An upward correction reads the same as the iPad's own one
+    [step({ action: 'correct', quantity_consumed: 6, direction: 'up' }), 'Put back · Apples'],
+    // A downward correction, only reachable through the item sheet or the API, says so
+    [
+      step({ action: 'correct', quantity_consumed: 2, direction: 'down' }),
+      'Corrected down · Apples',
+    ],
   ])('names one change by what happened to the food', (only, text) => {
     expect(describeUndo(preview(only))).toBe(text)
   })
