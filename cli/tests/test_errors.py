@@ -281,7 +281,7 @@ def test_a_read_timeout_on_a_read_is_connection(api: FakeApi, run: Runner) -> No
 # --- string details, unknown ids, bad URLs, usage errors in JSON ---------------
 
 
-@pytest.mark.parametrize(("status", "exit_code"), [(400, 2), (409, 6)])
+@pytest.mark.parametrize(("status", "exit_code"), [(400, 2), (404, 3), (409, 6)])
 def test_a_string_detail_maps_like_the_object_form(
     api: FakeApi, run: Runner, status: int, exit_code: int
 ) -> None:

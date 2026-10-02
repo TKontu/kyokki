@@ -533,9 +533,13 @@ class TestShoppingIntegrityErrors:
         assert "Key (" not in detail["message"]
         assert "00000000-0000-0000-0000-000000000000" in detail["message"]
 
-    async def test_updating_onto_an_unknown_product_answers_400(
+    async def test_updating_onto_an_unknown_product_is_a_coded_not_found(
         self, client: AsyncClient, test_db: AsyncSession
     ):
+        """F2 fix-pass follow-up to test_unknown_product_on_create_is_a_coded_not_found:
+        an unknown `product_master_id` on update used to stay `handle_integrity_errors`'
+        plain-string 400, unlike create's coded 404; it gets the same `AgentError`
+        `not_found` now, via the same `_unknown_product_as_not_found` helper."""
         created = await client.post(
             "/api/shopping/",
             json={
@@ -553,7 +557,10 @@ class TestShoppingIntegrityErrors:
             json={"product_master_id": "00000000-0000-0000-0000-000000000000"},
         )
 
-        assert response.status_code == 400
+        assert response.status_code == 404
+        detail = response.json()["detail"]
+        assert detail["code"] == "not_found"
+        assert "00000000-0000-0000-0000-000000000000" in detail["message"]
 
 
 BANANAS = {

@@ -236,8 +236,26 @@ def test_receipt_status_unknown_id_is_not_found(api: FakeApi, run: Runner) -> No
     assert result.code == 3
 
 
-def test_receipt_status_other_404_stays_an_error(api: FakeApi, run: Runner) -> None:
+def test_receipt_status_a_plain_string_404_is_also_not_found(
+    api: FakeApi, run: Runner
+) -> None:
+    """F1: a 404 with a plain-string `detail` is `not_found` (exit 3) globally now
+    (`STRING_DETAIL_EXIT` in `api.py`), whether or not its text matches the exact
+    "Receipt '...' not found" shape `_receipt_not_found` recognises."""
     api.error("GET", RECEIPT_GET_PATH, 404, "Not Found")
+    result = run("receipt", "status", RECEIPT_ID)
+    assert result.code == 3
+    assert result.json() == {"code": "http_404", "message": "Not Found"}
+
+
+def test_receipt_status_a_non_json_404_stays_an_error(
+    api: FakeApi, run: Runner
+) -> None:
+    """A 404 that is not even JSON (a wrong route or a proxy's page) is not the API's
+    own answer, so it stays the generic error (exit 1), not `not_found`."""
+    api.routes[("GET", RECEIPT_GET_PATH)] = httpx.Response(
+        404, text="<html>404 Not Found</html>"
+    )
     result = run("receipt", "status", RECEIPT_ID)
     assert result.code == 1
 

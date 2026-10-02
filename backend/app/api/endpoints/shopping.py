@@ -283,7 +283,7 @@ async def update_shopping_item(
 
     Can update name, quantity, unit, priority, or purchase status.
 
-    Errors: 404 `not_found` (no item has this id).
+    Errors: 404 `not_found` (no item has this id, or no product has `product_master_id`).
     """
     logger.info("update_shopping_item", extra={"item_id": str(item_id)})
 
@@ -291,8 +291,16 @@ async def update_shopping_item(
     if not item:
         raise AgentError("not_found", f"Shopping list item {item_id} not found")
 
-    async with handle_integrity_errors():
-        updated_item = await shopping_list_item.update(db, db_obj=item, obj_in=item_in)
+    try:
+        async with handle_integrity_errors():
+            updated_item = await shopping_list_item.update(
+                db, db_obj=item, obj_in=item_in
+            )
+    except HTTPException as exc:
+        mapped = _unknown_product_as_not_found(exc, item_in.product_master_id)
+        if mapped is exc:
+            raise
+        raise mapped from exc
 
     # Broadcast update
     await broadcast_shopping_list_update(

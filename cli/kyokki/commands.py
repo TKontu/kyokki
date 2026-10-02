@@ -495,9 +495,21 @@ def shopping_remove(ctx: Context) -> Outcome:
     # An Idempotency-Key like the other mutations: a retry with the same key replays
     # the first 204 instead of a second (harmless) delete. Removing is safe to repeat
     # even without one: a repeat of one that already applied is just exit 3.
-    answer = ctx.api.request(
-        "DELETE", f"{SHOPPING_PATH}{a.item_id}", idempotency_key=ctx.idempotency_key
-    )
+    try:
+        answer = ctx.api.request(
+            "DELETE",
+            f"{SHOPPING_PATH}{a.item_id}",
+            idempotency_key=ctx.idempotency_key,
+        )
+    except CliError as exc:
+        # Nothing was sent (a connect error/timeout): a read timeout instead becomes
+        # unknown_outcome, which already carries the generic retry hint.
+        if exc.code == "connection" and isinstance(exc.detail, dict):
+            exc.detail["hint"] = (
+                "rerun the same command: it sends the same Idempotency-Key, so a "
+                "retry is safe, and exit 3 just means the item is already removed"
+            )
+        raise
     document = {"id": a.item_id, "removed": True}
 
     def human() -> str:

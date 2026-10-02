@@ -444,6 +444,22 @@ def test_remove_needs_a_uuid(api: FakeApi, run: Runner) -> None:
     assert api.requests == []
 
 
+def test_remove_a_connection_error_says_a_retry_is_safe(
+    api: FakeApi, run: Runner
+) -> None:
+    """F3: nothing was sent (api.down simulates a ConnectError, like a real
+    ConnectTimeout), so the generic unknown_outcome retry hint never fires; remove gets
+    its own hint instead, saying a rerun is safe because it sends the same
+    Idempotency-Key (derived from the same command line within the same minute)."""
+    api.down = True
+    result = run("shopping", "remove", ITEM_ID)
+    assert result.code == 1
+    detail = result.json()
+    assert detail["code"] == "connection"
+    assert "Idempotency-Key" in detail["hint"]
+    assert "exit 3" in detail["hint"]
+
+
 # --- 404 on an item id --------------------------------------------------------------
 
 
@@ -483,13 +499,12 @@ def test_an_unknown_item_is_not_found(
     "answer",
     [
         httpx.Response(404, json={"detail": "Not Found"}),
-        httpx.Response(404, text="<html>404 Not Found</html>"),
         httpx.Response(404, json={"detail": "Product 42 not found"}),
         httpx.Response(404, json={"detail": f"Shopping list item {ITEM_ID} not found"}),
     ],
-    ids=["route", "proxy-html", "other-string", "plain-not-found"],
+    ids=["route", "other-string", "plain-not-found"],
 )
-def test_another_404_stays_1(
+def test_a_plain_string_404_is_also_not_found(
     api: FakeApi,
     run: Runner,
     method: str,
@@ -497,10 +512,30 @@ def test_another_404_stays_1(
     argv: list[str],
     answer: httpx.Response,
 ) -> None:
-    """Dropped the text match (AG3 follow-up): a plain-string 404, even one shaped
-    exactly like the old "Shopping list item ... not found", is no longer special-cased
-    to not_found — only a coded detail is (test_an_unknown_item_is_not_found)."""
+    """F1: dropped the text match (AG3 follow-up), but any plain-string 404 is still
+    `not_found` (exit 3) globally now (`STRING_DETAIL_EXIT` in `api.py`) - whatever its
+    exact text, including one shaped exactly like the old "Shopping list item ... not
+    found" - with a generic `http_404` code since nothing recognised its shape. Only a
+    coded detail gets the nicer `not_found` code (test_an_unknown_item_is_not_found)."""
     api.routes[(method, path)] = answer
+    result = run(*argv)
+    assert result.code == 3
+    assert result.json()["code"] == "http_404"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "argv"),
+    [
+        ("POST", PURCHASE_PATH, ["shopping", "done", ITEM_ID]),
+        ("DELETE", ITEM_PATH, ["shopping", "remove", ITEM_ID]),
+    ],
+)
+def test_a_non_json_404_stays_1(
+    api: FakeApi, run: Runner, method: str, path: str, argv: list[str]
+) -> None:
+    """A 404 that is not even JSON (a wrong route, a proxy's page) is not the API's own
+    answer, so it stays the generic error (exit 1), not `not_found`."""
+    api.routes[(method, path)] = httpx.Response(404, text="<html>404 Not Found</html>")
     result = run(*argv)
     assert result.code == 1
     assert result.json()["code"] == "http_404"
