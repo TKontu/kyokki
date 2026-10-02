@@ -1,0 +1,21 @@
+{
+ "store_chain": "lidl",
+ "purchase_date": null,
+ "total": 46.75,
+ "lines": [
+  {"name": "OdlygoodBarista kauraj", "quantity": 2, "weight_kg": null},
+  {"name": "Valio voi normaalisuolai", "quantity": 1, "weight_kg": null},
+  {"name": "Baresa Vihrea ollivi pap", "quantity": 1, "weight_kg": null},
+  {"name": "Kivikylän Palvarin Lihap", "quantity": 1, "weight_kg": null},
+  {"name": "Kartanon kalkkunaleike", "quantity": 1, "weight_kg": null},
+  {"name": "Baresa Pesto genovese", "quantity": 1, "weight_kg": null},
+  {"name": "Kananestari kanan jauhel", "quantity": 1, "weight_kg": null},
+  {"name": "Lovilio mozzarella", "quantity": 1, "weight_kg": null},
+  {"name": "FinCarré taloussuklaa", "quantity": 1, "weight_kg": null},
+  {"name": "Alesto Selection Cashewp", "quantity": 1, "weight_kg": null},
+  {"name": "Combino Farfalle", "quantity": 1, "weight_kg": null},
+  {"name": "Pikkutom. viljelij. erik", "quantity": 1, "weight_kg": null},
+  {"name": "OululainenReissum.TosiOn", "quantity": 1, "weight_kg": null},
+  {"name": "Vaasan Ruispalat Ohut He", "quantity": 1, "weight_kg": null}
+ ]
+}

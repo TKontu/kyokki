@@ -610,6 +610,7 @@ class TestReceiptItems:
         assert oat == {
             "index": 0,
             "name": "BARISTA KAURAJUOMA",
+            "price": None,
             "generic_name": "Oat drink",
             "quantity": 3.0,
             "unit": "pcs",
@@ -1128,3 +1129,80 @@ class TestKCitymarketReview:
 
         assert body["completeness"] is None
         assert body["items"][0]["recovered"] is None
+
+
+class TestConfirmMarksStockedLines:
+    """Confirm marks each line it stocks, so a later hard-deleted item's line can still
+    read 'removed' rather than 'skipped' on the audit view (follow-up from Q26/Q28,
+    round 2026-09-30-1). See `receipt_audit.record_stocked_lines`.
+    """
+
+    async def test_confirming_by_index_marks_the_line(
+        self, client: AsyncClient, test_db: AsyncSession, sample_product
+    ) -> None:
+        from sqlalchemy import select
+
+        from app.models.receipt import Receipt
+
+        files = {"file": ("receipt.jpg", BytesIO(b"img"), "image/jpeg")}
+        receipt_id = (await client.post("/api/receipts/scan", files=files)).json()["id"]
+
+        receipt = (
+            await test_db.execute(select(Receipt).where(Receipt.id == receipt_id))
+        ).scalar_one()
+        receipt.processing_status = "completed"
+        receipt.ocr_structured = {"lines": [{"name": "VALIO MAITO 1L", "price": 1.49}]}
+        await test_db.commit()
+
+        response = await client.post(
+            f"/api/receipts/{receipt_id}/confirm",
+            json={
+                "items": [
+                    {
+                        "index": 0,
+                        "product_id": str(sample_product.id),
+                        "quantity": 1,
+                        "unit": "pcs",
+                        "purchase_date": "2024-01-06",
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200, response.text
+
+        body = (await client.get(f"/api/receipts/{receipt_id}")).json()
+        assert body["ocr_structured"]["lines"][0]["stocked_at_confirm"] is True
+
+    async def test_a_product_id_only_item_marks_nothing(
+        self, client: AsyncClient, test_db: AsyncSession, sample_product
+    ) -> None:
+        """No `index` on the item (the shape `test_receipt_confirm.py` already covers):
+        nothing to mark, and the confirm must not fail over it."""
+        files = {"file": ("receipt.jpg", BytesIO(b"img"), "image/jpeg")}
+        receipt_id = (await client.post("/api/receipts/scan", files=files)).json()["id"]
+
+        from sqlalchemy import select
+
+        from app.models.receipt import Receipt
+
+        receipt = (
+            await test_db.execute(select(Receipt).where(Receipt.id == receipt_id))
+        ).scalar_one()
+        receipt.processing_status = "completed"
+        receipt.ocr_structured = {"lines": []}
+        await test_db.commit()
+
+        response = await client.post(
+            f"/api/receipts/{receipt_id}/confirm",
+            json={
+                "items": [
+                    {
+                        "product_id": str(sample_product.id),
+                        "quantity": 1,
+                        "unit": "pcs",
+                        "purchase_date": "2024-01-06",
+                    }
+                ]
+            },
+        )
+        assert response.status_code == 200, response.text

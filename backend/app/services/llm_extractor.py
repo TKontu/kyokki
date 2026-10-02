@@ -84,10 +84,26 @@ NON_FOOD = "household"
 # run reproduced 6 of 15, and the line accounting is what makes a loss visible and recovers
 # it. H17 measured the block's category benefit, so it stays, reworded so it cannot read as
 # the list of what to extract; scripts/measure_extraction.py compares.
+#
+# "Equivalent" read too loosely (Q37): a Lidl receipt with Dip, Spread, Chicken fillet,
+# Chips and Ham already in the catalog had cashew nuts, butter, pesto, baking chocolate and
+# turkey cold cuts all snap to one of those five, across kinds (nuts -> Dip, butter ->
+# Spread). The reword below names the same test g already uses - would a home cook put them
+# on one shopping-list line? - and says plainly that a listed name of a different food is
+# wrong even when the list has nothing closer, so the model is told to write its own g
+# instead rather than reach for the nearest listed word.
+#
+# Kept short on purpose: a longer first draft (explaining the test twice, with its own
+# "sharing a shelf/flavour" examples) measured 0-1 of 15 categories on the K-Citymarket
+# fixture in half its runs, against a stable 12 of 15 before and after on the rest -
+# H17/Q7's fragility (a change aimed at one field silencing another) applies to the
+# catalog block's own wording, not only to adding the block at all.
 CATALOG_BLOCK = (
     "\n- Extract every product line on the receipt, whether or not it is in this list."
-    " The list only tells you which name to use for an equivalent product: when one is"
-    " listed here, use its name exactly for g. Known products: {names}."
+    " The list only tells you which name to use for the very same product - would a"
+    " home cook put them on one shopping-list line? A listed name for a different kind"
+    " of food is wrong even when the list offers nothing closer; write your own g"
+    " instead. Known products: {names}."
 )
 
 _INSTRUCTIONS = """Extract every purchased product from this receipt. It may come from any shop, country and language.
