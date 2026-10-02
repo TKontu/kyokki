@@ -276,6 +276,72 @@ class TestDetailLinesAfterASkippedLine:
         assert _profile_names(text) == [("OMENA", 1, None)]
 
 
+class TestH27SkippedLineResetsOnKGroupText:
+    """H27 task 1: a skipped line resets the current product so a following count line
+    never lands on the product above it. Already fixed by PR #131 (the reset is
+    unconditional); this pins the K-group-shaped example from the backlog item so a
+    regression is caught here, in the parser's own test module."""
+
+    def test_a_deposit_count_line_does_not_give_the_beer_its_quantity(self):
+        text = (
+            "Olvi III-olut 6-pack 6,99\n"
+            "PANTTI 0,90\n"
+            "6 KPL 0,15 €/KPL\n"
+            "Banaani 0,89\n"
+            "0,412 KG 2,15 €/KG"
+        )
+        assert [
+            (line.name, line.quantity, line.weight_kg)
+            for line in parse_receipt_text(text).lines
+        ] == [
+            ("Olvi III-olut 6-pack", 1, None),
+            ("Banaani", 1, 0.412),
+        ]
+
+
+class TestH27WeightDecimals:
+    """H27 task 2: a weight line needs exactly three decimals today, so `0,85 kg` and
+    `1,2 kg` are missed. Accept one to three decimals, with `,` or `.`."""
+
+    @pytest.mark.parametrize(
+        "weight_line,expected_kg",
+        [
+            ("0,85 kg", 0.85),
+            ("1,2 kg", 1.2),
+            ("0,345 kg", 0.345),
+            ("0.85 kg", 0.85),
+        ],
+    )
+    def test_one_to_three_decimal_weights_land_on_the_product_above(
+        self, weight_line, expected_kg
+    ):
+        text = f"OMENA 2,10\n{weight_line}"
+        (line,) = parse_receipt_text(text).lines
+        assert line.weight_kg == expected_kg
+
+
+class TestH27SaastoIsAnchoredToTheLoyaltyForms:
+    """H27 task 3: `.*säästö` skips any line containing the word, so a real product such
+    as `OMENA SÄÄSTÖPAKKAUS` is dropped. Anchor the skip to the loyalty/discount forms
+    (line-start, or a standalone `-säästö...` discount entry) instead."""
+
+    def test_a_product_named_with_saasto_is_kept(self):
+        result = parse_receipt_text("OMENA SÄÄSTÖPAKKAUS 4,99")
+        assert [line.name for line in result.lines] == ["OMENA SÄÄSTÖPAKKAUS"]
+
+    def test_the_real_saving_lines_are_still_skipped(self):
+        text = (
+            "JUUSTO 4,30\n"
+            "Lidl Plus -säästösi             -0,37\n"
+            "Säästöt                          0,94\n"
+            "LEIPÄ 2,10"
+        )
+        assert [line.name for line in parse_receipt_text(text).lines] == [
+            "JUUSTO",
+            "LEIPÄ",
+        ]
+
+
 class TestBlocksCiteTheirLines:
     """Q27: the `fi` profile reports which numbered lines each product came from."""
 
