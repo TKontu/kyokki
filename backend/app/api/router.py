@@ -4,6 +4,7 @@ from .endpoints import (
     categories,
     consumption_log,
     events,
+    ha,
     health,
     inventory,
     products,
@@ -30,3 +31,4 @@ api_router.include_router(
 api_router.include_router(scanner.router, prefix="/scanner", tags=["scanner"])
 api_router.include_router(websockets.router, tags=["websockets"])
 api_router.include_router(events.router, tags=["events"])
+api_router.include_router(ha.router, prefix="/ha", tags=["ha"])
