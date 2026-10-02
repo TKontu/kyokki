@@ -94,7 +94,7 @@ def icon_subject(name: str, hint: str | None = None) -> str:
     """What to ask ComfyUI to draw: the generic name, the operator's brief, the cook's hint.
 
     `app.services.icon_briefs` is the only source of the operator's own words for a gap
-    product ("a small can or squeeze-out tube" for Tomato puree); most gap products have none
+    product ("a small can or squeeze out tube" for Tomato puree); most gap products have none
     and generate from their name alone. A cook's Regenerate hint, if given, is appended last.
     """
     parts = [name]
