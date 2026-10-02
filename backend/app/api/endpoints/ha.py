@@ -127,10 +127,12 @@ async def ha_shopping_add(
 ) -> Any:
     """Add an item to the shopping list by name, for a voice assistant.
 
-    `amount`/`unit` default to 1 pcs. Errors: 409 `conflict` (Idempotency-Key reused
-    with another body).
+    `amount`/`unit` default to 1 pcs, `priority` to normal. Errors: 409 `conflict`
+    (Idempotency-Key reused with another body).
     """
-    item_in = ha_service.shopping_add_item(body.name, body.amount, body.unit)
+    item_in = ha_service.shopping_add_item(
+        body.name, body.amount, body.unit, body.priority
+    )
     claim = claim_request(item_in, idempotency_key, SHOPPING_ADD_ROUTE)
     async with idempotency.held(db, claim):
         if (stored := await replayed(db, claim)) is not None:

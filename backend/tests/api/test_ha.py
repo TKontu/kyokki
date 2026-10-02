@@ -143,7 +143,8 @@ class TestStatus:
         }
         assert body["total_items"] == 2
         assert body["expired"] == 1
-        assert body["expiring_within_3_days"] == 2
+        # F1: the already-expired item does not also count as "expiring".
+        assert body["expiring_within_3_days"] == 1
         assert body["by_location"] == {"main_fridge": 2}
 
 
@@ -166,11 +167,28 @@ class TestExpiring:
             "expiry_date",
             "days_until_expiry",
             "quantity_percent",
+            "expired",
         }
         assert item["name"] == "Milk"
         assert item["category"] == "dairy"
         assert item["days_until_expiry"] == 1
         assert item["quantity_percent"] == 50
+        assert item["expired"] is False
+
+    async def test_expired_flag_per_item(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        milk = await _product(db, "Milk")
+        await _item(db, milk, "1", expires_in=-2)
+        await _item(db, milk, "1", expires_in=1)
+
+        response = await client.get("/api/ha/expiring?days=3")
+
+        items = {
+            item["days_until_expiry"]: item["expired"]
+            for item in response.json()["items"]
+        }
+        assert items == {-2: True, 1: False}
 
     async def test_days_query_param(
         self, client: AsyncClient, db: AsyncSession
@@ -357,6 +375,16 @@ class TestShoppingAdd:
         assert body["is_purchased"] is False
         shopping_broadcast.assert_awaited_once()
         assert shopping_broadcast.await_args.kwargs["action"] == "created"
+
+    async def test_f3_explicit_priority(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        response = await client.post(
+            "/api/ha/shopping/add", json={"name": "Milk", "priority": "urgent"}
+        )
+
+        assert response.status_code == 201, response.text
+        assert response.json()["priority"] == "urgent"
 
     async def test_amount_and_unit(self, client: AsyncClient, db: AsyncSession) -> None:
         response = await client.post(

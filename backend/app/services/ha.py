@@ -51,7 +51,14 @@ def _percent(part: Decimal, whole: Decimal) -> int:
 
 
 async def status(db: AsyncSession) -> HaStatusResponse:
-    """Inventory counts for HA's REST sensor platform (one call, several sensors)."""
+    """Inventory counts for HA's REST sensor platform (one call, several sensors).
+
+    F1: `expiring_within_3_days` and `expired` are disjoint - an already-expired item is
+    `expired` only, not also counted as "expiring". `expiring_soon` (`expiring_days=3`)
+    has no lower bound, so it is every expired item plus every item due in the next 3
+    days; subtracting the (already fetched) expired count leaves just the latter, without
+    restating the crud layer's date arithmetic.
+    """
     active = await crud_inventory.get_inventory_items(db)
     expiring_soon = await crud_inventory.get_inventory_items(
         db, expiring_days=EXPIRING_WITHIN_DAYS
@@ -60,7 +67,7 @@ async def status(db: AsyncSession) -> HaStatusResponse:
     by_location: Counter[str] = Counter(str(item.location) for item in active)
     return HaStatusResponse(
         total_items=len(active),
-        expiring_within_3_days=len(expiring_soon),
+        expiring_within_3_days=len(expiring_soon) - len(expired),
         expired=len(expired),
         by_location=dict(by_location),
         last_updated=datetime.now(UTC),
@@ -70,7 +77,11 @@ async def status(db: AsyncSession) -> HaStatusResponse:
 async def expiring(
     db: AsyncSession, *, days: int = 3, limit: int = 10
 ) -> HaExpiringResponse:
-    """Items expiring within `days`, soonest first, truncated to `limit`."""
+    """Items expiring within `days`, soonest first, truncated to `limit`.
+
+    F1: each item carries `expired` (the same `expiry_date < today` rule `status` uses),
+    so a dashboard or voice intent can tell an already-expired item from one still coming.
+    """
     # Any: the models declare untyped `Column`s, which mypy reads as Column[...], not values.
     items: list[Any] = await crud_inventory.get_inventory_items(db, expiring_days=days)
     today = date.today()
@@ -84,6 +95,7 @@ async def expiring(
             quantity_percent=_percent(
                 Decimal(item.current_quantity), Decimal(item.initial_quantity)
             ),
+            expired=item.expiry_date < today,
         )
         for item in items[:limit]
     ]
@@ -158,13 +170,18 @@ async def consume_by_name(
     return response, result
 
 
-def shopping_add_item(name: str, amount: Decimal, unit: str) -> ShoppingListItemCreate:
+def shopping_add_item(
+    name: str,
+    amount: Decimal,
+    unit: str,
+    priority: ShoppingPriority = ShoppingPriority.NORMAL,
+) -> ShoppingListItemCreate:
     """What `POST /api/ha/shopping/add` puts on the list: a free-text line by name."""
     return ShoppingListItemCreate(
         product_master_id=None,
         name=name,
         quantity=amount,
         unit=unit,
-        priority=ShoppingPriority.NORMAL,
+        priority=priority,
         source=ShoppingSource.MANUAL,
     )

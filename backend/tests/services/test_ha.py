@@ -107,7 +107,8 @@ class TestStatus:
 
         assert result.total_items == 3
         assert result.expired == 1
-        assert result.expiring_within_3_days == 2  # the 1-day item and the expired one
+        # F1: the already-expired item is in `expired`, not also in the 3-day window.
+        assert result.expiring_within_3_days == 1  # only the 1-day item
         assert result.by_location == {
             "main_fridge": 1,
             "freezer": 1,
@@ -115,6 +116,29 @@ class TestStatus:
         }
         assert result.last_updated is not None
         del expired_item
+
+    async def test_expired_and_expiring_are_disjoint(self, db: AsyncSession) -> None:
+        """F1: an item expired 2 days ago counts in `expired` only; one expiring
+        tomorrow counts in `expiring_within_3_days` only."""
+        milk = await _product(db, "Milk")
+        expired_item = await _item(db, milk, "1", expires_in=-2)
+        soon_item = await _item(db, milk, "1", expires_in=1)
+
+        result = await ha.status(db)
+
+        assert result.expired == 1
+        assert result.expiring_within_3_days == 1
+        del expired_item, soon_item
+
+    async def test_due_today_counts_as_expiring_not_expired(
+        self, db: AsyncSession
+    ) -> None:
+        milk = await _product(db, "Milk")
+        await _item(db, milk, "1", expires_in=0)
+
+        result = await ha.status(db)
+
+        assert (result.expired, result.expiring_within_3_days) == (0, 1)
 
     async def test_empty_kitchen(self, db: AsyncSession) -> None:
         result = await ha.status(db)
@@ -141,6 +165,7 @@ class TestExpiring:
         assert first.expiry_date == TODAY + timedelta(days=1)
         assert first.days_until_expiry == 1
         assert first.quantity_percent == 50
+        assert first.expired is False
 
     async def test_days_until_expiry_is_negative_once_past(
         self, db: AsyncSession
@@ -152,6 +177,15 @@ class TestExpiring:
 
         assert result.count == 1
         assert result.items[0].days_until_expiry == -2
+        assert result.items[0].expired is True
+
+    async def test_due_today_is_not_expired(self, db: AsyncSession) -> None:
+        milk = await _product(db, "Milk")
+        await _item(db, milk, "1", expires_in=0)
+
+        result = await ha.expiring(db, days=0)
+
+        assert result.items[0].expired is False
 
     async def test_limit_truncates(self, db: AsyncSession) -> None:
         milk = await _product(db, "Milk")
@@ -276,3 +310,7 @@ class TestShoppingAddItem:
         # ShoppingListItemCreate canonicalizes on write (MVP-U1): "l" -> "dl", x10.
         item_in = ha.shopping_add_item("Milk", Decimal("2"), "l")
         assert (item_in.quantity, item_in.unit) == (Decimal("20"), "dl")
+
+    def test_f3_an_explicit_priority(self) -> None:
+        item_in = ha.shopping_add_item("Milk", Decimal("1"), "pcs", "urgent")
+        assert item_in.priority == "urgent"

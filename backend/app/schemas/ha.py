@@ -11,6 +11,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas.shopping_list_item import ShoppingPriority
 from app.schemas.types import JsonDecimal, canonicalize_units
 from app.services.units import canonical_factor
 
@@ -35,6 +36,9 @@ class HaExpiringItem(BaseModel):
     )
     quantity_percent: int = Field(
         ..., description="current_quantity / initial_quantity"
+    )
+    expired: bool = Field(
+        ..., description="The same rule as `status.expired`: expiry_date < today"
     )
 
 
@@ -103,6 +107,9 @@ class HaShoppingAddRequest(BaseModel):
     name: str = Field(..., min_length=1)
     amount: JsonDecimal = Field(Decimal(1), gt=0)
     unit: str = Field("pcs")
+    priority: ShoppingPriority = Field(
+        ShoppingPriority.NORMAL, description="urgent, normal or low"
+    )
 
     @field_validator("name")
     @classmethod
