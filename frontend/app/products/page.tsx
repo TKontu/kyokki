@@ -20,7 +20,8 @@
  * Same flow as the guesses: a dry run first, then the cook saves what it proposed.
  */
 
-import React, { useMemo, useState } from 'react'
+import React, { Suspense, useMemo, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { ProductEditSheet } from '@/components/products/ProductEditSheet'
 import Badge from '@/components/ui/Badge'
 import Button from '@/components/ui/Button'
@@ -304,12 +305,38 @@ function EmojiReviewList({ products }: { products: ProductMaster[] }) {
 }
 
 export default function ProductsPage() {
-  const [term, setTerm] = useState('')
+  // `useSearchParams` (the `?q=` filter, below) opts the page out of static rendering unless
+  // it sits under its own Suspense boundary - Next.js's own requirement, not a loading state
+  // this page ever actually shows (the search params are available on the client at once).
+  return (
+    <Suspense fallback={null}>
+      <ProductsPageContent />
+    </Suspense>
+  )
+}
+
+function ProductsPageContent() {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  // The audit view's item links land here with `?q=<name>` (H58 friction, 2026-10-01): the
+  // page reads it as its initial filter, and the URL follows what the cook types - replaced,
+  // not pushed, so typing does not fill the browser's back history with one entry per letter.
+  const [term, setTerm] = useState(() => searchParams.get('q') ?? '')
   const [editing, setEditing] = useState<ProductMaster | null>(null)
   const [proposal, setProposal] = useState<CatalogEstimateResponse | null>(null)
   const [scope, setScope] = useState<EstimateScope>('guesses')
   const [view, setView] = useState<View>('category')
   const search = useDebouncedValue(term, SEARCH_DEBOUNCE_MS)
+
+  const setTermAndUrl = (value: string) => {
+    setTerm(value)
+    const params = new URLSearchParams(searchParams.toString())
+    if (value) params.set('q', value)
+    else params.delete('q')
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname)
+  }
   const { data: products, isLoading, isError } = useProductList({ search: search || undefined })
   const { data: categories } = useCategories()
   const estimate = useEstimateCatalog()
@@ -392,7 +419,7 @@ export default function ProductsPage() {
             aria-label="Search products"
             placeholder="Search"
             value={term}
-            onChange={(event) => setTerm(event.target.value)}
+            onChange={(event) => setTermAndUrl(event.target.value)}
             className={
               'min-h-touch flex-1 rounded-ui border border-ui-border px-3 py-2 ' +
               'dark:border-ui-dark-border dark:bg-ui-dark-bg-secondary ' +

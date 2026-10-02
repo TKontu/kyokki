@@ -3,11 +3,13 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    BigInteger,
     Column,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -37,12 +39,18 @@ class ShelfLifeSource(StrEnum):
 
 
 class IconStatus(StrEnum):
-    """Where a product's drawn icon stands (Q18). NULL in the column: never drawn."""
+    """Where a product's generated icon stands (Q18-G2). NULL in the column: never generated.
 
-    PENDING = "pending"  # being drawn, or waiting for the drawing lock
+    Reused from the rejected SVG drawer (Q18, operator rejection 2026-09-27): the four states
+    mean the same thing for a ComfyUI render as they did for a drawing.
+    """
+
+    PENDING = "pending"  # being generated, or waiting for the ComfyUI lock
     READY = "ready"
-    FAILED = "failed"  # the last drawing failed; any earlier one is kept
-    CLEARED = "cleared"  # the cook chose the category emoji; nothing redraws on its own
+    FAILED = "failed"  # the last render failed; any earlier image is kept
+    CLEARED = (
+        "cleared"  # the cook chose the category emoji; nothing generates on its own
+    )
 
 
 class EmojiMatch(StrEnum):
@@ -121,14 +129,19 @@ class ProductMaster(Base):
     off_product_id = Column(String, nullable=True, index=True)  # OFF barcode
     off_data = Column(JSONB, nullable=True)  # cached nutrition, image, etc.
 
-    # The icon the model drew for it (Q18): sanitised SVG markup, capped at 8 KB (drawings
-    # so far were 0.2-0.6 KB). Deferred, so listing products does not load it; only
-    # GET /products/{id}/icon.svg reads it.
-    icon_svg = deferred(Column(Text, nullable=True))
-    # pending (drawing), ready, failed (kept any earlier drawing) or cleared (the cook chose
-    # the category emoji; nothing redraws it on its own). NULL: never drawn.
+    # The generated icon (Q18-G2): a small transparent PNG, downscaled from ComfyUI's fixed
+    # 1024x1024 output to settings.ICON_IMAGE_SIZE for the tile. Deferred, so listing products
+    # does not load it; only GET /products/{id}/icon.png reads it. Replaces the rejected
+    # LLM-drawn SVG (`icon_svg`, operator rejection 2026-09-27) - downgrading the migration
+    # that dropped it restores an empty column, not the drawings.
+    icon_image = deferred(Column(LargeBinary, nullable=True))
+    # The seed ComfyUI used for the stored image; NULL before the first generation.
+    # Regenerate always picks a fresh random one (the operator's ask, 2026-09-30).
+    icon_seed = Column(BigInteger, nullable=True)
+    # pending (generating), ready, failed (kept any earlier image) or cleared (the cook chose
+    # the category emoji; nothing generates it on its own). NULL: never generated.
     icon_status = Column(String, nullable=True)
-    # When icon_svg last changed; NULL exactly when there is no drawing to show.
+    # When icon_image last changed; NULL exactly when there is no image to show.
     icon_updated_at = Column(DateTime(timezone=True), nullable=True)
 
     # The exact Apple emoji (Q18 build): one emoji from app/resources/emoji_reference.json,
@@ -162,6 +175,6 @@ class ProductMaster(Base):
 
     @property
     def icon_version(self) -> int | None:
-        """Whole seconds of icon_updated_at, for the icon URL; None: show the emoji."""
+        """Whole seconds of icon_updated_at, for the icon URL; None: no image to show."""
         updated = self.icon_updated_at
         return None if updated is None else int(updated.timestamp())

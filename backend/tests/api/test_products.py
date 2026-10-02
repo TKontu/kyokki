@@ -104,6 +104,40 @@ class TestListProducts:
         assert len(products) == 1
         assert "Milk" in products[0]["canonical_name"]
 
+    async def test_search_treats_percent_and_underscore_literally(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """F13 review: unescaped `%`/`_` in an ILIKE pattern are wildcards, and `?q=`
+        (H58) now lets the cook type either into this search without meaning to."""
+        await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "100% Juice",
+                "category": "dairy",
+                "storage_type": "pantry",
+                "default_shelf_life_days": 100,
+                "unit_type": "volume",
+                "default_unit": "dl",
+            },
+        )
+        await client.post(
+            "/api/products",
+            json={
+                "canonical_name": "1000 Juice",
+                "category": "dairy",
+                "storage_type": "pantry",
+                "default_shelf_life_days": 100,
+                "unit_type": "volume",
+                "default_unit": "dl",
+            },
+        )
+
+        response = await client.get("/api/products?search=100%25")
+
+        assert response.status_code == 200
+        names = [p["canonical_name"] for p in response.json()]
+        assert names == ["100% Juice"]
+
 
 class TestGetProduct:
     """Test GET /api/products/{id} endpoint."""

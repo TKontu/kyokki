@@ -117,13 +117,22 @@ class ProductMasterResponse(ProductMasterBase):
     icon_status: IconStatus | None = Field(
         None,
         description=(
-            "The drawn icon (Q18): pending, ready, failed (any earlier drawing kept) or "
-            "cleared (the cook chose the category emoji); null: never drawn"
+            "The generated icon (Q18-G2): pending, ready, failed (any earlier image kept) or "
+            "cleared (the cook chose the category emoji); null: never generated"
         ),
     )
     icon_version: int | None = Field(
         None,
-        description="Version for /products/{id}/icon.svg?v=; null: no drawing, show the emoji",
+        description=(
+            "Version for /products/{id}/icon.png?v=; null: no generated image, show the emoji"
+        ),
+    )
+    generation_enabled: bool = Field(
+        False,
+        description=(
+            "Whether ComfyUI generation is configured on this server (COMFYUI_BASE_URL set); "
+            "when false the product sheet shows a plain note instead of Regenerate"
+        ),
     )
     emoji: str | None = Field(
         None,
@@ -145,6 +154,20 @@ class ProductMasterResponse(ProductMasterBase):
 
     model_config = {"from_attributes": True}
 
+    @model_validator(mode="after")
+    def _generation_enabled(self) -> "ProductMasterResponse":
+        """Always the server's own setting, never whatever the ORM row happened to carry.
+
+        Imported here, not at module level: a schema module importing `app.core.config`
+        at import time makes `Settings()` build eagerly for anything that merely imports
+        this schema (`scripts/check_vocabularies.py` does, with no DB env vars set) -
+        unrelated code should not need a database configured just to import a type.
+        """
+        from app.core.config import settings
+
+        self.generation_enabled = bool(settings.COMFYUI_BASE_URL)
+        return self
+
 
 class ProductEmojiRequest(BaseModel):
     """The cook's own choice for a product's emoji (Q18 build)."""
@@ -162,7 +185,7 @@ class EmojiReferenceEntry(BaseModel):
 
 
 class IconRedrawRequest(BaseModel):
-    """Draw a product's icon again (Q18), optionally with a word from the cook."""
+    """Regenerate a product's icon (Q18-G2), optionally with a word from the cook."""
 
     hint: str | None = Field(
         None,

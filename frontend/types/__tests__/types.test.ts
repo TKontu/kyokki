@@ -72,16 +72,18 @@ describe('TypeScript Types', () => {
       expect(product.id).toBeDefined()
     })
 
-    it('should carry the drawn icon fields (Q18)', () => {
+    it('should carry the generated icon fields (Q18-G2)', () => {
       const status: IconStatus[] = ['pending', 'ready', 'failed', 'cleared']
-      const product: Pick<ProductMaster, 'icon_status' | 'icon_version'> = {
+      const product: Pick<ProductMaster, 'icon_status' | 'icon_version' | 'generation_enabled'> = {
         icon_status: 'ready',
         icon_version: 1790000000,
+        generation_enabled: true,
       }
       const item: Pick<InventoryItem, 'product_icon_version'> = { product_icon_version: null }
       const redraw: IconRedrawRequest = { hint: 'oval rye pastry' }
       expect(status).toHaveLength(4)
       expect(product.icon_version).toBe(1790000000)
+      expect(product.generation_enabled).toBe(true)
       expect(item.product_icon_version).toBeNull()
       expect(redraw.hint).toBe('oval rye pastry')
     })

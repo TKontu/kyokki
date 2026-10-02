@@ -236,8 +236,8 @@ class InventoryItemResponse(InventoryItemBase):
     product_icon_version: int | None = Field(
         None,
         description=(
-            "Version of the product's drawn icon (Q18), for "
-            "/products/{product_master_id}/icon.svg?v=; null: show category_icon"
+            "Version of the product's generated icon (Q18-G2), for "
+            "/products/{product_master_id}/icon.png?v=; null: show category_icon"
         ),
     )
     product_emoji: str | None = Field(

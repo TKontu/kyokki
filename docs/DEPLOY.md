@@ -236,6 +236,26 @@ other chats get no reply except their chat id on `/start`, and nothing they send
 Keep the token secret: anyone with it can read what is sent to the bot. If it leaks, use
 `/revoke` in @BotFather and update `stack.env`.
 
+## Generated product icons
+
+**Off until the server can reach ComfyUI.** A food product with no exact Apple emoji (the
+"gap", `docs/spikes/Q18_exact_emoji.md`) gets a small generated icon through ComfyUI
+(`services/comfyui.py`, `services/icon_workflow.py`, `services/product_icons.py`). The GPU
+host's ComfyUI is loopback-only today, so `COMFYUI_BASE_URL` is empty by default and nothing is
+queued or shown as an error - tiles fall back to the emoji or the category icon, and the
+product sheet says generation is not configured.
+
+Once a route to the GPU host exists, set `COMFYUI_BASE_URL` (and `LLM_API_KEY`, sent on every
+ComfyUI request too) in `stack.env` and restart `kyokki-api`. Then queue the existing catalog's
+gap products:
+
+```bash
+docker compose --env-file stack.env -f docker-compose.prod.yml run --rm kyokki-api \
+  python -m scripts.backfill_icons --dry-run
+docker compose --env-file stack.env -f docker-compose.prod.yml run --rm kyokki-api \
+  python -m scripts.backfill_icons
+```
+
 ## Agent access tokens
 
 Port 17300 answers anyone on the LAN until `KYOKKI_API_TOKENS` is set. Once it holds at least

@@ -67,6 +67,10 @@ const EMOJI_REFERENCE = [
   { emoji: '🧀', name: 'cheese wedge' },
 ]
 
+// The sheet polls `GET /products/{id}` while its icon is pending (F4 review). Most tests
+// never make it pending, so the poll's request goes unhandled (MSW logs it, harmlessly -
+// `polled.data` just stays undefined and `liveProduct` falls through to `product`/
+// `liveAnswer` as before); only the dedicated polling test below gives it a handler.
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 beforeEach(() => {
   server.use(
@@ -101,6 +105,7 @@ const PRODUCT: ProductMaster = {
   reorder_quantity: null,
   off_product_id: null,
   off_data: null,
+  generation_enabled: true,
   created_at: '2026-09-01T00:00:00Z',
   updated_at: '2026-09-01T00:00:00Z',
 }
@@ -417,62 +422,64 @@ describe('matching names (H52)', () => {
   })
 })
 
-// Q18: the product's own drawing, redrawn on request (with the cook's words) or dropped for
-// the category emoji. The drawing only ever loads as an <img>.
+// Q18-G2: the product's own generated image, regenerated on request (with the cook's words,
+// a new seed each time) or dropped for the category emoji. Loads only as an <img>.
 describe('ProductEditSheet icon', () => {
-  const DRAWN: ProductMaster = { ...PRODUCT, icon_status: 'ready', icon_version: 1790000000 }
+  const GENERATED: ProductMaster = { ...PRODUCT, icon_status: 'ready', icon_version: 1790000000 }
 
   function iconSection() {
     return screen.getByRole('group', { name: 'Icon' })
   }
 
-  it('shows the category emoji when there is no drawing', async () => {
+  it('shows the category emoji when there is no generated image', async () => {
     renderSheet()
 
     await waitFor(() => expect(iconSection()).toHaveTextContent('🥩'))
     expect(iconSection().querySelector('img')).toBeNull()
   })
 
-  it('shows the drawing when there is one', () => {
-    renderSheet(DRAWN)
+  it('shows the generated image when there is one', () => {
+    renderSheet(GENERATED)
 
     const img = iconSection().querySelector('img')
-    expect(img?.getAttribute('src')).toMatch(/\/products\/p-1\/icon\.svg\?v=1790000000$/)
+    expect(img?.getAttribute('src')).toMatch(/\/products\/p-1\/icon\.png\?v=1790000000$/)
     expect(img).toHaveAttribute('alt', '')
   })
 
-  it('redraws with the hint and says it is drawing', async () => {
+  it('regenerates with the hint and says it is generating', async () => {
     const bodies: unknown[] = []
     server.use(
       http.post(`${API_URL}/products/p-1/icon`, async ({ request }) => {
         bodies.push(await request.json())
-        return HttpResponse.json({ ...DRAWN, icon_status: 'pending' }, { status: 202 })
+        return HttpResponse.json({ ...GENERATED, icon_status: 'pending' }, { status: 202 })
       })
     )
-    renderSheet(DRAWN)
+    renderSheet(GENERATED)
 
-    fireEvent.change(screen.getByLabelText('Hint for the drawing'), {
+    fireEvent.change(screen.getByLabelText('Hint for the image'), {
       target: { value: 'dark loaf with seeds' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Redraw' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
 
     await waitFor(() => expect(bodies).toEqual([{ hint: 'dark loaf with seeds' }]))
-    expect(await screen.findByText('Drawing… this takes a few minutes')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Generating… this takes a few minutes')
+    ).toBeInTheDocument()
   })
 
-  it('says a pending drawing is on its way', () => {
+  it('says a pending render is on its way', () => {
     renderSheet({ ...PRODUCT, icon_status: 'pending' })
 
-    expect(screen.getByText('Drawing… this takes a few minutes')).toBeInTheDocument()
+    expect(screen.getByText('Generating… this takes a few minutes')).toBeInTheDocument()
   })
 
-  it('says when the last drawing failed', () => {
+  it('says when the last render failed', () => {
     renderSheet({ ...PRODUCT, icon_status: 'failed' })
 
-    expect(iconSection()).toHaveTextContent(/could not draw/i)
+    expect(iconSection()).toHaveTextContent(/could not generate/i)
   })
 
-  it('drops the drawing for the category emoji', async () => {
+  it('drops the image for the category emoji', async () => {
     let deleted = false
     server.use(
       http.delete(`${API_URL}/products/p-1/icon`, () => {
@@ -480,7 +487,7 @@ describe('ProductEditSheet icon', () => {
         return HttpResponse.json({ ...PRODUCT, icon_status: 'cleared', icon_version: null })
       })
     )
-    renderSheet(DRAWN)
+    renderSheet(GENERATED)
 
     fireEvent.click(screen.getByRole('button', { name: 'Use category emoji' }))
 
@@ -493,28 +500,81 @@ describe('ProductEditSheet icon', () => {
     renderSheet({ ...PRODUCT, icon_status: 'cleared' })
 
     expect(screen.queryByRole('button', { name: 'Use category emoji' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Redraw' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Regenerate' })).toBeEnabled()
   })
 
   it('does not count the hint as an unsaved product change', () => {
     renderSheet()
 
-    fireEvent.change(screen.getByLabelText('Hint for the drawing'), {
+    fireEvent.change(screen.getByLabelText('Hint for the image'), {
       target: { value: 'round' },
     })
 
     expect(save()).toBeDisabled()
   })
+
+  it(
+    'clears "Generating..." on its own once a poll finds the icon ready (F4)',
+    async () => {
+      let polls = 0
+      server.use(
+        http.get(`${API_URL}/products/p-1`, () => {
+          polls += 1
+          return HttpResponse.json(
+            polls === 1
+              ? { ...PRODUCT, icon_status: 'pending' }
+              : {
+                  ...PRODUCT,
+                  icon_status: 'ready',
+                  icon_version: 1790000001,
+                  updated_at: '2026-09-01T00:00:10Z',
+                }
+          )
+        })
+      )
+      renderSheet({ ...PRODUCT, icon_status: 'pending' })
+
+      expect(
+        screen.getByText('Generating… this takes a few minutes')
+      ).toBeInTheDocument()
+
+      await waitFor(
+        () =>
+          expect(
+            screen.queryByText('Generating… this takes a few minutes')
+          ).toBeNull(),
+        { timeout: 8000, interval: 250 }
+      )
+      expect(polls).toBeGreaterThan(1)
+    },
+    10_000
+  )
+
+  it('shows a plain note instead of Regenerate when generation is not configured', () => {
+    renderSheet({ ...PRODUCT, generation_enabled: false })
+
+    expect(
+      screen.getByText('Icon generation is not configured on this server')
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Regenerate' })).toBeNull()
+    expect(screen.queryByLabelText('Hint for the image')).toBeNull()
+  })
+
+  it('still offers Use category emoji when generation is not configured', () => {
+    renderSheet({ ...GENERATED, generation_enabled: false })
+
+    expect(screen.getByRole('button', { name: 'Use category emoji' })).toBeInTheDocument()
+  })
 })
 
-// Q18 build: the exact emoji, ahead of the drawing in the same preview. A proposal shows
+// Q18 build: the exact emoji, ahead of the generated image in the same preview. A proposal shows
 // Confirm/Reject; otherwise a picker limited to the reference list, plus "No emoji".
 describe('ProductEditSheet emoji', () => {
   function emojiSection() {
     return screen.getByRole('group', { name: 'Emoji' })
   }
 
-  it('shows the emoji ahead of the drawing', async () => {
+  it('shows the emoji ahead of the generated image', async () => {
     renderSheet({
       ...PRODUCT,
       icon_status: 'ready',

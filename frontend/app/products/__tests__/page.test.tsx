@@ -16,6 +16,15 @@ import { ToastProvider } from '@/components/ui/Toast'
 import ProductsPage from '../page'
 import type { CatalogEstimateResponse, ProductMaster } from '@/types/product'
 
+// `/products?q=<name>` (H58 friction, 2026-10-01): the audit view's item links land here.
+const replace = jest.fn()
+let mockSearch = ''
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ replace }),
+  usePathname: () => '/products',
+  useSearchParams: () => new URLSearchParams(mockSearch),
+}))
+
 const CATEGORIES = [
   {
     id: 'meat',
@@ -65,7 +74,11 @@ function product(overrides: Partial<ProductMaster> = {}): ProductMaster {
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
-afterEach(() => server.resetHandlers())
+afterEach(() => {
+  server.resetHandlers()
+  replace.mockReset()
+  mockSearch = ''
+})
 afterAll(() => server.close())
 
 function renderPage(initialProducts: ProductMaster[], estimate?: CatalogEstimateResponse) {
@@ -478,5 +491,34 @@ describe('Emoji to confirm', () => {
     await waitFor(() =>
       expect(screen.queryByRole('region', { name: 'Emoji to confirm' })).not.toBeInTheDocument()
     )
+  })
+})
+
+// `/products?q=<name>`: the audit view's item links land on the product, filtered (2026-10-01).
+describe('the q URL filter', () => {
+  it('opens filtered when the URL carries ?q=', async () => {
+    mockSearch = 'q=Pesto'
+    renderPage([product({ canonical_name: 'Pesto' })])
+
+    expect(await screen.findByLabelText('Search products')).toHaveValue('Pesto')
+  })
+
+  it('updates the URL as the cook types, replacing rather than pushing', async () => {
+    renderPage([product()])
+    await screen.findByText('Ground beef')
+
+    fireEvent.change(screen.getByLabelText('Search products'), { target: { value: 'Pesto' } })
+
+    expect(replace).toHaveBeenCalledWith('/products?q=Pesto')
+  })
+
+  it('drops the q param once the search is cleared', async () => {
+    mockSearch = 'q=Pesto'
+    renderPage([product()])
+    await screen.findByText('Ground beef')
+
+    fireEvent.change(screen.getByLabelText('Search products'), { target: { value: '' } })
+
+    expect(replace).toHaveBeenCalledWith('/products')
   })
 })

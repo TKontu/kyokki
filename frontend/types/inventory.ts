@@ -20,8 +20,9 @@ export interface InventoryItem {
   category: string // Category ID, e.g. 'dairy'
   category_name: string // Category display name
   category_icon: string | null // Category emoji
-  // Version of the product's drawn icon (Q18), for productsAPI.iconUrl. Null or absent: no
-  // drawing, show category_icon. Optional so fixtures written before Q18 still type-check.
+  // Version of the product's generated icon (Q18-G2), for productsAPI.iconUrl. Null or
+  // absent: no image, show category_icon. Optional so fixtures written before Q18 still
+  // type-check.
   product_icon_version?: number | null
   // The product's exact Apple emoji (Q18 build), already gated server-side to an `exact` or
   // `cook` match; null otherwise, even mid-proposal (lib/productIcon.ts has the precedence).

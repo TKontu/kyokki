@@ -1,6 +1,6 @@
 /**
- * The one precedence rule for a product icon (Q18 build): the exact emoji first, then the
- * drawn icon, then the category emoji. A `proposed` emoji is never shown.
+ * The one precedence rule for a product icon (Q18-G2): the exact emoji first, then the
+ * generated image, then the category emoji. A `proposed` emoji is never shown.
  */
 
 import { productIconGlyph, resolveProductIcon } from '../productIcon'
@@ -36,7 +36,7 @@ describe('resolveProductIcon', () => {
       categoryIcon: '🥩',
     })
 
-    expect(icon).toEqual({ kind: 'drawn', version: 1790000000 })
+    expect(icon).toEqual({ kind: 'generated', version: 1790000000 })
   })
 
   it('never shows a none or cleared emoji', () => {
@@ -52,7 +52,7 @@ describe('resolveProductIcon', () => {
     }
   })
 
-  it('falls back to the drawn icon when there is no exact emoji', () => {
+  it('falls back to the generated image when there is no exact emoji', () => {
     const icon = resolveProductIcon({
       emoji: null,
       emojiMatch: 'none',
@@ -60,7 +60,7 @@ describe('resolveProductIcon', () => {
       categoryIcon: '🥩',
     })
 
-    expect(icon).toEqual({ kind: 'drawn', version: 1790000000 })
+    expect(icon).toEqual({ kind: 'generated', version: 1790000000 })
   })
 
   it('falls back to the category emoji when there is neither', () => {
@@ -105,8 +105,8 @@ describe('productIconGlyph', () => {
     expect(productIconGlyph({ kind: 'category', value: '🥩' }, '🥩')).toBe('🥩')
   })
 
-  it('falls back to the raw category icon for a drawn or none icon', () => {
-    expect(productIconGlyph({ kind: 'drawn', version: 1 }, '🥩')).toBe('🥩')
+  it('falls back to the raw category icon for a generated or none icon', () => {
+    expect(productIconGlyph({ kind: 'generated', version: 1 }, '🥩')).toBe('🥩')
     expect(productIconGlyph({ kind: 'none' }, '🥩')).toBe('🥩')
   })
 

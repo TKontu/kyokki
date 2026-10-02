@@ -21,11 +21,11 @@ afterAll(() => server.close())
 
 describe('iconUrl', () => {
   it('points at the served SVG with the version, so a redraw is a new URL', () => {
-    expect(iconUrl('p-1', 1790000000)).toBe(`${API_URL}/products/p-1/icon.svg?v=1790000000`)
+    expect(iconUrl('p-1', 1790000000)).toBe(`${API_URL}/products/p-1/icon.png?v=1790000000`)
   })
 
   it('escapes the id', () => {
-    expect(iconUrl('a/b', 1)).toBe(`${API_URL}/products/a%2Fb/icon.svg?v=1`)
+    expect(iconUrl('a/b', 1)).toBe(`${API_URL}/products/a%2Fb/icon.png?v=1`)
   })
 
   it('is on the default export too', () => {
@@ -44,7 +44,7 @@ describe('iconUrl', () => {
       jest.isolateModules(() => {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const fresh = require('../products') as typeof import('../products')
-        expect(fresh.iconUrl('p-1', 7)).toBe('/api/products/p-1/icon.svg?v=7')
+        expect(fresh.iconUrl('p-1', 7)).toBe('/api/products/p-1/icon.png?v=7')
       })
     } finally {
       process.env.NEXT_PUBLIC_API_URL = saved

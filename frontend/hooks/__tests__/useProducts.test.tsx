@@ -1,7 +1,7 @@
 /**
- * Redraw and Use category emoji (Q18) refresh the product and the tiles that show its icon.
- * The exact emoji (Q18 build) - the picker, the cook's choice, confirm and reject - refresh
- * the same way.
+ * Regenerate and Use category emoji (Q18-G2) refresh the product and the tiles that show its
+ * icon. The exact emoji (Q18 build) - the picker, the cook's choice, confirm and reject -
+ * refresh the same way.
  */
 
 import React from 'react'
