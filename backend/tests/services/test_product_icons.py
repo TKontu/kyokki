@@ -83,12 +83,14 @@ class TestIconSubject:
 
         assert icon_subject("Quark", hint="   ") == "Quark"
 
-    def test_a_cached_visual_subject_replaces_the_bare_name(
+    def test_a_cached_visual_subject_is_joined_with_the_name_not_replacing_it(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Repeating the bare name alongside the subject would reintroduce the same
-        misreading the subject exists to fix (Q18 subjects), so it is replaced, not
-        joined - unlike an operator brief, which is appended to the name."""
+        """F1 (planner, PR #160): dropping the name entirely regressed foods SDXL
+        already drew correctly from the word alone (Fish fingers, Karelian pasty,
+        Canned tuna all read worse on the sheets with the name dropped) - the name
+        carries real information the model already has, so the subject joins it
+        instead, same shape as an operator brief."""
         monkeypatch.setattr(
             product_icons,
             "subject_for",
@@ -99,9 +101,8 @@ class TestIconSubject:
             ),
         )
 
-        assert (
-            icon_subject("Quark")
-            == "a tub of smooth white soft cheese, a spoon resting in it"
+        assert icon_subject("Quark") == (
+            "Quark, a tub of smooth white soft cheese, a spoon resting in it"
         )
 
     def test_an_operator_brief_wins_over_a_cached_subject(
@@ -127,7 +128,7 @@ class TestIconSubject:
         )
 
         assert icon_subject("Quark", hint="with berries on top") == (
-            "a tub of smooth white soft cheese, with berries on top"
+            "Quark, a tub of smooth white soft cheese, with berries on top"
         )
 
     def test_a_product_with_no_cached_subject_falls_back_to_its_name(
