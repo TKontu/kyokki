@@ -225,6 +225,20 @@ describe('QuickAddSheet', () => {
 
       expect(screen.getByRole('heading', { name: 'Lisää varastoon' })).toBeInTheDocument()
     })
+
+    it('reads the location options in Finnish too (lib/stock.ts, review F1)', async () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      mockApi()
+      renderSheet()
+
+      search('mil')
+      fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
+
+      const locations = screen.getByRole('radiogroup', { name: 'Sijainti' })
+      expect(within(locations).getByRole('radio', { name: 'Jääkaappi' })).toBeInTheDocument()
+      expect(within(locations).getByRole('radio', { name: 'Pakastin' })).toBeInTheDocument()
+      expect(within(locations).getByRole('radio', { name: 'Komero' })).toBeInTheDocument()
+    })
   })
 
   it('adds an existing product with its defaults', async () => {

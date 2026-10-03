@@ -83,6 +83,34 @@ describe('stock', () => {
         'pantry',
       ])
     })
+
+    describe('display language (review F1, round 2026-10-03-1)', () => {
+      it('reads LOCATION_OPTIONS by reference, English by default - unchanged for callers that never pass a language', () => {
+        expect(locationOptions('freezer')).toBe(LOCATION_OPTIONS)
+        expect(locationOptions('freezer', 'en')).toBe(LOCATION_OPTIONS)
+      })
+
+      it('names every location in Finnish', () => {
+        const options = locationOptions(undefined, 'fi')
+        expect(options.map((o) => o.label)).toEqual(['Jääkaappi', 'Pakastin', 'Komero'])
+        expect(options.map((o) => o.value)).toEqual(LOCATION_OPTIONS.map((o) => o.value))
+      })
+
+      it('still adds an unknown location as its own option, labelled raw, in Finnish too', () => {
+        const options = locationOptions('cellar', 'fi')
+        expect(options).toHaveLength(LOCATION_OPTIONS.length + 1)
+        expect(options[options.length - 1]).toEqual({ value: 'cellar', label: 'cellar' })
+      })
+
+      it('does not mutate the shared option list when asked in Finnish', () => {
+        locationOptions('cellar', 'fi')
+        expect(LOCATION_OPTIONS.map((option) => option.label)).toEqual([
+          'Fridge',
+          'Freezer',
+          'Pantry',
+        ])
+      })
+    })
   })
 
   describe('compareStock', () => {

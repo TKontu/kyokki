@@ -119,15 +119,15 @@ describe('UndoButton', () => {
     beforeEach(() => window.localStorage.setItem('kyokki.language', 'fi'))
     afterEach(() => window.localStorage.clear())
 
-    it('reads "Undo" in Finnish; what it would undo stays as the backend worded it', async () => {
+    it('reads "Undo" and what it would undo in Finnish (lib/undo.ts, review F1)', async () => {
       server.use(http.get(`${API_URL}/inventory/undo`, () => HttpResponse.json(APPLE)))
 
       renderButton()
 
-      // "Kumoa" is the app's own word; "Used some · Apples" is lib/undo.ts's own text
-      // (unowned this phase) and is unchanged by the chosen display language.
+      // "Kumoa" is the app's own word; "Käytetty osittain" is lib/undo.ts's own text, now
+      // also language-aware (review F1). "Apples" is the product's own name, unaffected.
       expect(
-        await screen.findByRole('button', { name: 'Kumoa Used some · Apples' })
+        await screen.findByRole('button', { name: 'Kumoa Käytetty osittain · Apples' })
       ).toBeEnabled()
       expect(screen.getByText('Kumoa', { exact: false })).toBeInTheDocument()
     })

@@ -92,6 +92,7 @@ export const fi: Messages = {
     areaSpot: {
       empty: 'Tyhjä',
       open: 'Avaa {area}',
+      moreInside: 'Lisää sisällä',
     },
   },
   home: {
@@ -256,6 +257,8 @@ export const fi: Messages = {
       notEnough: 'Tällä aikavälillä ei ole tapahtunut tarpeeksi prosentin näyttämiseen.',
       trendHeading: 'Viimeiset 8 viikkoa',
       trendAriaLabel: 'Hävikkiprosentti, viimeiset 8 viikkoa',
+      trendTitleEmpty: '{week}: ei mitään',
+      trendTitleCounted: '{week}: {discarded}/{total} ({percent} %)',
     },
     empty: 'Mitään ei ole heitetty pois tai käytetty loppuun tällä aikavälillä.',
     showMore: 'Näytä lisää',

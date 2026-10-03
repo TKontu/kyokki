@@ -241,5 +241,13 @@ describe('IngredientTile', () => {
 
       expect(container).toHaveTextContent('Oat Milk')
     })
+
+    it('reads the staleness word in Finnish too (review F1, round 2026-10-03-1)', () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+
+      render(<IngredientTile item={MILK} onSelect={jest.fn()} />)
+
+      expect(screen.getByRole('button', { name: 'Oat Milk, vanhenemassa' })).toBeInTheDocument()
+    })
   })
 })

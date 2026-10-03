@@ -2,7 +2,7 @@
  * The fridge's areas (V3): which area an item lives in, and what the going-stale shelf holds.
  */
 
-import { AREAS, areaOf, areaTiles, buildFridgeView } from '../fridge'
+import { AREAS, areaLabel, areaOf, areaTiles, buildFridgeView } from '../fridge'
 import type { InventoryItem } from '@/types/inventory'
 
 const TODAY = new Date('2026-09-25T12:00:00')
@@ -92,6 +92,30 @@ describe('areaOf', () => {
       'meat', 'veggies', 'fruits', 'dairy', 'bread', 'ready_meals', 'drinks', 'pantry',
       'condiments', 'spices', 'freezer', 'other',
     ])
+  })
+})
+
+describe('areaLabel: display language (review F1, round 2026-10-03-1)', () => {
+  it('reads AREAS[].label by default, English - unchanged for AREAS\'s own callers (e.g. app/area/[id])', () => {
+    for (const area of AREAS) {
+      expect(areaLabel(area.id)).toBe(area.label)
+      expect(areaLabel(area.id, 'en')).toBe(area.label)
+    }
+  })
+
+  it('names every area in Finnish', () => {
+    expect(areaLabel('meat', 'fi')).toBe('Liha ja kala')
+    expect(areaLabel('veggies', 'fi')).toBe('Vihannekset')
+    expect(areaLabel('fruits', 'fi')).toBe('Hedelmät')
+    expect(areaLabel('dairy', 'fi')).toBe('Maitotuotteet')
+    expect(areaLabel('bread', 'fi')).toBe('Leipä')
+    expect(areaLabel('ready_meals', 'fi')).toBe('Valmisruoat')
+    expect(areaLabel('drinks', 'fi')).toBe('Juomat')
+    expect(areaLabel('pantry', 'fi')).toBe('Kuivamuona')
+    expect(areaLabel('condiments', 'fi')).toBe('Kastikkeet')
+    expect(areaLabel('spices', 'fi')).toBe('Mausteet')
+    expect(areaLabel('freezer', 'fi')).toBe('Pakastin')
+    expect(areaLabel('other', 'fi')).toBe('Muut')
   })
 })
 

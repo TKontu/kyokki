@@ -4,7 +4,7 @@
  */
 
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
@@ -105,8 +105,13 @@ describe('ItemEditSheet', () => {
 
     expect(screen.getByRole('button', { name: 'Tallenna' })).toBeInTheDocument()
     expect(screen.getByLabelText('Viimeinen käyttöpäivä')).toBeInTheDocument()
-    expect(screen.getByRole('radiogroup', { name: 'Sijainti' })).toBeInTheDocument()
+    const locations = screen.getByRole('radiogroup', { name: 'Sijainti' })
+    expect(locations).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Heitä pois' })).toBeInTheDocument()
+    // review F1: lib/stock.ts's own location labels follow the language too
+    expect(within(locations).getByRole('radio', { name: 'Jääkaappi' })).toBeInTheDocument()
+    expect(within(locations).getByRole('radio', { name: 'Pakastin' })).toBeInTheDocument()
+    expect(within(locations).getByRole('radio', { name: 'Komero' })).toBeInTheDocument()
   })
 
   it('is prefilled from the item and Save waits for a change', () => {

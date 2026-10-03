@@ -275,7 +275,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           label={t('inventory.itemEdit.location')}
           name="item-edit-location"
           value={location}
-          options={locationOptions(item.location)}
+          options={locationOptions(item.location, language)}
           onChange={locationField.set}
         />
         <FieldMoved label={t('inventory.itemEdit.location')} field={locationField} />

@@ -37,7 +37,7 @@ export function StatusBanner() {
   const client = useQueryClient()
   const { unreachable, lastSync } = useBackendStatus()
   const failures = useFailedActions()
-  const { t } = useT()
+  const { t, language } = useT()
 
   // What a cook can act on comes first: a tap that did not happen is theirs to retry, while
   // the connection is the app's problem to keep trying at.
@@ -78,7 +78,7 @@ export function StatusBanner() {
       <div role="alert" className={boxClass + toneClass.alarm}>
         <span>
           {t('status.unreachable')}
-          {lastSync !== null && t('status.showingFrom', { when: formatAgo(lastSync) })}
+          {lastSync !== null && t('status.showingFrom', { when: formatAgo(lastSync, language) })}
         </span>
         <Button
           variant="secondary"
@@ -102,7 +102,7 @@ export function StatusBanner() {
   if (lastSync !== null && Date.now() - lastSync > STALE_AFTER_MS) {
     return (
       <div role="status" className={boxClass + toneClass.quiet}>
-        <span>{t('status.lastUpdated', { when: formatAgo(lastSync) })}</span>
+        <span>{t('status.lastUpdated', { when: formatAgo(lastSync, language) })}</span>
       </div>
     )
   }

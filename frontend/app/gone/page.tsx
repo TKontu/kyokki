@@ -33,6 +33,7 @@ import {
   topWastingCategories,
   wasteRateLine,
   weekLabel,
+  windowLabel,
   WINDOWS,
 } from '@/lib/gone'
 import { useT } from '@/lib/i18n'
@@ -41,12 +42,10 @@ import type { ConsumptionLogEntry, WasteStats, WasteTrend } from '@/types/consum
 
 const PAGE_SIZE = 50
 
-/** The headline rate, and the categories that waste the most (planner ruling, 2026-10-02).
- * `wasteRateLine` (`lib/gone.ts`, unowned this phase) always answers in English; only the
- * fallback and the surrounding chrome follow the chosen display language. */
+/** The headline rate, and the categories that waste the most (planner ruling, 2026-10-02). */
 function WasteRateCard({ stats }: { stats: WasteStats | undefined }) {
-  const { t } = useT()
-  const headline = wasteRateLine(stats)
+  const { t, language } = useT()
+  const headline = wasteRateLine(stats, language)
   const categories = stats ? topWastingCategories(stats.categories) : []
 
   return (
@@ -85,7 +84,7 @@ function WasteRateCard({ stats }: { stats: WasteStats | undefined }) {
 
 /** A compact 8-bar week trend, plain divs - no chart dependency. */
 function WasteTrendChart({ trend }: { trend: WasteTrend | undefined }) {
-  const { t } = useT()
+  const { t, language } = useT()
   const weeks = trend?.weeks ?? []
   if (weeks.length === 0) return null
 
@@ -97,10 +96,16 @@ function WasteTrendChart({ trend }: { trend: WasteTrend | undefined }) {
       <div className="flex items-end gap-2">
         {weeks.map((week) => {
           const percent = week.rate === null ? 0 : Math.round(week.rate * 100)
+          const week_ = weekLabel(week, language)
           const title =
             week.total === 0
-              ? `${weekLabel(week)}: nothing gone`
-              : `${weekLabel(week)}: ${week.discarded} of ${week.total} (${percent} %)`
+              ? t('gone.waste.trendTitleEmpty', { week: week_ })
+              : t('gone.waste.trendTitleCounted', {
+                  week: week_,
+                  discarded: week.discarded,
+                  total: week.total,
+                  percent,
+                })
           return (
             <div key={week.week_start} className="flex flex-1 flex-col items-center gap-1">
               <div
@@ -114,7 +119,7 @@ function WasteTrendChart({ trend }: { trend: WasteTrend | undefined }) {
                 />
               </div>
               <span className="text-xs text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
-                {weekLabel(week)}
+                {week_}
               </span>
             </div>
           )
@@ -196,15 +201,12 @@ export default function Gone() {
     )
   }
 
-  const groups = groupByDay(rows ?? [])
+  const groups = groupByDay(rows ?? [], new Date(), language)
 
   return (
     <div>
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
         <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">{t('gone.title')}</h1>
-        {/* each.label (lib/gone.ts, unowned this phase) stays "7 days"/"30 days"/"All" in
-            English whichever language is chosen; only this group's own accessible name - and
-            everything else on the page - follows it. */}
         <div className="flex gap-2" role="group" aria-label={t('gone.howFarBack')}>
           {WINDOWS.map((each) => (
             <Button
@@ -217,7 +219,7 @@ export default function Gone() {
                 setLimit(PAGE_SIZE)
               }}
             >
-              {each.label}
+              {windowLabel(each, language)}
             </Button>
           ))}
         </div>
@@ -230,7 +232,7 @@ export default function Gone() {
               {t('gone.thrownAway')}
             </dt>
             <dd className="text-lg font-semibold text-ui-text dark:text-ui-dark-text">
-              {summaryLine(summary?.discard)}
+              {summaryLine(summary?.discard, language)}
             </dd>
           </div>
           <div>
@@ -238,7 +240,7 @@ export default function Gone() {
               {t('gone.finished')}
             </dt>
             <dd className="text-lg font-semibold text-ui-text dark:text-ui-dark-text">
-              {summaryLine(summary?.use_full)}
+              {summaryLine(summary?.use_full, language)}
             </dd>
           </div>
         </dl>

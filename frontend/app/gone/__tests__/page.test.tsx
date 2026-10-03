@@ -278,5 +278,35 @@ describe('The Gone screen', () => {
       const button = screen.getByRole('button', { name: 'Palauta Jauheliha' })
       expect(button).toHaveTextContent('Palauta')
     })
+
+    it('reads the window buttons, the counts and today\'s group in Finnish (review F1)', async () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      api([MEAT, MILK])
+
+      renderGone()
+
+      // lib/gone.ts's own text (review F1): window labels, the item counts, the day group
+      expect(await screen.findByRole('button', { name: '7 päivää' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '30 päivää' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Kaikki' })).toBeInTheDocument()
+      expect(await screen.findByText('8 tuotetta')).toBeInTheDocument()
+      expect(screen.getByText('34 tuotetta')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Tänään', level: 2 })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Eilen', level: 2 })).toBeInTheDocument()
+    })
+
+    it('reads the waste rate headline and the trend week labels in Finnish (review F1)', async () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      api([MEAT, MILK])
+
+      renderGone()
+
+      expect(await screen.findByText('Heitit pois 8/42 asiaa (19 %)')).toBeInTheDocument()
+      const trend = (await screen.findByText('Viimeiset 8 viikkoa')).closest(
+        'section'
+      ) as HTMLElement
+      // fi-FI's short date form drops the month name ("12.1.", not "12 Jan")
+      expect(within(trend).getAllByText(/^\d{1,2}\.\d{1,2}\.$/)).toHaveLength(8)
+    })
   })
 })

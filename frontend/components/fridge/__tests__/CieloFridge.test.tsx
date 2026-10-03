@@ -19,7 +19,7 @@ import {
 } from '../CieloFridge'
 import { DOT, dotCapacity } from '../capacity'
 import { crowdedItems } from '../__fixtures__/crowded'
-import { TODAY, item, many } from '../__fixtures__/stock'
+import { TODAY, inDays, item, many } from '../__fixtures__/stock'
 import { LANGUAGE_KEY } from '@/lib/language'
 
 beforeEach(() => {
@@ -298,11 +298,42 @@ describe('CieloFridge', () => {
     it('reads "Empty" and the area link in Finnish', () => {
       render(<CieloFridge items={[item()]} />)
 
-      expect(within(area('Veggies')).getByText('Tyhjä')).toBeInTheDocument()
-      expect(screen.getByRole('link', { name: 'Avaa Spices' })).toHaveAttribute(
+      expect(within(area('Vihannekset')).getByText('Tyhjä')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Avaa Mausteet' })).toHaveAttribute(
         'href',
         '/area/spices'
       )
+    })
+
+    it('reads every area\'s own name in Finnish (review F1)', () => {
+      render(<CieloFridge items={[]} />)
+
+      for (const [id, fi] of Object.entries({
+        meat: 'Liha ja kala',
+        veggies: 'Vihannekset',
+        fruits: 'Hedelmät',
+        dairy: 'Maitotuotteet',
+        bread: 'Leipä',
+        ready_meals: 'Valmisruoat',
+        drinks: 'Juomat',
+        pantry: 'Kuivamuona',
+        condiments: 'Kastikkeet',
+        spices: 'Mausteet',
+        freezer: 'Pakastin',
+      })) {
+        expect(screen.getByRole('link', { name: `Avaa ${fi}` })).toHaveAttribute(
+          'href',
+          `/area/${id}`
+        )
+      }
+    })
+
+    it('reads a dot\'s staleness word in Finnish too (review F1)', () => {
+      render(<CieloFridge items={[item({ expiry_date: inDays(1) })]} />)
+
+      expect(
+        within(area('Maitotuotteet')).getByRole('img', { name: 'Oat Milk vanhenemassa' })
+      ).toBeInTheDocument()
     })
   })
 })

@@ -221,7 +221,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
           label={t('inventory.quickAdd.location')}
           name="quick-add-location"
           value={location}
-          options={locationOptions(location)}
+          options={locationOptions(location, language)}
           onChange={(next) => {
             setLocationChosen(true)
             setLocation(next)

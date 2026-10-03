@@ -19,9 +19,9 @@ export function UndoButton() {
   const { data: preview } = useUndoPreview()
   const undo = useUndo()
   const toast = useToast()
-  const { t } = useT()
+  const { t, language } = useT()
 
-  const description = preview ? describeUndo(preview) : null
+  const description = preview ? describeUndo(preview, language) : null
 
   const handleUndo = () => {
     if (!preview) return

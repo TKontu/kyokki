@@ -97,7 +97,7 @@ export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetPro
               {displayName(item.product_display_names, item.product_name, language)}
             </span>
             <span className="shrink-0 text-ui-text-secondary dark:text-ui-dark-text-secondary">
-              {formatExpiryDate(item.expiry_date)}
+              {formatExpiryDate(item.expiry_date, language)}
             </span>
           </li>
         ))}

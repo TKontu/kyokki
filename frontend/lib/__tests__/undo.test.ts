@@ -65,4 +65,39 @@ describe('describeUndo', () => {
   it('shows an action this build has never heard of rather than hiding it', () => {
     expect(describeUndo(preview(step({ action: 'composted' })))).toBe('composted · Apples')
   })
+
+  describe('display language (review F1, round 2026-10-03-1)', () => {
+    it('reads in Finnish when asked, English by default - the product name is untouched', () => {
+      expect(describeUndo(preview(step()))).toBe('Used some · Apples')
+      expect(describeUndo(preview(step()), 'en')).toBe('Used some · Apples')
+      expect(describeUndo(preview(step()), 'fi')).toBe('Käytetty osittain · Apples')
+    })
+
+    it.each([
+      [step({ action: 'use_full' }), 'Käytetty loppuun · Apples'],
+      [step({ action: 'discard' }), 'Heitetty pois · Apples'],
+      [step({ action: 'restore' }), 'Palautettu · Apples'],
+      [step({ action: 'correct', quantity_consumed: 6 }), 'Palautettu · Apples'],
+      [
+        step({ action: 'correct', quantity_consumed: 2, direction: 'down' }),
+        'Korjattu alaspäin · Apples',
+      ],
+    ])('names the act in Finnish', (only, text) => {
+      expect(describeUndo(preview(only), 'fi')).toBe(text)
+    })
+
+    it('counts several items in Finnish, by numeral agreement (partitive singular)', () => {
+      const shelf = preview(
+        step({ action: 'discard' }),
+        step({ action: 'discard', product_name: 'Milk' }),
+        step({ action: 'discard', product_name: 'Cream' })
+      )
+
+      expect(describeUndo(shelf, 'fi')).toBe('Heitetty pois · 3 tuotetta')
+    })
+
+    it('shows an unknown action raw even in Finnish, rather than hiding it', () => {
+      expect(describeUndo(preview(step({ action: 'composted' })), 'fi')).toBe('composted · Apples')
+    })
+  })
 })

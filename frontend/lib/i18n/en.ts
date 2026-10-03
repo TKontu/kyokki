@@ -85,6 +85,7 @@ export const en = {
     areaSpot: {
       empty: 'Empty',
       open: 'Open {area}',
+      moreInside: 'More inside',
     },
   },
   home: {
@@ -246,6 +247,8 @@ export const en = {
       notEnough: 'Not enough has gone in this window to show a rate yet.',
       trendHeading: 'Last 8 weeks',
       trendAriaLabel: 'Waste rate, last 8 weeks',
+      trendTitleEmpty: '{week}: nothing gone',
+      trendTitleCounted: '{week}: {discarded} of {total} ({percent} %)',
     },
     empty: 'Nothing has been thrown away or finished in this window.',
     showMore: 'Show more',

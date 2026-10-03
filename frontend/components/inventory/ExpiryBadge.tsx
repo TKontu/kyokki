@@ -9,8 +9,13 @@ import {
   formatExpiryDate,
   getExpiryColor,
 } from '@/lib/dates'
+import type { Language } from '@/lib/language'
 
 export interface ExpiryBadgeProps {
+  /** The display language (review F1, round 2026-10-03-1); defaults to English, same as
+   * `formatExpiryDate` itself, so this component's only current caller (`components-demo`,
+   * out of scope) is unaffected. */
+  language?: Language
   /**
    * ISO date string for expiry date
    * e.g., "2024-01-15" or "2024-01-15T10:00:00Z"
@@ -51,9 +56,10 @@ export const ExpiryBadge: React.FC<ExpiryBadgeProps> = ({
   expiryDate,
   expirySource,
   className = '',
+  language = 'en',
 }) => {
   const urgency = getExpiryUrgency(expiryDate)
-  const formattedDate = formatExpiryDate(expiryDate)
+  const formattedDate = formatExpiryDate(expiryDate, language)
   const colorClasses = getExpiryColor(urgency)
 
   // Show warning icon for expired and today items
