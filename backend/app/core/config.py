@@ -167,6 +167,16 @@ class Settings(BaseSettings):
         budget = math.ceil((self.MINERU_TIMEOUT + models) / 60) + 5
         return max(self.RECEIPT_STALE_MINUTES or 0, budget)
 
+    # Watched folder receipt drop-in (A2, app/services/receipt_folder.py): a phone or
+    # computer sync app (Syncthing, a network share, e-receipts saved from mail) drops
+    # files into this folder instead of going through the iPad upload API or the Telegram
+    # bot. Empty disables the scan entirely, which is the default.
+    RECEIPT_WATCH_DIR: str = ""
+    RECEIPT_WATCH_POLL_SECONDS: float = 10.0
+    # A file must be unchanged in size and mtime for this long before it is taken, so a
+    # sync still writing it is never read half-finished.
+    RECEIPT_WATCH_SETTLE_SECONDS: float = 5.0
+
     TELEGRAM_BOT_TOKEN: SecretStr | None = None
     # Chats the bot serves; comma-separated ids. Send /start to the bot to learn yours.
     TELEGRAM_ALLOWED_CHAT_IDS: Annotated[list[int], NoDecode] = []
