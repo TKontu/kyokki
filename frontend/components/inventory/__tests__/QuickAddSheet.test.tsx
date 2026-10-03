@@ -157,10 +157,16 @@ function type(label: string, value: string) {
  * Every search here used to spend 250 ms of wall clock inside a 1000 ms findBy budget, which is
  * a race the moment jest runs several suites next to a build. Real timers come straight back so
  * msw and findBy* work normally; only the debounce is skipped (H06).
+ *
+ * Queries the field by its id rather than its "Product" label: the label itself is translated
+ * in Finnish mode (Post-MVP frontier item 13, phase 3, round 2026-10-03-3's `ProductSearch`
+ * translation - PR #174 review F1), so a label-based query broke once Suomi read "Tuote" there.
+ * The id is the one thing `ProductSearch` keeps stable across languages.
  */
 function search(term: string) {
   jest.useFakeTimers()
-  type('Product', term)
+  const input = document.getElementById('quick-add-search') as HTMLInputElement
+  fireEvent.change(input, { target: { value: term } })
   act(() => {
     jest.advanceTimersByTime(SEARCH_DEBOUNCE_MS)
   })
