@@ -430,5 +430,249 @@
     "seconds": 23.4,
     "path": "new_leek_20261003.png",
     "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Quark",
+    "seed": 20261002,
+    "subject": "Quark, a tub of smooth white soft cheese with a spoon in it",
+    "seconds": 38.3,
+    "path": "combined_quark_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Quark",
+    "seed": 20261003,
+    "subject": "Quark, a tub of smooth white soft cheese with a spoon in it",
+    "seconds": 23.0,
+    "path": "combined_quark_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Canned tuna",
+    "seed": 20261002,
+    "subject": "Canned tuna, \"should look as they should\": the tuna can as sold",
+    "seconds": 23.0,
+    "path": "combined_canned_tuna_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Canned tuna",
+    "seed": 20261003,
+    "subject": "Canned tuna, \"should look as they should\": the tuna can as sold",
+    "seconds": 23.1,
+    "path": "combined_canned_tuna_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Tomato puree",
+    "seed": 20261002,
+    "subject": "Tomato puree, a small can or squeeze out tube",
+    "seconds": 23.0,
+    "path": "combined_tomato_puree_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Tomato puree",
+    "seed": 20261003,
+    "subject": "Tomato puree, a small can or squeeze out tube",
+    "seconds": 23.1,
+    "path": "combined_tomato_puree_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Fish fingers",
+    "seed": 20261002,
+    "subject": "Fish fingers, \"should look as they should\": the fish fingers, or their pack, as sold",
+    "seconds": 23.2,
+    "path": "combined_fish_fingers_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Fish fingers",
+    "seed": 20261003,
+    "subject": "Fish fingers, \"should look as they should\": the fish fingers, or their pack, as sold",
+    "seconds": 23.1,
+    "path": "combined_fish_fingers_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Karelian pasty",
+    "seed": 20261002,
+    "subject": "Karelian pasty, oval rye pastry, scalloped crimped edge, rice filling showing",
+    "seconds": 23.4,
+    "path": "combined_karelian_pasty_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Karelian pasty",
+    "seed": 20261003,
+    "subject": "Karelian pasty, oval rye pastry, scalloped crimped edge, rice filling showing",
+    "seconds": 23.2,
+    "path": "combined_karelian_pasty_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Cottage cheese",
+    "seed": 20261002,
+    "subject": "Cottage cheese, small white curds in a white plastic tub with lid",
+    "seconds": 23.4,
+    "path": "combined_cottage_cheese_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Cottage cheese",
+    "seed": 20261003,
+    "subject": "Cottage cheese, small white curds in a white plastic tub with lid",
+    "seconds": 23.3,
+    "path": "combined_cottage_cheese_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Hot dog sausages",
+    "seed": 20261002,
+    "subject": "Hot dog sausages, plump pink sausages in a vacuum sealed plastic pack",
+    "seconds": 25.1,
+    "path": "combined_hot_dog_sausages_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Hot dog sausages",
+    "seed": 20261003,
+    "subject": "Hot dog sausages, plump pink sausages in a vacuum sealed plastic pack",
+    "seconds": 23.3,
+    "path": "combined_hot_dog_sausages_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Mustard",
+    "seed": 20261002,
+    "subject": "Mustard, bright yellow smooth condiment in a glass jar with metal lid",
+    "seconds": 25.1,
+    "path": "combined_mustard_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Mustard",
+    "seed": 20261003,
+    "subject": "Mustard, bright yellow smooth condiment in a glass jar with metal lid",
+    "seconds": 23.3,
+    "path": "combined_mustard_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Apple sauce",
+    "seed": 20261002,
+    "subject": "Apple sauce, glass jar of smooth pale apple puree with a metal lid",
+    "seconds": 25.0,
+    "path": "combined_apple_sauce_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Apple sauce",
+    "seed": 20261003,
+    "subject": "Apple sauce, glass jar of smooth pale apple puree with a metal lid",
+    "seconds": 23.3,
+    "path": "combined_apple_sauce_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Sliced ham",
+    "seed": 20261002,
+    "subject": "Sliced ham, a stack of pink thin ham slices on plastic tray",
+    "seconds": 25.1,
+    "path": "combined_sliced_ham_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Sliced ham",
+    "seed": 20261003,
+    "subject": "Sliced ham, a stack of pink thin ham slices on plastic tray",
+    "seconds": 23.4,
+    "path": "combined_sliced_ham_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Mineral water",
+    "seed": 20261002,
+    "subject": "Mineral water, clear liquid in a plastic bottle with blue label",
+    "seconds": 25.0,
+    "path": "combined_mineral_water_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Mineral water",
+    "seed": 20261003,
+    "subject": "Mineral water, clear liquid in a plastic bottle with blue label",
+    "seconds": 23.4,
+    "path": "combined_mineral_water_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Leek",
+    "seed": 20261002,
+    "subject": "Leek, a single pale green and white leek with roots trimmed",
+    "seconds": 25.0,
+    "path": "combined_leek_20261002.png",
+    "error": null
+  },
+  {
+    "condition": "combined",
+    "product": "Leek",
+    "seed": 20261003,
+    "subject": "Leek, a single pale green and white leek with roots trimmed",
+    "seconds": 23.4,
+    "path": "combined_leek_20261003.png",
+    "error": null
+  },
+  {
+    "condition": "name-only (tuned template)",
+    "product": "Karelian pasty",
+    "seed": 20261002,
+    "subject": "Karelian pasty",
+    "path": "nameonly_karelian_pasty_20261002.png"
+  },
+  {
+    "condition": "name-only (tuned template)",
+    "product": "Karelian pasty",
+    "seed": 20261003,
+    "subject": "Karelian pasty",
+    "path": "nameonly_karelian_pasty_20261003.png"
+  },
+  {
+    "condition": "name-only (tuned template)",
+    "product": "Mustard",
+    "seed": 20261002,
+    "subject": "Mustard",
+    "path": "nameonly_mustard_20261002.png"
+  },
+  {
+    "condition": "name-only (tuned template)",
+    "product": "Mustard",
+    "seed": 20261003,
+    "subject": "Mustard",
+    "path": "nameonly_mustard_20261003.png"
   }
 ]
