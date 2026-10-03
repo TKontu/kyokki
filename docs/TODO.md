@@ -2479,6 +2479,43 @@ deployed. No migration. Each PR had a verdict; #164 and #168 had fix passes.
 - **Process:** the planner's spec missed ownership of the text libs (#168 F1) and wrote a crud
   grep acceptance that was already false (#167).
 
+**Deploy 2026-10-03 and follow-ups** (operator, with the planner):
+- Rounds 2026-10-02-3 and 2026-10-03-1 were deployed. `kyokki-migrate` applies migrations
+  automatically on every deploy.
+- The display names were backfilled (72). The icons were backfilled (50, ComfyUI reached through
+  the gateway with `LLM_API_KEY`, after a cold start). #170 added visual subjects for 36 gap
+  products (90 cached).
+- **Operator ruling:** promoting generated icons to canonical ones is an in-app feature of the
+  develop build. The current icons are not hand-fixed or bulk-exported.
+
+**Round 2026-10-03-2** (base `dd0f1e2`): #171, the canonical icon library.
+- `resources/icon_library/` holds the PNGs and `index.json`. The precedence is cook or exact emoji
+  > library > generated, and a library icon has `icon_seed` NULL.
+- `export_icon_library.py` exports from a deployment (GET only); `backfill_icons --library-only`
+  applies the library. See `docs/icon_library/README.md`.
+
+**Round 2026-10-03-3** (base `1280300`). Merged 2026-10-03: #172 to #175. Migration
+`c9a51b6756c1`.
+- **Icon curation (#175):**
+  - with `ICON_CURATION_ENABLED`, the product sheet has "Keep as canonical"
+    (`icon_canonical_at`); a new image or a clear removes the mark;
+  - Settings has "Canonical icons" with **Download bundle** (`/api/icon-library/bundle.zip`);
+  - `scripts/apply_icon_bundle.py` merges the bundle into the repo library;
+  - Regenerate is hidden when an emoji wins.
+- **Run-out list (#172):** `include_out` (default false) and HA `out_count`, after the production
+  finding of 28 out items and 1 forecast.
+- **Finnish names (#173):**
+  - a rename re-proposes a model name (a cook name is kept);
+  - the prompt carries up to 3 printed receipt aliases;
+  - `backfill_display_names --refresh-model`.
+- **Finnish phase 3 (#174):** the receipt flow, scan, area and ProductSearch.
+  - [ ] Phase 4: the products screen and `ProductEditSheet`.
+  - [ ] Wording pass: "kpl", "Kotitaloustuote", "arvio"/"tiedossa", "luettu mallilla", plus the
+    earlier list.
+- **Process:** two planner misses on shared components. ProductSearch is used by QuickAddSheet
+  (#174 F1), and the text libs were missing from #168's ownership. Check the importers of a granted
+  component before splitting ownership.
+
 ---
 
 ## Phase 1: MVP
@@ -2629,7 +2666,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [x] H47 (#166)
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Not deployed. Next: deploy, then round 6
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Deployed 2026-10-03. Round 2026-10-03-2: [x] icon library (#171). Round 2026-10-03-3: [x] icon curation (#175)  [x] run-out list (#172)  [x] Finnish names on rename (#173)  [x] Finnish receipt screens (#174), merged 2026-10-03. Next: deploy, then the operator uses the iPad and curates icons
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
