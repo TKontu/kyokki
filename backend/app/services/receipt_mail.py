@@ -33,7 +33,7 @@ from email import message_from_bytes
 from email.message import Message
 from email.utils import parseaddr
 from time import monotonic
-from typing import Protocol
+from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,13 +68,13 @@ class ImapClient(Protocol):
     ``imaplib.IMAP4_SSL`` from :func:`_default_connect`.
     """
 
-    def login(self, user: str, password: str) -> tuple: ...
-    def select(self, mailbox: str) -> tuple: ...
-    def create(self, mailbox: str) -> tuple: ...
-    def capability(self) -> tuple: ...
-    def uid(self, command: str, *args: str) -> tuple: ...
-    def expunge(self) -> tuple: ...
-    def logout(self) -> tuple: ...
+    def login(self, user: str, password: str) -> tuple[str, list[Any]]: ...
+    def select(self, mailbox: str) -> tuple[str, list[Any]]: ...
+    def create(self, mailbox: str) -> tuple[str, list[Any]]: ...
+    def capability(self) -> tuple[str, list[Any]]: ...
+    def uid(self, command: str, *args: str) -> tuple[str, list[Any]]: ...
+    def expunge(self) -> tuple[str, list[Any]]: ...
+    def logout(self) -> tuple[str, list[Any]]: ...
 
 
 ConnectFn = Callable[[str, int], ImapClient]
@@ -120,7 +120,7 @@ def _iter_attachments(msg: Message) -> list[_Attachment]:
         if content_type not in ATTACHMENT_CONTENT_TYPES:
             continue
         content = part.get_payload(decode=True)
-        if not content:
+        if not isinstance(content, bytes) or not content:
             continue
         filename = part.get_filename() or "attachment"
         found.append(
@@ -173,7 +173,11 @@ class ReceiptMailPoller:
                     f"could not select the mail folder (got {typ})"
                 )
             supports_move = await asyncio.to_thread(self._supports_move, client)
-            typ, data = await asyncio.to_thread(client.uid, "SEARCH", None, "UNSEEN")
+            # No CHARSET argument (optional per RFC 3501): a bare search-key list defaults
+            # to US-ASCII, and real imaplib's uid() types every arg as str, so a literal
+            # None here (the common "no charset" idiom for the lower-level search()) would
+            # not type-check.
+            typ, data = await asyncio.to_thread(client.uid, "SEARCH", "UNSEEN")
             if typ != "OK":
                 raise ReceiptMailConnectionError(f"IMAP search failed (got {typ})")
         except Exception as exc:
