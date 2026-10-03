@@ -774,3 +774,220 @@ class TestClearAndStoredIcon:
         product = await _product(db_session)
 
         assert await product_icons.stored_icon(db_session, product.id) is None
+
+
+class TestLibraryPrecedence:
+    """The repo-shipped icon library (operator ask 2026-10-03): cook or exact emoji wins
+    the tile, then the library, then a fresh ComfyUI render - `draw_icons` (not
+    `draw_icon`) is the entry point that gives the library its look, see its docstring.
+    """
+
+    async def test_a_gap_product_with_a_library_match_is_applied_with_no_comfyui_call(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            product_icons.icon_library,
+            "lookup",
+            lambda name: GOOD if name == "Quark" else None,
+        )
+        product = await _product(db_session, "Quark")
+
+        with _render() as render:
+            await draw_icons([product.id])
+
+        render.assert_not_awaited()
+        stored = await _reload(db_session, product)
+        assert stored.icon_status == "ready"
+        assert stored.icon_seed is None
+        assert stored.icon_image is not None
+        broadcast.assert_awaited()
+        assert broadcast.await_args.kwargs["action"] == "icon_updated"
+
+    async def test_it_resizes_a_library_icon_to_the_configured_size(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(settings, "ICON_IMAGE_SIZE", 32)
+        monkeypatch.setattr(
+            product_icons.icon_library, "lookup", lambda name: _png(size=128)
+        )
+        product = await _product(db_session, "Quark")
+
+        await draw_icons([product.id])
+
+        stored = await _reload(db_session, product)
+        with Image.open(io.BytesIO(stored.icon_image)) as image:
+            assert image.size == (32, 32)
+
+    async def test_a_library_png_already_the_right_size_is_stored_unchanged(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        right_size = _png(size=settings.ICON_IMAGE_SIZE)
+        monkeypatch.setattr(
+            product_icons.icon_library, "lookup", lambda name: right_size
+        )
+        product = await _product(db_session, "Quark")
+
+        await draw_icons([product.id])
+
+        stored = await _reload(db_session, product)
+        assert stored.icon_image == right_size
+
+    async def test_it_applies_even_with_comfyui_disabled(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(settings, "COMFYUI_BASE_URL", "")
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: GOOD)
+        render = AsyncMock(return_value=[GOOD])
+        monkeypatch.setattr(product_icons.comfyui, "render", render)
+        product = await _product(db_session, "Quark")
+
+        await draw_icons([product.id])
+
+        render.assert_not_awaited()
+        assert (await _reload(db_session, product)).icon_status == "ready"
+
+    async def test_an_emoji_win_means_no_library_icon(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: GOOD)
+        product = await _product(db_session, "Quark", emoji_match=EmojiMatch.EXACT)
+
+        with _render() as render:
+            await draw_icons([product.id])
+
+        render.assert_not_awaited()
+        assert (await _reload(db_session, product)).icon_status is None
+
+    async def test_a_cleared_icon_stays_cleared(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: GOOD)
+        product = await _product(db_session, "Quark", icon_status=IconStatus.CLEARED)
+
+        with _render() as render:
+            await draw_icons([product.id])
+
+        render.assert_not_awaited()
+        assert (await _reload(db_session, product)).icon_status == "cleared"
+
+    async def test_a_generated_icon_is_not_replaced_by_the_library(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Isolates the library's own precedence rule from the unrelated, pre-existing
+        fact that a rename's automatic queue always re-renders through ComfyUI whatever
+        is already there - `COMFYUI_BASE_URL` is cleared here so the only thing that
+        could possibly change the stored icon is the library pass itself."""
+        product = await _product(db_session, "Quark")
+        with _render():
+            await draw_icon(product.id)
+        generated = await _reload(db_session, product)
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: GOOD)
+        monkeypatch.setattr(settings, "COMFYUI_BASE_URL", "")
+
+        applied = await product_icons.apply_library_icon(product.id)
+
+        assert applied is False
+        stored = await _reload(db_session, product)
+        assert stored.icon_seed == generated.icon_seed
+        assert stored.icon_image == generated.icon_image
+
+    async def test_regenerate_bypasses_the_library(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: GOOD)
+        product = await _product(db_session, "Quark")
+        await product_icons.request_redraw(db_session, product.id)
+
+        with _render() as render:
+            await draw_icons([product.id])
+
+        render.assert_awaited_once()
+        stored = await _reload(db_session, product)
+        assert stored.icon_status == "ready"
+        assert stored.icon_seed is not None
+
+    async def test_a_non_food_name_gets_no_library_icon(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        await remember_non_food(db_session, "S-Market", ["Toilet paper"])
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: GOOD)
+        product = await _product(db_session, "Toilet paper")
+
+        with _render() as render:
+            await draw_icons([product.id])
+
+        render.assert_not_awaited()
+        assert (await _reload(db_session, product)).icon_status is None
+
+    async def test_a_product_with_no_library_match_still_generates(
+        self,
+        db_session: AsyncSession,
+        categories,
+        broadcast,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: None)
+        product = await _product(db_session, "Quark")
+
+        with _render() as render:
+            await draw_icons([product.id])
+
+        render.assert_awaited_once()
+        assert (await _reload(db_session, product)).icon_status == "ready"
+
+
+class TestApplyLibraryIconDryRun:
+    async def test_dry_run_reports_without_writing(
+        self, db_session: AsyncSession, categories, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: GOOD)
+        product = await _product(db_session, "Quark")
+
+        would_apply = await product_icons.apply_library_icon(product.id, dry_run=True)
+
+        assert would_apply is True
+        assert (await _reload(db_session, product)).icon_status is None
+
+    async def test_dry_run_is_false_with_no_library_match(
+        self, db_session: AsyncSession, categories, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: None)
+        product = await _product(db_session, "Quark")
+
+        assert await product_icons.apply_library_icon(product.id, dry_run=True) is False

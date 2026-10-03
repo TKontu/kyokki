@@ -155,6 +155,15 @@ class ProductMasterResponse(ProductMasterBase):
             "Version for /products/{id}/icon.png?v=; null: no generated image, show the emoji"
         ),
     )
+    icon_seed: int | None = Field(
+        None,
+        description=(
+            "The seed ComfyUI used for the current image; null before generation, after "
+            "the cook clears it, or when the icon came from the repo's icon library "
+            "(operator ask 2026-10-03) rather than a render - no migration marks that, "
+            "this is it. Read-only."
+        ),
+    )
     generation_enabled: bool = Field(
         False,
         description=(

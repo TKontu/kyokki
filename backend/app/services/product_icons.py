@@ -35,11 +35,15 @@ never wait forever for a job that will not run.
 
 `schedule_icons` always queues its background task (`draw_icons`, the same name and call shape
 Q18's drawer used - `services/shelf_life_on_create.py` and its tests, a sibling lane, schedule
-and identify it by that name and are not this lane's to rename). With `COMFYUI_BASE_URL`
-empty, `draw_icons` itself refuses at the top, before touching the database or any product in
-the batch - one INFO line per call, not one per product - so nothing is actually queued or
-retried in any sense that matters: no row is written, no GPU is asked. Nothing in the receipt
-or stock path waits for an icon.
+and identify it by that name and are not this lane's to rename). `draw_icons` first gives
+every product a chance at the repo's icon library (operator ask 2026-10-03,
+`app.services.icon_library`): a gap product whose name matches an entry there is stored from
+it instead, no GPU needed, before anything below even looks at `COMFYUI_BASE_URL` - see
+`apply_library_icon`. Only what the library left over reaches the ComfyUI path, and with
+`COMFYUI_BASE_URL` empty that remainder refuses at once - one INFO line per call, not one per
+product - so nothing is actually queued or retried in any sense that matters beyond the
+library: no further row is written, no GPU is asked. Nothing in the receipt or stock path
+waits for an icon.
 """
 
 from __future__ import annotations
@@ -64,7 +68,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.crud import product_master as crud_product
 from app.models.product_master import EmojiMatch, IconStatus, ProductMaster
-from app.services import comfyui
+from app.services import comfyui, icon_library
 from app.services.broadcast_helpers import broadcast_product_update
 from app.services.icon_briefs import brief_for
 from app.services.icon_subjects import subject_for
@@ -221,6 +225,21 @@ def _downscale(image_bytes: bytes) -> bytes:
         return buffer.getvalue()
 
 
+def _fit_to_icon_size(image_bytes: bytes) -> bytes:
+    """A library PNG, resized to `settings.ICON_IMAGE_SIZE` only if it is not already that
+    size - unlike a fresh ComfyUI render, a library file was very likely exported at the
+    size the exporting deployment used, which this deployment need not share.
+    """
+    size = settings.ICON_IMAGE_SIZE
+    with Image.open(io.BytesIO(image_bytes)) as original:
+        if original.size == (size, size):
+            return image_bytes
+        image = original.convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
 async def draw_icon(product_id: UUID, hint: str | None = None) -> None:
     """Generate and store this product's icon. One at a time; never raises.
 
@@ -241,17 +260,86 @@ async def draw_icon(product_id: UUID, hint: str | None = None) -> None:
 async def draw_icons(product_ids: Sequence[UUID], hint: str | None = None) -> None:
     """Generate these products' icons one after another.
 
-    With `COMFYUI_BASE_URL` empty, refuses at once: one INFO line for the whole batch, no
-    database read or write for any product in it.
+    The icon library (operator ask 2026-10-03, `app.services.icon_library`) gets first
+    look at every one of them, before any ComfyUI call and before the
+    `COMFYUI_BASE_URL`-empty refusal below: a gap product whose name matches a library
+    entry is stored from there instead, no GPU needed - which is also why this runs
+    whether or not ComfyUI is configured. Only what the library did not cover ever reaches
+    the refusal or a render.
+
+    With `COMFYUI_BASE_URL` empty, refuses the rest at once: one INFO line for the whole
+    remaining batch, no database read or write for any product still in it.
     """
+    still_needed = []
+    for product_id in product_ids:
+        if not await apply_library_icon(product_id):
+            still_needed.append(product_id)
+    if not still_needed:
+        return
     if not settings.COMFYUI_BASE_URL:
         logger.info(
             "ComfyUI is disabled (COMFYUI_BASE_URL empty); no icon generation queued",
-            extra={"count": len(product_ids)},
+            extra={"count": len(still_needed)},
         )
         return
-    for product_id in product_ids:
+    for product_id in still_needed:
         await draw_icon(product_id, hint)
+
+
+async def _library_fit(
+    db: AsyncSession, product_id: UUID
+) -> tuple[ProductMaster, bytes] | None:
+    """The product and the library image that fits it, or None - eligibility only, no
+    write. Shared by `apply_library_icon`'s real and dry-run paths.
+
+    The precedence (cook or exact emoji > library > generated): an emoji already shown
+    never gets a library icon either (the tile could not show it, same as generation);
+    `cleared` is the cook's own "nothing generates this" and the library respects it too;
+    `pending` means an explicit Regenerate already marked this row before scheduling its
+    own job (`request_redraw`) - the library never second-guesses that, so Regenerate
+    always reaches ComfyUI; and a non-NULL `icon_seed` means *some* render was already
+    attempted for this row (the one signal this round's "no migration" ruling gives us),
+    so a later library entry never overwrites it automatically.
+    """
+    product = await crud_product.get_icon_subject(db, product_id)
+    if product is None:
+        return None
+    if _emoji_already_shown(product):
+        return None
+    if product.icon_status in (IconStatus.CLEARED, IconStatus.PENDING):
+        return None
+    if product.icon_seed is not None:
+        return None
+    name = str(product.canonical_name)
+    image = icon_library.lookup(name)
+    if image is None:
+        return None
+    if await is_non_food(db, name):
+        return None
+    return product, image
+
+
+async def apply_library_icon(product_id: UUID, *, dry_run: bool = False) -> bool:
+    """Store this gap product's icon from the repo's icon library if its name matches.
+
+    True means applied (or, with `dry_run`, would be - nothing is written in that case).
+    Never touches ComfyUI either way, so this works with `COMFYUI_BASE_URL` empty.
+    """
+    async with open_session() as db:
+        fit = await _library_fit(db, product_id)
+        if fit is None:
+            return False
+        if dry_run:
+            return True
+        product, image = fit
+        name = str(product.canonical_name)
+        await crud_product.store_library_icon(db, product, _fit_to_icon_size(image))
+    logger.info(
+        "Product icon applied from the library",
+        extra={"product_id": str(product_id)},
+    )
+    await _announce(product_id, name)
+    return True
 
 
 async def _generate(product_id: UUID, hint: str | None) -> None:
