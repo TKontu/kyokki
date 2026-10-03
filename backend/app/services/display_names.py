@@ -24,9 +24,21 @@ leaves that product with no display name and never drops any other product's - t
 INFO.
 
 A cook's own name (`source="cook"`, written by `PATCH /products/{id}`) is never overwritten by a
-later proposal: the background job checks the language is not already there - by any source -
-before it ever writes, and again right before it writes, since the cook may have gotten there
-while the model was asked.
+later proposal: the background job checks the cook has not set this language - before it ever
+writes, and again right before it writes, since the cook may have gotten there while the model
+was asked.
+
+A rename re-proposes too (2026-10-03 production backfill finding): the model proposed from the
+old English name, so a rename could leave a stale or wrong Finnish name in place
+(`schedule_display_name_rename`, called from `PATCH /products/{id}`'s rename hook). It skips a
+cook's own name exactly the same way; a missing or model-sourced name is re-asked, and the old
+value (if any) stays shown until the new proposal lands - no flash of English.
+
+Both the on-create and the rename proposal, plus the backfill script
+(`scripts/backfill_display_names.py`), give the model up to three distinct printed receipt
+names for the product (`printed_aliases`, from `store_product_alias`, newest first): the
+printed text is the best evidence of the product's real Finnish wording, which the English
+canonical name alone cannot carry (operator ruling, Finnish receipts "kept as original").
 """
 
 from __future__ import annotations
@@ -46,6 +58,7 @@ import app.db.session as app_session
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.crud import product_master as crud_product
+from app.crud import store_product_alias as crud_alias
 from app.models.product_master import ProductMaster
 from app.services.broadcast_helpers import broadcast_product_update
 from app.services.llm_http import LLMAuthError
@@ -61,6 +74,11 @@ SUPPORTED_LANGUAGES: list[str] = ["fi"]
 # A cold start takes 2-5 minutes (the executor preamble); never below that, whatever
 # LLM_TIMEOUT is - mirrors `services/product_emoji.py`'s MIN_PROPOSAL_TIMEOUT.
 MIN_PROPOSAL_TIMEOUT = 300.0
+
+# Up to this many distinct printed receipt names go in the prompt for one product
+# (`printed_aliases`), newest first - enough to show the model the real wording without
+# letting one heavily-bought product dominate the request.
+MAX_PRINTED_ALIASES = 3
 
 
 class DisplayNameProposalError(Exception):
@@ -81,17 +99,40 @@ PROPOSAL_PROMPT = """You translate grocery product names for a Finnish home cook
 inventory app. For each generic English product name below, give the natural Finnish word or
 short phrase a Finnish cook would use for it on a shopping list or in the fridge - not a
 literal dictionary translation, and not a brand name. Keep it short, in Finnish sentence case.
-
+{receipt_rule}
 Products, numbered:
 {products}
 
 Answer with JSON only: {{"r": [{{"i": <number>, "fi": "<name>"}}, ...]}}, one row per product,
 in the same order they were given."""
 
+RECEIPT_ALIAS_RULE = (
+    "\nSome products also list the text a receipt printed for them. When one does, prefer "
+    "the Finnish wording the receipt shows over a plain translation, tidied into a normal "
+    'shopping-list name: normal case, no brand, no pack size, no "LUOMU", no percentages '
+    '(for example "KAHVIKAURAJUOMA 1L" -> "Kahvikaurajuoma"; '
+    '"TOFU KYLMÄSAVU LUOMU" -> "Kylmäsavutofu").\n'
+)
 
-def _build_prompt(names: Sequence[str]) -> str:
-    products = "\n".join(f"{n}. {name}" for n, name in enumerate(names, start=1))
-    return PROPOSAL_PROMPT.format(products=products)
+
+def _build_prompt(
+    names: Sequence[str], aliases: Sequence[Sequence[str]] | None = None
+) -> str:
+    alias_lists: Sequence[Sequence[str]] = (
+        aliases if aliases is not None else [[] for _ in names]
+    )
+    lines = []
+    for number, (name, product_aliases) in enumerate(
+        zip(names, alias_lists, strict=True), start=1
+    ):
+        if product_aliases:
+            printed = ", ".join(product_aliases)
+            lines.append(f"{number}. {name} (printed on receipts: {printed})")
+        else:
+            lines.append(f"{number}. {name}")
+    products = "\n".join(lines)
+    receipt_rule = RECEIPT_ALIAS_RULE if any(alias_lists) else ""
+    return PROPOSAL_PROMPT.format(products=products, receipt_rule=receipt_rule)
 
 
 RESPONSE_SCHEMA: dict[str, Any] = {
@@ -203,17 +244,24 @@ def _parse_proposals(content: str, names: Sequence[str]) -> list[str | None] | N
 
 
 async def propose_finnish_names(
-    names: Sequence[str], *, complete: Any = None
+    names: Sequence[str],
+    *,
+    complete: Any = None,
+    aliases: Sequence[Sequence[str]] | None = None,
 ) -> list[str | None] | None:
     """Ask the model for a Finnish name for each of these generic names, one batch, one
     request. None: nothing usable - the caller leaves every product without a proposal, the
     same as a model failure anywhere else in the catalog.
 
+    `aliases`, one list per name in the same order, carries up to `MAX_PRINTED_ALIASES`
+    printed receipt names per product (`printed_aliases`); omitted or empty, the prompt is
+    exactly as it was before this carried any.
+
     `complete` overrides how the request is sent, for tests; it defaults to the gateway call.
     """
     if not names:
         return []
-    prompt = _build_prompt(names)
+    prompt = _build_prompt(names, aliases)
     payload = _build_payload(prompt)
     post = complete or _post_proposal
     try:
@@ -231,6 +279,30 @@ async def propose_finnish_names(
             extra={"count": len(names)},
         )
     return parsed
+
+
+# --- printed receipt aliases, the best evidence of the real Finnish wording -----------------
+
+
+async def printed_aliases(db: AsyncSession, product_id: UUID) -> list[str]:
+    """Up to `MAX_PRINTED_ALIASES` distinct printed receipt names for this product, newest
+    first (`store_product_alias.last_seen`) - the best evidence of a product's real Finnish
+    wording (operator ruling: Finnish receipts are "kept as original"). Read-only; never
+    used as a resolution key, exactly as `display_names` itself never is.
+    """
+    rows = await crud_alias.aliases_for_product(db, product_id)
+    ordered = sorted(rows, key=lambda row: row.last_seen, reverse=True)
+    seen: set[str] = set()
+    names: list[str] = []
+    for row in ordered:
+        name = str(row.receipt_name)
+        if name in seen:
+            continue
+        seen.add(name)
+        names.append(name)
+        if len(names) == MAX_PRINTED_ALIASES:
+            break
+    return names
 
 
 # --- scheduling the on-create hook (next to the icon drawing and the emoji) -----------------
@@ -273,19 +345,23 @@ async def propose_display_names_for_new_products(product_ids: Sequence[UUID]) ->
     # Phase 1 ships one language, and the model prompt only knows how to ask for
     # Finnish; a batch-of-languages request would only matter once SUPPORTED_LANGUAGES
     # grows (SUPPORTED_LANGUAGES itself still gates who counts as "pending" above).
-    names = [name for _, name in pending]
-    proposed = await propose_finnish_names(names)
+    names = [name for _, name, _ in pending]
+    aliases = [product_aliases for _, _, product_aliases in pending]
+    proposed = await propose_finnish_names(names, aliases=aliases)
     if not proposed:
         return
 
-    for (product_id, name), fi_name in zip(pending, proposed, strict=True):
+    for (product_id, name, _), fi_name in zip(pending, proposed, strict=True):
         if not fi_name:
             continue  # this one row was unusable; every other product still gets its own
         await _store_one_proposal(product_id, name, fi_name)
 
 
-async def _pending_products(product_ids: Sequence[UUID]) -> list[tuple[UUID, str]]:
-    """Every product in this batch with no Finnish name yet, id and English name.
+async def _pending_products(
+    product_ids: Sequence[UUID],
+) -> list[tuple[UUID, str, list[str]]]:
+    """Every product in this batch with no Finnish name yet: id, English name, and up to
+    three printed receipt aliases (newest first) for the prompt.
 
     `populate_existing=True`, as `get_display_name_subject` also uses: a product just
     created earlier in the same request (and so already in this session's identity map,
@@ -304,20 +380,29 @@ async def _pending_products(product_ids: Sequence[UUID]) -> list[tuple[UUID, str
             .scalars()
             .all()
         )
-        return [
+        pending = [
             (cast(UUID, product.id), str(product.canonical_name))
             for product in products
             if "fi" not in product.display_names
+        ]
+        return [
+            (product_id, name, await printed_aliases(db, product_id))
+            for product_id, name in pending
         ]
 
 
 async def _store_one_proposal(product_id: UUID, name: str, fi_name: str) -> None:
     """Write one product's proposed name, if it is still wanted. Never raises - this
-    product's own failure must not stop the rest of the batch (F3 review)."""
+    product's own failure must not stop the rest of the batch (F3 review).
+
+    Only a cook's own name (`source="cook"`) blocks this: a rename re-proposal is meant
+    to overwrite an existing `model` row, not merely fill a gap (`schedule_display_name_
+    rename`).
+    """
     try:
         async with open_session() as db:
             product = await crud_product.get_display_name_subject(db, product_id)
-            if product is None or "fi" in product.display_names:
+            if product is None or product.display_name_sources.get("fi") == "cook":
                 # Gone, or the cook (or an earlier run) already set this language.
                 return
             await crud_product.set_display_name(
@@ -336,6 +421,50 @@ async def _store_one_proposal(product_id: UUID, name: str, fi_name: str) -> None
 async def _propose_one_on_create(product_id: UUID) -> None:
     """One product on its own - the batched path (above) with a single-element batch."""
     await propose_display_names_for_new_products([product_id])
+
+
+# --- scheduling a rename's re-proposal (2026-10-03 production backfill finding) -------------
+
+
+def schedule_display_name_rename(
+    background_tasks: BackgroundTasks, product_id: UUID
+) -> None:
+    """A rename re-proposes the product's Finnish name, once the response has gone.
+
+    The model proposed from the old English name, so a rename can leave a stale or
+    outright wrong Finnish name behind. Scheduled unconditionally from the rename hook,
+    exactly as the icon redraw already is (F2 review) - `_propose_one_on_rename` is
+    where the cook's-own-name check happens, not here.
+    """
+    background_tasks.add_task(_propose_one_on_rename, product_id)
+
+
+async def _propose_one_on_rename(product_id: UUID) -> None:
+    """Re-propose this product's Finnish name after a rename, unless the cook set it.
+
+    A missing name is proposed too (the product may have had none to begin with, or an
+    earlier proposal failed) - this is "the same as create" for whichever language rows
+    are not the cook's own. The stale value, if any, is left in place until the new
+    proposal lands: nothing here ever clears a name it cannot yet replace.
+    """
+    try:
+        async with open_session() as db:
+            product = await crud_product.get_display_name_subject(db, product_id)
+            if product is None or product.display_name_sources.get("fi") == "cook":
+                return
+            name = str(product.canonical_name)
+            aliases = await printed_aliases(db, product_id)
+    except Exception as exc:  # noqa: BLE001 - a background job has nobody to raise to
+        logger.warning(
+            "Could not read a product for a rename's display-name re-proposal",
+            extra={"product_id": str(product_id), "error": repr(exc)},
+        )
+        return
+
+    proposed = await propose_finnish_names([name], aliases=[aliases])
+    if not proposed or not proposed[0]:
+        return
+    await _store_one_proposal(product_id, name, proposed[0])
 
 
 async def _announce(product_id: UUID, name: str) -> None:

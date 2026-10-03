@@ -5,8 +5,14 @@ A new product gets its Finnish name proposed when it is created
 lookup); the products that existed before this lane do not. This walks the whole catalog once,
 proposing a name for every product with no `fi` entry yet, in batches of `--batch-size` (20 by
 default) and one request at a time - the gateway serves one request at a time
-(`app/services/llm_http.py`). A cook-set name is never touched: a product already carrying any
-`fi` row, cook or model, is skipped.
+(`app/services/llm_http.py`). A cook-set name is never touched: a product with a cook `fi` row
+is skipped, with or without `--refresh-model`.
+
+`--refresh-model` instead walks every product whose current `fi` name came from an earlier
+model proposal (as well as the still-missing ones) and asks again - the prompt now also reads
+the product's printed receipt names (`display_names.printed_aliases`), so a rerun after that
+context landed can fix a name the model got wrong without it (2026-10-03 production backfill
+finding: a raw printed name came out garbled, and a rename left the old proposal in place).
 
 Each batch is applied (or, on `--dry-run`, reported) as soon as it answers, so a run
 interrupted partway through a large catalog keeps the batches it finished - the same shape as
@@ -16,6 +22,7 @@ The operator runs this inside the `kyokki-api` container after deploy:
 
     python -m scripts.backfill_display_names --dry-run
     python -m scripts.backfill_display_names
+    python -m scripts.backfill_display_names --refresh-model --dry-run
 """
 
 from __future__ import annotations
@@ -34,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import app.db.session as app_session
 from app.crud import product_master as crud_product
 from app.models.product_master import ProductMaster
-from app.services.display_names import propose_finnish_names
+from app.services.display_names import printed_aliases, propose_finnish_names
 
 SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
@@ -55,18 +62,38 @@ class Change:
     display_name: str
 
 
-async def candidates(db: AsyncSession) -> list[ProductMaster]:
-    """Every product with no Finnish display name yet, cook's or model's."""
+async def candidates(
+    db: AsyncSession, *, refresh_model: bool = False
+) -> list[ProductMaster]:
+    """Every product with no Finnish display name yet, cook's or model's.
+
+    With `refresh_model`, also every product whose current name came from an earlier
+    model proposal - the cook's own is never a candidate, with or without the flag.
+    """
     products = (
-        (await db.execute(select(ProductMaster).order_by(ProductMaster.canonical_name)))
+        (
+            await db.execute(
+                select(ProductMaster)
+                .order_by(ProductMaster.canonical_name)
+                .execution_options(populate_existing=True)
+            )
+        )
         .scalars()
         .all()
     )
+    if refresh_model:
+        return [
+            p
+            for p in products
+            if LANGUAGE not in p.display_names
+            or p.display_name_sources.get(LANGUAGE) == "model"
+        ]
     return [p for p in products if LANGUAGE not in p.display_names]
 
 
 def _report(changes: list[Change], *, dry_run: bool) -> None:
-    print(f"{len(changes)} product(s) would get a Finnish name")
+    verb_header = "would get" if dry_run else "will get"
+    print(f"{len(changes)} product(s) {verb_header} a Finnish name")
     verb = "would propose" if dry_run else "proposed"
     for change in changes:
         print(f"  {verb}  {change.name} -> {change.display_name}")
@@ -89,15 +116,21 @@ async def propose_in_batches(
     *,
     batch_size: int = DEFAULT_BATCH_SIZE,
     on_batch: Callable[[list[Change]], Awaitable[None]] | None = None,
+    sessions: SessionFactory = _default_sessions,
 ) -> list[Change]:
     """Ask the model about every candidate, one batch after another - exactly as
-    `scripts/backfill_emoji.py --propose` does. `on_batch` gets each batch's changes as
+    `scripts/backfill_emoji.py --propose` does. Each product carries its own printed
+    receipt aliases, read fresh for each batch. `on_batch` gets each batch's changes as
     soon as it answers, so a caller can apply or print them right away.
     """
     changes: list[Change] = []
     for start in range(0, len(products), batch_size):
         batch = products[start : start + batch_size]
-        answers = await propose_finnish_names([str(p.canonical_name) for p in batch])
+        async with sessions() as db:
+            aliases = [await printed_aliases(db, p.id) for p in batch]
+        answers = await propose_finnish_names(
+            [str(p.canonical_name) for p in batch], aliases=aliases
+        )
         if answers is None:
             continue
         batch_changes = [
@@ -113,11 +146,13 @@ async def propose_in_batches(
 
 async def apply_changes(db: AsyncSession, changes: list[Change]) -> int:
     """Write every planned change, skipping any product the cook (or an earlier run)
-    already gave a Finnish name meanwhile. Returns how many were applied."""
+    already gave their own Finnish name meanwhile - a model name, however, is exactly
+    what a `--refresh-model` change is meant to overwrite. Returns how many were
+    applied."""
     applied = 0
     for change in changes:
         product = await crud_product.get_display_name_subject(db, change.id)
-        if product is None or LANGUAGE in product.display_names:
+        if product is None or product.display_name_sources.get(LANGUAGE) == "cook":
             continue
         await crud_product.set_display_name(
             db, product, language=LANGUAGE, name=change.display_name, source="model"
@@ -131,12 +166,13 @@ async def backfill(
     *,
     dry_run: bool,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    refresh_model: bool = False,
     sessions: SessionFactory = _default_sessions,
 ) -> list[Change]:
-    """Propose a Finnish name for every product that has none, one batch at a time, each one
+    """Propose a Finnish name for every candidate product, one batch at a time, each one
     applied (or, on `--dry-run`, reported) as soon as it comes back."""
     async with sessions() as db:
-        products = await candidates(db)
+        products = await candidates(db, refresh_model=refresh_model)
 
     if not products:
         print("Nothing to propose: every product already has a Finnish name.")
@@ -150,7 +186,9 @@ async def backfill(
     async def on_batch(batch_changes: list[Change]) -> None:
         await _apply_and_report(batch_changes, dry_run=dry_run, sessions=sessions)
 
-    return await propose_in_batches(products, batch_size=batch_size, on_batch=on_batch)
+    return await propose_in_batches(
+        products, batch_size=batch_size, on_batch=on_batch, sessions=sessions
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -164,8 +202,20 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_BATCH_SIZE,
         help="model proposal batch size (default 20)",
     )
+    parser.add_argument(
+        "--refresh-model",
+        action="store_true",
+        help="also re-propose every product whose current name came from the model "
+        "(the cook's own names are always kept)",
+    )
     args = parser.parse_args(argv)
-    asyncio.run(backfill(dry_run=args.dry_run, batch_size=args.batch_size))
+    asyncio.run(
+        backfill(
+            dry_run=args.dry_run,
+            batch_size=args.batch_size,
+            refresh_model=args.refresh_model,
+        )
+    )
     return 0
 
 
