@@ -120,6 +120,13 @@ resolve(lines, chain, catalog):
   everything else                                     -> none (a new product, named by generic)
 ```
 
+**A rejected proposal carries a correction (Q37b).** When the g-only proposal was offered
+and the selection answer did not land on it, the line's resolution records
+`rejected_product_id` (the proposal) and, if the model gave one, `corrected_generic`. The
+pipeline and re-analyse then store the line under the corrected generic name. A rejection
+exists only for the g-only proposal: a key hit or alias is never "rejected", and a
+trigram-only line that stayed unmatched proposed nothing.
+
 Rules the service enforces, not the caller:
 
 - No product id is ever assigned from a similarity score.
@@ -152,7 +159,7 @@ Same thing means a home cook would put them on one shopping-list line. Different
 plant milk vs dairy milk, or a different cut are different products.
 Lines: [{"id": line_id, "n": printed, "g": generic, "c": category,
          "candidates": [{"p": product_id, "name": ...}, ...]}]
-Answer: {"r": [{"id": line_id, "p": product_id or null}]}
+Answer: {"r": [{"id": line_id, "p": product_id or null, "g": corrected generic, only when p is null}]}
 ```
 
 The prompt also says that sharing a word is not sameness and that null is a good answer, with
@@ -161,7 +168,8 @@ were the nearest candidate picked when none was right). The examples are not the
 pairs, which `tests/fixtures/resolution/reported_pairs.json` pins for the retriever and, behind
 `requires_vllm`, for the model.
 
-Strict JSON schema as in extraction; `p` validated against the offered set. Expected cost on
+Strict JSON schema as in extraction; `p` validated against the offered set. A `g` is kept
+only when `p` is null and it is not merely the rejected proposal's own name (Q37b). Expected cost on
 the homelab: a dozen unresolved lines with five candidates each is a few hundred tokens of
 output and roughly 10-20 s on `c2.muse-glimmer`; measure on the 49-line fixture with an empty
 catalog (no call), a warm catalog (few unresolved) and a cold one (all unresolved).
@@ -183,6 +191,15 @@ the line's `resolution.product_id`:
 | cook changed the product (attach or search) | create/correct, source=cook, verified=True | learn generic → product, source=cook |
 | cook detached and named a new product | create, source=cook, verified=True | canonical row for the new product |
 | cook skipped the line | nothing | nothing |
+
+**A rejected snap stays rejected (Q37b).** Confirm defaults an item without a product id
+to the line's generic name. When that name is the one the server served (absent, or echoed
+back unchanged) and it would resolve to `rejected_product_id`, confirm falls back to the
+line's corrected generic; if even that names the rejected product, the item is refused and the
+cook must type a name. The guard applies only to the served name: a name the cook typed, or a
+product the cook picked explicitly, is honoured even when it is the rejected product. A line
+confirmed exactly as served onto its `corrected_generic` product is the model's correction,
+not the cook's word, so its alias is learned as `source=model`, unverified.
 
 Alias precedence in resolution: verified before unverified, then occurrence count, then
 recency. An unverified alias still pre-fills the row, but the row shows it as "auto" (3.5).

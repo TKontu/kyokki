@@ -1,49 +1,50 @@
 # Handoff
-Generated-UTC: 2026-10-02T17:22:38Z
-Base-SHA: f4874abfc3f5ce3d996933a4452e2eca733dfc37
+Generated-UTC: 2026-10-03T08:06:53Z
+Base-SHA: 03588d1cfecdf22026c5972b7cd3a89951d480f2
 
 ## Round delta
-- **Merged on 2026-10-02 (not deployed):**
-  - round 2026-10-02-1, complete: #144 store chain, #147 agent discard-expired, #148 shopping screen,
-    #149 undo direction, #150 waste trend;
-  - round 2026-10-02-2, partial: #151 H27 parser, #154 Home Assistant REST.
-- **Open and ready:**
-  - #153 Q37b;
-  - #152 shopping live updates and #155 CLI discard with coded shopping errors. Both were retargeted
-    from their stacked parents to `main`, and `main` was merged in so CI runs.
-- **#142 Q18-G2:** the live ComfyUI check is running through the operator's tunnel.
-- Outcomes are in `docs/TODO.md` after the round 2026-10-01-1 block. The logs are `.rounds/2026-10-02-1`
-  and `.rounds/2026-10-02-2`.
+- **Merged on 2026-10-03 (not deployed):** round 2026-10-02-3, complete: #157 stack.env icon keys,
+  #158 watched-folder receipts, #159 iPad API contract, #160 icon subjects (9/12), #161 min-stock
+  auto-add, #162 display language phase 1. `main` CI and the image builds are green at 03588d1.
+- Rounds 2026-10-02-1 and -2, plus #142, were all merged on 2026-10-02.
+- Outcomes are in `docs/TODO.md` after the round 2026-10-02-2 block. The log is
+  `.rounds/2026-10-02-3`.
+- `docs/PRODUCT_RESOLUTION_SPEC.md` now describes Q37b (the rejected proposal, its correction,
+  and the confirm guard).
 
 ## Active PRs and conflicts
-- None of #142, #152, #153 or #155 share files.
-- #142 owns the only new Alembic head (c715f1ea4510, on fbf2c08da52d).
+- None open apart from this reconcile. Alembic head: `61f6f69cc22f` (product_display_name).
 
 ## Non-obvious decisions or blockers
-- **Q37b rulings:**
-  - the confirm guard applies only to the name the server served;
-  - a name the cook typed is explicit;
-  - an accepted correction learns an unverified alias.
+- **Display names are not resolution keys.** They live in `product_display_name`, never in
+  `product_name`. Whether a cook-set Finnish name should also become a synonym is undecided.
+- **Icons:** the template's composition and negative-prompt tuning were measured as harmful and
+  reverted. Do not reintroduce them without a new four-way measurement.
 - **CI runs only for PRs into `main`.** A stacked PR needs a retarget plus a push before real CI runs.
-- **The agent sandbox refuses `ssh`** ("Containment Escape"). The operator opens the tunnel:
-  `ssh -f -N -L 19292:127.0.0.1:9292 sandbox-host` on devbox. Close it with
+- **The agent sandbox refuses `ssh`.** The operator opens the ComfyUI tunnel on devbox
+  (`ssh -f -N -L 19292:127.0.0.1:9292 sandbox-host`) and closes it with
   `pkill -f "19292:127.0.0.1:9292"`.
 - **The agent is denied `gh pr merge` and force-push.** Lanes merge `main` and never rebase.
-- **The Sonnet session limit has stopped agents three times.** Re-run lost lenses; executors push early.
+- **The Sonnet session limit has stopped agents four times.** Executors push early; resume them
+  with SendMessage.
 - **Operator, in production:**
+  - deploy, then `alembic upgrade head` (two new revisions since the last deploy:
+    c715f1ea4510 and 61f6f69cc22f);
+  - icons on: a Caddy allow rule for the server on `/upstream/a4.comfyui/`, then
+    `COMFYUI_BASE_URL` in Portainer, then `backfill_icons --dry-run` and the real run;
+  - `scripts.backfill_display_names --dry-run`, then the real run;
+  - optional: `RECEIPT_WATCH_DIR` and the worker mount (`docs/DEPLOY.md` "Watched folder");
   - remove the aliases `KARTANON KALKKUNALEIKE → Ham` and `VALIO VOI NORMAALISUOLAI → Spread`;
-  - rename "Dip";
-  - run `scripts.rekey_store_chains` (dry run, then `--apply lidi-suomi-ky`);
-  - deploy, including `alembic upgrade head` once #142 merges;
-  - `LLM_MAX_TOKENS`;
-  - the AG7 Hermes run.
-- **Round 4 candidates:**
-  - the iPad reads `detail.code` and sends an Idempotency-Key on shopping remove;
-  - dedupe the undo TS types;
-  - update `PRODUCT_RESOLUTION_SPEC.md` for Q37/Q37b;
+    rename "Dip";
+  - `scripts.rekey_store_chains` (dry run, then `--apply lidi-suomi-ky`);
+  - `LLM_MAX_TOKENS`; the AG7 Hermes run.
+- **Round 5 candidates:**
+  - language phase 2 (UI text; display names on Gone and shopping rows);
+  - min-stock follow-ups (the crud → service layering in discard; undo and auto items);
+  - the shopping page passes its remove key explicitly;
+  - a Tomato puree icon brief;
   - H47 Telegram hygiene.
 - Do not stage `.claude/README.md` or `.claude/templates/profiles/python-fastapi.md`.
 
 ## Next action
-When the CI watcher and the live check report: post the #142 live-check verdict and have the operator
-merge #142, #152, #153 and #155. Then reconcile and plan round 4.
+Merge this reconcile, then plan round 5.
