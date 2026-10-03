@@ -118,13 +118,13 @@ async def undo_last_change(
     """
     try:
         async with handle_integrity_errors():
-            items = await undo_service.undo(db, request.batch_id)
+            result = await undo_service.undo(db, request.batch_id)
     except undo_service.UndoConflict as exc:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
 
-    for item in items:
+    for item in result.items:
         row: Any = item
         await broadcast_inventory_update(
             inventory_item_id=row.id,
@@ -133,7 +133,13 @@ async def undo_last_change(
             status=row.status,
             product_name=row.product_name,
         )
-    return UndoResponse(undone=len(items))
+
+    # A4: every product this undo raised the stock of may have an auto-added item that
+    # can now come back off the list - `min_stock` decides, never this layer.
+    if result.raised and result.since is not None:
+        await min_stock.after_stock_increase_by_undo(db, result.raised, result.since)
+
+    return UndoResponse(undone=len(result.items))
 
 
 @router.get("/{item_id}", response_model=InventoryItemResponse)
@@ -259,6 +265,12 @@ async def update_inventory_item(
     # dated from the shelf life (`expiry_source='calculated'`) with it
     await _announce_moved(result.moved, item.product_name)
 
+    # F1: a discard, or a quantity corrected down, lowers active stock exactly as a
+    # consume does - the crud layer only reports which product (never calling
+    # `app.services` itself); this is where the same auto-add check a consume runs.
+    if result.lowered_product_id is not None:
+        await min_stock.after_stock_decrease(db, result.lowered_product_id)
+
     return item
 
 
@@ -292,6 +304,12 @@ async def _move_many(
             current_quantity=item.current_quantity,
             status=item.status,
         )
+
+    # F1: once per distinct product this batch discarded (never a restore, which cannot
+    # lower stock), the same auto-add check a consume runs. The crud layer only reports
+    # which products (never calling `app.services` itself).
+    for product_id in result.lowered_products:
+        await min_stock.after_stock_decrease(db, product_id)
 
     return BulkItemsResponse(
         changed=len(result.changed), refused=result.refused, missing=result.missing

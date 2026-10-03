@@ -284,7 +284,7 @@ async def update_inventory_item(
     item_update: InventoryItemUpdate,
     *,
     on_dated_by_hand: Callable[[InventoryItem], Awaitable[None]] | None = None,
-) -> InventoryItem | None:
+) -> tuple[InventoryItem | None, UUID | None]:
     """Update an inventory item.
 
     Args:
@@ -297,7 +297,10 @@ async def update_inventory_item(
             transaction. A new date on a `frozen` item stays `frozen` and is not passed.
 
     Returns:
-        Updated inventory item if found, None otherwise.
+        A tuple of (updated inventory item if found else None, the id of the product
+        whose active stock this update lowered - a discard, or a quantity corrected down -
+        or None when nothing was lowered). The caller decides what to do with the second
+        element (F1); this layer never calls into `app.services` itself.
 
     Raises:
         ItemFrozen: The item has been thrown away and this is not a restore.
@@ -307,7 +310,7 @@ async def update_inventory_item(
     # and two concurrent PATCHes used to make all four of them twice (H23).
     db_item = await get_inventory_item(db, item_id, for_update=True)
     if not db_item:
-        return None
+        return None, None
 
     row: Any = db_item
     previous = snapshot(db_item)
@@ -408,15 +411,16 @@ async def update_inventory_item(
 
     # F1: a PATCH that discards the item, or corrects its quantity down, lowers active
     # stock exactly as a consume does - throwing away the last milk still means you need
-    # milk - so it gets the same auto-add check, once this commit has landed. A plain
-    # restore never lowers stock and is not checked; `after_stock_decrease` never raises
-    # (F2), so a failure here cannot turn this PATCH into a 500.
-    if event is ItemEvent.DISCARD or remaining < before:
-        from app.services import min_stock
+    # milk. Reported back rather than acted on here (crud never imports a service): the
+    # caller runs the same auto-add check a consume does, once this commit has landed. A
+    # plain restore never lowers stock and is not reported.
+    lowered_product_id: UUID | None = (
+        cast(UUID, row.product_master_id)
+        if (event is ItemEvent.DISCARD or remaining < before)
+        else None
+    )
 
-        await min_stock.after_stock_decrease(db, row.product_master_id)
-
-    return await _reload(db, db_item.id)
+    return await _reload(db, db_item.id), lowered_product_id
 
 
 @dataclass(frozen=True)
@@ -426,6 +430,10 @@ class BulkResult:
     changed: list[MovedInventoryItem]
     refused: int
     missing: int
+    #: Distinct products a discard in this batch lowered (F1), for the caller to run the
+    #: same auto-add check a consume does, once this commit has landed. Never a service
+    #: call made from here (crud never imports a service). Empty on a restore.
+    lowered_products: frozenset[UUID] = frozenset()
 
 
 async def move_many(
@@ -503,14 +511,11 @@ async def move_many(
 
     await db.commit()
 
-    if discarded_products:
-        from app.services import min_stock
-
-        for product_id in discarded_products:
-            await min_stock.after_stock_decrease(db, product_id)
-
     return BulkResult(
-        changed=changed, refused=refused, missing=len(item_ids) - len(found)
+        changed=changed,
+        refused=refused,
+        missing=len(item_ids) - len(found),
+        lowered_products=frozenset(discarded_products),
     )
 
 
