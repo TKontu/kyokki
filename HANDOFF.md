@@ -1,19 +1,18 @@
 # Handoff
-Generated-UTC: 2026-10-03T08:06:53Z
-Base-SHA: 03588d1cfecdf22026c5972b7cd3a89951d480f2
+Generated-UTC: 2026-10-03T11:02:35Z
+Base-SHA: 6506cca6c543d439f78fcaa43df0d2202225cf8d
 
 ## Round delta
-- **Merged on 2026-10-03 (not deployed):** round 2026-10-02-3, complete: #157 stack.env icon keys,
-  #158 watched-folder receipts, #159 iPad API contract, #160 icon subjects (9/12), #161 min-stock
-  auto-add, #162 display language phase 1. `main` CI and the image builds are green at 03588d1.
-- Rounds 2026-10-02-1 and -2, plus #142, were all merged on 2026-10-02.
-- Outcomes are in `docs/TODO.md` after the round 2026-10-02-2 block. The log is
-  `.rounds/2026-10-02-3`.
-- `docs/PRODUCT_RESOLUTION_SPEC.md` now describes Q37b (the rejected proposal, its correction,
-  and the confirm guard).
+- **Merged on 2026-10-03 (not deployed):**
+  - round 2026-10-02-3 (#157-#162) and its reconcile #163;
+  - round 2026-10-03-1: #164 e-mail receipts, #165 run-out forecast, #166 H47 Telegram, #167
+    min-stock follow-ups, #168 Finnish UI.
+- `main` CI and the image builds are green at 6506cca.
+- Outcomes are in `docs/TODO.md` after the round 2026-10-02-3 block. The log is
+  `.rounds/2026-10-03-1`.
 
 ## Active PRs and conflicts
-- None open apart from this reconcile. Alembic head: `61f6f69cc22f` (product_display_name).
+- None open apart from this reconcile. Alembic head: `61f6f69cc22f` (unchanged in round 2026-10-03-1).
 
 ## Non-obvious decisions or blockers
 - **Display names are not resolution keys.** They live in `product_display_name`, never in
@@ -28,23 +27,27 @@ Base-SHA: 03588d1cfecdf22026c5972b7cd3a89951d480f2
 - **The Sonnet session limit has stopped agents four times.** Executors push early; resume them
   with SendMessage.
 - **Operator, in production:**
-  - deploy, then `alembic upgrade head` (two new revisions since the last deploy:
-    c715f1ea4510 and 61f6f69cc22f);
+  - deploy (`kyokki-migrate` applies the two new revisions, c715f1ea4510 and 61f6f69cc22f,
+    automatically);
   - icons on: a Caddy allow rule for the server on `/upstream/a4.comfyui/`, then
     `COMFYUI_BASE_URL` in Portainer, then `backfill_icons --dry-run` and the real run;
   - `scripts.backfill_display_names --dry-run`, then the real run;
   - optional: `RECEIPT_WATCH_DIR` and the worker mount (`docs/DEPLOY.md` "Watched folder");
+  - optional: e-mail receipts, a dedicated mailbox plus `RECEIPT_MAIL_*` including
+    `RECEIPT_MAIL_ALLOWED_SENDERS` (`docs/DEPLOY.md` "E-mail receipts");
+  - the Finnish wording pass (list in `docs/TODO.md`, round 2026-10-03-1);
   - remove the aliases `KARTANON KALKKUNALEIKE → Ham` and `VALIO VOI NORMAALISUOLAI → Spread`;
     rename "Dip";
   - `scripts.rekey_store_chains` (dry run, then `--apply lidi-suomi-ky`);
   - `LLM_MAX_TOKENS`; the AG7 Hermes run.
-- **Round 5 candidates:**
-  - language phase 2 (UI text; display names on Gone and shopping rows);
-  - min-stock follow-ups (the crud → service layering in discard; undo and auto items);
-  - the shopping page passes its remove key explicitly;
-  - a Tomato puree icon brief;
-  - H47 Telegram hygiene.
+- **Held on operator decisions:** HTTPS on the LAN (frontier 4), which unblocks the Android share
+  target and PWA camera scanning; meal sections (frontier 14); AG0 recipes.
+- **Round 6 candidates:**
+  - language phase 3 (the products, receipt and scan screens);
+  - the crud → service inversion;
+  - H41 (scanner quarantine, DEC-7), H42 (concurrency tests), H44 (line endings);
+  - a Tomato puree icon brief (needs a tunnel session).
 - Do not stage `.claude/README.md` or `.claude/templates/profiles/python-fastapi.md`.
 
 ## Next action
-Merge this reconcile, then plan round 5.
+Merge this reconcile. Deploy is due: several rounds of features are merged but not deployed. Then plan round 6.

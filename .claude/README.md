@@ -13,7 +13,8 @@ cd <new-project>
 ```
 
 For a brand-new Python project, `starters/python/` has a matching `pyproject.toml` and
-`.env.example` to copy to the root as well.
+`.env.example` to copy to the root as well. `starters/devbox/` has a Dockerfile for a remote dev
+container you reach over SSH or VS Code Remote-SSH.
 
 Then, in that project:
 
