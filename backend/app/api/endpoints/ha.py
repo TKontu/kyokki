@@ -29,9 +29,11 @@ from app.schemas.ha import (
     HaShoppingAddRequest,
     HaStatusResponse,
 )
+from app.schemas.runout import HaRunoutItem, HaRunoutResponse
 from app.schemas.shopping_list_item import ShoppingListItemResponse
 from app.services import ha as ha_service
 from app.services import idempotency, min_stock, shopping_generate
+from app.services import runout as runout_service
 from app.services import stock as stock_service
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
@@ -65,6 +67,33 @@ async def ha_expiring(
 async def ha_low_stock(db: AsyncSession = Depends(get_db)) -> Any:
     """Products below their restock point, for shopping reminders. Writes nothing."""
     return await ha_service.low_stock(db)
+
+
+@router.get("/runout", response_model=HaRunoutResponse)
+async def ha_runout(
+    within_days: int | None = Query(
+        None, ge=0, description="Only products running out within N days"
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """When each product will run out, for a template sensor. Writes nothing.
+
+    The same forecast `GET /api/stock/runout` returns (`services.runout`), shaped down
+    to what a sensor needs - no `active_stock` or `daily_rate`.
+    """
+    items = await runout_service.forecast(db, within_days=within_days)
+    shaped = [
+        HaRunoutItem(
+            id=item.product_id,
+            name=item.name,
+            unit=item.unit,
+            days_left=item.days_left,
+            runs_out_on=item.runs_out_on,
+            status=item.status,
+        )
+        for item in items
+    ]
+    return HaRunoutResponse(items=shaped, count=len(shaped))
 
 
 @router.post("/consume", response_model=HaConsumeResponse)
