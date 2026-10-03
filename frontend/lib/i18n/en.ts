@@ -266,6 +266,15 @@ export const en = {
       light: { name: 'Light', hint: 'Always light' },
       dark: { name: 'Dark', hint: 'Always dark' },
     },
+    // Icon curation (operator ask 2026-10-03), shown only when the server has
+    // ICON_CURATION_ENABLED set - the operator's own develop build, not every deployment.
+    canonicalIcons: {
+      heading: 'Canonical icons',
+      empty: 'No icons marked yet',
+      count: { one: '{count} icon marked', other: '{count} icons marked' },
+      unmark: 'Unmark',
+      downloadBundle: 'Download bundle',
+    },
   },
   // Post-MVP frontier item 13, phase 3 (round 2026-10-03-3): the receipt, scan and area
   // screens, plus the product search the receipt review row uses. Appended at the end, after

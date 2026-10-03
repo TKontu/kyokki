@@ -33,12 +33,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import io
 import json
 import sys
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -47,6 +45,7 @@ import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from app.services.icon_briefs import brief_for
+from app.services.icon_library import index_entry, slug_for
 from app.services.icon_subjects import subject_for
 from app.services.product_names import normalize_product_name
 
@@ -91,15 +90,6 @@ def _is_eligible(
     if names is not None:
         return normalize_product_name(name) in names
     return all_ready
-
-
-def _slug(name: str) -> str:
-    """A filesystem-safe key for this product's PNG, from its normalised name."""
-    text = normalize_product_name(name)
-    cleaned = "".join(ch if ch.isalnum() else "_" for ch in text)
-    while "__" in cleaned:
-        cleaned = cleaned.replace("__", "_")
-    return cleaned.strip("_") or "icon"
 
 
 def load_index(path: Path = INDEX_PATH) -> dict[str, Any]:
@@ -213,18 +203,17 @@ async def export(
                 continue
 
             image = await fetch_icon(client, str(product["id"]))
-            file_name = f"{_slug(name)}.png"
+            file_name = f"{slug_for(name)}.png"
             library_dir.mkdir(parents=True, exist_ok=True)
             (library_dir / file_name).write_bytes(image)
             subject = product.get("subject") or brief_for(name) or subject_for(name)
-            index[key] = {
-                "file": file_name,
-                "sha256": hashlib.sha256(image).hexdigest(),
-                "subject": subject,
-                "seed": product.get("icon_seed"),
-                "source": f"generated:{urlparse(api).netloc}",
-                "exported_at": datetime.now(UTC).isoformat(),
-            }
+            index[key] = index_entry(
+                name,
+                image,
+                source=f"generated:{urlparse(api).netloc}",
+                seed=product.get("icon_seed"),
+                subject=subject,
+            )
             exported_images.append((name, image))
             if already_in_library:
                 result.replaced += 1

@@ -6,6 +6,7 @@ from .endpoints import (
     events,
     ha,
     health,
+    icon_library,
     inventory,
     products,
     receipts,
@@ -21,6 +22,9 @@ api_router = APIRouter()
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(categories.router, prefix="/categories", tags=["categories"])
 api_router.include_router(products.router, prefix="/products", tags=["products"])
+api_router.include_router(
+    icon_library.router, prefix="/icon-library", tags=["icon-library"]
+)
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(stock.router, prefix="/stock", tags=["stock"])
 api_router.include_router(receipts.router, prefix="/receipts", tags=["receipts"])

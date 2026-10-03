@@ -129,6 +129,12 @@ class Settings(BaseSettings):
     # ComfyUI's fixed 1024x1024 canvas - sharp on the iPad tile, small to store and serve.
     ICON_IMAGE_SIZE: int = 256
 
+    # Icon curation (operator ruling 2026-10-03): on the operator's own develop build, the
+    # cook can mark a good generated icon as canonical, ready to submit to the repo's icon
+    # library. False everywhere else - this is a developer workflow, not a cook-facing
+    # feature, so it defaults off.
+    ICON_CURATION_ENABLED: bool = False
+
     @field_validator("COMFYUI_TIMEOUT")
     @classmethod
     def comfyui_timeout_has_a_floor(cls, v: float) -> float:

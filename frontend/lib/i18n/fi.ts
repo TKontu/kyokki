@@ -276,6 +276,13 @@ export const fi: Messages = {
       light: { name: 'Vaalea', hint: 'Aina vaalea' },
       dark: { name: 'Tumma', hint: 'Aina tumma' },
     },
+    canonicalIcons: {
+      heading: 'Kanoniset kuvakkeet',
+      empty: 'Ei merkittyjä kuvakkeita vielä',
+      count: { one: '{count} kuvake merkitty', other: '{count} kuvaketta merkitty' },
+      unmark: 'Poista merkintä',
+      downloadBundle: 'Lataa paketti',
+    },
   },
   receipt: {
     title: 'Kuitti',
