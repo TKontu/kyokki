@@ -4,7 +4,7 @@
  */
 
 import { describeUndo } from '../undo'
-import type { UndoPreview, UndoStep } from '@/types/inventory'
+import type { UndoPreview, UndoStep } from '@/types/consumption'
 
 const step = (overrides: Partial<UndoStep> = {}): UndoStep => ({
   inventory_item_id: 'i1',

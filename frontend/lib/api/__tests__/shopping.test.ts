@@ -130,12 +130,17 @@ describe('update', () => {
 })
 
 describe('remove', () => {
-  it('deletes the item', async () => {
+  it('deletes the item and sends the Idempotency-Key header', async () => {
+    let header: string | null = null
     server.use(
-      http.delete(`${API_URL}/shopping/i-1`, () => new HttpResponse(null, { status: 204 }))
+      http.delete(`${API_URL}/shopping/i-1`, ({ request }) => {
+        header = request.headers.get('Idempotency-Key')
+        return new HttpResponse(null, { status: 204 })
+      })
     )
 
-    await expect(shoppingAPI.remove('i-1')).resolves.toBeUndefined()
+    await expect(shoppingAPI.remove('i-1', 'key-5')).resolves.toBeUndefined()
+    expect(header).toBe('key-5')
   })
 })
 

@@ -3,7 +3,6 @@
  * Mirror backend schema: /backend/app/schemas/inventory_item.py
  */
 
-import type { ConsumptionAction } from './consumption'
 import type { Vocabulary } from './vocabulary'
 
 export type InventoryItemStatus = 'sealed' | 'opened' | 'partial' | 'empty' | 'discarded'
@@ -106,28 +105,6 @@ export interface BulkItemsResponse {
   /** Already in that state, or frozen against it. Not an error. */
   refused: number
   missing: number
-}
-
-/**
- * One change the header's Undo would reverse. Mirrors `schemas/inventory_item.py`'s
- * `UndoStepResponse`.
- */
-export interface UndoStep {
-  inventory_item_id: string
-  product_name: string
-  unit: string
-  action: Vocabulary<ConsumptionAction>
-  quantity_consumed: number
-  // Which way a `correct` moved the quantity; null for any other action, and for a
-  // `correct` logged before the backend could tell (operator, 2026-10-02).
-  direction: 'up' | 'down' | null
-}
-
-/** The most recent action on stock, as one step for Undo: one item, or a whole cleared shelf. */
-export interface UndoPreview {
-  batch_id: string // Send back to undo exactly this, and nothing newer
-  logged_at: string // ISO datetime
-  steps: UndoStep[]
 }
 
 export interface InventoryListParams {

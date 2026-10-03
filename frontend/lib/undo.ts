@@ -12,7 +12,7 @@
  * that reads "Put back" too, same as before this build knew to ask (2026-10-02).
  */
 
-import type { UndoPreview, UndoStep } from '@/types/inventory'
+import type { UndoPreview, UndoStep } from '@/types/consumption'
 
 const VERBS: Record<string, string> = {
   use_full: 'Finished',
