@@ -20,6 +20,7 @@ import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { formatExpiryDate } from '@/lib/dates'
 import { displayName } from '@/lib/displayName'
+import { useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
 import type { InventoryItem } from '@/types/inventory'
 
@@ -37,11 +38,11 @@ export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetPro
   const move = useBulkInventoryMove()
   const toast = useToast()
   const [language] = useLanguage()
+  const { t } = useT()
 
   if (!open || items.length === 0) return null
 
   const count = items.length
-  const noun = count === 1 ? 'item' : 'items'
   const ids = items.map((item) => item.id)
 
   const clear = () => {
@@ -50,10 +51,13 @@ export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetPro
       {
         onSuccess: (result) => {
           // The header's Undo takes the whole shelf back as one step
-          toast.success(`Thrown away · ${result.changed} ${noun}`)
+          toast.success(t('inventory.clearExpired.toast', { count: result.changed }))
           onClose()
         },
-        onError: (error) => toast.error(errorText(error, `Could not clear ${count} ${noun}`)),
+        onError: (error) =>
+          toast.error(
+            errorText(error, t('inventory.clearExpired.error', { count }))
+          ),
       }
     )
   }
@@ -62,12 +66,12 @@ export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetPro
     <BottomSheet
       open
       onClose={onClose}
-      title={`Clear ${count} expired ${noun}?`}
+      title={t('inventory.clearExpired.title', { count })}
       footer={
         <div className="grid grid-cols-2 gap-3">
           {/* Throwing a shelf away is the destructive one; focus stays on the way out (H45) */}
           <Button data-primary variant="secondary" size="lg" disabled={move.isPending} onClick={onClose}>
-            Cancel
+            {t('inventory.clearExpired.cancel')}
           </Button>
           <Button
             variant="danger"
@@ -75,14 +79,13 @@ export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetPro
             loading={move.isPending}
             onClick={clear}
           >
-            {`Yes, throw away`}
+            {t('inventory.clearExpired.confirm')}
           </Button>
         </div>
       }
     >
       <p className="text-base text-ui-text dark:text-ui-dark-text">
-        This records them as thrown away, which is what the waste count is for. Anything you
-        actually ate is better consumed from its card instead.
+        {t('inventory.clearExpired.body')}
       </p>
       <ul className="mt-4 flex flex-col gap-1">
         {items.map((item) => (
@@ -94,7 +97,7 @@ export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetPro
               {displayName(item.product_display_names, item.product_name, language)}
             </span>
             <span className="shrink-0 text-ui-text-secondary dark:text-ui-dark-text-secondary">
-              {formatExpiryDate(item.expiry_date)}
+              {formatExpiryDate(item.expiry_date, language)}
             </span>
           </li>
         ))}

@@ -24,6 +24,11 @@ export interface ConsumptionLogEntry {
   item_status: Vocabulary<InventoryItemStatus> | null // null when the item is gone
   product_master_id: string
   product_name: string
+  // Post-MVP frontier item 13, phase 2: the product's name by language code, e.g.
+  // {'fi': 'Maito'}; a language with no entry falls back to `product_name` (English).
+  // Optional, same as `InventoryItem.product_display_names`: the API always sends it, but
+  // a fixture built before this field existed should not fail to typecheck.
+  product_display_names?: Record<string, string>
   unit: string // The unit both quantities are in
   action: Vocabulary<ConsumptionAction>
   quantity_consumed: number // How much the event moved, always positive

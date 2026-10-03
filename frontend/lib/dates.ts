@@ -1,7 +1,15 @@
 /**
  * Date and Expiry Utilities
  * Handles date calculations and expiry urgency logic for inventory items
+ *
+ * `formatAgo`/`formatExpiryDate` take an optional `Language` (review F1, round 2026-10-03-1):
+ * the planner's original spec never granted this file, so a Finnish screen still read "Today"
+ * and "3 days ago" in English. No hooks here, by design - the caller (already holding
+ * `useLanguage()`/`useT()`) passes the language in. Defaulting to `'en'` keeps every existing
+ * caller's output byte-identical without touching their call sites.
  */
+
+import type { Language } from './language'
 
 export type ExpiryUrgency = 'expired' | 'today' | 'tomorrow' | 'soon' | 'fresh'
 
@@ -61,8 +69,23 @@ export function getExpiryUrgency(expiryDate: string): ExpiryUrgency {
   return 'fresh'
 }
 
-/** Days or weeks, in the bare voice the badge uses: no "in", no "ago", no flourish. */
-function howLong(days: number): string {
+/** The `Intl` locale for a language choice, same mapping `lib/i18n` uses. */
+function localeFor(language: Language): string {
+  return language === 'fi' ? 'fi-FI' : 'en-GB'
+}
+
+/**
+ * Days or weeks, in the bare voice the badge uses: no "in", no "ago", no flourish. Finnish
+ * numeral agreement, not a word-for-word copy of the English plural: a count of exactly one
+ * takes the nominative singular ("1 viikko"), any other count the partitive singular
+ * ("3 viikkoa"), never the bare partitive plural a number-less count would use.
+ */
+function howLong(days: number, language: Language): string {
+  if (language === 'fi') {
+    if (days <= 6) return `${days} ${days === 1 ? 'päivä' : 'päivää'}`
+    const weeks = Math.floor(days / 7)
+    return `${weeks} ${weeks === 1 ? 'viikko' : 'viikkoa'}`
+  }
   if (days <= 6) return `${days} day${days === 1 ? '' : 's'}`
   const weeks = Math.floor(days / 7)
   return `${weeks} week${weeks > 1 ? 's' : ''}`
@@ -79,20 +102,26 @@ const DAY_MS = 24 * HOUR_MS
  * a number nobody converts, and a wall display saying "13 January" is the honest answer. A
  * moment in the future - two clocks disagreeing - reads as "just now" rather than counting up.
  */
-export function formatAgo(when: string | number, now: Date = new Date()): string {
+export function formatAgo(
+  when: string | number,
+  language: Language = 'en',
+  now: Date = new Date()
+): string {
   const at = typeof when === 'number' ? when : new Date(when).getTime()
   const ago = now.getTime() - at
 
-  if (ago < MINUTE_MS) return 'just now'
+  if (ago < MINUTE_MS) return language === 'fi' ? 'Juuri nyt' : 'just now'
   if (ago < HOUR_MS) {
     const minutes = Math.floor(ago / MINUTE_MS)
+    if (language === 'fi') return `${minutes} ${minutes === 1 ? 'minuutti' : 'minuuttia'} sitten`
     return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
   }
   if (ago < DAY_MS) {
     const hours = Math.floor(ago / HOUR_MS)
+    if (language === 'fi') return `${hours} ${hours === 1 ? 'tunti' : 'tuntia'} sitten`
     return `${hours} hour${hours === 1 ? '' : 's'} ago`
   }
-  return new Date(at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })
+  return new Date(at).toLocaleDateString(localeFor(language), { day: 'numeric', month: 'long' })
 }
 
 /**
@@ -105,14 +134,22 @@ export function formatAgo(when: string | number, now: Date = new Date()): string
  * @param expiryDate - ISO date string
  * @returns Formatted string (e.g., "3 weeks ago", "Yesterday", "Today", "2 days", "1 week")
  */
-export function formatExpiryDate(expiryDate: string): string {
+export function formatExpiryDate(expiryDate: string, language: Language = 'en'): string {
   const days = calculateDaysUntilExpiry(expiryDate)
 
+  if (language === 'fi') {
+    if (days === -1) return 'Eilen'
+    if (days < 0) return `${howLong(-days, language)} sitten`
+    if (days === 0) return 'Tänään'
+    if (days === 1) return 'Huomenna'
+    return howLong(days, language)
+  }
+
   if (days === -1) return 'Yesterday'
-  if (days < 0) return `${howLong(-days)} ago`
+  if (days < 0) return `${howLong(-days, language)} ago`
   if (days === 0) return 'Today'
   if (days === 1) return 'Tomorrow'
-  return howLong(days)
+  return howLong(days, language)
 }
 
 /**

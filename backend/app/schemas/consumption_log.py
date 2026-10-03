@@ -53,6 +53,14 @@ class ConsumptionLogResponse(BaseModel):
     )
     product_master_id: UUID
     product_name: str = Field(..., description="The product's name, for display")
+    product_display_names: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "The product's name by language code (Post-MVP frontier item 13, phase 2), "
+            "e.g. {'fi': 'Maito'}; a language with no entry falls back to product_name "
+            "(the English canonical name)."
+        ),
+    )
     unit: str = Field(..., description="The unit both quantities are in")
     action: ConsumptionAction = Field(..., description="What happened")
     quantity_consumed: JsonDecimal = Field(

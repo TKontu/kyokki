@@ -15,23 +15,25 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useT } from '@/lib/i18n'
 import { LANGUAGE_CHOICES, readLanguage, saveLanguage, type Language } from '@/lib/language'
 import { readTheme, saveTheme, THEME_CHOICES, type ThemeChoice } from '@/lib/theme'
-
-const LABELS: Record<ThemeChoice, { name: string; hint: string }> = {
-  system: { name: 'System', hint: 'Follow this device' },
-  light: { name: 'Light', hint: 'Always light' },
-  dark: { name: 'Dark', hint: 'Always dark' },
-}
-
-const LANGUAGE_LABELS: Record<Language, { name: string; hint: string }> = {
-  en: { name: 'English', hint: "Products' own names" },
-  fi: { name: 'Suomi', hint: 'Finnish names where known' },
-}
 
 export default function SettingsPage() {
   const [theme, setTheme] = useState<ThemeChoice>('system')
   const [language, setLanguage] = useState<Language>('en')
+  const { t } = useT()
+
+  const labels: Record<ThemeChoice, { name: string; hint: string }> = {
+    system: { name: t('settings.theme.system.name'), hint: t('settings.theme.system.hint') },
+    light: { name: t('settings.theme.light.name'), hint: t('settings.theme.light.hint') },
+    dark: { name: t('settings.theme.dark.name'), hint: t('settings.theme.dark.hint') },
+  }
+
+  const languageLabels: Record<Language, { name: string; hint: string }> = {
+    en: { name: t('settings.language.en.name'), hint: t('settings.language.en.hint') },
+    fi: { name: t('settings.language.fi.name'), hint: t('settings.language.fi.hint') },
+  }
 
   // Read after mounting: the server cannot know what this device stored
   useEffect(() => {
@@ -51,13 +53,15 @@ export default function SettingsPage() {
 
   return (
     <main className="mx-auto w-full max-w-xl px-4 py-6">
-      <h1 className="mb-6 text-2xl font-semibold text-ui-text dark:text-ui-dark-text">Settings</h1>
+      <h1 className="mb-6 text-2xl font-semibold text-ui-text dark:text-ui-dark-text">
+        {t('settings.title')}
+      </h1>
       <section aria-labelledby="language-heading" className="mb-6">
         <h2
           id="language-heading"
           className="mb-2 text-base font-medium text-ui-text dark:text-ui-dark-text"
         >
-          Display language
+          {t('settings.language.heading')}
         </h2>
         <div
           role="radiogroup"
@@ -86,8 +90,8 @@ export default function SettingsPage() {
                   onChange={() => chooseLanguage(choice)}
                   className="sr-only"
                 />
-                <span className="text-sm font-semibold">{LANGUAGE_LABELS[choice].name}</span>
-                <span className="text-xs opacity-80">{LANGUAGE_LABELS[choice].hint}</span>
+                <span className="text-sm font-semibold">{languageLabels[choice].name}</span>
+                <span className="text-xs opacity-80">{languageLabels[choice].hint}</span>
               </label>
             )
           })}
@@ -98,7 +102,7 @@ export default function SettingsPage() {
           id="theme-heading"
           className="mb-2 text-base font-medium text-ui-text dark:text-ui-dark-text"
         >
-          Theme
+          {t('settings.theme.heading')}
         </h2>
         <div
           role="radiogroup"
@@ -127,8 +131,8 @@ export default function SettingsPage() {
                   onChange={() => choose(choice)}
                   className="sr-only"
                 />
-                <span className="text-sm font-semibold">{LABELS[choice].name}</span>
-                <span className="text-xs opacity-80">{LABELS[choice].hint}</span>
+                <span className="text-sm font-semibold">{labels[choice].name}</span>
+                <span className="text-xs opacity-80">{labels[choice].hint}</span>
               </label>
             )
           })}

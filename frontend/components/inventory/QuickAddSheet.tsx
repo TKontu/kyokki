@@ -20,6 +20,7 @@ import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { addDaysISO } from '@/lib/dates'
 import { displayName } from '@/lib/displayName'
+import { useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
 import { locationOptions } from '@/lib/stock'
 import type { Category } from '@/types/category'
@@ -53,6 +54,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
   const quickAdd = useQuickAddInventoryItem()
   const categories = useCategories()
   const [language] = useLanguage()
+  const { t } = useT()
 
   const [term, setTerm] = useState('')
   const [selection, setSelection] = useState<Selection | null>(null)
@@ -132,21 +134,25 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
     quickAdd.mutate(payload, {
       onSuccess: (item) => {
         toast.success(
-          `Added · ${displayName(item.product_display_names, item.product_name, language)}`
+          t('inventory.quickAdd.addedToast', {
+            name: displayName(item.product_display_names, item.product_name, language),
+          })
         )
         onClose()
       },
       onError: (error) => {
         // Keep the sheet open so nothing typed is lost; 4xx messages are meant for people.
         const clientError = isAPIError(error) && error.status < 500 && error.message
-        toast.error(clientError ? error.message : `Could not add ${productName}`)
+        toast.error(
+          clientError ? error.message : t('inventory.quickAdd.addError', { name: productName })
+        )
       },
     })
   }
 
   if (!selection) {
     return (
-      <BottomSheet open onClose={onClose} title="Add to stock">
+      <BottomSheet open onClose={onClose} title={t('inventory.quickAdd.title')}>
         {/* The same control the receipt review row uses (H15). */}
         <ProductSearch
           categories={categories.data ?? []}
@@ -173,10 +179,10 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
       footer={
         <div className="grid grid-cols-2 gap-3">
           <Button variant="secondary" size="lg" onClick={() => setSelection(null)}>
-            Back
+            {t('inventory.quickAdd.back')}
           </Button>
           <Button data-primary size="lg" disabled={!canAdd} loading={quickAdd.isPending} onClick={submit}>
-            Add
+            {t('inventory.quickAdd.add')}
           </Button>
         </div>
       }
@@ -185,15 +191,15 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
         {selection.kind === 'new' && (
           <>
             <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-              New product
+              {t('inventory.quickAdd.newProduct')}
             </p>
             <div>
               <span className={fieldLabelClass} aria-hidden="true">
-                Category
+                {t('inventory.quickAdd.category')}
               </span>
               <div className="mt-1">
                 <ChoiceGroup
-                  label="Category"
+                  label={t('inventory.quickAdd.category')}
                   name="quick-add-category"
                   className="grid-cols-2 sm:grid-cols-3"
                   value={categoryId}
@@ -212,10 +218,10 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
         )}
 
         <ChoiceGroup
-          label="Location"
+          label={t('inventory.quickAdd.location')}
           name="quick-add-location"
           value={location}
-          options={locationOptions(location)}
+          options={locationOptions(location, language)}
           onChange={(next) => {
             setLocationChosen(true)
             setLocation(next)
@@ -224,7 +230,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
 
         <div>
           <label htmlFor="quick-add-expiry" className={fieldLabelClass}>
-            Expiry
+            {t('inventory.quickAdd.expiry')}
           </label>
           <input
             id="quick-add-expiry"

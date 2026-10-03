@@ -24,6 +24,7 @@ import {
 import { useUpdateInventoryItem } from '@/hooks/useInventory'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
+import { displayName } from '@/lib/displayName'
 import {
   GONE_ACTIONS,
   groupByDay,
@@ -32,27 +33,31 @@ import {
   topWastingCategories,
   wasteRateLine,
   weekLabel,
+  windowLabel,
   WINDOWS,
 } from '@/lib/gone'
+import { useT } from '@/lib/i18n'
+import { useLanguage } from '@/lib/language'
 import type { ConsumptionLogEntry, WasteStats, WasteTrend } from '@/types/consumption'
 
 const PAGE_SIZE = 50
 
 /** The headline rate, and the categories that waste the most (planner ruling, 2026-10-02). */
 function WasteRateCard({ stats }: { stats: WasteStats | undefined }) {
-  const headline = wasteRateLine(stats)
+  const { t, language } = useT()
+  const headline = wasteRateLine(stats, language)
   const categories = stats ? topWastingCategories(stats.categories) : []
 
   return (
     <section
-      aria-label="Waste rate"
+      aria-label={t('gone.waste.ariaLabel')}
       className="mb-4 rounded-ui border border-ui-border bg-ui-bg-secondary p-4 dark:border-ui-dark-border dark:bg-ui-dark-bg-secondary"
     >
       {headline ? (
         <p className="text-lg font-semibold text-ui-text dark:text-ui-dark-text">{headline}</p>
       ) : (
         <p className="text-ui-text-secondary dark:text-ui-dark-text-secondary">
-          Not enough has gone in this window to show a rate yet.
+          {t('gone.waste.notEnough')}
         </p>
       )}
 
@@ -79,21 +84,28 @@ function WasteRateCard({ stats }: { stats: WasteStats | undefined }) {
 
 /** A compact 8-bar week trend, plain divs - no chart dependency. */
 function WasteTrendChart({ trend }: { trend: WasteTrend | undefined }) {
+  const { t, language } = useT()
   const weeks = trend?.weeks ?? []
   if (weeks.length === 0) return null
 
   return (
-    <section aria-label="Waste rate, last 8 weeks" className="mb-6">
+    <section aria-label={t('gone.waste.trendAriaLabel')} className="mb-6">
       <h2 className="mb-2 text-sm font-medium text-ui-text-secondary dark:text-ui-dark-text-secondary">
-        Last 8 weeks
+        {t('gone.waste.trendHeading')}
       </h2>
       <div className="flex items-end gap-2">
         {weeks.map((week) => {
           const percent = week.rate === null ? 0 : Math.round(week.rate * 100)
+          const week_ = weekLabel(week, language)
           const title =
             week.total === 0
-              ? `${weekLabel(week)}: nothing gone`
-              : `${weekLabel(week)}: ${week.discarded} of ${week.total} (${percent} %)`
+              ? t('gone.waste.trendTitleEmpty', { week: week_ })
+              : t('gone.waste.trendTitleCounted', {
+                  week: week_,
+                  discarded: week.discarded,
+                  total: week.total,
+                  percent,
+                })
           return (
             <div key={week.week_start} className="flex flex-1 flex-col items-center gap-1">
               <div
@@ -107,7 +119,7 @@ function WasteTrendChart({ trend }: { trend: WasteTrend | undefined }) {
                 />
               </div>
               <span className="text-xs text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
-                {weekLabel(week)}
+                {week_}
               </span>
             </div>
           )
@@ -118,18 +130,19 @@ function WasteTrendChart({ trend }: { trend: WasteTrend | undefined }) {
 }
 
 function Row({ row, onRestore }: { row: ConsumptionLogEntry; onRestore: () => void }) {
+  const [language] = useLanguage()
+  const { t } = useT()
   const thrownAway = row.action === 'discard'
+  const name = displayName(row.product_display_names, row.product_name, language)
   return (
     <li className="flex items-center gap-3 border-b border-ui-border py-3 last:border-b-0 dark:border-ui-dark-border">
       <span aria-hidden="true" className="text-xl leading-none">
         {thrownAway ? '🗑' : '✓'}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate font-medium text-ui-text dark:text-ui-dark-text">
-          {row.product_name}
-        </p>
+        <p className="truncate font-medium text-ui-text dark:text-ui-dark-text">{name}</p>
         <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-          {thrownAway ? 'Thrown away' : 'Finished'}
+          {thrownAway ? t('gone.thrownAway') : t('gone.finished')}
         </p>
       </div>
       {/* Only what is still in the bin can come back. Something finished is simply eaten, and
@@ -138,10 +151,10 @@ function Row({ row, onRestore }: { row: ConsumptionLogEntry; onRestore: () => vo
         <Button
           variant="secondary"
           size="md"
-          aria-label={`Put ${row.product_name} back`}
+          aria-label={t('gone.putBackAriaLabel', { name })}
           onClick={onRestore}
         >
-          Put it back
+          {t('gone.putItBack')}
         </Button>
       )}
     </li>
@@ -156,6 +169,8 @@ export default function Gone() {
   const since = sinceFor(windowDays)
   const toast = useToast()
   const restore = useUpdateInventoryItem()
+  const [language] = useLanguage()
+  const { t } = useT()
 
   const { data: rows, isLoading } = useConsumptionLog({
     action: GONE_ACTIONS,
@@ -168,30 +183,31 @@ export default function Gone() {
 
   const putBack = (row: ConsumptionLogEntry) => {
     if (!row.inventory_item_id) return
+    const name = displayName(row.product_display_names, row.product_name, language)
     // The status sent is only a signal: the server classifies the event from it and derives
     // the result - `opened`, or `empty` when nothing was left. Never `sealed`; it was in the
     // bin (H23). The update hook invalidates stock, the history and the undo preview.
     restore.mutate(
       { id: row.inventory_item_id, data: { status: 'opened' } },
       {
-        onSuccess: () => toast.success(`Back in the kitchen · ${row.product_name}`),
+        onSuccess: () => toast.success(t('gone.putBackToast', { name })),
         onError: (error) =>
           toast.error(
             isAPIError(error) && error.status < 500 && error.message
               ? error.message
-              : `Could not put ${row.product_name} back`
+              : t('gone.putBackError', { name })
           ),
       }
     )
   }
 
-  const groups = groupByDay(rows ?? [])
+  const groups = groupByDay(rows ?? [], new Date(), language)
 
   return (
     <div>
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
-        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">Gone</h1>
-        <div className="flex gap-2" role="group" aria-label="How far back">
+        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">{t('gone.title')}</h1>
+        <div className="flex gap-2" role="group" aria-label={t('gone.howFarBack')}>
           {WINDOWS.map((each) => (
             <Button
               key={each.label}
@@ -203,7 +219,7 @@ export default function Gone() {
                 setLimit(PAGE_SIZE)
               }}
             >
-              {each.label}
+              {windowLabel(each, language)}
             </Button>
           ))}
         </div>
@@ -213,18 +229,18 @@ export default function Gone() {
         <dl className="mb-4 flex flex-wrap gap-x-8 gap-y-2">
           <div>
             <dt className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-              Thrown away
+              {t('gone.thrownAway')}
             </dt>
             <dd className="text-lg font-semibold text-ui-text dark:text-ui-dark-text">
-              {summaryLine(summary?.discard)}
+              {summaryLine(summary?.discard, language)}
             </dd>
           </div>
           <div>
             <dt className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-              Finished
+              {t('gone.finished')}
             </dt>
             <dd className="text-lg font-semibold text-ui-text dark:text-ui-dark-text">
-              {summaryLine(summary?.use_full)}
+              {summaryLine(summary?.use_full, language)}
             </dd>
           </div>
         </dl>
@@ -236,7 +252,7 @@ export default function Gone() {
 
         {!isLoading && groups.length === 0 && (
           <p className="py-8 text-center text-ui-text-secondary dark:text-ui-dark-text-secondary">
-            Nothing has been thrown away or finished in this window.
+            {t('gone.empty')}
           </p>
         )}
 
@@ -255,7 +271,7 @@ export default function Gone() {
 
         {rows && rows.length >= limit && (
           <Button variant="ghost" size="md" fullWidth onClick={() => setLimit(limit + PAGE_SIZE)}>
-            Show more
+            {t('gone.showMore')}
           </Button>
         )}
       </main>

@@ -13,8 +13,10 @@
 
 import Link from 'next/link'
 import type { CSSProperties } from 'react'
-import type { Area } from '@/lib/fridge'
-import { STALENESS, stalenessOf } from '@/lib/staleness'
+import { areaLabel, type Area } from '@/lib/fridge'
+import { useT } from '@/lib/i18n'
+import { useLanguage } from '@/lib/language'
+import { STALENESS, stalenessLabel, stalenessOf } from '@/lib/staleness'
 import type { InventoryItem } from '@/types/inventory'
 import { DOT, DOT_GAP, HEADER, PAD, dotCapacity, dotSlot, fitDots } from './capacity'
 import type { Box } from './drawing'
@@ -57,6 +59,9 @@ export function AreaSpot({
   radius = 'rounded-xl',
   labelSize = 13,
 }: AreaSpotProps) {
+  const { t } = useT()
+  const [language] = useLanguage()
+  const label = areaLabel(area.id, language)
   // A length in the drawing's units, as a share of the canvas's width
   const u = (units: number) => `calc(${units} * 100cqw / ${width})`
   const place: CSSProperties = {
@@ -73,10 +78,10 @@ export function AreaSpot({
   }
 
   return (
-    <section aria-label={area.label} className="absolute" style={place}>
+    <section aria-label={label} className="absolute" style={place}>
       <Link
         href={`/area/${area.id}`}
-        aria-label={`Open ${area.label}`}
+        aria-label={t('fridge.areaSpot.open', { area: label })}
         style={{ padding: u(PAD), gap: u(DOT_GAP) }}
         className={
           `absolute inset-0 flex flex-col overflow-hidden transition-colors ${radius} ` +
@@ -92,7 +97,7 @@ export function AreaSpot({
             className="min-w-0 truncate rounded-full bg-white/85 font-semibold leading-tight text-slate-800 shadow-sm dark:bg-slate-950/75 dark:text-slate-100"
             style={{ fontSize: u(labelSize), padding: `${u(2)} ${u(labelSize === 13 ? 7 : 5)}` }}
           >
-            {area.label}
+            {label}
           </span>
           {contents.length > 0 && (
             <span
@@ -111,14 +116,14 @@ export function AreaSpot({
             className="italic text-slate-500 dark:text-slate-400"
             style={{ fontSize: u(12), paddingLeft: u(4) }}
           >
-            Empty
+            {t('fridge.areaSpot.empty')}
           </span>
         ) : (
           // Each dot is placed in its slot (`dotSlot`), not flowed, so what fits is exact
           <span
             role="img"
             aria-label={items
-              .map((item) => `${item.product_name} ${STALENESS[stalenessOf(item)].label}`)
+              .map((item) => `${item.product_name} ${stalenessLabel(stalenessOf(item), language)}`)
               .join(', ')}
             className="pointer-events-none absolute inset-0"
           >
@@ -132,7 +137,7 @@ export function AreaSpot({
             {more && (
               <span
                 data-testid="more-dots"
-                title="More inside"
+                title={t('fridge.areaSpot.moreInside')}
                 style={{ ...at(shown.length), fontSize: u(13) }}
                 className={
                   'absolute flex items-center justify-center rounded-full bg-white font-bold ' +

@@ -6,9 +6,16 @@
  * seven, blue eight or more, grey used up. A tile is red only in its last two days (operator
  * ruling 2026-09-26, Q19): counting a day earlier made most of a fresh shop red by day two. Every tier also has a word, for screen readers and for anyone who
  * cannot tell red from green - colour is never the only signal.
+ *
+ * `STALENESS[tier].label` stays English and unchanged (review F1, round 2026-10-03-1):
+ * `components/fridge-mocks/**` (out of scope) reads it directly, and the planner's original
+ * spec never granted this file, so a Finnish screen still read "going stale". `stalenessLabel`
+ * is the language-aware way to read the same word - no hooks here, by design; the caller
+ * (already holding `useLanguage()`) passes the language in, defaulting to `'en'`.
  */
 
 import { calculateDaysUntilExpiry } from '@/lib/dates'
+import type { Language } from '@/lib/language'
 import type { InventoryItem } from '@/types/inventory'
 
 export type Staleness = 'stale' | 'soon' | 'week' | 'later' | 'consumed'
@@ -48,6 +55,19 @@ export const STALENESS: Record<Staleness, StalenessStyle> = {
     tile: 'bg-gray-100 border-gray-300 text-gray-500 dark:bg-gray-800 dark:border-gray-600 dark:text-gray-400',
     dot: 'bg-gray-300 dark:bg-gray-600',
   },
+}
+
+const STALENESS_LABEL_FI: Record<Staleness, string> = {
+  stale: 'vanhenemassa',
+  soon: 'pari päivää jäljellä',
+  week: 'noin viikko jäljellä',
+  later: 'säilyy',
+  consumed: 'käytetty loppuun',
+}
+
+/** A tier's word, in the chosen language - English (`STALENESS[tier].label`) by default. */
+export function stalenessLabel(tier: Staleness, language: Language = 'en'): string {
+  return language === 'fi' ? STALENESS_LABEL_FI[tier] : STALENESS[tier].label
 }
 
 export function stalenessOf(item: Pick<InventoryItem, 'expiry_date' | 'status'>): Staleness {

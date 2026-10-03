@@ -166,10 +166,12 @@ describe('ConsumptionSheet', () => {
       window.localStorage.setItem('kyokki.language', 'fi')
       renderSheet({ ...MILK, product_display_names: { fi: 'Kauramaito' } })
 
-      fireEvent.click(screen.getByRole('button', { name: 'Used up' }))
+      // Phase 2: choosing Suomi translates the button and toast text too, not only the
+      // product's own name.
+      fireEvent.click(screen.getByRole('button', { name: 'Käytetty loppuun' }))
       act(() => lastMutateOptions().onSuccess?.())
 
-      expect(screen.getByRole('status')).toHaveTextContent('Used up · Kauramaito')
+      expect(screen.getByRole('status')).toHaveTextContent('Käytetty loppuun · Kauramaito')
     })
   })
 })

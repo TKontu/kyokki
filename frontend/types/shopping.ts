@@ -27,6 +27,12 @@ export interface ShoppingListItem {
   is_purchased: boolean
   added_at: string // ISO datetime
   purchased_at: string | null // ISO datetime
+  // Post-MVP frontier item 13, phase 2: the linked product's name by language code, e.g.
+  // {'fi': 'Maito'}; empty for a free-text item or one whose product has none - the iPad
+  // falls back to `name` either way (`lib/displayName.ts`). Optional, same as
+  // `InventoryItem.product_display_names`: the API always sends it, but a fixture built
+  // before this field existed should not fail to typecheck.
+  product_display_names?: Record<string, string>
 }
 
 export interface ShoppingListItemCreate {

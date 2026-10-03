@@ -14,6 +14,7 @@ import React from 'react'
 import { CieloFridge } from '@/components/fridge/CieloFridge'
 import { useInventoryList } from '@/hooks/useInventory'
 import { buildFridgeView } from '@/lib/fridge'
+import { useT } from '@/lib/i18n'
 import type { InventoryItem } from '@/types/inventory'
 
 export interface FridgeViewProps {
@@ -24,16 +25,13 @@ export interface FridgeViewProps {
   onClearExpired?: (items: InventoryItem[]) => void
 }
 
-const EMPTY_MESSAGE =
-  'No items found. Add one with + Add, or share a receipt to the Telegram bot - you can also ' +
-  'scan one from Receipts.'
-
 export function FridgeView({ onConsume, onMore, onClearExpired }: FridgeViewProps) {
   const { data: items, isLoading, isError, error } = useInventoryList()
+  const { t } = useT()
 
   if (isLoading) {
     return (
-      <div className="space-y-3" aria-label="Loading inventory">
+      <div className="space-y-3" aria-label={t('inventory.fridgeView.loading')}>
         {[0, 1, 2].map((i) => (
           <div
             key={i}
@@ -50,7 +48,7 @@ export function FridgeView({ onConsume, onMore, onClearExpired }: FridgeViewProp
   if (isError && !items) {
     return (
       <p role="alert" className="py-4 text-sm text-red-600 dark:text-red-400">
-        {error instanceof Error ? error.message : 'Failed to load inventory.'}
+        {error instanceof Error ? error.message : t('inventory.fridgeView.loadError')}
       </p>
     )
   }
@@ -59,7 +57,7 @@ export function FridgeView({ onConsume, onMore, onClearExpired }: FridgeViewProp
   if (view.areas.every(({ items: inArea }) => inArea.length === 0)) {
     return (
       <p className="py-4 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-        {EMPTY_MESSAGE}
+        {t('inventory.fridgeView.empty')}
       </p>
     )
   }

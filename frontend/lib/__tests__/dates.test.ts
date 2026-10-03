@@ -139,6 +139,27 @@ describe('Date Utilities', () => {
       expect(formatExpiryDate('2024-01-15T23:59:59Z')).toBe('Today')
       expect(formatExpiryDate('2024-01-16T00:00:01Z')).toBe('Tomorrow')
     })
+
+    describe('display language (Post-MVP frontier item 13, review F1)', () => {
+      it('reads Today/Yesterday/Tomorrow in Finnish when asked, English by default', () => {
+        expect(formatExpiryDate('2024-01-15')).toBe('Today')
+        expect(formatExpiryDate('2024-01-15', 'en')).toBe('Today')
+        expect(formatExpiryDate('2024-01-15', 'fi')).toBe('Tänään')
+        expect(formatExpiryDate('2024-01-14', 'fi')).toBe('Eilen')
+        expect(formatExpiryDate('2024-01-16', 'fi')).toBe('Huomenna')
+      })
+
+      it('says days and weeks in Finnish, with partitive plurals', () => {
+        expect(formatExpiryDate('2024-01-17', 'fi')).toBe('2 päivää')
+        expect(formatExpiryDate('2024-01-22', 'fi')).toBe('1 viikko')
+        expect(formatExpiryDate('2024-01-29', 'fi')).toBe('2 viikkoa')
+      })
+
+      it('says how long ago in Finnish, "X sitten"', () => {
+        expect(formatExpiryDate('2024-01-10', 'fi')).toBe('5 päivää sitten')
+        expect(formatExpiryDate('2023-12-25', 'fi')).toBe('3 viikkoa sitten')
+      })
+    })
   })
 
   describe('getExpiryColor', () => {
@@ -282,5 +303,24 @@ describe('formatAgo: how old the thing on screen is', () => {
 
   it('does not count into the future when a clock disagrees', () => {
     expect(formatAgo(MOCK_NOW.getTime() + 60_000)).toBe('just now')
+  })
+
+  describe('display language (Post-MVP frontier item 13, review F1)', () => {
+    it('reads in Finnish when asked, English by default', () => {
+      expect(formatAgo(MOCK_NOW.getTime())).toBe('just now')
+      expect(formatAgo(MOCK_NOW.getTime(), 'en')).toBe('just now')
+      expect(formatAgo(MOCK_NOW.getTime(), 'fi')).toBe('Juuri nyt')
+    })
+
+    it('says minutes and hours in Finnish, with partitive plurals', () => {
+      expect(formatAgo(MOCK_NOW.getTime() - 60_000, 'fi')).toBe('1 minuutti sitten')
+      expect(formatAgo(MOCK_NOW.getTime() - 4 * 60_000, 'fi')).toBe('4 minuuttia sitten')
+      expect(formatAgo(MOCK_NOW.getTime() - 60 * 60_000, 'fi')).toBe('1 tunti sitten')
+      expect(formatAgo(MOCK_NOW.getTime() - 5 * 60 * 60_000, 'fi')).toBe('5 tuntia sitten')
+    })
+
+    it('gives the date in Finnish once it has been more than a day', () => {
+      expect(formatAgo(new Date('2024-01-13T23:00:00Z').getTime(), 'fi')).toBe('13. tammikuuta')
+    })
   })
 })

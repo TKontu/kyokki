@@ -16,7 +16,7 @@ import { iconUrl } from '@/lib/api/products'
 import { displayName } from '@/lib/displayName'
 import { useLanguage } from '@/lib/language'
 import { productIconGlyph, resolveProductIcon } from '@/lib/productIcon'
-import { STALENESS, stalenessOf } from '@/lib/staleness'
+import { STALENESS, stalenessLabel, stalenessOf } from '@/lib/staleness'
 import type { InventoryItem } from '@/types/inventory'
 
 export interface IngredientTileProps {
@@ -32,6 +32,7 @@ export function IngredientTile({ item, onSelect, onMore }: IngredientTileProps) 
   const name = displayName(item.product_display_names, item.product_name, language)
   const tier = stalenessOf(item)
   const style = STALENESS[tier]
+  const staleWord = stalenessLabel(tier, language)
   const icon = resolveProductIcon({
     emoji: item.product_emoji ?? null,
     iconVersion: item.product_icon_version ?? null,
@@ -81,14 +82,14 @@ export function IngredientTile({ item, onSelect, onMore }: IngredientTileProps) 
       {onSelect ? (
         <button
           type="button"
-          aria-label={`${name}, ${style.label}`}
+          aria-label={`${name}, ${staleWord}`}
           onClick={() => onSelect(item.id)}
           className={`${box} focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2`}
         >
           {face}
         </button>
       ) : (
-        <div aria-label={`${name}, ${style.label}`} className={box}>
+        <div aria-label={`${name}, ${staleWord}`} className={box}>
           {face}
         </div>
       )}

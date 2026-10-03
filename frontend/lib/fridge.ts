@@ -6,9 +6,16 @@
  * is going stale.
  * Categories map to areas here and only here; the backend's seeded ids are in
  * `backend/app/db/seed_categories.py`, and the test pins that every one has an area.
+ *
+ * `AREAS[].label` stays English and unchanged (review F1, round 2026-10-03-1):
+ * `app/area/[id]/page.tsx` (out of scope this phase) reads it directly, and the planner's
+ * original spec never granted this file, so a Finnish screen still read "Meat & fish".
+ * `areaLabel` is the language-aware way to read the same name - no hooks here, by design;
+ * the caller (already holding `useLanguage()`) passes the language in, defaulting to `'en'`.
  */
 
 import { calculateDaysUntilExpiry } from '@/lib/dates'
+import type { Language } from '@/lib/language'
 import { stalenessOf } from '@/lib/staleness'
 import { compareStock, isInactive } from '@/lib/stock'
 import type { InventoryItem } from '@/types/inventory'
@@ -63,6 +70,31 @@ export const AREAS: Area[] = [
   { id: 'freezer', label: 'Freezer', icon: '🧊', compartment: 'freezer', categories: ['frozen'] },
   { id: 'other', label: 'Other', icon: '📦', compartment: 'other', categories: [] },
 ]
+
+const AREA_LABELS_EN = Object.fromEntries(AREAS.map((area) => [area.id, area.label])) as Record<
+  AreaId,
+  string
+>
+
+const AREA_LABELS_FI: Record<AreaId, string> = {
+  meat: 'Liha ja kala',
+  veggies: 'Vihannekset',
+  fruits: 'Hedelmät',
+  dairy: 'Maitotuotteet',
+  bread: 'Leipä',
+  ready_meals: 'Valmisruoat',
+  drinks: 'Juomat',
+  pantry: 'Kuivamuona',
+  condiments: 'Kastikkeet',
+  spices: 'Mausteet',
+  freezer: 'Pakastin',
+  other: 'Muut',
+}
+
+/** An area's own name, in the chosen language - English (`AREAS[].label`) by default. */
+export function areaLabel(id: AreaId, language: Language = 'en'): string {
+  return language === 'fi' ? AREA_LABELS_FI[id] : AREA_LABELS_EN[id]
+}
 
 const BY_CATEGORY = new Map(
   AREAS.flatMap((area) => area.categories.map((category) => [category, area.id] as const))

@@ -12,6 +12,8 @@ import { useGenerateShoppingList } from '@/hooks/useShopping'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { newIdempotencyKey } from '@/lib/api/shopping'
+import { formatNumber, useT } from '@/lib/i18n'
+import { useLanguage } from '@/lib/language'
 import type { ShoppingGenerateResponse } from '@/types/shopping'
 
 export interface GenerateSheetProps {
@@ -30,6 +32,8 @@ function changeCount(preview: ShoppingGenerateResponse): number {
 function GenerateForm({ onClose }: { onClose: () => void }) {
   const generate = useGenerateShoppingList()
   const toast = useToast()
+  const [language] = useLanguage()
+  const { t } = useT()
   const [preview, setPreview] = useState<ShoppingGenerateResponse | null>(null)
   const asked = useRef(false)
   // F1: one key for the whole apply action. Minted the first time "Add to list" is pressed,
@@ -45,7 +49,7 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
       {
         onSuccess: setPreview,
         onError: (error) => {
-          toast.error(errorText(error, 'Could not check low stock'))
+          toast.error(errorText(error, t('shopping.generate.checkError')))
           onClose()
         },
       }
@@ -63,10 +67,14 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
         onSuccess: (result) => {
           applyKey.current = null
           const count = changeCount(result)
-          toast.success(count > 0 ? `Added ${count} item${count === 1 ? '' : 's'}` : 'Nothing to add')
+          toast.success(
+            count > 0
+              ? t('shopping.generate.addedToast', { count })
+              : t('shopping.generate.nothingToAdd')
+          )
           onClose()
         },
-        onError: (error) => toast.error(errorText(error, 'Could not generate the list')),
+        onError: (error) => toast.error(errorText(error, t('shopping.generate.generateError'))),
       }
     )
   }
@@ -77,11 +85,11 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
     <BottomSheet
       open
       onClose={onClose}
-      title="Generate from low stock"
+      title={t('shopping.generate.title')}
       footer={
         <div className="grid grid-cols-2 gap-3">
           <Button variant="secondary" size="lg" onClick={onClose}>
-            Cancel
+            {t('shopping.generate.cancel')}
           </Button>
           <Button
             data-primary
@@ -90,32 +98,33 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
             loading={generate.isPending}
             onClick={apply}
           >
-            Add to list
+            {t('shopping.generate.addToList')}
           </Button>
         </div>
       }
     >
       {!preview && (
         <p className="py-8 text-center text-ui-text-secondary dark:text-ui-dark-text-secondary">
-          Checking stock…
+          {t('shopping.generate.checking')}
         </p>
       )}
       {preview && (
         <div className="flex flex-col gap-4">
           {nothingToDo && preview.skipped.length === 0 && (
             <p className="py-8 text-center text-ui-text-secondary dark:text-ui-dark-text-secondary">
-              Nothing is short.
+              {t('shopping.generate.nothingShort')}
             </p>
           )}
           {preview.added.length > 0 && (
             <section>
               <h3 className="mb-1 text-sm font-medium text-ui-text-secondary dark:text-ui-dark-text-secondary">
-                New
+                {t('shopping.generate.new')}
               </h3>
               <ul>
                 {preview.added.map((line) => (
                   <li key={line.product_id} className="text-ui-text dark:text-ui-dark-text">
-                    {line.name} · {line.need} {line.unit}
+                    {line.name} · {line.need === null ? '' : formatNumber(line.need, language)}{' '}
+                    {line.unit}
                   </li>
                 ))}
               </ul>
@@ -124,12 +133,13 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
           {preview.updated.length > 0 && (
             <section>
               <h3 className="mb-1 text-sm font-medium text-ui-text-secondary dark:text-ui-dark-text-secondary">
-                Raised
+                {t('shopping.generate.raised')}
               </h3>
               <ul>
                 {preview.updated.map((line) => (
                   <li key={line.product_id} className="text-ui-text dark:text-ui-dark-text">
-                    {line.name} · {line.need} {line.unit}
+                    {line.name} · {line.need === null ? '' : formatNumber(line.need, language)}{' '}
+                    {line.unit}
                   </li>
                 ))}
               </ul>
@@ -138,7 +148,7 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
           {preview.skipped.length > 0 && (
             <section>
               <h3 className="mb-1 text-sm font-medium text-ui-text-secondary dark:text-ui-dark-text-secondary">
-                Skipped
+                {t('shopping.generate.skipped')}
               </h3>
               <ul>
                 {preview.skipped.map((line) => (

@@ -5,6 +5,7 @@ import { ClearExpiredSheet, FridgeView, QuickAddSheet, UndoButton } from '@/comp
 import { ReceiptsBanner } from '@/components/receipts'
 import Button from '@/components/ui/Button'
 import { useStockActions } from '@/hooks/useStockActions'
+import { useT } from '@/lib/i18n'
 import type { InventoryItem } from '@/types/inventory'
 
 /**
@@ -15,6 +16,7 @@ import type { InventoryItem } from '@/types/inventory'
  */
 export default function Home() {
   const { finishItem, openMore, sheets } = useStockActions()
+  const { t } = useT()
   const [adding, setAdding] = useState(false)
   // Held rather than re-derived: the confirm lists exactly what was on offer when it opened,
   // so a background refetch cannot change what the cook is agreeing to throw away.
@@ -28,7 +30,7 @@ export default function Home() {
       <header className="flex items-center justify-end gap-3 px-4 pt-2">
         <h1 className="sr-only">Kyokki</h1>
         <UndoButton />
-        <Button onClick={() => setAdding(true)}>+ Add</Button>
+        <Button onClick={() => setAdding(true)}>{t('home.add')}</Button>
       </header>
       <main className="flex min-h-0 flex-1 flex-col px-4 pb-3 pt-2">
         <ReceiptsBanner />

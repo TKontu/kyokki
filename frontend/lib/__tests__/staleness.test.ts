@@ -5,7 +5,7 @@
  * grey used up.
  */
 
-import { STALENESS, stalenessOf } from '../staleness'
+import { STALENESS, stalenessLabel, stalenessOf } from '../staleness'
 
 const TODAY = new Date('2026-09-25T12:00:00')
 
@@ -64,5 +64,22 @@ describe('STALENESS', () => {
     expect(STALENESS.week.tile).toMatch(/green/)
     expect(STALENESS.later.tile).toMatch(/blue/)
     expect(STALENESS.consumed.tile).toMatch(/gray/)
+  })
+
+  describe('stalenessLabel: display language (review F1, round 2026-10-03-1)', () => {
+    it('reads STALENESS[tier].label by default, English - unchanged for STALENESS\'s own callers', () => {
+      for (const tier of Object.keys(STALENESS) as Array<keyof typeof STALENESS>) {
+        expect(stalenessLabel(tier)).toBe(STALENESS[tier].label)
+        expect(stalenessLabel(tier, 'en')).toBe(STALENESS[tier].label)
+      }
+    })
+
+    it('names every tier in Finnish', () => {
+      expect(stalenessLabel('stale', 'fi')).toBe('vanhenemassa')
+      expect(stalenessLabel('soon', 'fi')).toBe('pari päivää jäljellä')
+      expect(stalenessLabel('week', 'fi')).toBe('noin viikko jäljellä')
+      expect(stalenessLabel('later', 'fi')).toBe('säilyy')
+      expect(stalenessLabel('consumed', 'fi')).toBe('käytetty loppuun')
+    })
   })
 })

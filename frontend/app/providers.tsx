@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { useEffect, useState } from 'react'
 import { ToastProvider } from '@/components/ui/Toast'
+import { applyLanguage, readLanguage, subscribeToLanguage } from '@/lib/language'
 import { applyTheme, readTheme } from '@/lib/theme'
 import { useLiveUpdates } from '@/hooks/useLiveUpdates'
 
@@ -44,6 +45,15 @@ export function Providers({ children }: { children: React.ReactNode }) {
   // leave a forced theme reverted (round 2026-09-30-1).
   useEffect(() => {
     applyTheme(readTheme())
+  }, [])
+
+  // Keeps <html lang> on the stored display language (frontier item 13 phase 2), the same
+  // mount-effect belt-and-braces as the theme above: LANGUAGE_SCRIPT already set it before
+  // first paint for everything but the default, and this also follows a later change - this
+  // tab's own Settings toggle, or another tab's - without a navigation in between.
+  useEffect(() => {
+    applyLanguage(readLanguage())
+    return subscribeToLanguage(() => applyLanguage(readLanguage()))
   }, [])
 
   return (

@@ -107,6 +107,19 @@ describe('ClearExpiredSheet', () => {
     expect(screen.getByText('Yesterday')).toBeInTheDocument()
   })
 
+  it('reads the title, cancel and confirm in Finnish (Post-MVP frontier item 13, phase 2)', () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    renderSheet()
+
+    expect(screen.getByText('Poistetaanko 2 vanhentunutta tuotetta?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Peruuta' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Kyllä, heitä pois/ })).toBeInTheDocument()
+    // review F1: lib/dates.ts's own text (the age shown beside each item) follows the
+    // language too, not only this component's own strings.
+    expect(screen.getByText('5 päivää sitten')).toBeInTheDocument()
+    expect(screen.getByText('Eilen')).toBeInTheDocument()
+  })
+
   it('says what it records, because that is the number the app exists for', () => {
     renderSheet()
 

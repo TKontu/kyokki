@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -76,3 +77,13 @@ class ConsumptionLog(Base):
         What tells the Gone screen whether this row can still be put back.
         """
         return None if self.inventory_item is None else str(self.inventory_item.status)
+
+    @property
+    def product_display_names(self) -> dict[str, str]:
+        """The product's per-language names (Post-MVP frontier item 13, phase 2), by
+        language code, for the Gone screen. `product_master_id` is never null here, and
+        every caller (`crud.consumption_log`) eager-loads `product_master`; its own
+        `display_name_rows` loads itself (`lazy="selectin"`), so this needs no further
+        eager-load option, the same reasoning as `InventoryItem.product_display_names`.
+        """
+        return cast(dict[str, str], self.product_master.display_names)

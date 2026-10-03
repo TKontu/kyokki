@@ -16,6 +16,7 @@ import { useConsumeInventoryItem } from '@/hooks/useInventory'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { displayName } from '@/lib/displayName'
+import { useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
 import type { InventoryItem } from '@/types/inventory'
 
@@ -31,6 +32,7 @@ export function ConsumptionSheet({ item, open, onClose, onEdit }: ConsumptionShe
   const consume = useConsumeInventoryItem()
   const toast = useToast()
   const [language] = useLanguage()
+  const { t } = useT()
 
   if (!item) return null
 
@@ -41,12 +43,16 @@ export function ConsumptionSheet({ item, open, onClose, onEdit }: ConsumptionShe
     consume.mutate(
       { id: item.id, data: { quantity: item.current_quantity } },
       {
-        onSuccess: () => toast.success(`Used up · ${productName}`),
+        onSuccess: () => toast.success(t('inventory.consumption.usedUpToast', { name: productName })),
         onError: (error) => {
           // 4xx messages come from the API and are meant for people ("Oat Milk has been
           // thrown away"); server and network failures are not.
           const clientError = isAPIError(error) && error.status < 500 && error.message
-          toast.error(clientError ? error.message : `Could not update ${productName}`)
+          toast.error(
+            clientError
+              ? error.message
+              : t('inventory.consumption.usedUpError', { name: productName })
+          )
         },
       }
     )
@@ -58,11 +64,11 @@ export function ConsumptionSheet({ item, open, onClose, onEdit }: ConsumptionShe
     <BottomSheet open={open} onClose={onClose} title={name}>
       <div className="flex flex-col gap-3">
         <Button data-primary size="xl" fullWidth onClick={useUpItem}>
-          Used up
+          {t('inventory.consumption.usedUp')}
         </Button>
         {onEdit && (
           <Button size="lg" variant="ghost" fullWidth onClick={onEdit}>
-            Edit item
+            {t('inventory.consumption.editItem')}
           </Button>
         )}
       </div>

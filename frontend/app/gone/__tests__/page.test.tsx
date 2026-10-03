@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
+import { LANGUAGE_KEY } from '@/lib/language'
 import Gone from '../page'
 import type { ConsumptionLogEntry, ConsumptionSummary, WasteStats, WasteTrend } from '@/types/consumption'
 
@@ -247,5 +248,65 @@ describe('The Gone screen', () => {
     const trend = (await screen.findByText('Last 8 weeks')).closest('section') as HTMLElement
     // en-GB's short month is usually 3 letters ("Jan") but 4 for September ("Sept")
     expect(within(trend).getAllByText(/^\d{1,2} \w{3,4}$/)).toHaveLength(8)
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    afterEach(() => window.localStorage.clear())
+
+    it('reads the title, the summary labels and the empty state in Finnish', async () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      api([], {}, EMPTY_WASTE)
+
+      renderGone()
+
+      expect(await screen.findByRole('heading', { name: 'Käytetty' })).toBeInTheDocument()
+      expect(screen.getByText('Heitetty pois')).toBeInTheDocument()
+      expect(screen.getByText('Käytetty loppuun')).toBeInTheDocument()
+      expect(
+        await screen.findByText('Mitään ei ole heitetty pois tai käytetty loppuun tällä aikavälillä.')
+      ).toBeInTheDocument()
+    })
+
+    it('shows the product\'s Finnish name on a row, and Put it back in Finnish', async () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      api([{ ...MEAT, product_display_names: { fi: 'Jauheliha' } }])
+
+      renderGone()
+
+      expect(await screen.findByText('Jauheliha')).toBeInTheDocument()
+      expect(screen.queryByText('Minced Meat')).not.toBeInTheDocument()
+      const button = screen.getByRole('button', { name: 'Palauta Jauheliha' })
+      expect(button).toHaveTextContent('Palauta')
+    })
+
+    it('reads the window buttons, the counts and today\'s group in Finnish (review F1)', async () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      api([MEAT, MILK])
+
+      renderGone()
+
+      // lib/gone.ts's own text (review F1): window labels, the item counts, the day group
+      expect(await screen.findByRole('button', { name: '7 päivää' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: '30 päivää' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Kaikki' })).toBeInTheDocument()
+      expect(await screen.findByText('8 tuotetta')).toBeInTheDocument()
+      expect(screen.getByText('34 tuotetta')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Tänään', level: 2 })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Eilen', level: 2 })).toBeInTheDocument()
+    })
+
+    it('reads the waste rate headline and the trend week labels in Finnish (review F1)', async () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      api([MEAT, MILK])
+
+      renderGone()
+
+      expect(await screen.findByText('Heitit pois 8/42 asiaa (19 %)')).toBeInTheDocument()
+      const trend = (await screen.findByText('Viimeiset 8 viikkoa')).closest(
+        'section'
+      ) as HTMLElement
+      // fi-FI's short date form drops the month name ("12.1.", not "12 Jan")
+      expect(within(trend).getAllByText(/^\d{1,2}\.\d{1,2}\.$/)).toHaveLength(8)
+    })
   })
 })

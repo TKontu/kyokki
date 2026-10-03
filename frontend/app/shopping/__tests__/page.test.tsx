@@ -64,6 +64,7 @@ function api(rows: ShoppingListItem[]) {
     purchased: [] as Record<string, unknown>[],
     purchaseKeys: [] as Array<string | null>,
     removed: [] as string[],
+    removeKeys: [] as Array<string | null>,
     cleared: 0,
     listCalls: 0,
   }
@@ -107,8 +108,9 @@ function api(rows: ShoppingListItem[]) {
       asked.cleared = before - list.length
       return HttpResponse.json({ deleted_count: asked.cleared })
     }),
-    http.delete(`${API_URL}/shopping/:id`, ({ params }) => {
+    http.delete(`${API_URL}/shopping/:id`, ({ request, params }) => {
       asked.removed.push(String(params.id))
+      asked.removeKeys.push(request.headers.get('Idempotency-Key'))
       list = list.filter((item) => item.id !== params.id)
       return new HttpResponse(null, { status: 204 })
     }),
@@ -274,6 +276,21 @@ describe('The Shopping screen', () => {
     await waitFor(() => expect(screen.queryByText('Bananas')).not.toBeInTheDocument())
   })
 
+  it('removes an item with its own Idempotency-Key, minted once per action (#159 folded fix)', async () => {
+    const asked = api([BANANAS])
+
+    renderShopping()
+    await screen.findByText('Bananas')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Bananas' }))
+
+    await waitFor(() => expect(asked.removeKeys).toHaveLength(1))
+    expect(asked.removeKeys[0]).toBeTruthy()
+    expect(asked.removeKeys[0]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    )
+  })
+
   it('clears bought items', async () => {
     const asked = api([BANANAS, EGGS])
 
@@ -301,5 +318,27 @@ describe('The Shopping screen', () => {
     renderShopping()
 
     expect(await screen.findByText('Nothing on the list.')).toBeInTheDocument()
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    afterEach(() => window.localStorage.clear())
+
+    it('reads the header, groups and empty state in Finnish', async () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      api([BANANAS])
+      renderShopping()
+
+      expect(await screen.findByRole('heading', { name: 'Ostoslista' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Luo vähissä olevista' })).toBeInTheDocument()
+      expect(await screen.findByRole('heading', { name: 'Kiireelliset' })).toBeInTheDocument()
+    })
+
+    it('reads "Nothing on the list" in Finnish', async () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      api([])
+      renderShopping()
+
+      expect(await screen.findByText('Listalla ei ole mitään.')).toBeInTheDocument()
+    })
   })
 })

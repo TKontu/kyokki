@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
+import { LANGUAGE_KEY } from '@/lib/language'
 import Home from '../page'
 
 // Home mounts InventoryList and ReceiptsBanner, which fetch on mount. Without msw those two
@@ -67,5 +68,18 @@ describe('Home Page', () => {
     expect(screen.getByRole('button', { name: '+ Add' })).toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     await screen.findByText(/no items found/i)
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    afterEach(() => window.localStorage.clear())
+
+    it('reads "+ Add" in Finnish', async () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      mockApi()
+      render(<Home />, { wrapper })
+
+      expect(screen.getByRole('button', { name: '+ Lisää' })).toBeInTheDocument()
+      await screen.findByText(/Ei tuotteita/)
+    })
   })
 })

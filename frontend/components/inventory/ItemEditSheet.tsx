@@ -25,6 +25,7 @@ import { useProduct } from '@/hooks/useProducts'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { displayName } from '@/lib/displayName'
+import { formatDate, useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
 import { receiptDate, storeName } from '@/lib/receipts'
 import { isInactive, locationOptions } from '@/lib/stock'
@@ -58,6 +59,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const source = useItemSource(item.receipt_id ? item.id : null)
 
   const [language] = useLanguage()
+  const { t } = useT()
   const name = displayName(item.product_display_names, item.product_name, language)
 
   // Only what the cook touched and actually changed: what moved underneath is not theirs
@@ -75,7 +77,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           toast.success(success)
           onClose()
         },
-        onError: (error) => toast.error(errorText(error, `Could not save ${name}`)),
+        onError: (error) => toast.error(errorText(error, t('inventory.itemEdit.saveError', { name }))),
       }
     )
   }
@@ -83,14 +85,16 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const confirmDelete = () => {
     remove.mutate(item.id, {
       onSuccess: () => {
-        toast.success(`Deleted · ${name}`)
+        toast.success(t('inventory.itemEdit.deletedToast', { name }))
         onClose()
       },
-      onError: (error) => toast.error(errorText(error, `Could not delete ${name}`)),
+      onError: (error) => toast.error(errorText(error, t('inventory.itemEdit.deleteError', { name }))),
     })
   }
 
-  const subtitle = item.purchase_date ? `Added ${item.purchase_date}` : ''
+  const subtitle = item.purchase_date
+    ? t('inventory.itemEdit.addedOn', { date: formatDate(item.purchase_date, language) })
+    : ''
   const editProduct = () => setEditingProduct(true)
 
   if (confirmingDelete) {
@@ -103,16 +107,16 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
           <div className="grid grid-cols-2 gap-3">
             {/* The safe one is focused, so Enter on a confirm never deletes (H45) */}
             <Button data-primary variant="secondary" size="lg" onClick={() => setConfirmingDelete(false)}>
-              Cancel
+              {t('inventory.itemEdit.cancel')}
             </Button>
             <Button variant="danger" size="lg" loading={remove.isPending} onClick={confirmDelete}>
-              Yes, delete
+              {t('inventory.itemEdit.confirmDelete')}
             </Button>
           </div>
         }
       >
         <p className="text-base text-ui-text dark:text-ui-dark-text">
-          {`Delete ${name}? This removes the item; what it wasted stays on Gone. Use Mark as gone if it was thrown away.`}
+          {t('inventory.itemEdit.deleteBody', { name })}
         </p>
       </BottomSheet>
     )
@@ -131,18 +135,18 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
         footer={
           product.isError ? (
             <Button data-primary variant="secondary" size="lg" fullWidth onClick={() => setEditingProduct(false)}>
-              {`Back to ${name}`}
+              {t('inventory.itemEdit.backTo', { name })}
             </Button>
           ) : undefined
         }
       >
         {product.isError ? (
           <p role="alert" className="text-base text-red-600 dark:text-red-400">
-            {`Could not load the product details for ${name}.`}
+            {t('inventory.itemEdit.productDetailsError', { name })}
           </p>
         ) : (
           <p className="text-base text-ui-text-secondary dark:text-ui-dark-text-secondary">
-            Loading product details…
+            {t('inventory.itemEdit.loadingProductDetails')}
           </p>
         )}
       </BottomSheet>
@@ -156,8 +160,15 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
       title={name}
       footer={
         <div className="flex flex-col gap-3">
-          <Button data-primary size="lg" fullWidth disabled={!canSave} loading={update.isPending} onClick={() => patch(changes, `Saved · ${name}`)}>
-            Save
+          <Button
+            data-primary
+            size="lg"
+            fullWidth
+            disabled={!canSave}
+            loading={update.isPending}
+            onClick={() => patch(changes, t('inventory.itemEdit.savedToast', { name }))}
+          >
+            {t('inventory.itemEdit.save')}
           </Button>
           <div className="grid grid-cols-2 gap-3">
             {!isInactive(item) && (
@@ -167,9 +178,11 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
                 disabled={busy}
                 // The way back from a mis-tap is the header's Undo, which names what it reverses
                 // and does not vanish after a few seconds (2026-09-22)
-                onClick={() => patch({ status: 'discarded' }, `Marked as gone · ${name}`)}
+                onClick={() =>
+                  patch({ status: 'discarded' }, t('inventory.itemEdit.markedGoneToast', { name }))
+                }
               >
-                Mark as gone
+                {t('inventory.itemEdit.markAsGone')}
               </Button>
             )}
             {isInactive(item) && (
@@ -181,14 +194,14 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
                 size="lg"
                 disabled={busy}
                 onClick={() =>
-                  patch({ status: 'opened' }, `Back in the kitchen · ${name}`)
+                  patch({ status: 'opened' }, t('inventory.itemEdit.backInKitchenToast', { name }))
                 }
               >
-                Put it back
+                {t('inventory.itemEdit.putItBack')}
               </Button>
             )}
             <Button variant="danger" size="lg" disabled={busy} onClick={() => setConfirmingDelete(true)}>
-              Delete
+              {t('inventory.itemEdit.delete')}
             </Button>
           </div>
         </div>
@@ -200,13 +213,22 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
         )}
 
         {/* Where this item came from (Q26): traces "fish soup" back to the printed receipt
-            line it was confirmed from, and links to the receipt's audit view. */}
+            line it was confirmed from, and links to the receipt's audit view. The store name
+            and date are the receipt's own text (never translated); only the surrounding
+            words follow the chosen language. */}
         {source.data && (
           <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
             <Link href={`/receipts/${source.data.receipt_id}`} className="underline">
               {source.data.line_text
-                ? `From ${storeName(source.data)}, ${receiptDate(source.data)}: ${source.data.line_text}`
-                : `From ${storeName(source.data)}, ${receiptDate(source.data)}`}
+                ? t('inventory.itemEdit.fromLineAndText', {
+                    store: storeName(source.data),
+                    date: receiptDate(source.data),
+                    line: source.data.line_text,
+                  })
+                : t('inventory.itemEdit.fromLine', {
+                    store: storeName(source.data),
+                    date: receiptDate(source.data),
+                  })}
             </Link>
           </p>
         )}
@@ -216,12 +238,14 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
             placeholder shelf life; a date the product or the cook set stays. */}
         <div className="flex items-center justify-between gap-3">
           <p className="text-base text-ui-text dark:text-ui-dark-text">
-            {`Category: ${item.category_name || 'No category'}`}
+            {t('inventory.itemEdit.categoryLine', {
+              category: item.category_name || t('inventory.itemEdit.noCategory'),
+            })}
           </p>
           {/* Held while a save is in flight: its success closes this sheet, and would take the
               product's sheet with it mid-edit */}
           <Button variant="secondary" size="md" disabled={busy} onClick={editProduct}>
-            Change…
+            {t('inventory.itemEdit.change')}
           </Button>
         </div>
 
@@ -229,13 +253,13 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
             and until H18 there was no way to correct it. */}
         <div>
           <Button variant="ghost" size="md" disabled={busy} onClick={editProduct}>
-            Change product details…
+            {t('inventory.itemEdit.changeProductDetails')}
           </Button>
         </div>
 
         <div>
           <label htmlFor="item-edit-expiry" className={fieldLabelClass}>
-            Expiry
+            {t('inventory.itemEdit.expiry')}
           </label>
           <input
             id="item-edit-expiry"
@@ -244,17 +268,17 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
             onChange={(event) => expiryField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
-          <FieldMoved label="Expiry" field={expiryField} />
+          <FieldMoved label={t('inventory.itemEdit.expiry')} field={expiryField} />
         </div>
 
         <ChoiceGroup
-          label="Location"
+          label={t('inventory.itemEdit.location')}
           name="item-edit-location"
           value={location}
-          options={locationOptions(item.location)}
+          options={locationOptions(item.location, language)}
           onChange={locationField.set}
         />
-        <FieldMoved label="Location" field={locationField} />
+        <FieldMoved label={t('inventory.itemEdit.location')} field={locationField} />
         {/* Q12/DEC-10: freezing restarts the clock, and taking it back out deliberately
             does not - nothing records when it went in, and thawed food keeps for a day
             or two whatever it was. Say both, because a date that moves on its own is
@@ -262,8 +286,8 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
         {location === 'freezer' && item.location !== 'freezer' && (
           <p className="mt-2 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
             {expiry === item.expiry_date.split('T')[0]
-              ? 'Saving will give this a freezer date. Taking it back out later will not change it back — set the date yourself then.'
-              : 'Your date will be kept, not the freezer one.'}
+              ? t('inventory.itemEdit.freezerDateNote')
+              : t('inventory.itemEdit.freezerKeptNote')}
           </p>
         )}
       </div>
