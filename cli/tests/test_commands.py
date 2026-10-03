@@ -452,6 +452,61 @@ def test_stock_discard_human_nothing_expired(
     assert "nothing was expired" in result.out.lower()
 
 
+# --- stock runout ---------------------------------------------------------------
+
+RUNOUT_ROW = {
+    "product_id": PRODUCT_ID,
+    "name": "Milk",
+    "unit": "dl",
+    "active_stock": 5.0,
+    "daily_rate": 1.25,
+    "runs_out_on": "2026-10-07",
+    "days_left": 4,
+    "expires_first": False,
+    "status": "forecast",
+}
+
+
+def test_stock_runout_sends_within_days(api: FakeApi, run: Runner) -> None:
+    api.on("GET", "/api/stock/runout", body=[RUNOUT_ROW])
+    result = run("stock", "runout", "--within", "7")
+    assert result.code == 0
+    request = api.last
+    assert request.method == "GET"
+    assert dict(request.url.params) == {"within_days": "7"}
+    assert result.json() == [RUNOUT_ROW]
+
+
+def test_stock_runout_without_within_sends_no_query(api: FakeApi, run: Runner) -> None:
+    api.on("GET", "/api/stock/runout", body=[])
+    assert run("stock", "runout").code == 0
+    assert api.last.url.query == b""
+
+
+def test_stock_runout_human(api: FakeApi, run: Runner, tty: None) -> None:
+    api.on("GET", "/api/stock/runout", body=[RUNOUT_ROW])
+    result = run("stock", "runout")
+    assert result.code == 0
+    lines = result.out.splitlines()
+    assert "PRODUCT" in lines[0] and "DAYS LEFT" in lines[0]
+    assert "Milk" in lines[1] and "4" in lines[1] and "forecast" in lines[1]
+
+
+def test_stock_runout_human_empty(api: FakeApi, run: Runner, tty: None) -> None:
+    api.on("GET", "/api/stock/runout", body=[])
+    result = run("stock", "runout")
+    assert result.code == 0
+    assert "Nothing is forecast" in result.out
+
+
+def test_stock_runout_human_flags_expires_first(
+    api: FakeApi, run: Runner, tty: None
+) -> None:
+    api.on("GET", "/api/stock/runout", body=[{**RUNOUT_ROW, "expires_first": True}])
+    result = run("stock", "runout")
+    assert "2026-10-07 !" in result.out
+
+
 # --- product ------------------------------------------------------------------
 
 

@@ -11,6 +11,7 @@ commands:
     add       add stock of a product, by name or id
     consume   use up an amount of a product, first to expire first
     discard   throw away everything past its expiry date
+    runout    when each product will run out, soonest first
 
 examples:
   kyokki stock list --location freezer

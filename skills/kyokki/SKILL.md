@@ -99,6 +99,15 @@ kyokki stock discard --expired
 `--location` narrows it to one place (`main_fridge`, `freezer`, `pantry`). Each item is
 logged as a discard and can be undone with the general undo.
 
+### What's about to run out?
+
+A daily use rate from the last 60 days, no seasonality - a product short of history
+reports `insufficient_history`, one with no stock left reports `out`.
+
+```
+kyokki stock runout --within 7
+```
+
 ### A receipt
 
 ```

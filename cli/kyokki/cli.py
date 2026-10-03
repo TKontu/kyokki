@@ -520,6 +520,28 @@ def build_parser() -> argparse.ArgumentParser:
     add_idempotency_option(discard)
     add_connection_options(discard, top=False)
 
+    runout = leaf(
+        stock,
+        "runout",
+        summary="when each product will run out, soonest first",
+        description="A daily use rate from the last 60 days of consumption (no\n"
+        "seasonality), and the date active stock runs out at that rate. A\n"
+        "product without enough history reports insufficient_history; one\n"
+        "already out of stock reports out. Writes nothing.",
+        examples=[
+            "kyokki stock runout",
+            "kyokki stock runout --within 7",
+        ],
+        handler=commands.stock_runout,
+    )
+    runout.add_argument(
+        "--within",
+        type=non_negative_int,
+        metavar="DAYS",
+        help="only products running out within DAYS days",
+    )
+    add_connection_options(runout, top=False)
+
     # product
     product = group(
         top,

@@ -16,6 +16,7 @@ from app.api.errors import AgentError
 from app.api.exceptions import handle_integrity_errors
 from app.db.session import get_db
 from app.schemas.inventory_item import QuickAddRequest, StorageLocation
+from app.schemas.runout import RunoutProduct
 from app.schemas.stock import (
     DiscardExpiredRequest,
     DiscardExpiredResponse,
@@ -25,6 +26,7 @@ from app.schemas.stock import (
     StockRow,
 )
 from app.services import idempotency, min_stock
+from app.services import runout as runout_service
 from app.services import stock as stock_service
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest, UnknownProduct
@@ -113,6 +115,23 @@ async def list_stock(
     return await stock_service.stock_summary(
         db, q=q, location=location, expiring_days=expiring_days, category=category
     )
+
+
+@router.get("/runout", response_model=list[RunoutProduct])
+async def stock_runout(
+    within_days: int | None = Query(
+        None, ge=0, description="Only products running out within N days"
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> list[RunoutProduct]:
+    """When each product will run out, soonest first (Phase 3, frontier item 8).
+
+    See `services.runout` for the method: a simple daily-use rate over the last 60
+    days, with no seasonality. `within_days` filters to `days_left <= N`, which leaves
+    out a product without enough history (it has no `days_left` to compare). Writes
+    nothing.
+    """
+    return await runout_service.forecast(db, within_days=within_days)
 
 
 @router.post(

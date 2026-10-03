@@ -289,6 +289,38 @@ def stock_discard(ctx: Context) -> Outcome:
     return Outcome(result, human, answer.replayed)
 
 
+def stock_runout(ctx: Context) -> Outcome:
+    a = ctx.args
+    rows = ctx.api.request(
+        "GET",
+        "/api/stock/runout",
+        params={"within_days": a.within},
+        expect=list,
+    ).body
+
+    def human() -> str:
+        if not rows:
+            return "Nothing is forecast to run out."
+        return output.table(
+            ["PRODUCT", "STOCK", "UNIT", "RATE/DAY", "RUNS OUT", "DAYS LEFT", "STATUS"],
+            [
+                [
+                    row.get("name", ""),
+                    output.number(row.get("active_stock")),
+                    row.get("unit", ""),
+                    output.number(row.get("daily_rate")),
+                    f"{row.get('runs_out_on') or ''}"
+                    + (" !" if row.get("expires_first") else ""),
+                    output.number(row.get("days_left")),
+                    row.get("status", ""),
+                ]
+                for row in rows
+            ],
+        )
+
+    return Outcome(rows, human)
+
+
 # --- product ------------------------------------------------------------------
 
 
