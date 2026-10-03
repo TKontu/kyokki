@@ -11,7 +11,7 @@ with `read` scope covers the three `GET`s; `consume` and `shopping/add` need `wr
 | GET    | `/api/ha/status`         | `total_items`, `expiring_within_3_days`, `expired`, `by_location`, `last_updated` |
 | GET    | `/api/ha/expiring`       | `?days=N` (default 3), `?limit=N` (default 10); each item carries its own `expired` flag |
 | GET    | `/api/ha/low-stock`      | Read-only; never writes to the shopping list |
-| GET    | `/api/ha/runout`         | `?within_days=N`; when each product will run out, soonest first. Read-only |
+| GET    | `/api/ha/runout`         | `?within_days=N`, `?include_out=true`; when each product will run out, soonest first. A product already out of stock is excluded unless `include_out` is set, but always counted in `out_count`. Read-only |
 | POST   | `/api/ha/consume`        | `{"name", "amount", "unit"}` - by product name, like the agent's `stock consume` |
 | POST   | `/api/ha/shopping/add`   | `{"name", "amount"?, "unit"?, "priority"?}` - `amount`/`unit` default to 1 pcs, `priority` to `normal` |
 
@@ -93,7 +93,10 @@ rest:
 ### Run-out sensor
 
 A daily use rate from the last 60 days of `consumption_log` (no seasonality -
-`backend/app/services/runout.py`), filtered to what runs out soon:
+`backend/app/services/runout.py`), filtered to what runs out soon. A product already
+out of stock (`status` `out`) is left off this list by default - it answers what is
+about to run out, not what is already gone - but is still counted in `out_count`, so a
+separate sensor can show "N things are out" without pulling the full list:
 
 ```yaml
 # configuration.yaml
@@ -108,12 +111,18 @@ rest:
         unit_of_measurement: "items"
         icon: mdi:timer-sand
         json_attributes_template: "{{ value_json.items | tojson }}"
+
+      - name: "Fridge Already Out"
+        value_template: "{{ value_json.out_count }}"
+        unit_of_measurement: "items"
+        icon: mdi:cart-off
 ```
 
 `sensor.fridge_running_out_soon`'s attributes carry the list (`name`, `unit`,
 `days_left`, `runs_out_on`, `status`); a product with too little history reports
-`insufficient_history` with `days_left` null, and one already gone reports `out` with
-`days_left` 0.
+`insufficient_history` with `days_left` null. Add `?include_out=true` to the resource
+URL to fold already-out products back into this list (each reports `out` with
+`days_left` 0) instead of reading `out_count` separately.
 
 ### REST commands for actions
 

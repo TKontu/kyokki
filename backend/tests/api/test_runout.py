@@ -180,6 +180,28 @@ class TestStockRunout:
         after = (await db.execute(ConsumptionLog.__table__.select())).all()
         assert len(before) == len(after)
 
+    async def test_excludes_out_by_default(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        out = await _product(db, "Gone")
+        await _log(db, out, days_ago=0, quantity="1")
+
+        response = await client.get("/api/stock/runout")
+
+        ids = {row["product_id"] for row in response.json()}
+        assert str(out.id) not in ids
+
+    async def test_include_out_lists_it(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        out = await _product(db, "Gone")
+        await _log(db, out, days_ago=0, quantity="1")
+
+        response = await client.get("/api/stock/runout", params={"include_out": "true"})
+
+        rows = {row["product_id"]: row for row in response.json()}
+        assert rows[str(out.id)]["status"] == "out"
+
 
 class TestStockRunoutAuth:
     @pytest.mark.usefixtures("tokens")
@@ -204,8 +226,9 @@ class TestHaRunout:
 
         assert response.status_code == 200, response.text
         body = response.json()
-        assert set(body.keys()) == {"items", "count"}
+        assert set(body.keys()) == {"items", "count", "out_count"}
         assert body["count"] == 1
+        assert body["out_count"] == 0
         (item,) = body["items"]
         assert set(item.keys()) == {
             "id",
@@ -246,6 +269,60 @@ class TestHaRunout:
         assert {(r["name"], r["days_left"], r["status"]) for r in agent} == {
             (r["name"], r["days_left"], r["status"]) for r in ha
         }
+
+    async def test_excludes_out_but_counts_it(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await _steady_milk(db)
+        out = await _product(db, "Gone")
+        await _log(db, out, days_ago=0, quantity="1")
+
+        response = await client.get("/api/ha/runout")
+
+        body = response.json()
+        ids = {item["id"] for item in body["items"]}
+        assert str(out.id) not in ids
+        assert body["out_count"] == 1
+        assert body["count"] == 1
+
+    async def test_include_out_lists_it_and_still_counts_it(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        await _steady_milk(db)
+        out = await _product(db, "Gone")
+        await _log(db, out, days_ago=0, quantity="1")
+
+        response = await client.get("/api/ha/runout", params={"include_out": "true"})
+
+        body = response.json()
+        ids = {item["id"] for item in body["items"]}
+        assert str(out.id) in ids
+        assert body["out_count"] == 1
+        assert body["count"] == 2
+
+    async def test_production_shape_default_holds_only_the_forecast(
+        self, client: AsyncClient, db: AsyncSession
+    ) -> None:
+        """28 products already out, one real forecast within 7 days (the live
+        finding): the default list holds exactly the forecast, with out_count 28."""
+        for i in range(28):
+            out = await _product(db, f"Out {i}")
+            await _log(db, out, days_ago=0, quantity="1")
+
+        forecast = await _steady_milk(db, stock="9")  # 9 dl / 1.25 dl/day = 7 days left
+
+        response = await client.get("/api/ha/runout", params={"within_days": 7})
+
+        body = response.json()
+        assert body["count"] == 1
+        assert body["items"][0]["id"] == str(forecast.id)
+        assert body["out_count"] == 28
+
+        full = await client.get(
+            "/api/ha/runout", params={"within_days": 7, "include_out": "true"}
+        )
+        assert full.json()["count"] == 29
+        assert full.json()["out_count"] == 28
 
 
 class TestHaRunoutAuth:

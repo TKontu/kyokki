@@ -526,11 +526,14 @@ def build_parser() -> argparse.ArgumentParser:
         summary="when each product will run out, soonest first",
         description="A daily use rate from the last 60 days of consumption (no\n"
         "seasonality), and the date active stock runs out at that rate. A\n"
-        "product without enough history reports insufficient_history; one\n"
-        "already out of stock reports out. Writes nothing.",
+        "product without enough history reports insufficient_history. One\n"
+        "already out of stock reports out, but is left off the list by\n"
+        "default - this answers what will run out soon, not what is gone -\n"
+        "unless --include-out is given. Writes nothing.",
         examples=[
             "kyokki stock runout",
             "kyokki stock runout --within 7",
+            "kyokki stock runout --include-out",
         ],
         handler=commands.stock_runout,
     )
@@ -539,6 +542,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=non_negative_int,
         metavar="DAYS",
         help="only products running out within DAYS days",
+    )
+    runout.add_argument(
+        "--include-out",
+        action="store_true",
+        help="also list products already out of stock",
     )
     add_connection_options(runout, top=False)
 

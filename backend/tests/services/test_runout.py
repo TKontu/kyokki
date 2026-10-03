@@ -221,7 +221,7 @@ class TestRunOutDate:
         for days_ago in (8, 6, 4, 2, 0):
             await _log(db, milk, "use_partial", days_ago=days_ago, quantity="2")
 
-        result = await _one(db, milk.id)
+        result = await _one(db, milk.id, include_out=True)
 
         assert result.status == "out"
         assert result.active_stock == Decimal("0.00")
@@ -302,6 +302,82 @@ class TestWithinDaysFilter:
         assert later.id not in ids_filtered
         # insufficient_history has no days_left to compare, so the filter leaves it out.
         assert short_history.id not in ids_filtered
+
+
+class TestIncludeOut:
+    """``out`` items are dropped unless ``include_out`` is set (the production
+    finding: products already out drown out the real forecasts otherwise)."""
+
+    async def test_default_excludes_out(self, db: AsyncSession) -> None:
+        milk = await _product(db, "Milk", unit="dl")
+        for days_ago in (8, 6, 4, 2, 0):
+            await _log(db, milk, "use_partial", days_ago=days_ago, quantity="2")
+
+        results = await runout.forecast(db, now=NOW)
+
+        assert milk.id not in {r.product_id for r in results}
+
+    async def test_include_out_includes_it(self, db: AsyncSession) -> None:
+        milk = await _product(db, "Milk", unit="dl")
+        for days_ago in (8, 6, 4, 2, 0):
+            await _log(db, milk, "use_partial", days_ago=days_ago, quantity="2")
+
+        results = await runout.forecast(db, now=NOW, include_out=True)
+
+        result = next(r for r in results if r.product_id == milk.id)
+        assert result.status == "out"
+
+    async def test_within_days_still_excludes_out_by_default(
+        self, db: AsyncSession
+    ) -> None:
+        milk = await _product(db, "Milk", unit="dl")
+        for days_ago in (8, 6, 4, 2, 0):
+            await _log(db, milk, "use_partial", days_ago=days_ago, quantity="2")
+
+        results = await runout.forecast(db, now=NOW, within_days=7)
+
+        assert milk.id not in {r.product_id for r in results}
+
+    async def test_within_days_with_include_out_lists_it(
+        self, db: AsyncSession
+    ) -> None:
+        milk = await _product(db, "Milk", unit="dl")
+        for days_ago in (8, 6, 4, 2, 0):
+            await _log(db, milk, "use_partial", days_ago=days_ago, quantity="2")
+
+        results = await runout.forecast(db, now=NOW, within_days=7, include_out=True)
+
+        result = next(r for r in results if r.product_id == milk.id)
+        assert result.status == "out"
+
+    async def test_production_shape_default_holds_only_the_forecast(
+        self, db: AsyncSession
+    ) -> None:
+        """28 products already out, one real forecast within 7 days: the default
+        list (within_days=7) must hold exactly the forecast."""
+        out_ids = set()
+        for i in range(28):
+            product = await _product(db, f"Out {i}", unit="dl")
+            await _log(db, product, "use_partial", days_ago=2, quantity="1")
+            await _log(db, product, "use_partial", days_ago=1, quantity="1")
+            await _log(db, product, "use_partial", days_ago=0, quantity="1")
+            out_ids.add(product.id)
+
+        # Same pinned rate as TestRateMaths.test_steady_use_forecasts_days_left
+        # (1.25 dl/day), with enough stock for 7 days rather than 4.
+        rye = await _product(db, "Rye crispbread", unit="dl")
+        await _item(db, rye, "9")
+        for days_ago in (8, 6, 4, 2, 0):
+            await _log(db, rye, "use_partial", days_ago=days_ago, quantity="2")
+
+        results = await runout.forecast(db, now=NOW, within_days=7)
+
+        ids = {r.product_id for r in results}
+        assert ids == {rye.id}
+        assert not (ids & out_ids)
+
+        with_out = await runout.forecast(db, now=NOW, within_days=7, include_out=True)
+        assert {r.product_id for r in with_out} == out_ids | {rye.id}
 
 
 class TestSorting:

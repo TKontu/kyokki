@@ -235,8 +235,15 @@ async def forecast(
     within_days: int | None = None,
     now: datetime | None = None,
     window_days: int = DEFAULT_WINDOW_DAYS,
+    include_out: bool = False,
 ) -> list[RunoutProduct]:
     """Every product with a forecast to report, soonest to run out first.
+
+    A run-out list answers "what will run out soon", not "what is gone": a product
+    already at zero stock (``status`` ``out``) is dropped unless ``include_out`` is
+    set, with or without ``within_days`` - an ``out`` item has ``days_left`` 0, which
+    would otherwise pass any non-negative ``within_days`` and drown out real forecasts
+    (the production shape this guards: 28 ``out`` items and one real forecast).
 
     ``within_days`` filters to products whose ``days_left`` is at most that many days -
     which excludes ``insufficient_history`` (no ``days_left`` to compare) by the same
@@ -274,6 +281,9 @@ async def forecast(
                 db, product, active_stock, earliest_expiry, floor=floor, today=today
             )
         )
+
+    if not include_out:
+        results = [r for r in results if r.status != "out"]
 
     if within_days is not None:
         results = [

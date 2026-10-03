@@ -64,3 +64,10 @@ class HaRunoutResponse(BaseModel):
 
     items: list[HaRunoutItem]
     count: int
+    out_count: int = Field(
+        ...,
+        description=(
+            "Products already at zero stock that would be listed with "
+            "include_out=true, whether or not they are in items"
+        ),
+    )

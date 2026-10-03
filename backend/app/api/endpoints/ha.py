@@ -74,14 +74,28 @@ async def ha_runout(
     within_days: int | None = Query(
         None, ge=0, description="Only products running out within N days"
     ),
+    include_out: bool = Query(
+        False, description="Also list products already out of stock"
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> Any:
     """When each product will run out, for a template sensor. Writes nothing.
 
     The same forecast `GET /api/stock/runout` returns (`services.runout`), shaped down
-    to what a sensor needs - no `active_stock` or `daily_rate`.
+    to what a sensor needs - no `active_stock` or `daily_rate`. A product already out
+    of stock is excluded from `items` by default - unless `include_out` is set - but
+    always counted in `out_count`, so a sensor can show "N things are out" without
+    asking for the list.
     """
-    items = await runout_service.forecast(db, within_days=within_days)
+    all_items = await runout_service.forecast(
+        db, within_days=within_days, include_out=True
+    )
+    out_count = sum(1 for item in all_items if item.status == "out")
+    items = (
+        all_items
+        if include_out
+        else [item for item in all_items if item.status != "out"]
+    )
     shaped = [
         HaRunoutItem(
             id=item.product_id,
@@ -93,7 +107,7 @@ async def ha_runout(
         )
         for item in items
     ]
-    return HaRunoutResponse(items=shaped, count=len(shaped))
+    return HaRunoutResponse(items=shaped, count=len(shaped), out_count=out_count)
 
 
 @router.post("/consume", response_model=HaConsumeResponse)
