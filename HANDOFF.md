@@ -1,53 +1,52 @@
 # Handoff
-Generated-UTC: 2026-10-03T11:02:35Z
-Base-SHA: 6506cca6c543d439f78fcaa43df0d2202225cf8d
+Generated-UTC: 2026-10-03T18:40:32Z
+Base-SHA: a3b163612b1ed664f84d2a6c820c1742a665f5e8
 
 ## Round delta
-- **Merged on 2026-10-03 (not deployed):**
-  - round 2026-10-02-3 (#157-#162) and its reconcile #163;
-  - round 2026-10-03-1: #164 e-mail receipts, #165 run-out forecast, #166 H47 Telegram, #167
-    min-stock follow-ups, #168 Finnish UI.
-- `main` CI and the image builds are green at 6506cca.
-- Outcomes are in `docs/TODO.md` after the round 2026-10-02-3 block. The log is
-  `.rounds/2026-10-03-1`.
+- **Merged on 2026-10-03:**
+  - #170 icon subjects;
+  - round 2026-10-03-2: #171 icon library;
+  - round 2026-10-03-3: #172 run-out list, #173 Finnish names on rename, #174 Finnish receipt
+    screens, #175 icon curation.
+- `main` CI and images are green at a3b1636.
+- **Deployed 2026-10-03:** rounds up to 2026-10-03-1. The display-name and icon backfills ran in
+  production (72 names, 50 icons).
+- **The operator was redeploying a3b1636** when the workspace was halted.
+- Outcomes are in `docs/TODO.md`. The logs are `.rounds/2026-10-03-{1,2,3}`.
 
 ## Active PRs and conflicts
-- None open apart from this reconcile. Alembic head: `61f6f69cc22f` (unchanged in round 2026-10-03-1).
+- None open apart from this reconcile. Alembic head: `c9a51b6756c1` (icon_canonical_at).
 
 ## Non-obvious decisions or blockers
-- **Display names are not resolution keys.** They live in `product_display_name`, never in
-  `product_name`. Whether a cook-set Finnish name should also become a synonym is undecided.
-- **Icons:** the template's composition and negative-prompt tuning were measured as harmful and
-  reverted. Do not reintroduce them without a new four-way measurement.
-- **CI runs only for PRs into `main`.** A stacked PR needs a retarget plus a push before real CI runs.
-- **The agent sandbox refuses `ssh`.** The operator opens the ComfyUI tunnel on devbox
-  (`ssh -f -N -L 19292:127.0.0.1:9292 sandbox-host`) and closes it with
-  `pkill -f "19292:127.0.0.1:9292"`.
-- **The agent is denied `gh pr merge` and force-push.** Lanes merge `main` and never rebase.
-- **The Sonnet session limit has stopped agents four times.** Executors push early; resume them
-  with SendMessage.
-- **Operator, in production:**
-  - deploy (`kyokki-migrate` applies the two new revisions, c715f1ea4510 and 61f6f69cc22f,
-    automatically);
-  - icons on: a Caddy allow rule for the server on `/upstream/a4.comfyui/`, then
-    `COMFYUI_BASE_URL` in Portainer, then `backfill_icons --dry-run` and the real run;
-  - `scripts.backfill_display_names --dry-run`, then the real run;
-  - optional: `RECEIPT_WATCH_DIR` and the worker mount (`docs/DEPLOY.md` "Watched folder");
-  - optional: e-mail receipts, a dedicated mailbox plus `RECEIPT_MAIL_*` including
-    `RECEIPT_MAIL_ALLOWED_SENDERS` (`docs/DEPLOY.md` "E-mail receipts");
-  - the Finnish wording pass (list in `docs/TODO.md`, round 2026-10-03-1);
+- **Icons:**
+  - curation is in-app on the develop build (`ICON_CURATION_ENABLED=true`): mark → **Download
+    bundle** → `apply_icon_bundle.py` → PR;
+  - never hand-fix or bulk-export the current generated icons (operator ruling).
+- **Production checks after a deploy:**
+  - read-only GETs through `http://192.168.0.136:17300` (the Next proxy injects the token);
+  - `kyokki-migrate` runs Alembic automatically;
+  - scripts run from the API container's bash as `python -m scripts.<name>` (WORKDIR `/app`).
+- **ComfyUI from production:** `COMFYUI_BASE_URL=http://192.168.0.94:9292/upstream/a4.comfyui`
+  plus `LLM_API_KEY`. The first call after idle cold-starts for several minutes.
+- **CI runs only for PRs into `main`.** The agent is denied `gh pr merge` and force-push; the
+  operator merges.
+- **The Sonnet session limit** can stop agents; resume them with SendMessage.
+- **Operator, open:**
+  - verify the redeploy (`kyokki-migrate` Exited (0)) and set `ICON_CURATION_ENABLED=true`;
+  - optionally `backfill_display_names --refresh-model` (dry run first);
+  - the Finnish wording pass (list in `docs/TODO.md`);
   - remove the aliases `KARTANON KALKKUNALEIKE → Ham` and `VALIO VOI NORMAALISUOLAI → Spread`;
-    rename "Dip";
-  - `scripts.rekey_store_chains` (dry run, then `--apply lidi-suomi-ky`);
+    rename "Dip"; `scripts.rekey_store_chains`;
   - `LLM_MAX_TOKENS`; the AG7 Hermes run.
-- **Held on operator decisions:** HTTPS on the LAN (frontier 4), which unblocks the Android share
-  target and PWA camera scanning; meal sections (frontier 14); AG0 recipes.
-- **Round 6 candidates:**
-  - language phase 3 (the products, receipt and scan screens);
+- **Held on operator decisions:** HTTPS on the LAN (the share target and camera scanning), meal
+  sections, AG0 recipes.
+- **Next round candidates:**
+  - Finnish phase 4 (the products screen and ProductEditSheet);
   - the crud → service inversion;
-  - H41 (scanner quarantine, DEC-7), H42 (concurrency tests), H44 (line endings);
-  - a Tomato puree icon brief (needs a tunnel session).
+  - H41, H42 and H44;
+  - findings from the operator's iPad use.
 - Do not stage `.claude/README.md` or `.claude/templates/profiles/python-fastapi.md`.
 
 ## Next action
-Merge this reconcile. Deploy is due: several rounds of features are merged but not deployed. Then plan round 6.
+The operator merges this reconcile, verifies the redeploy and uses the iPad. Then plan the next
+round from their findings.
