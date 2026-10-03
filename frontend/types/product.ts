@@ -50,6 +50,10 @@ export interface ProductMaster {
   // the cook clears it, or when the icon came from the repo's icon library (operator ask
   // 2026-10-03) rather than a render. Read-only. Optional, same reason as the rest here.
   icon_seed?: number | null
+  // When the cook marked this product's icon canonical (icon curation, operator ask
+  // 2026-10-03), ready to submit to the repo's icon library; null: not marked. Read-only.
+  // Optional, same reason as the rest here.
+  icon_canonical_at?: string | null // ISO datetime
   // Whether ComfyUI generation is configured on this server (Q18-G2); false: the sheet shows
   // a plain note instead of Regenerate. Optional so fixtures written before this lane still
   // type-check.

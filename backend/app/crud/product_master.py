@@ -798,11 +798,17 @@ async def mark_icon_pending(
 async def store_icon(
     db: AsyncSession, product: ProductMaster, image: bytes, seed: int
 ) -> None:
-    """Keep a generated image; its version is the moment it was stored. Commits."""
+    """Keep a generated image; its version is the moment it was stored. Commits.
+
+    Drops any canonical mark (operator ask 2026-10-03): a fresh render replaces the image
+    the cook marked, in the same write - the mark is only ever about the image actually
+    showing, never carried forward onto a different one.
+    """
     product.icon_image = image
     product.icon_seed = seed  # type: ignore[assignment]
     product.icon_status = IconStatus.READY  # type: ignore[assignment]
     product.icon_updated_at = datetime.now(UTC)  # type: ignore[assignment]
+    product.icon_canonical_at = None  # type: ignore[assignment]
     await db.commit()
 
 
@@ -820,16 +826,26 @@ async def store_library_icon(
     `icon_seed` stays NULL: the one bit that tells a library icon from a generated one
     apart, with no migration (the round's own ruling) - `icon_needs_generation` and this
     feature's own precedence both read it that way.
+
+    Also drops any canonical mark, same reason as `store_icon` - in practice unreachable,
+    since a marked product always has `icon_seed` set and the library never applies over
+    one (`services/product_icons.py`'s `_library_fit`), but a changed image must never
+    keep a stale mark either way.
     """
     product.icon_image = image
     product.icon_seed = None  # type: ignore[assignment]
     product.icon_status = IconStatus.READY  # type: ignore[assignment]
     product.icon_updated_at = datetime.now(UTC)  # type: ignore[assignment]
+    product.icon_canonical_at = None  # type: ignore[assignment]
     await db.commit()
 
 
 async def clear_icon(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
-    """Drop the image for the category emoji, as the cook's choice. None: no product."""
+    """Drop the image for the category emoji, as the cook's choice. None: no product.
+
+    Also drops any canonical mark, in the same write (operator ask 2026-10-03): the marked
+    image is gone, so the mark cannot survive it.
+    """
     product = await db.get(ProductMaster, product_id)
     if product is None:
         return None
@@ -837,6 +853,7 @@ async def clear_icon(db: AsyncSession, product_id: UUID) -> ProductMaster | None
     product.icon_seed = None  # type: ignore[assignment]
     product.icon_status = IconStatus.CLEARED  # type: ignore[assignment]
     product.icon_updated_at = None  # type: ignore[assignment]
+    product.icon_canonical_at = None  # type: ignore[assignment]
     await db.commit()
     # A plain `db.get()` can hand back an object already in this session's identity map
     # from an earlier load that never touched `display_name_rows` (Post-MVP frontier item
@@ -925,6 +942,60 @@ async def products_needing_icons(
     if limit is not None:
         query = query.limit(limit)
     return list((await db.execute(query)).scalars().all())
+
+
+# --- icon curation (operator ask 2026-10-03) -----------------------------------------------
+
+
+async def mark_icon_canonical(db: AsyncSession, product: ProductMaster) -> None:
+    """The cook's "Keep as canonical": this product's current icon is good enough for the
+    repo's icon library. Eligibility is the caller's job (`services/icon_library.py`); this
+    only writes the timestamp. Commits.
+    """
+    product.icon_canonical_at = datetime.now(UTC)  # type: ignore[assignment]
+    await db.commit()
+
+
+async def unmark_icon_canonical(db: AsyncSession, product: ProductMaster) -> None:
+    """Undo a mark. A no-op, not an error, on a product that was never marked. Commits."""
+    product.icon_canonical_at = None  # type: ignore[assignment]
+    await db.commit()
+
+
+async def marked_icons(db: AsyncSession) -> list[ProductMaster]:
+    """Every product with a canonical mark, newest mark first - the Settings list and the
+    bundle both read this; `icon_image` is left deferred for the list (only the bundle
+    needs the bytes, through `canonical_icons` below).
+    """
+    query = (
+        select(ProductMaster)
+        .where(ProductMaster.icon_canonical_at.is_not(None))
+        .order_by(ProductMaster.icon_canonical_at.desc())
+    )
+    return list((await db.execute(query)).scalars().all())
+
+
+async def canonical_icons(db: AsyncSession) -> list[ProductMaster]:
+    """Every marked product, with its image loaded - what `GET /icon-library/bundle.zip`
+    zips up. Same query as `marked_icons`, undeferring `icon_image` for it.
+    """
+    query = (
+        select(ProductMaster)
+        .where(ProductMaster.icon_canonical_at.is_not(None))
+        .options(undefer(ProductMaster.icon_image))
+        .order_by(ProductMaster.canonical_name)
+    )
+    return list((await db.execute(query)).scalars().all())
+
+
+async def count_marked_icons(db: AsyncSession) -> int:
+    """How many products are currently marked canonical, for `GET /icon-library/status`."""
+    return int(
+        await db.scalar(
+            select(func.count()).where(ProductMaster.icon_canonical_at.is_not(None))
+        )
+        or 0
+    )
 
 
 # --- the exact emoji (Q18 build) ----------------------------------------------------------

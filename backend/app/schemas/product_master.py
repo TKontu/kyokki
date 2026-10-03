@@ -164,6 +164,14 @@ class ProductMasterResponse(ProductMasterBase):
             "this is it. Read-only."
         ),
     )
+    icon_canonical_at: datetime | None = Field(
+        None,
+        description=(
+            "When the cook marked this product's icon canonical (icon curation, operator "
+            "ask 2026-10-03), ready to submit to the repo's icon library; null: not "
+            "marked. A fresh generated image or a clear drops the mark. Read-only."
+        ),
+    )
     generation_enabled: bool = Field(
         False,
         description=(

@@ -33,6 +33,14 @@
  * whose word it is) - and, folded into this round because A1's auto-shopping sits right below
  * it, an editable Minimum stock (`min_stock_quantity`, already in the API; this sheet had no
  * field for it before).
+ *
+ * Icon curation (operator ask 2026-10-03) adds **Keep as canonical** - a develop-build-only
+ * toggle (`ICON_CURATION_ENABLED`, `useIconLibraryStatus`) shown on an icon that is a ready,
+ * actually-generated image with no emoji win, for the operator to later submit to the repo's
+ * icon library (`docs/icon_library/README.md`). Folded in: **Regenerate** and its hint field
+ * are now hidden whenever an exact or cook emoji wins the tile - asking for one used to reach
+ * the API and fail with 409, since that image could never show; a short line explains why
+ * instead.
  */
 
 import { useState } from 'react'
@@ -47,6 +55,11 @@ import {
 } from '@/components/ui/formStyles'
 import { ProductNamesList } from '@/components/products/ProductNamesList'
 import { useCategories } from '@/hooks/useCategories'
+import {
+  useIconLibraryStatus,
+  useMarkIcon,
+  useUnmarkIcon,
+} from '@/hooks/useIconLibrary'
 import { useToast } from '@/hooks/useToast'
 import {
   useClearProductIcon,
@@ -113,6 +126,9 @@ export function ProductEditSheet({
   const setEmoji = useSetProductEmoji()
   const confirmEmoji = useConfirmProductEmoji()
   const rejectEmoji = useRejectProductEmoji()
+  const curationStatus = useIconLibraryStatus()
+  const markIcon = useMarkIcon()
+  const unmarkIcon = useUnmarkIcon()
   const [hint, setHint] = useState('')
   // What the last icon or emoji action answered, until the product itself catches up (both
   // act at once, outside Save, so this sheet's own prop is briefly behind the server).
@@ -139,6 +155,19 @@ export function ProductEditSheet({
   const generationEnabled = liveProduct.generation_enabled ?? false
   const emoji = liveProduct.emoji ?? null
   const emojiMatch = liveProduct.emoji_match ?? null
+  // An exact or cook emoji already wins the tile (lib/productIcon.ts's own precedence):
+  // Regenerate could never show its result, so the sheet must not offer it (the bug this
+  // round folds in - it used to, and asking for one failed with 409).
+  const emojiWins = emojiMatch === 'exact' || emojiMatch === 'cook'
+  // Icon curation (operator ask 2026-10-03): "Keep as canonical" is offered only on a
+  // develop build (curationEnabled) for an icon that is actually a ready, generated image
+  // (icon_seed set - a library icon never qualifies, it is already in the library) with no
+  // emoji win - the same markability the API itself enforces.
+  const curationEnabled = curationStatus.data?.curation_enabled ?? false
+  const iconSeed = liveProduct.icon_seed ?? null
+  const markable =
+    curationEnabled && iconStatus === 'ready' && iconSeed != null && !emojiWins
+  const marked = liveProduct.icon_canonical_at != null
 
   // Each field follows the product until the cook touches it, and says so if what they are
   // editing moves underneath them (H25) - two cooks on two screens is the case this is for.
@@ -233,6 +262,21 @@ export function ProductEditSheet({
     clearIcon.mutate(product.id, {
       onSuccess: (updated) => setLiveAnswer(updated),
       onError: (error) => actionError(error, 'Could not change the icon'),
+    })
+  }
+  // The mark/unmark routes answer a mark entry, not the full product (unlike every other
+  // icon action here) - merged onto liveProduct, with a fresh `updated_at` so it wins the
+  // freshest-of-three reduce above over whatever the prop or an earlier poll last had.
+  const toggleCanonical = () => {
+    const mutation = marked ? unmarkIcon : markIcon
+    mutation.mutate(product.id, {
+      onSuccess: (entry) =>
+        setLiveAnswer({
+          ...liveProduct,
+          icon_canonical_at: entry.marked_at,
+          updated_at: new Date().toISOString(),
+        }),
+      onError: (error) => actionError(error, 'Could not change the canonical mark'),
     })
   }
   const busyGenerating = redraw.isPending || iconStatus === 'pending'
@@ -348,7 +392,7 @@ export function ProductEditSheet({
           </div>
           {iconNote && <p className={fieldHintClass}>{iconNote}</p>}
         </div>
-        {generationEnabled && (
+        {generationEnabled && !emojiWins && (
           <>
             <label htmlFor="product-icon-hint" className={`${fieldLabelClass} mt-2`}>
               Hint for the image
@@ -364,8 +408,13 @@ export function ProductEditSheet({
             />
           </>
         )}
+        {generationEnabled && emojiWins && (
+          <p className={`${fieldHintClass} mt-2`}>
+            Showing the emoji. Choose &quot;No emoji&quot; to use a generated icon.
+          </p>
+        )}
         <div className="mt-2 flex gap-2">
-          {generationEnabled && (
+          {generationEnabled && !emojiWins && (
             <Button
               variant="secondary"
               size="sm"
@@ -386,6 +435,19 @@ export function ProductEditSheet({
             </Button>
           )}
         </div>
+        {markable && (
+          <div className="mt-2">
+            <Button
+              variant={marked ? 'primary' : 'secondary'}
+              size="sm"
+              aria-pressed={marked}
+              loading={markIcon.isPending || unmarkIcon.isPending}
+              onClick={toggleCanonical}
+            >
+              {marked ? 'Canonical ✓' : 'Keep as canonical'}
+            </Button>
+          </div>
+        )}
       </fieldset>
 
       <fieldset className="mb-4">

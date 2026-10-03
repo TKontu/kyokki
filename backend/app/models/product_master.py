@@ -143,6 +143,12 @@ class ProductMaster(Base):
     icon_status = Column(String, nullable=True)
     # When icon_image last changed; NULL exactly when there is no image to show.
     icon_updated_at = Column(DateTime(timezone=True), nullable=True)
+    # When the cook marked this product's icon canonical (operator ask 2026-10-03), for the
+    # icon-curation feature: ready to bundle into a PR against the repo's icon library. NULL:
+    # not marked. Only ever set on a generated icon (icon_seed not NULL, icon_status ready,
+    # no emoji win) - see services/icon_library.py. A new generated image or a clear drops
+    # the mark in the same write that changes the image, since the marked image is gone.
+    icon_canonical_at = Column(DateTime(timezone=True), nullable=True)
 
     # The exact Apple emoji (Q18 build): one emoji from app/resources/emoji_reference.json,
     # or NULL. The tile only shows it when emoji_match is `exact` or `cook` - see EmojiMatch.

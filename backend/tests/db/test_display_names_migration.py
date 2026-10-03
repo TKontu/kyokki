@@ -41,10 +41,9 @@ class TestTheRevision:
     def test_it_follows_the_generated_icons(self) -> None:
         assert _load_migration().down_revision == "c715f1ea4510"
 
-    def test_it_is_the_only_head(self) -> None:
-        script = _script()
-        (head,) = script.get_heads()
-        assert head == _load_migration().revision
+    # Was "the only head" until icon curation's c9a51b6756c1 followed it (operator ask
+    # 2026-10-03, `test_icon_canonical_at_migration.py`); that test owns the head now -
+    # same succession `test_product_icons_migration.py` already documents for f1a2b3c4d5e6.
 
     def test_history_stays_one_line_through_it(self) -> None:
         script = _script()

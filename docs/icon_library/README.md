@@ -78,6 +78,41 @@ A real (non-dry-run) export that wrote at least one icon also writes a **contact
 sheet**, `docs/icon_library/contact_sheet.png` - a grid of every icon just exported, its
 product name underneath.
 
+## Curation (in the app)
+
+Operator ruling (2026-10-03): "The generated -> canonical should be a feature of the
+'develop' production build I use. ... during use more [icons] are generated and some are
+re-generated and after that updated canonical [icons] can be submitted to the repo." This
+is the other way an icon reaches the library - from the cook's own use of the app, not a
+one-off export run - and it needs no API access to a remote deployment: it runs on the
+build the cook already has open.
+
+1. Set `ICON_CURATION_ENABLED=true` on the develop build (`.env.example`; false
+   everywhere else). The product sheet then shows a **Keep as canonical** toggle on any
+   product whose icon is a ready, actually-generated image with no emoji win - an exact
+   or cook emoji, a pending or failed render, or a library icon already applied here are
+   never markable, since there is nothing of the cook's own to curate on any of them. A
+   fresh render (Regenerate, or a rename's own) or a clear drops the mark in the same
+   write that changes the image - a mark is only ever about the image actually showing.
+2. Use the app as usual. More icons get generated and some get regenerated; mark the
+   good ones as they come up.
+3. Open Settings' "Canonical icons" section (shown only when curation is enabled): it
+   lists every marked product and has **Download bundle**
+   (`GET /api/icon-library/bundle.zip`) - every marked icon as `icon_library/<slug>.png`
+   plus an `index.json` fragment in the library's exact entry format
+   (`source: "curated:<host>"`).
+4. In a checkout of this repo, apply the downloaded bundle:
+   ```bash
+   python -m scripts.apply_icon_bundle bundle.zip --dry-run
+   python -m scripts.apply_icon_bundle bundle.zip
+   ```
+   This checks each entry's `sha256` against its image before ever writing it, merges it
+   into `app/resources/icon_library/` under the library's own normalised-name keys
+   (an entry already there is left alone unless `--replace` is given, the same as the
+   export script), and regenerates `docs/icon_library/contact_sheet.png`.
+5. Open a PR with the result - the same review step as an export (below): look at the
+   contact sheet, drop anything wrong, merge.
+
 ## Review
 
 The export's PR **is** the operator's approval step:

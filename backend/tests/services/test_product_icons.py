@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
 from app.core.config import settings
+from app.crud import product_master as crud_product
 from app.models.product_master import EmojiMatch, IconStatus, ProductMaster
 from app.services import comfyui, product_icons
 from app.services.non_food import remember_non_food
@@ -774,6 +775,57 @@ class TestClearAndStoredIcon:
         product = await _product(db_session)
 
         assert await product_icons.stored_icon(db_session, product.id) is None
+
+
+class TestCanonicalMarkClearedByImageChanges:
+    """Icon curation (operator ask 2026-10-03): a mark lives on the one image it was set
+    for - Regenerate (once the new image actually lands) or a clear must drop it, in the
+    same write that changes the image."""
+
+    async def test_regenerate_drops_a_mark_once_the_new_image_lands(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session)
+        with _render():
+            await draw_icon(product.id)
+        marked = await _reload(db_session, product)
+        await crud_product.mark_icon_canonical(db_session, marked)
+
+        await product_icons.request_redraw(db_session, product.id)
+        with _render():
+            await draw_icon(product.id)
+
+        assert (await _reload(db_session, product)).icon_canonical_at is None
+
+    async def test_a_failed_regenerate_keeps_the_mark_on_the_surviving_image(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        """A failed render keeps the earlier image (`mark_icon_failed`'s own contract),
+        so the mark on it must survive too - that image never actually changed."""
+        product = await _product(db_session)
+        with _render():
+            await draw_icon(product.id)
+        marked = await _reload(db_session, product)
+        await crud_product.mark_icon_canonical(db_session, marked)
+
+        await product_icons.request_redraw(db_session, product.id)
+        with _render(error=comfyui.ComfyUIError("boom")):
+            await draw_icon(product.id)
+
+        assert (await _reload(db_session, product)).icon_canonical_at is not None
+
+    async def test_clear_icon_drops_the_mark(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session)
+        with _render():
+            await draw_icon(product.id)
+        marked = await _reload(db_session, product)
+        await crud_product.mark_icon_canonical(db_session, marked)
+
+        await product_icons.clear_icon(db_session, product.id)
+
+        assert (await _reload(db_session, product)).icon_canonical_at is None
 
 
 class TestLibraryPrecedence:

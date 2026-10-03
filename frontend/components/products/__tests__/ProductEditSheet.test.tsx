@@ -78,6 +78,11 @@ beforeEach(() => {
     http.get(`${API_URL}/products/p-1/names`, () => HttpResponse.json(NAMES)),
     http.get(`${API_URL}/products/emoji/reference`, () =>
       HttpResponse.json(EMOJI_REFERENCE)
+    ),
+    // Icon curation (operator ask 2026-10-03): off by default here, same as the server's
+    // own default - the dedicated describe block below turns it on for its own tests.
+    http.get(`${API_URL}/icon-library/status`, () =>
+      HttpResponse.json({ curation_enabled: false, library_count: 0, marked_count: 0 })
     )
   )
 })
@@ -789,5 +794,134 @@ describe('ProductEditSheet emoji', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Reject' }))
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirm' })).toBeNull())
+  })
+})
+
+// The folded-in fix: Regenerate used to reach the API and fail with 409 on a product
+// whose exact or cook emoji already wins the tile - it must never be offered there.
+describe('ProductEditSheet Regenerate hidden for an emoji win', () => {
+  const EMOJI_PRODUCT: ProductMaster = {
+    ...PRODUCT,
+    icon_status: 'ready',
+    icon_version: 1790000000,
+    emoji: '🧀',
+    emoji_match: 'exact',
+  }
+
+  it('hides Regenerate and its hint field', () => {
+    renderSheet(EMOJI_PRODUCT)
+
+    expect(screen.queryByRole('button', { name: 'Regenerate' })).toBeNull()
+    expect(screen.queryByLabelText('Hint for the image')).toBeNull()
+  })
+
+  it('shows a short line instead', () => {
+    renderSheet(EMOJI_PRODUCT)
+
+    expect(
+      screen.getByText(/Choose "No emoji" to use a generated icon/)
+    ).toBeInTheDocument()
+  })
+
+  it('a cook-chosen emoji hides it too', () => {
+    renderSheet({ ...EMOJI_PRODUCT, emoji: '🥨', emoji_match: 'cook' })
+
+    expect(screen.queryByRole('button', { name: 'Regenerate' })).toBeNull()
+  })
+
+  it('still offers Use category emoji', () => {
+    renderSheet(EMOJI_PRODUCT)
+
+    expect(screen.getByRole('button', { name: 'Use category emoji' })).toBeInTheDocument()
+  })
+})
+
+// Icon curation (operator ask 2026-10-03): the cook marks a good generated icon canonical,
+// on a develop build only (ICON_CURATION_ENABLED, GET /api/icon-library/status).
+describe('ProductEditSheet icon curation', () => {
+  const MARKABLE: ProductMaster = {
+    ...PRODUCT,
+    icon_status: 'ready',
+    icon_version: 1790000000,
+    icon_seed: 123456,
+  }
+
+  function mockCurationEnabled() {
+    server.use(
+      http.get(`${API_URL}/icon-library/status`, () =>
+        HttpResponse.json({ curation_enabled: true, library_count: 0, marked_count: 0 })
+      )
+    )
+  }
+
+  it('offers no toggle when curation is disabled (the default)', () => {
+    renderSheet(MARKABLE)
+
+    expect(screen.queryByText('Keep as canonical')).toBeNull()
+  })
+
+  it('offers no toggle for a library icon (no icon_seed)', () => {
+    mockCurationEnabled()
+    renderSheet({ ...MARKABLE, icon_seed: null })
+
+    expect(screen.queryByText('Keep as canonical')).toBeNull()
+  })
+
+  it('offers no toggle when an emoji wins', () => {
+    mockCurationEnabled()
+    renderSheet({ ...MARKABLE, emoji: '🧀', emoji_match: 'exact' })
+
+    expect(screen.queryByText('Keep as canonical')).toBeNull()
+  })
+
+  it('offers the toggle for a markable icon once curation is enabled', async () => {
+    mockCurationEnabled()
+    renderSheet(MARKABLE)
+
+    expect(await screen.findByText('Keep as canonical')).toBeInTheDocument()
+  })
+
+  it('marks it on click', async () => {
+    mockCurationEnabled()
+    let marked = false
+    server.use(
+      http.put(`${API_URL}/icon-library/marks/p-1`, () => {
+        marked = true
+        return HttpResponse.json({
+          id: 'p-1',
+          name: 'Ground beef',
+          icon_version: 1790000000,
+          marked_at: '2026-10-03T12:00:00Z',
+        })
+      })
+    )
+    renderSheet(MARKABLE)
+
+    fireEvent.click(await screen.findByText('Keep as canonical'))
+
+    await waitFor(() => expect(marked).toBe(true))
+    expect(await screen.findByText('Canonical ✓')).toBeInTheDocument()
+  })
+
+  it('unmarks an already-marked icon on click', async () => {
+    mockCurationEnabled()
+    let unmarked = false
+    server.use(
+      http.delete(`${API_URL}/icon-library/marks/p-1`, () => {
+        unmarked = true
+        return HttpResponse.json({
+          id: 'p-1',
+          name: 'Ground beef',
+          icon_version: 1790000000,
+          marked_at: null,
+        })
+      })
+    )
+    renderSheet({ ...MARKABLE, icon_canonical_at: '2026-10-03T00:00:00Z' })
+
+    fireEvent.click(await screen.findByText('Canonical ✓'))
+
+    await waitFor(() => expect(unmarked).toBe(true))
+    expect(await screen.findByText('Keep as canonical')).toBeInTheDocument()
   })
 })
