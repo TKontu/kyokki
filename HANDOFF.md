@@ -27,8 +27,8 @@ Base-SHA: 6506cca6c543d439f78fcaa43df0d2202225cf8d
 - **The Sonnet session limit has stopped agents four times.** Executors push early; resume them
   with SendMessage.
 - **Operator, in production:**
-  - deploy, then `alembic upgrade head` (two new revisions since the last deploy:
-    c715f1ea4510 and 61f6f69cc22f);
+  - deploy (`kyokki-migrate` applies the two new revisions, c715f1ea4510 and 61f6f69cc22f,
+    automatically);
   - icons on: a Caddy allow rule for the server on `/upstream/a4.comfyui/`, then
     `COMFYUI_BASE_URL` in Portainer, then `backfill_icons --dry-run` and the real run;
   - `scripts.backfill_display_names --dry-run`, then the real run;

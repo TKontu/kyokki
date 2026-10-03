@@ -7,30 +7,42 @@ Python 3.12+, FastAPI, Ruff, pytest, mypy, structlog.
 Paste into the `claude:commands` table in `CLAUDE.md`:
 
 ```
-| install   | pip install -r requirements.txt -r requirements-dev.txt |
-| test      | pytest |
-| test-one  | pytest {arg} -v --tb=short |
-| lint      | ruff check . |
-| lint-fix  | ruff check . --fix |
-| format    | ruff format . |
-| typecheck | mypy src/ |
-| run       | uvicorn app.main:app --reload |
+| install   | uv sync |
+| test      | uv run pytest |
+| test-one  | uv run pytest {arg} -v --tb=short |
+| lint      | uv run ruff check . |
+| lint-fix  | uv run ruff check . --fix |
+| format    | uv run ruff format . |
+| typecheck | uv run mypy src/ |
+| run       | uv run uvicorn app.main:app --reload |
 | build     | n/a |
 ```
 
-Using a virtualenv, prefix with the interpreter so the commands work without an activated shell —
-`.venv/bin/python -m pytest`, `.venv/bin/ruff check .` (on Windows, `.venv\Scripts\`). Poetry or uv
-projects substitute `poetry run` / `uv run`.
+**Name a runner, never a path.** `uv run` resolves the interpreter at call time; `.venv/bin/python`
+hardcodes *where* the environment lives. That difference matters more than it looks:
+
+- A virtualenv is machine-specific. The moment a tree is shared between two machines — a network
+  mount, a bind-mounted container, a remote dev box — one `.venv` directory cannot be valid for
+  both, because they rarely hold the same interpreter.
+- A virtualenv is also regenerable, and large: tens of thousands of files. On any non-local
+  filesystem that is the dominant cost of every test and type-check run.
+
+So the environment belongs on fast local disk, and the commands above stay agnostic about where
+that is. `uv` reads the location from `UV_PROJECT_ENVIRONMENT`, so a host can place it without any
+project file changing. Poetry projects use `poetry run` and `POETRY_VIRTUALENVS_PATH` the same way.
+If a project is pinned to bare `pip`, keep `python -m` forms (`python -m pytest`) and let the
+activated environment decide, rather than writing `.venv/bin` into the table.
 
 Setup, once:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate      # Linux/macOS
-.venv\Scripts\activate         # Windows
-pip install -r requirements.txt
-pip install -e .               # editable install
+uv sync                        # creates the environment and installs, dev group included
 ```
+
+Keep regenerable state out of the tree as well — `.venv/`, `.mypy_cache/`, `.ruff_cache/`,
+`.pytest_cache/`, and `__pycache__/` all belong in `.gitignore`, and on a shared or networked
+checkout they belong outside the checkout entirely (`UV_CACHE_DIR`, `MYPY_CACHE_DIR`,
+`RUFF_CACHE_DIR`, `PYTHONPYCACHEPREFIX`).
 
 ## Toolchain config
 
