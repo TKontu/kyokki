@@ -19,6 +19,8 @@ import { useBulkInventoryMove } from '@/hooks/useInventory'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { formatExpiryDate } from '@/lib/dates'
+import { displayName } from '@/lib/displayName'
+import { useLanguage } from '@/lib/language'
 import type { InventoryItem } from '@/types/inventory'
 
 export interface ClearExpiredSheetProps {
@@ -34,6 +36,7 @@ function errorText(error: unknown, fallback: string): string {
 export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetProps) {
   const move = useBulkInventoryMove()
   const toast = useToast()
+  const [language] = useLanguage()
 
   if (!open || items.length === 0) return null
 
@@ -88,7 +91,7 @@ export function ClearExpiredSheet({ items, open, onClose }: ClearExpiredSheetPro
             className="flex items-baseline justify-between gap-3 text-sm"
           >
             <span className="truncate text-ui-text dark:text-ui-dark-text">
-              {item.product_name}
+              {displayName(item.product_display_names, item.product_name, language)}
             </span>
             <span className="shrink-0 text-ui-text-secondary dark:text-ui-dark-text-secondary">
               {formatExpiryDate(item.expiry_date)}

@@ -384,6 +384,12 @@ def _no_model_selection():
     `propose()` returns `None` and the product is left unchanged, exactly as a model
     failure does; a test that wants a proposal patches `product_emoji._post_proposal`
     itself.
+
+    The Finnish display-name proposal (Post-MVP frontier item 13) is the fourth, scheduled
+    the same way next to the emoji proposal (`services/shelf_life_on_create.py`): every
+    product-create path would otherwise reach the gateway for a name nothing asked it to
+    patch. A test that wants a proposal patches `display_names._post_proposal` itself
+    (`tests/services/test_display_names.py`, `tests/api/test_display_names.py`).
     """
     from unittest.mock import AsyncMock, patch
 
@@ -400,6 +406,11 @@ def _no_model_selection():
         ),
         patch(
             "app.services.product_emoji._post_proposal",
+            new_callable=AsyncMock,
+            return_value="",
+        ),
+        patch(
+            "app.services.display_names._post_proposal",
             new_callable=AsyncMock,
             return_value="",
         ),

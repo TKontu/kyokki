@@ -88,6 +88,16 @@ function renderSheet(items = EXPIRED, onClose = jest.fn()) {
 }
 
 describe('ClearExpiredSheet', () => {
+  beforeEach(() => window.localStorage.clear())
+
+  it('shows the Finnish name once the cook has chosen Suomi (Post-MVP frontier item 13)', () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    renderSheet([makeItem({ product_display_names: { fi: 'Jauheliha' } })])
+
+    expect(screen.getByText('Jauheliha')).toBeInTheDocument()
+    expect(screen.queryByText('Ground beef')).not.toBeInTheDocument()
+  })
+
   it('names the count and lists what would go, with ages', () => {
     renderSheet()
 

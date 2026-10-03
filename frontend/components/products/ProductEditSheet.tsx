@@ -27,6 +27,12 @@
  * (lib/productIcon.ts has the one precedence rule). A `proposed` emoji shows **Confirm** and
  * **Reject**; otherwise the picker below is limited to `GET /products/emoji/reference`, plus
  * "No emoji". None of it waits for Save either.
+ *
+ * Post-MVP frontier item 13 adds an editable Finnish name - a new product gets one proposed
+ * in the background, marked "Proposed" until the cook edits it (`display_name_sources` says
+ * whose word it is) - and, folded into this round because A1's auto-shopping sits right below
+ * it, an editable Minimum stock (`min_stock_quantity`, already in the API; this sheet had no
+ * field for it before).
  */
 
 import { useState } from 'react'
@@ -54,6 +60,8 @@ import {
 } from '@/hooks/useProducts'
 import { iconUrl } from '@/lib/api/products'
 import { isAPIError } from '@/lib/api/errors'
+import { displayName } from '@/lib/displayName'
+import { useLanguage } from '@/lib/language'
 import { resolveProductIcon } from '@/lib/productIcon'
 import type { Unit } from '@/types/inventory'
 import { useFieldEdit } from '@/hooks/useFieldEdit'
@@ -81,12 +89,22 @@ function positiveOrNull(raw: string): number | null | undefined {
   return Number.isFinite(value) && value > 0 ? value : undefined
 }
 
+/** Like `positiveOrNull`, but zero counts - the minimum stock threshold that turns auto
+ * shopping off is zero, not "no value" (A1's sibling lane). */
+function nonNegativeOrNull(raw: string): number | null | undefined {
+  const tidy = raw.trim()
+  if (tidy === '') return null
+  const value = Number(tidy)
+  return Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
 export function ProductEditSheet({
   product,
   onClose,
   onSaved,
 }: ProductEditSheetProps) {
   const toast = useToast()
+  const [language] = useLanguage()
   const save = useUpdateProduct()
   const categories = useCategories()
   const redraw = useRedrawProductIcon()
@@ -132,6 +150,10 @@ export function ProductEditSheet({
   const unitField = useFieldEdit(product.default_unit)
   const categoryField = useFieldEdit(product.category)
   const frozenField = useFieldEdit(blankIfNull(product.frozen_shelf_life_days))
+  // Follows `liveProduct`, not the prop: a background proposal (Post-MVP frontier item 13)
+  // may land while this sheet is open, the same as the icon and the emoji do.
+  const displayNameField = useFieldEdit(liveProduct.display_names?.fi ?? '')
+  const minStockField = useFieldEdit(blankIfNull(product.min_stock_quantity))
   const name = nameField.value
   const shelfLife = shelfLifeField.value
   const openedShelfLife = openedField.value
@@ -140,12 +162,15 @@ export function ProductEditSheet({
   const unit = unitField.value as Unit
   const category = categoryField.value
   const frozenShelfLife = frozenField.value
+  const displayNameFi = displayNameField.value
+  const minStock = minStockField.value
 
   const shelfLifeValue = positiveOrNull(shelfLife)
   const openedValue = positiveOrNull(openedShelfLife)
   const pieceValue = positiveOrNull(pieceGrams)
   const packValue = positiveOrNull(packGrams)
   const frozenValue = positiveOrNull(frozenShelfLife)
+  const minStockValue = nonNegativeOrNull(minStock)
 
   // Shelf life is the one field that may not be blank: every expiry date comes from it.
   const valid =
@@ -154,7 +179,8 @@ export function ProductEditSheet({
     openedValue !== undefined &&
     pieceValue !== undefined &&
     packValue !== undefined &&
-    frozenValue !== undefined
+    frozenValue !== undefined &&
+    minStockValue !== undefined
 
   // Send only what changed, so two cooks editing different fields do not fight - and only
   // what *this* cook changed, so a field that moved underneath is left where the server has it.
@@ -171,6 +197,12 @@ export function ProductEditSheet({
   if (unitField.changed) changes.default_unit = unit
   if (categoryField.changed && category !== product.category) changes.category = category
   if (frozenField.changed) changes.frozen_shelf_life_days = frozenValue ?? null
+  // Blank means "nothing typed yet" (Post-MVP frontier item 13 has no "clear" affordance,
+  // unlike the emoji's `cleared` state) - only a non-empty edit is sent.
+  if (displayNameField.changed && displayNameFi.trim() !== '') {
+    changes.display_names = { fi: displayNameFi.trim() }
+  }
+  if (minStockField.changed) changes.min_stock_quantity = minStockValue ?? null
 
   const dirty = Object.keys(changes).length > 0
 
@@ -267,7 +299,7 @@ export function ProductEditSheet({
     <BottomSheet
       open
       onClose={onClose}
-      title={`Edit ${product.canonical_name}`}
+      title={`Edit ${displayName(product.display_names, product.canonical_name, language)}`}
       footer={
         <div className="flex gap-2">
           <Button variant="secondary" fullWidth onClick={onClose}>
@@ -447,6 +479,27 @@ export function ProductEditSheet({
       />
       <FieldMoved label="Name" field={nameField} />
 
+      <label htmlFor="product-display-name-fi" className={`${fieldLabelClass} mt-4`}>
+        Finnish name
+      </label>
+      <input
+        id="product-display-name-fi"
+        type="text"
+        aria-label="Finnish name"
+        placeholder="e.g. Maito"
+        value={displayNameFi}
+        onChange={(event) => displayNameField.set(event.target.value)}
+        className={`${fieldInputClass} mt-1`}
+      />
+      <p className={fieldHintClass}>
+        {liveProduct.display_name_sources?.fi === 'model'
+          ? 'Proposed by the model; shown in Suomi until you change it'
+          : liveProduct.display_names?.fi
+            ? 'Your own name, shown in Suomi'
+            : 'Blank until proposed, or typed here; English shows the canonical name either way'}
+      </p>
+      <FieldMoved label="Finnish name" field={displayNameField} />
+
       <div className="mt-4 flex flex-wrap gap-4">
         <div className="w-32">
           <label htmlFor="product-shelf-life" className={fieldLabelClass}>
@@ -541,6 +594,25 @@ export function ProductEditSheet({
             className={`${fieldInputClass} mt-1`}
           />
           <p className={fieldHintClass}>grams, blank if unknown</p>
+        </div>
+
+        <div className="w-32">
+          <label htmlFor="product-min-stock" className={fieldLabelClass}>
+            Minimum stock
+          </label>
+          <input
+            id="product-min-stock"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="any"
+            aria-label="Minimum stock"
+            value={minStock}
+            onChange={(event) => minStockField.set(event.target.value)}
+            className={`${fieldInputClass} mt-1`}
+          />
+          <p className={fieldHintClass}>{`${product.default_unit}, blank for no auto shopping`}</p>
+          <FieldMoved label="Minimum stock" field={minStockField} />
         </div>
       </div>
 

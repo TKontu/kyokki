@@ -90,6 +90,34 @@ class ProductMasterUpdate(BaseModel):
     min_stock_quantity: JsonDecimal | None = Field(None, ge=0)
     reorder_quantity: JsonDecimal | None = Field(None, gt=0)
     off_product_id: str | None = None
+    display_names: dict[str, str] | None = Field(
+        None,
+        description=(
+            "The cook's own name per language, e.g. {'fi': 'Maito'} (Post-MVP frontier "
+            "item 13); written as `source: cook`, which a later model proposal never "
+            "overwrites. Only the languages included are touched - this is a partial "
+            "update of the map, not a replacement of it."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def known_languages(self) -> "ProductMasterUpdate":
+        """Every key of `display_names` must be one `GET /products` can ever answer with.
+
+        Imported here, not at module level, for the same reason `_generation_enabled`
+        (below) imports `app.core.config` late: a schema module should not need the
+        services package built just to be imported.
+        """
+        if self.display_names:
+            from app.services.display_names import SUPPORTED_LANGUAGES
+
+            unknown = sorted(set(self.display_names) - set(SUPPORTED_LANGUAGES))
+            if unknown:
+                raise ValueError(
+                    f"Unsupported language code(s): {', '.join(unknown)}; "
+                    f"supported: {', '.join(SUPPORTED_LANGUAGES)}"
+                )
+        return self
 
     @model_validator(mode="after")
     def canonical_units(self) -> "ProductMasterUpdate":
@@ -147,6 +175,21 @@ class ProductMasterResponse(ProductMasterBase):
             "exact (the curated table, or a confirmed proposal), proposed (the model's "
             "answer, not yet confirmed - never shown), none (the gap list, or rejected), "
             "cook (set by hand) or cleared (the cook chose no emoji); null: never looked up"
+        ),
+    )
+    display_names: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "The product's name by language code (Post-MVP frontier item 13), e.g. "
+            "{'fi': 'Maito'}; a language with no entry falls back to canonical_name "
+            "(English). Never a resolution key - matching a receipt line is unaffected."
+        ),
+    )
+    display_name_sources: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Whose word each display_names entry is - 'cook' or 'model' - by the same "
+            "language code; the product sheet marks a 'model' name as proposed."
         ),
     )
     created_at: datetime

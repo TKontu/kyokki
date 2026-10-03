@@ -19,6 +19,8 @@ import { ProductSearch } from '@/components/products/ProductSearch'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { addDaysISO } from '@/lib/dates'
+import { displayName } from '@/lib/displayName'
+import { useLanguage } from '@/lib/language'
 import { locationOptions } from '@/lib/stock'
 import type { Category } from '@/types/category'
 import type { InventoryLocation, QuickAddRequest } from '@/types/inventory'
@@ -50,6 +52,7 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
   const toast = useToast()
   const quickAdd = useQuickAddInventoryItem()
   const categories = useCategories()
+  const [language] = useLanguage()
 
   const [term, setTerm] = useState('')
   const [selection, setSelection] = useState<Selection | null>(null)
@@ -105,7 +108,13 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
   const submit = () => {
     if (!selection || !canAdd) return
     const productName =
-      selection.kind === 'existing' ? selection.product.canonical_name : selection.name
+      selection.kind === 'existing'
+        ? displayName(
+            selection.product.display_names,
+            selection.product.canonical_name,
+            language
+          )
+        : selection.name
     // The backend still keeps an amount: the product's usual one, else one piece. A new
     // product sends no unit, so the server's own default applies.
     const payload: QuickAddRequest = {
@@ -122,7 +131,9 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
 
     quickAdd.mutate(payload, {
       onSuccess: (item) => {
-        toast.success(`Added · ${item.product_name}`)
+        toast.success(
+          `Added · ${displayName(item.product_display_names, item.product_name, language)}`
+        )
         onClose()
       },
       onError: (error) => {
@@ -149,7 +160,10 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
     )
   }
 
-  const title = selection.kind === 'existing' ? selection.product.canonical_name : selection.name
+  const title =
+    selection.kind === 'existing'
+      ? displayName(selection.product.display_names, selection.product.canonical_name, language)
+      : selection.name
 
   return (
     <BottomSheet

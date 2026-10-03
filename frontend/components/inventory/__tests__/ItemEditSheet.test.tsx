@@ -88,6 +88,16 @@ function change(label: string, value: string) {
 const save = () => screen.getByRole('button', { name: 'Save' })
 
 describe('ItemEditSheet', () => {
+  beforeEach(() => window.localStorage.clear())
+
+  it('shows the Finnish name once the cook has chosen Suomi (Post-MVP frontier item 13)', () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    mockApi()
+    renderSheet({ ...OAT, product_display_names: { fi: 'Kaurajuoma' } })
+
+    expect(screen.getByRole('heading', { name: 'Kaurajuoma' })).toBeInTheDocument()
+  })
+
   it('is prefilled from the item and Save waits for a change', () => {
     mockApi()
     renderSheet()

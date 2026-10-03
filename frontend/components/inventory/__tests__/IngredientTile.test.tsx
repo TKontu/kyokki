@@ -38,6 +38,7 @@ const MILK: InventoryItem = {
 beforeEach(() => {
   jest.useFakeTimers()
   jest.setSystemTime(TODAY)
+  window.localStorage.clear()
 })
 afterEach(() => jest.useRealTimers())
 
@@ -211,6 +212,34 @@ describe('IngredientTile', () => {
 
       expect(container.querySelector('img')).toBeNull()
       expect(container).toHaveTextContent('🥛')
+    })
+  })
+
+  describe('display language (Post-MVP frontier item 13)', () => {
+    const WITH_FI = { ...MILK, product_display_names: { fi: 'Kauramaito' } }
+
+    it('shows the English name by default', () => {
+      const { container } = render(<IngredientTile item={WITH_FI} />)
+
+      expect(container).toHaveTextContent('Oat Milk')
+      expect(container).not.toHaveTextContent('Kauramaito')
+    })
+
+    it('shows the Finnish name once the cook has chosen Suomi', () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+
+      const { container } = render(<IngredientTile item={WITH_FI} />)
+
+      expect(container).toHaveTextContent('Kauramaito')
+      expect(container).not.toHaveTextContent('Oat Milk')
+    })
+
+    it('falls back to the English name in Suomi when there is no Finnish one', () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+
+      const { container } = render(<IngredientTile item={MILK} />)
+
+      expect(container).toHaveTextContent('Oat Milk')
     })
   })
 })

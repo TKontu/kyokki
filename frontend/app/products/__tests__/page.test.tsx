@@ -141,6 +141,32 @@ function renderPage(initialProducts: ProductMaster[], estimate?: CatalogEstimate
 }
 
 describe('ProductsPage', () => {
+  beforeEach(() => window.localStorage.clear())
+
+  describe('display language (Post-MVP frontier item 13)', () => {
+    it('shows the Finnish name once the cook has chosen Suomi', async () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      renderPage([product({ display_names: { fi: 'Jauheliha' } })])
+
+      expect(await screen.findByText('Jauheliha')).toBeInTheDocument()
+      expect(screen.queryByText('Ground beef')).not.toBeInTheDocument()
+    })
+
+    it('falls back to the English name when there is no Finnish one', async () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      renderPage([product()])
+
+      expect(await screen.findByText('Ground beef')).toBeInTheDocument()
+    })
+
+    it('shows the English name by default', async () => {
+      renderPage([product({ display_names: { fi: 'Jauheliha' } })])
+
+      expect(await screen.findByText('Ground beef')).toBeInTheDocument()
+      expect(screen.queryByText('Jauheliha')).not.toBeInTheDocument()
+    })
+  })
+
   it('lists every product, grouped by category', async () => {
     renderPage([product(), product({ id: 'p-pasta', canonical_name: 'Pasta', category: 'pantry' })])
 

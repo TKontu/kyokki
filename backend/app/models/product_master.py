@@ -167,6 +167,19 @@ class ProductMaster(Base):
     names = relationship(
         "ProductName", back_populates="product_master", cascade="all, delete-orphan"
     )
+    # Per-language display names (Post-MVP frontier item 13), read-only here: writes go
+    # through crud.product_master.set_display_name, never through this collection. `lazy`
+    # is "selectin" rather than the default - not a query-time choice made where the product
+    # is loaded, but the mapper's own default, so it is there for every loader of a
+    # ProductMaster regardless of which file wrote that query (notably
+    # `crud/inventory_item.py`'s eager-load chain, owned by a sibling lane this round, which
+    # cannot be asked to add an option for a relationship it does not know about).
+    display_name_rows = relationship(
+        "ProductDisplayName",
+        back_populates="product_master",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
     store_aliases = relationship("StoreProductAlias", back_populates="product_master")
     inventory_items = relationship("InventoryItem", back_populates="product_master")
     shopping_list_items = relationship(
@@ -178,3 +191,19 @@ class ProductMaster(Base):
         """Whole seconds of icon_updated_at, for the icon URL; None: no image to show."""
         updated = self.icon_updated_at
         return None if updated is None else int(updated.timestamp())
+
+    @property
+    def display_names(self) -> dict[str, str]:
+        """Per-language display names (Post-MVP frontier item 13), by language code.
+
+        English is never a key here: the canonical name already is the English name, and
+        the frontend's `displayName.ts` falls back to it when a language has no row.
+        """
+        return {str(row.language): str(row.name) for row in self.display_name_rows}
+
+    @property
+    def display_name_sources(self) -> dict[str, str]:
+        """Whose word each display name is (`cook` or `model`), by the same language code
+        `display_names` uses - the product edit sheet marks a `model` row "proposed".
+        """
+        return {str(row.language): str(row.source) for row in self.display_name_rows}

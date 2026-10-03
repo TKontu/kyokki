@@ -14,6 +14,7 @@ from sqlalchemy.orm import undefer
 from app.models.category import Category
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
+from app.models.product_display_name import ProductDisplayName
 from app.models.product_emoji_learned import ProductEmojiLearned
 from app.models.product_master import EmojiMatch, IconStatus, ProductMaster
 from app.models.product_name import ProductName
@@ -132,7 +133,7 @@ async def create_product(
         db, db_product, str(db_product.canonical_name), "canonical"
     )
     await db.commit()
-    await db.refresh(db_product)
+    await _refresh_product(db, db_product)
     return db_product
 
 
@@ -156,8 +157,11 @@ async def update_product(
     old_name = str(db_product.canonical_name)
     old_category = str(db_product.category)
 
-    # Update only provided fields
+    # Update only provided fields. `display_names` is not a plain column - it has no
+    # setter, only the read-only `display_names` property - so it is handled on its own,
+    # below, through `set_display_name` rather than `setattr`.
     update_data = product_update.model_dump(exclude_unset=True)
+    display_names_update = update_data.pop("display_names", None)
     for field, value in update_data.items():
         setattr(db_product, field, value)
 
@@ -175,9 +179,94 @@ async def update_product(
     ):
         await _rename_keys(db, db_product, old_name)
 
+    # The cook's own name (PATCH /products/{id}), one language at a time (Post-MVP
+    # frontier item 13). Always `cook`: a human typed this request, whatever a model
+    # proposed earlier for the same language is now superseded.
+    if display_names_update:
+        for language, name in display_names_update.items():
+            await set_display_name(
+                db, db_product, language=language, name=str(name), source="cook"
+            )
+
     await db.commit()
-    await db.refresh(db_product)
+    await _refresh_product(db, db_product)
     return db_product
+
+
+MAX_DISPLAY_NAME_LENGTH = 100
+
+
+class DisplayNameTooLong(ValueError):
+    """A display name over MAX_DISPLAY_NAME_LENGTH characters (F2, PR #162 review)."""
+
+
+async def set_display_name(
+    db: AsyncSession, product: ProductMaster, *, language: str, name: str, source: str
+) -> None:
+    """Upsert one language's display name on the product (Post-MVP frontier item 13).
+
+    An empty or whitespace-only `name` **clears** the row instead of storing it (F2
+    review): a blank cook row otherwise still counts as "this language already has a
+    row", which silently and permanently stops a background proposal from ever filling
+    it in.
+
+    Flushes but does not commit - the caller's own transaction decides when. Queried by
+    table rather than through the `display_name_rows` relationship, so this never depends
+    on whether that collection happens to be loaded on `product` already.
+
+    `source` is whatever the caller decided (`cook` from a PATCH, `model` from the
+    background proposal in `services/display_names.py`) - this never second-guesses which
+    one should win; `services/display_names.py` is where a model proposal checks a cook's
+    name is not already there before ever calling this.
+
+    Raises:
+        DisplayNameTooLong: `name`, trimmed, is over `MAX_DISPLAY_NAME_LENGTH` characters.
+    """
+    stripped = name.strip()
+    existing = (
+        await db.execute(
+            select(ProductDisplayName).where(
+                ProductDisplayName.product_master_id == product.id,
+                ProductDisplayName.language == language,
+            )
+        )
+    ).scalar_one_or_none()
+    if not stripped:
+        if existing is not None:
+            await db.delete(existing)
+            await db.flush()
+        return
+    if len(stripped) > MAX_DISPLAY_NAME_LENGTH:
+        raise DisplayNameTooLong(
+            f"a display name is at most {MAX_DISPLAY_NAME_LENGTH} characters "
+            f"({len(stripped)} given)"
+        )
+    if existing is not None:
+        row: Any = existing
+        row.name = stripped
+        row.source = source
+    else:
+        db.add(
+            ProductDisplayName(
+                product_master_id=product.id,
+                language=language,
+                name=stripped,
+                source=source,
+            )
+        )
+    await db.flush()
+
+
+async def _refresh_product(db: AsyncSession, product: ProductMaster) -> None:
+    """Refresh a just-written product for a response that includes `display_names`.
+
+    Plain `db.refresh()` only refreshes column attributes; a relationship it already
+    expires rather than reloads, which would otherwise crash the next (async, so not
+    lazy-load-capable) access of `display_names` in API response serialisation. The second
+    call is the documented way to force that reload within this same await.
+    """
+    await db.refresh(product)
+    await db.refresh(product, attribute_names=["display_name_rows"])
 
 
 async def _follow_category(
@@ -452,6 +541,70 @@ async def _move_names(
     return moved, dropped
 
 
+async def _move_display_names(
+    db: AsyncSession, source_id: UUID, target_id: UUID
+) -> tuple[int, int]:
+    """Re-point the source's display names (Post-MVP frontier item 13), one row per
+    language - `product_display_name` is UNIQUE (product, language), so two rows for the
+    same language cannot both survive.
+
+    The target keeps its own name for a language it already has, *unless* that name is
+    only the model's guess and the source's is the cook's own - a cook's word beats a
+    model's, the same precedence `_fold_alias_evidence` gives a verified alias over an
+    unverified one. Without this, F1's review found, a merge silently let the CASCADE on
+    the deleted source take a cook-typed Finnish name down with it.
+    """
+    kept: dict[str, Any] = {
+        str(row.language): row
+        for row in (
+            await db.execute(
+                select(ProductDisplayName).where(
+                    ProductDisplayName.product_master_id == target_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
+    source_rows = (
+        (
+            await db.execute(
+                select(ProductDisplayName).where(
+                    ProductDisplayName.product_master_id == source_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    moved = dropped = 0
+    for row in source_rows:
+        language = str(row.language)
+        existing = kept.get(language)
+        if existing is None:
+            moving: Any = row
+            moving.product_master_id = target_id
+            kept[language] = row
+            moved += 1
+        elif str(existing.source) == "model" and str(row.source) == "cook":
+            # Cook beats model: the target keeps its own row (and its unique slot), but
+            # the cook's word overwrites its content in place - exactly as `_move_names`
+            # upgrades a colliding model guess into the cook's word, never by deleting
+            # the kept row and moving a new one into its place (which would collide with
+            # the UNIQUE (product, language) index mid-flush).
+            kept_row: Any = existing
+            kept_row.name = row.name
+            kept_row.source = row.source
+            await db.delete(row)
+            moved += 1
+        else:
+            await db.delete(row)
+            dropped += 1
+    await db.flush()
+    return moved, dropped
+
+
 async def merge_product_rows(
     db: AsyncSession, source: ProductMaster, target: ProductMaster
 ) -> MergeResult:
@@ -499,6 +652,20 @@ async def merge_product_rows(
     result.moved[ProductName.__tablename__] = moved_names
     result.dropped[ProductName.__tablename__] = dropped_names
 
+    moved_display_names, dropped_display_names = await _move_display_names(
+        db, source_id, target_id
+    )
+    result.moved[ProductDisplayName.__tablename__] = moved_display_names
+    result.dropped[ProductDisplayName.__tablename__] = dropped_display_names
+    # `source.display_name_rows` loads itself (`lazy="selectin"`) wherever `source` was
+    # fetched, so by now it is a stale, already-loaded Python collection that still
+    # thinks it owns the rows `_move_display_names` just re-pointed or deleted directly
+    # (bypassing that collection). `cascade="delete-orphan"` cascades against whatever is
+    # still in that loaded collection, not a fresh query - without expiring it first,
+    # deleting `source` below would delete the row just moved to `target` right back out
+    # from under it, FK column notwithstanding.
+    db.expire(source, attribute_names=["display_name_rows"])
+
     for model in (ShoppingListItem, ConsumptionLog):
         moved = await db.execute(
             update(model)
@@ -514,6 +681,11 @@ async def merge_product_rows(
     await db.flush()
     await db.delete(source)
     await db.flush()
+    # `target` may already have `display_name_rows` loaded from the query that fetched
+    # it, before `_move_display_names` wrote under it directly (not through the
+    # relationship collection) - without this, the response would serialise the
+    # pre-merge names, not what the merge actually left in place.
+    await db.refresh(target, attribute_names=["display_name_rows"])
     return result
 
 
@@ -543,7 +715,7 @@ async def enrich_product_from_off_data(
         existing_product.off_data = enriched_data["off_data"]
 
         await db.commit()
-        await db.refresh(existing_product)
+        await _refresh_product(db, existing_product)
         return existing_product, False
     else:
         # Create new product with sensible defaults
@@ -578,7 +750,7 @@ async def enrich_product_from_off_data(
         try:
             db.add(new_product)
             await db.commit()
-            await db.refresh(new_product)
+            await _refresh_product(db, new_product)
             return new_product, True
         except IntegrityError:
             # Concurrent request already created this product — fetch and return it
@@ -650,6 +822,12 @@ async def clear_icon(db: AsyncSession, product_id: UUID) -> ProductMaster | None
     product.icon_status = IconStatus.CLEARED  # type: ignore[assignment]
     product.icon_updated_at = None  # type: ignore[assignment]
     await db.commit()
+    # A plain `db.get()` can hand back an object already in this session's identity map
+    # from an earlier load that never touched `display_name_rows` (Post-MVP frontier item
+    # 13) - unlike a fresh `select()`, it does not reliably (re)populate a `lazy="selectin"`
+    # relationship on its own. Without this, serialising the response crashes instead
+    # (`MissingGreenlet`): an async context cannot lazy-load it after the fact.
+    await db.refresh(product, attribute_names=["display_name_rows"])
     return product
 
 
@@ -771,7 +949,7 @@ async def confirm_emoji_proposal(
     row: Any = product
     row.emoji_match = EmojiMatch.EXACT.value
     await db.commit()
-    await db.refresh(product)
+    await _refresh_product(db, product)
     return product
 
 
@@ -792,7 +970,7 @@ async def reject_emoji_proposal(
     row.emoji = None
     row.emoji_match = EmojiMatch.NONE.value
     await db.commit()
-    await db.refresh(product)
+    await _refresh_product(db, product)
     return product
 
 
@@ -811,7 +989,7 @@ async def set_cook_emoji(
         row.emoji = emoji
         row.emoji_match = EmojiMatch.COOK.value
     await db.commit()
-    await db.refresh(product)
+    await _refresh_product(db, product)
     return product
 
 
@@ -844,3 +1022,19 @@ async def learn_emoji(db: AsyncSession, generic_name_key: str, emoji: str) -> No
     if existing is None:
         db.add(ProductEmojiLearned(generic_name=generic_name_key, emoji=emoji))
         await db.commit()
+
+
+# --- display names (Post-MVP frontier item 13) ---------------------------------------------
+
+
+async def get_display_name_subject(
+    db: AsyncSession, product_id: UUID
+) -> ProductMaster | None:
+    """The product, freshly read, for deciding what its display-name proposal does next.
+
+    `populate_existing=True`, exactly as `get_emoji_subject` does: the background proposal
+    reads this once before asking the model and once more right before it writes, and the
+    second read must see a cook's own edit that landed in between - not a stale copy already
+    in this session's identity map from the first read.
+    """
+    return await db.get(ProductMaster, product_id, populate_existing=True)

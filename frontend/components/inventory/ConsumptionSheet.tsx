@@ -15,6 +15,8 @@ import Button from '@/components/ui/Button'
 import { useConsumeInventoryItem } from '@/hooks/useInventory'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
+import { displayName } from '@/lib/displayName'
+import { useLanguage } from '@/lib/language'
 import type { InventoryItem } from '@/types/inventory'
 
 export interface ConsumptionSheetProps {
@@ -28,11 +30,14 @@ export interface ConsumptionSheetProps {
 export function ConsumptionSheet({ item, open, onClose, onEdit }: ConsumptionSheetProps) {
   const consume = useConsumeInventoryItem()
   const toast = useToast()
+  const [language] = useLanguage()
 
   if (!item) return null
 
+  const name = displayName(item.product_display_names, item.product_name, language)
+
   const useUpItem = () => {
-    const productName = item.product_name
+    const productName = name
     consume.mutate(
       { id: item.id, data: { quantity: item.current_quantity } },
       {
@@ -50,7 +55,7 @@ export function ConsumptionSheet({ item, open, onClose, onEdit }: ConsumptionShe
   }
 
   return (
-    <BottomSheet open={open} onClose={onClose} title={item.product_name}>
+    <BottomSheet open={open} onClose={onClose} title={name}>
       <div className="flex flex-col gap-3">
         <Button data-primary size="xl" fullWidth onClick={useUpItem}>
           Used up

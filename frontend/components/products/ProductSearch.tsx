@@ -16,6 +16,8 @@ import {
   fieldLabelClass,
 } from '@/components/ui/formStyles'
 import { useProductSearch } from '@/hooks/useProducts'
+import { displayName } from '@/lib/displayName'
+import { useLanguage } from '@/lib/language'
 import type { Category } from '@/types/category'
 import type { ProductMaster } from '@/types/product'
 
@@ -47,6 +49,7 @@ export function ProductSearch({
   placeholder = 'Milk, ground beef, apples…',
 }: ProductSearchProps) {
   const search = useProductSearch(term)
+  const [language] = useLanguage()
 
   const categoryById = useMemo(
     () => new Map(categories.map((category) => [category.id, category])),
@@ -78,21 +81,24 @@ export function ProductSearch({
         className={`${fieldInputClass} mt-1`}
       />
       <ul className="mt-3 flex flex-col gap-2">
-        {results.map((product) => (
-          <li key={product.id}>
-            <button
-              type="button"
-              aria-label={product.canonical_name}
-              onClick={() => onPickExisting(product)}
-              className="flex w-full min-h-touch items-center gap-2 rounded-ui border border-ui-border dark:border-ui-dark-border px-3 text-left text-ui-text dark:text-ui-dark-text"
-            >
-              <span aria-hidden="true">
-                {categoryById.get(product.category)?.icon ?? ''}
-              </span>
-              {product.canonical_name}
-            </button>
-          </li>
-        ))}
+        {results.map((product) => {
+          const name = displayName(product.display_names, product.canonical_name, language)
+          return (
+            <li key={product.id}>
+              <button
+                type="button"
+                aria-label={name}
+                onClick={() => onPickExisting(product)}
+                className="flex w-full min-h-touch items-center gap-2 rounded-ui border border-ui-border dark:border-ui-dark-border px-3 text-left text-ui-text dark:text-ui-dark-text"
+              >
+                <span aria-hidden="true">
+                  {categoryById.get(product.category)?.icon ?? ''}
+                </span>
+                {name}
+              </button>
+            </li>
+          )
+        })}
         {offerNew && (
           <li>
             <button
