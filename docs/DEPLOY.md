@@ -275,6 +275,55 @@ Behaviour worth knowing:
   but only one replica should run the scan at a time, or the same dropped file could be
   read twice.
 
+## E-mail receipts
+
+A fourth way receipts arrive, alongside the iPad upload, the Telegram bot and the watched
+folder: Finnish chains (K-Ruoka, S-kanava, Lidl Plus) can send e-receipts by mail, usually as a
+PDF attachment. Point a dedicated mailbox at `kyokki-worker` and it reads each allowed mail's
+attachment like an upload, within a poll interval, then moves the mail so it is never read
+twice.
+
+**Off by default** (`RECEIPT_MAIL_HOST` empty). To turn it on:
+
+1. Create a **dedicated mailbox** for this - do not point it at a personal inbox. Any IMAP
+   provider works; an app password (not the account password) is usually required once
+   two-factor or "less secure apps" is involved - Gmail and Outlook both call this "app
+   password" in their security settings.
+2. In `stack.env`, set:
+   - `RECEIPT_MAIL_HOST`, `RECEIPT_MAIL_PORT` (default 993), `RECEIPT_MAIL_USER`,
+     `RECEIPT_MAIL_PASSWORD` (the app password).
+   - `RECEIPT_MAIL_ALLOWED_SENDERS` - **required**, a comma list of exact addresses or
+     `@domain`s. Anyone who knows the mailbox address could otherwise mail in a fake receipt;
+     with `RECEIPT_MAIL_HOST` set and this empty, the worker logs one ERROR and never scans.
+     List the cook's own address (for manually forwarded mail) and the chains' sending domains
+     (for mail rules set up per step 4).
+   - Optionally `RECEIPT_MAIL_FOLDER` (default `INBOX`), `RECEIPT_MAIL_PROCESSED_FOLDER`
+     (default `Kyokki/Processed`, created automatically), `RECEIPT_MAIL_POLL_SECONDS`
+     (default 300).
+3. Restart the worker: `docker compose --env-file stack.env -f docker-compose.prod.yml up -d
+   kyokki-worker`.
+4. Either forward each e-receipt mail by hand (from an allowed address), or set up a mail rule
+   / filter in the cook's own mailbox that auto-forwards mail from each chain's e-receipt
+   sender to the dedicated mailbox - most mail providers support a rule like "from
+   contains @k-ruoka... -> forward to receipts@...".
+
+Behaviour worth knowing:
+- Each `application/pdf`, `image/jpeg` or `image/png` attachment becomes one queued receipt,
+  including one inside a forwarded (`message/rfc822`) mail - so forwarding the chain's own
+  e-receipt mail works, not just a chain sending straight to the mailbox. A PDF always
+  counts; an image counts only if it has a filename and no `Content-ID` - a `Content-ID`
+  means the mail's own HTML references it (an inline logo, a tracking pixel), not something
+  attached for its own sake. An iPhone-forwarded photo still counts.
+- A mail with no usable attachment (including an HTML-only e-receipt, which is out of scope)
+  or from a sender not in `RECEIPT_MAIL_ALLOWED_SENDERS` is flagged read and left in the
+  mailbox, unmoved - nothing else is deleted or changed.
+- The same bytes sent again are skipped as already received (the same duplicate check as
+  every other channel); the mail still moves to `RECEIPT_MAIL_PROCESSED_FOLDER`.
+- Logging is INFO-only, and never includes the subject, body or password - only the sender's
+  domain and a reason for anything not queued.
+- A mailbox the worker cannot reach is retried on a later poll with a growing backoff, instead
+  of failing the worker.
+
 ## Generated product icons
 
 **Off until the server can reach ComfyUI.** A food product with no exact Apple emoji (the

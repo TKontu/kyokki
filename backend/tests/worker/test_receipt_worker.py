@@ -270,3 +270,144 @@ async def test_run_scans_the_folder_between_claims_at_its_own_pace(session_facto
     # t=0 scans (first iteration, nothing scanned yet), t=4 does not (only 4s since
     # t=0), t=10 (twice) scans once more (10s since t=0 >= 5s) and then holds.
     assert watcher.scans == 2
+
+
+class _FakeMailPoller:
+    def __init__(self):
+        self.polls = 0
+
+    async def poll_once(self, session_factory):
+        self.polls += 1
+
+
+async def test_run_with_no_mail_poller_never_polls(session_factory):
+    """RECEIPT_MAIL_HOST empty (or an enabled adapter refused for lacking an allowlist) ->
+    mail_poller is None -> no poll, ever."""
+    results = iter([False, False])
+
+    async def fake_run_once(factory):
+        try:
+            return next(results)
+        except StopIteration:
+            raise asyncio.CancelledError from None
+
+    async def fake_sleep(seconds):
+        pass
+
+    with (
+        patch.object(receipt_worker, "run_once", fake_run_once),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await receipt_worker.run(
+            session_factory, poll_seconds=1.0, sleep=fake_sleep, mail_poller=None
+        )
+
+
+async def test_run_polls_mail_between_claims_at_its_own_pace(session_factory):
+    """The mailbox is polled on the first iteration, then only once its own poll interval
+    has elapsed - independent of the receipt queue's poll_seconds, and independent of any
+    folder scan running alongside it."""
+    results = iter([False, False, False, False])
+    clock_values = iter([0.0, 4.0, 10.0, 10.0, 10.0])
+    poller = _FakeMailPoller()
+
+    async def fake_run_once(factory):
+        try:
+            return next(results)
+        except StopIteration:
+            raise asyncio.CancelledError from None
+
+    async def fake_sleep(seconds):
+        pass
+
+    def fake_clock():
+        return next(clock_values)
+
+    with (
+        patch.object(receipt_worker, "run_once", fake_run_once),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await receipt_worker.run(
+            session_factory,
+            poll_seconds=1.0,
+            sleep=fake_sleep,
+            mail_poller=poller,
+            mail_poll_seconds=5.0,
+            clock=fake_clock,
+        )
+
+    assert poller.polls == 2
+
+
+async def test_run_scans_folder_and_polls_mail_independently(session_factory):
+    """Both run alongside each other, each on its own timer, neither starving the other."""
+    results = iter([False, False, False, False])
+    # One "now" per loop iteration (clock() is called twice per iteration - once for the
+    # folder, once for mail - and must see the same value both times, as it would in
+    # production).
+    iteration_times = [0.0, 4.0, 10.0, 10.0, 10.0]
+    calls = {"n": 0}
+    folder = _FakeFolderWatcher()
+    mail = _FakeMailPoller()
+
+    async def fake_run_once(factory):
+        try:
+            return next(results)
+        except StopIteration:
+            raise asyncio.CancelledError from None
+
+    async def fake_sleep(seconds):
+        pass
+
+    def fake_clock():
+        idx = calls["n"] // 2
+        calls["n"] += 1
+        return iteration_times[idx]
+
+    with (
+        patch.object(receipt_worker, "run_once", fake_run_once),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await receipt_worker.run(
+            session_factory,
+            poll_seconds=1.0,
+            sleep=fake_sleep,
+            folder_watcher=folder,
+            folder_poll_seconds=5.0,
+            mail_poller=mail,
+            mail_poll_seconds=5.0,
+            clock=fake_clock,
+        )
+
+    assert folder.scans == 2
+    assert mail.polls == 2
+
+
+async def test_run_survives_a_mail_poll_crash(session_factory):
+    """An unexpected exception from the mail poller must not crash the worker loop."""
+    results = iter([False, False])
+
+    async def fake_run_once(factory):
+        try:
+            return next(results)
+        except StopIteration:
+            raise asyncio.CancelledError from None
+
+    async def fake_sleep(seconds):
+        pass
+
+    class _CrashingPoller:
+        async def poll_once(self, session_factory):
+            raise RuntimeError("mailbox exploded")
+
+    with (
+        patch.object(receipt_worker, "run_once", fake_run_once),
+        pytest.raises(asyncio.CancelledError),
+    ):
+        await receipt_worker.run(
+            session_factory,
+            poll_seconds=1.0,
+            sleep=fake_sleep,
+            mail_poller=_CrashingPoller(),
+            mail_poll_seconds=1.0,
+        )

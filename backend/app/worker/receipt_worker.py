@@ -20,6 +20,7 @@ from app.schemas.receipt import ReceiptStatus
 from app.services import receipt_queue
 from app.services.broadcast_helpers import broadcast_receipt_status
 from app.services.receipt_folder import ReceiptFolderWatcher
+from app.services.receipt_mail import ReceiptMailPoller
 from app.services.receipt_processing import MAX_ERROR_CHARS, ReceiptProcessingService
 
 logger = get_logger(__name__)
@@ -76,17 +77,21 @@ async def run(
     *,
     folder_watcher: ReceiptFolderWatcher | None = None,
     folder_poll_seconds: float = 10.0,
+    mail_poller: ReceiptMailPoller | None = None,
+    mail_poll_seconds: float = 300.0,
     clock: Callable[[], float] = monotonic,
 ) -> None:
     """Read the queue forever; wait ``poll_seconds`` only when it is empty or on errors.
 
     Between claims, also scans the watched folder (RECEIPT_WATCH_DIR) when
-    ``folder_watcher`` is given - at most once every ``folder_poll_seconds``, independent
-    of the queue's own pace, so a slow queue does not starve the folder scan and a busy
-    queue does not scan on every single claim. ``folder_watcher`` is ``None`` (no scan at
-    all) when RECEIPT_WATCH_DIR is empty.
+    ``folder_watcher`` is given, and polls the mailbox (RECEIPT_MAIL_HOST) when
+    ``mail_poller`` is given - each at most once every own its poll interval, independent of
+    the queue's own pace and of each other, so a slow queue does not starve either scan and a
+    busy queue does not scan or poll on every single claim. Either is ``None`` (no scan/poll
+    at all) when its setting is empty (or, for mail, refused for lacking an allowlist).
     """
     last_folder_scan = float("-inf")
+    last_mail_poll = float("-inf")
     while True:
         if folder_watcher is not None:
             now = clock()
@@ -96,6 +101,15 @@ async def run(
                 except Exception:
                     logger.exception("Receipt folder scan failed")
                 last_folder_scan = now
+
+        if mail_poller is not None:
+            now = clock()
+            if now - last_mail_poll >= mail_poll_seconds:
+                try:
+                    await mail_poller.poll_once(session_factory)
+                except Exception:
+                    logger.exception("E-mail receipt poll failed")
+                last_mail_poll = now
 
         try:
             worked = await run_once(session_factory)

@@ -177,6 +177,36 @@ class Settings(BaseSettings):
     # sync still writing it is never read half-finished.
     RECEIPT_WATCH_SETTLE_SECONDS: float = 5.0
 
+    # E-mail receipt drop-in (A2, app/services/receipt_mail.py): Finnish chains (K-Ruoka,
+    # S-kanava, Lidl Plus) send e-receipts by mail, usually a PDF attachment; the cook
+    # forwards them (or has them sent) to a dedicated mailbox. Empty host disables the scan
+    # entirely, which is the default.
+    RECEIPT_MAIL_HOST: str = ""
+    RECEIPT_MAIL_PORT: int = 993
+    RECEIPT_MAIL_USER: str = ""
+    RECEIPT_MAIL_PASSWORD: SecretStr | None = None
+    RECEIPT_MAIL_FOLDER: str = "INBOX"
+    # Read mail is moved here (created if missing) so it is never read twice.
+    RECEIPT_MAIL_PROCESSED_FOLDER: str = "Kyokki/Processed"
+    RECEIPT_MAIL_POLL_SECONDS: float = 300.0
+    # Comma list of exact addresses or @domains allowed to mail in a receipt. Required (not
+    # just recommended) when RECEIPT_MAIL_HOST is set: anyone who knows the mailbox address
+    # must not be able to inject receipts, so an empty allowlist on an enabled adapter
+    # refuses to start the scan (app.services.receipt_mail.build_mail_poller).
+    RECEIPT_MAIL_ALLOWED_SENDERS: Annotated[list[str], NoDecode] = []
+
+    @field_validator("RECEIPT_MAIL_PASSWORD", mode="before")
+    @classmethod
+    def empty_mail_password_means_none(cls, v: object) -> object:
+        return None if v == "" else v
+
+    @field_validator("RECEIPT_MAIL_ALLOWED_SENDERS", mode="before")
+    @classmethod
+    def parse_mail_allowed_senders(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [part.strip() for part in v.split(",") if part.strip()]
+        return v
+
     TELEGRAM_BOT_TOKEN: SecretStr | None = None
     # Chats the bot serves; comma-separated ids. Send /start to the bot to learn yours.
     TELEGRAM_ALLOWED_CHAT_IDS: Annotated[list[int], NoDecode] = []
