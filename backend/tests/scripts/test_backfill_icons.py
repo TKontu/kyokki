@@ -7,17 +7,25 @@ still_needs_generation, draw_icon) is the real behaviour under test here; `backf
 the thin loop and summary around it.
 """
 
+import io
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
+from PIL import Image
 from scripts import backfill_icons
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.product_master import IconStatus, ProductMaster
 from app.services import product_icons
+
+
+def _png(size: int = 4) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGBA", (size, size), (228, 69, 58, 255)).save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 @pytest.fixture
@@ -84,6 +92,7 @@ class TestTheSummaryBuckets:
             )
 
         assert counts["ready"] == 1
+        assert counts["library"] == 0
         assert counts["failed"] == counts["pending"] == counts["gone"] == 0
         assert (
             await db_session.get(ProductMaster, product.id, populate_existing=True)
@@ -105,6 +114,7 @@ class TestTheSummaryBuckets:
             )
 
         assert counts == {
+            "library": 0,
             "ready": 0,
             "failed": 1,
             "pending": 0,
@@ -128,6 +138,7 @@ class TestTheSummaryBuckets:
             )
 
         assert counts == {
+            "library": 0,
             "ready": 0,
             "failed": 0,
             "pending": 0,
@@ -158,6 +169,7 @@ class TestTheSummaryBuckets:
             )
 
         assert counts == {
+            "library": 0,
             "ready": 0,
             "failed": 0,
             "pending": 1,
@@ -166,8 +178,9 @@ class TestTheSummaryBuckets:
         }
 
     async def test_a_dry_run_lists_without_generating(
-        self, db_session: AsyncSession, categories, capsys
+        self, db_session: AsyncSession, categories, capsys, monkeypatch
     ) -> None:
+        monkeypatch.setattr(product_icons, "open_session", _sessions_for(db_session))
         await _product(db_session, "Skyr")
 
         counts = await backfill_icons.backfill(
@@ -175,6 +188,7 @@ class TestTheSummaryBuckets:
         )
 
         assert counts == {
+            "library": 0,
             "ready": 0,
             "failed": 0,
             "pending": 0,
@@ -193,6 +207,7 @@ class TestTheSummaryBuckets:
         )
 
         assert counts == {
+            "library": 0,
             "ready": 0,
             "failed": 0,
             "pending": 0,
@@ -205,8 +220,95 @@ class TestTheSummaryBuckets:
         self, db_session: AsyncSession, categories, monkeypatch, capsys
     ) -> None:
         monkeypatch.setattr(settings, "COMFYUI_BASE_URL", "")
+        monkeypatch.setattr(product_icons, "open_session", _sessions_for(db_session))
         await _product(db_session, "Skyr")
 
         await backfill_icons.backfill(None, True, sessions=_sessions_for(db_session))
 
         assert "would generate" in capsys.readouterr().out
+
+
+class TestTheLibraryPass:
+    """The icon library (operator ask 2026-10-03) gets first look at every candidate,
+    before any ComfyUI call - see `product_icons.apply_library_icon`."""
+
+    async def test_a_library_match_is_applied_with_no_comfyui_call(
+        self, db_session: AsyncSession, categories, broadcast, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(product_icons, "open_session", _sessions_for(db_session))
+        monkeypatch.setattr(
+            product_icons.icon_library, "lookup", lambda name: _png(size=4)
+        )
+        await _product(db_session, "Quark")
+        render = AsyncMock()
+        monkeypatch.setattr(product_icons.comfyui, "render", render)
+
+        counts = await backfill_icons.backfill(
+            None, False, sessions=_sessions_for(db_session)
+        )
+
+        assert counts == {
+            "library": 1,
+            "ready": 0,
+            "failed": 0,
+            "pending": 0,
+            "gone": 0,
+            "skipped": 0,
+        }
+        render.assert_not_awaited()
+
+    async def test_dry_run_reports_library_separately_from_generation(
+        self, db_session: AsyncSession, categories, monkeypatch, capsys
+    ) -> None:
+        monkeypatch.setattr(product_icons, "open_session", _sessions_for(db_session))
+        monkeypatch.setattr(
+            product_icons.icon_library,
+            "lookup",
+            lambda name: _png(size=4) if name == "Quark" else None,
+        )
+        await _product(db_session, "Quark")
+        await _product(db_session, "Skyr")
+
+        await backfill_icons.backfill(None, True, sessions=_sessions_for(db_session))
+
+        out = capsys.readouterr().out
+        assert "would apply from library  Quark" in out
+        assert "would generate  Skyr" in out
+
+    async def test_library_only_applies_no_comfyui_needed(
+        self, db_session: AsyncSession, categories, broadcast, monkeypatch, capsys
+    ) -> None:
+        monkeypatch.setattr(settings, "COMFYUI_BASE_URL", "")
+        monkeypatch.setattr(product_icons, "open_session", _sessions_for(db_session))
+        monkeypatch.setattr(
+            product_icons.icon_library, "lookup", lambda name: _png(size=4)
+        )
+        await _product(db_session, "Quark")
+
+        counts = await backfill_icons.backfill(
+            None, False, sessions=_sessions_for(db_session), library_only=True
+        )
+
+        assert counts["library"] == 1
+        assert "Refusing to run" not in capsys.readouterr().out
+
+    async def test_library_only_skips_what_the_library_does_not_cover(
+        self, db_session: AsyncSession, categories, broadcast, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(settings, "COMFYUI_BASE_URL", "")
+        monkeypatch.setattr(product_icons, "open_session", _sessions_for(db_session))
+        monkeypatch.setattr(product_icons.icon_library, "lookup", lambda name: None)
+        await _product(db_session, "Skyr")
+
+        counts = await backfill_icons.backfill(
+            None, False, sessions=_sessions_for(db_session), library_only=True
+        )
+
+        assert counts == {
+            "library": 0,
+            "ready": 0,
+            "failed": 0,
+            "pending": 0,
+            "gone": 0,
+            "skipped": 1,
+        }

@@ -46,6 +46,10 @@ export interface ProductMaster {
   // Optional so fixtures written before Q18 still type-check.
   icon_status?: IconStatus | null
   icon_version?: number | null
+  // The seed ComfyUI used for the current image (Q18-G2); null before generation, after
+  // the cook clears it, or when the icon came from the repo's icon library (operator ask
+  // 2026-10-03) rather than a render. Read-only. Optional, same reason as the rest here.
+  icon_seed?: number | null
   // Whether ComfyUI generation is configured on this server (Q18-G2); false: the sheet shows
   // a plain note instead of Regenerate. Optional so fixtures written before this lane still
   // type-check.

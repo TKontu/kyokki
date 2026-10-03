@@ -812,6 +812,22 @@ async def mark_icon_failed(db: AsyncSession, product: ProductMaster) -> None:
     await db.commit()
 
 
+async def store_library_icon(
+    db: AsyncSession, product: ProductMaster, image: bytes
+) -> None:
+    """Keep an icon applied from the repo's icon library (operator ask 2026-10-03).
+
+    `icon_seed` stays NULL: the one bit that tells a library icon from a generated one
+    apart, with no migration (the round's own ruling) - `icon_needs_generation` and this
+    feature's own precedence both read it that way.
+    """
+    product.icon_image = image
+    product.icon_seed = None  # type: ignore[assignment]
+    product.icon_status = IconStatus.READY  # type: ignore[assignment]
+    product.icon_updated_at = datetime.now(UTC)  # type: ignore[assignment]
+    await db.commit()
+
+
 async def clear_icon(db: AsyncSession, product_id: UUID) -> ProductMaster | None:
     """Drop the image for the category emoji, as the cook's choice. None: no product."""
     product = await db.get(ProductMaster, product_id)
