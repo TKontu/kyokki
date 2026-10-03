@@ -9,6 +9,7 @@ key: a receipt line still resolves only through `product_name`/`canonical_name`.
 """
 
 from datetime import date, timedelta
+from uuid import UUID
 
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -304,3 +305,122 @@ class TestHandAddedProductGetsAProposalToo:
         scheduled.assert_called_once()
         (tasks_arg, ids_arg), _ = scheduled.call_args
         assert [str(i) for i in ids_arg] == [response.json()["id"]]
+
+
+class TestRenameReproposesTheDisplayName:
+    """Task 1 (2026-10-03 production backfill finding): a rename re-proposes the
+    Finnish name through the same rename hook that already reschedules the icon."""
+
+    async def test_a_rename_schedules_a_reproposal(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        from unittest.mock import patch
+
+        product = await _create_product(client, "Rye crispbread")
+
+        with patch(
+            "app.api.endpoints.products.display_names.schedule_display_name_rename"
+        ) as scheduled:
+            response = await client.patch(
+                f"/api/products/{product['id']}", json={"canonical_name": "Rye bread"}
+            )
+
+        assert response.status_code == 200, response.text
+        scheduled.assert_called_once()
+        (tasks_arg, product_id_arg), _ = scheduled.call_args
+        assert str(product_id_arg) == product["id"]
+
+    async def test_not_renaming_does_not_schedule_a_reproposal(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        from unittest.mock import patch
+
+        product = await _create_product(client, "Milk")
+
+        with patch(
+            "app.api.endpoints.products.display_names.schedule_display_name_rename"
+        ) as scheduled:
+            response = await client.patch(
+                f"/api/products/{product['id']}", json={"default_shelf_life_days": 5}
+            )
+
+        assert response.status_code == 200, response.text
+        scheduled.assert_not_called()
+
+    async def test_a_rename_re_proposes_a_model_name_end_to_end(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        session_factory,
+    ) -> None:
+        """No mocked scheduling this time: the background task really runs (FastAPI
+        runs `BackgroundTasks` before the response is sent over `ASGITransport`), with
+        the job's own session rebound to the test's (it opens its own, exactly like
+        the icon and emoji jobs do - `tests/api/test_product_emoji.py`'s own pattern)
+        and the gateway mocked at `_post_proposal`."""
+        import json as _json
+        from unittest.mock import AsyncMock, patch
+
+        from app.crud import product_master as crud_product
+        from app.services import display_names as display_names_module
+
+        product = await _create_product(client, "Coffee oat milk")
+        subject = await crud_product.get_display_name_subject(
+            seeded_db, UUID(product["id"])
+        )
+        assert subject is not None
+        await crud_product.set_display_name(
+            seeded_db, subject, language="fi", name="Kauramaito", source="model"
+        )
+        await seeded_db.commit()
+
+        reply = _json.dumps({"r": [{"i": 1, "fi": "Kahvillinen kauramaito"}]})
+        with (
+            patch.object(display_names_module, "open_session", session_factory),
+            patch.object(
+                display_names_module,
+                "_post_proposal",
+                new_callable=AsyncMock,
+                return_value=reply,
+            ),
+        ):
+            response = await client.patch(
+                f"/api/products/{product['id']}",
+                json={"canonical_name": "Coffee flavoured oat milk"},
+            )
+
+        assert response.status_code == 200, response.text
+        reread = await client.get(f"/api/products/{product['id']}")
+        assert reread.json()["display_names"] == {"fi": "Kahvillinen kauramaito"}
+        assert reread.json()["display_name_sources"] == {"fi": "model"}
+
+    async def test_a_rename_never_re_proposes_a_cook_name_end_to_end(
+        self,
+        client: AsyncClient,
+        seeded_db: AsyncSession,
+        session_factory,
+    ) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from app.services import display_names as display_names_module
+
+        product = await _create_product(client, "Milk")
+        await client.patch(
+            f"/api/products/{product['id']}",
+            json={"display_names": {"fi": "Oma maito"}},
+        )
+
+        with (
+            patch.object(display_names_module, "open_session", session_factory),
+            patch.object(
+                display_names_module, "_post_proposal", new_callable=AsyncMock
+            ) as proposal,
+        ):
+            response = await client.patch(
+                f"/api/products/{product['id']}", json={"canonical_name": "Whole milk"}
+            )
+
+        assert response.status_code == 200, response.text
+        proposal.assert_not_awaited()
+        reread = await client.get(f"/api/products/{product['id']}")
+        assert reread.json()["display_names"] == {"fi": "Oma maito"}

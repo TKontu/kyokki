@@ -192,7 +192,8 @@ async def update_product(
     Correcting a shelf life moves the stock that was dated by the old one (Q12): a date
     the cook typed is left alone, and so is anything already gone from the kitchen.
     A new name regenerates the icon (Q18-G2), unless the cook chose the category emoji or
-    generation is not configured.
+    generation is not configured, and re-proposes the Finnish display name (Post-MVP
+    frontier item 13) unless the cook set that themselves.
 
     Returns:
         - 400: a `display_names` entry (Post-MVP frontier item 13) is over 100
@@ -225,6 +226,10 @@ async def update_product(
     renamed = str(product.canonical_name) != old_name
     if renamed:
         product_icons.schedule_icons(background_tasks, [product_id])
+        # The model proposed the old Finnish name from the old English name, so a
+        # rename can leave it stale or wrong (2026-10-03 production backfill finding).
+        # `schedule_display_name_rename` skips a cook's own name itself.
+        display_names.schedule_display_name_rename(background_tasks, product_id)
 
     await broadcast_product_update(
         product_id, action="updated", product_name=str(product.canonical_name)

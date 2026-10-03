@@ -606,3 +606,257 @@ class TestNoAccidentalGatewayCalls:
 
     def test_the_fixture_really_does_replace_the_function(self) -> None:
         assert display_names._post_proposal is not REAL_POST_PROPOSAL
+
+
+class TestBuildPromptAliases:
+    """Task 2: the prompt carries up to three printed receipt aliases per product, and
+    with none at all it behaves exactly as it did before this lane."""
+
+    def test_no_aliases_matches_todays_prompt(self) -> None:
+        with_none = display_names._build_prompt(["Milk"])
+        with_empty_lists = display_names._build_prompt(["Milk"], [[]])
+
+        assert with_none == with_empty_lists
+        assert "receipt" not in with_none.lower()
+        assert with_none == (
+            "You translate grocery product names for a Finnish home cook's kitchen\n"
+            "inventory app. For each generic English product name below, give the "
+            "natural Finnish word or\nshort phrase a Finnish cook would use for it on "
+            "a shopping list or in the fridge - not a\nliteral dictionary translation, "
+            "and not a brand name. Keep it short, in Finnish sentence case.\n\n"
+            "Products, numbered:\n1. Milk\n\n"
+            'Answer with JSON only: {"r": [{"i": <number>, "fi": "<name>"}, ...]}, '
+            "one row per product,\nin the same order they were given."
+        )
+
+    def test_aliases_appear_in_the_prompt(self) -> None:
+        prompt = display_names._build_prompt(
+            ["Smoked tofu"], [["TOFU KYLMÄSAVU LUOMU", "KYLMÄSAVUTOFU 200G"]]
+        )
+
+        assert "TOFU KYLMÄSAVU LUOMU" in prompt
+        assert "KYLMÄSAVUTOFU 200G" in prompt
+        assert "receipt" in prompt.lower()
+        assert "LUOMU" in prompt  # the worked example, not just the alias text
+
+    def test_a_product_with_no_alias_in_a_mixed_batch_still_gets_a_plain_line(
+        self,
+    ) -> None:
+        prompt = display_names._build_prompt(
+            ["Milk", "Smoked tofu"], [[], ["TOFU KYLMÄSAVU LUOMU"]]
+        )
+
+        assert "1. Milk\n" in prompt
+        assert "2. Smoked tofu (printed on receipts: TOFU KYLMÄSAVU LUOMU)" in prompt
+
+
+class TestPrintedAliases:
+    """`printed_aliases`: up to three distinct printed names, newest first."""
+
+    async def test_no_aliases_is_an_empty_list(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        product = await _product(db_session, "Milk")
+
+        assert await display_names.printed_aliases(db_session, product.id) == []
+
+    async def test_newest_first_deduplicated_and_capped_at_three(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from app.models.store_product_alias import StoreProductAlias
+
+        product = await _product(db_session, "Smoked tofu")
+        now = datetime.now(UTC)
+        rows = [
+            StoreProductAlias(
+                product_master_id=product.id,
+                store_chain=chain,
+                receipt_name=name,
+                last_seen=now - timedelta(days=days),
+            )
+            for chain, name, days in [
+                ("s-market", "TOFU KYLMÄSAVU LUOMU", 10),
+                ("prisma", "TOFU KYLMÄSAVU LUOMU", 5),  # same text, newer
+                ("lidl", "KYLMÄSAVUTOFU 200G", 1),
+                ("k-citymarket", "KS TOFU", 20),
+            ]
+        ]
+        for row in rows:
+            db_session.add(row)
+        await db_session.commit()
+
+        aliases = await display_names.printed_aliases(db_session, product.id)
+
+        assert aliases == ["KYLMÄSAVUTOFU 200G", "TOFU KYLMÄSAVU LUOMU", "KS TOFU"]
+
+
+class TestBatchCarriesAliases:
+    """Task 2: the on-create batch passes each product's own printed aliases through."""
+
+    async def test_the_batch_passes_each_products_aliases(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        from app.models.store_product_alias import StoreProductAlias
+
+        product = await _product(db_session, "Smoked tofu")
+        db_session.add(
+            StoreProductAlias(
+                product_master_id=product.id,
+                store_chain="s-market",
+                receipt_name="TOFU KYLMÄSAVU LUOMU",
+            )
+        )
+        await db_session.commit()
+        seen: dict = {}
+
+        async def fake_propose(names, *, aliases=None, **kwargs):
+            seen["names"] = list(names)
+            seen["aliases"] = aliases
+            return ["Kylmäsavutofu"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names.propose_display_names_for_new_products([product.id])
+
+        assert seen["names"] == ["Smoked tofu"]
+        assert seen["aliases"] == [["TOFU KYLMÄSAVU LUOMU"]]
+
+    async def test_a_product_with_no_alias_sends_an_empty_list(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session, "Milk")
+        seen: dict = {}
+
+        async def fake_propose(names, *, aliases=None, **kwargs):
+            seen["aliases"] = aliases
+            return ["Maito"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names.propose_display_names_for_new_products([product.id])
+
+        assert seen["aliases"] == [[]]
+
+
+class TestRenameReproposal:
+    """Task 1: a rename re-proposes the Finnish name for a model (or missing) name,
+    and never for the cook's own."""
+
+    async def test_a_model_name_is_reproposed_after_a_rename(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session, "Coffee oat milk")
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="Kauramaito", source="model"
+        )
+        await db_session.commit()
+        product.canonical_name = "Oat milk"
+        await db_session.commit()
+        seen: dict = {}
+
+        async def fake_propose(names, **kwargs):
+            seen["names"] = list(names)
+            return ["Kahvillinen kauramaito"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names._propose_one_on_rename(product.id)
+
+        assert seen["names"] == ["Oat milk"]
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {"fi": "Kahvillinen kauramaito"}
+        assert stored.display_name_sources == {"fi": "model"}
+        broadcast.assert_awaited_once()
+
+    async def test_a_missing_name_is_proposed_after_a_rename_too(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session, "Milk")
+
+        async def fake_propose(names, **kwargs):
+            return ["Maito"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names._propose_one_on_rename(product.id)
+
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {"fi": "Maito"}
+        assert stored.display_name_sources == {"fi": "model"}
+
+    async def test_a_cook_name_is_never_reproposed(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        product = await _product(db_session, "Milk")
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="Oma maito", source="cook"
+        )
+        await db_session.commit()
+        called = False
+
+        async def fake_propose(names, **kwargs):
+            nonlocal called
+            called = True
+            return ["Maito"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names._propose_one_on_rename(product.id)
+
+        assert called is False
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {"fi": "Oma maito"}
+
+    async def test_the_stale_model_name_stays_until_the_new_one_lands(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        """No flash of English: a model failure must leave the old name in place."""
+        product = await _product(db_session, "Coffee oat milk")
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="Kauramaito", source="model"
+        )
+        await db_session.commit()
+
+        async def failing_propose(names, **kwargs):
+            return None
+
+        with patch.object(display_names, "propose_finnish_names", new=failing_propose):
+            await display_names._propose_one_on_rename(product.id)
+
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {"fi": "Kauramaito"}
+
+    async def test_a_gone_product_is_skipped(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        await display_names._propose_one_on_rename(uuid4())  # does not raise
+
+    async def test_the_renames_prompt_carries_printed_aliases(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        from app.models.store_product_alias import StoreProductAlias
+
+        product = await _product(db_session, "Smoked tofu")
+        db_session.add(
+            StoreProductAlias(
+                product_master_id=product.id,
+                store_chain="s-market",
+                receipt_name="TOFU KYLMÄSAVU LUOMU",
+            )
+        )
+        await db_session.commit()
+        seen: dict = {}
+
+        async def fake_propose(names, *, aliases=None, **kwargs):
+            seen["aliases"] = aliases
+            return ["Kylmäsavutofu"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names._propose_one_on_rename(product.id)
+
+        assert seen["aliases"] == [["TOFU KYLMÄSAVU LUOMU"]]
+
+    def test_schedule_queues_a_background_task(self) -> None:
+        from fastapi import BackgroundTasks
+
+        tasks = BackgroundTasks()
+        display_names.schedule_display_name_rename(tasks, uuid4())
+
+        assert len(tasks.tasks) == 1
