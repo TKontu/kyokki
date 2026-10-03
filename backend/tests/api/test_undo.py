@@ -2,6 +2,7 @@
 
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import pytest
@@ -10,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.consumption_log import ConsumptionLog
+from app.models.shopping_list_item import ShoppingListItem
 
 URL = "/api/inventory/undo"
 IN_A_WEEK = str(date.today() + timedelta(days=7))
@@ -359,3 +361,149 @@ async def test_every_row_knows_its_batch(
     batches = {str(row.batch_id) for row in rows if row.action == "discard"}
     assert len(batches) == 1
     assert all(row.previous is not None for row in rows)
+
+
+async def _product_with_min_stock(
+    client: AsyncClient,
+    *,
+    min_stock: float,
+    reorder: float | None = None,
+    name: str = "Min Stock Oat Milk",
+) -> dict:
+    body = {
+        "canonical_name": name,
+        "category": "dairy",
+        "storage_type": "refrigerator",
+        "default_shelf_life_days": 7,
+        "unit_type": "volume",
+        "default_unit": "dl",
+        "min_stock_quantity": min_stock,
+    }
+    if reorder is not None:
+        body["reorder_quantity"] = reorder
+    response = await client.post("/api/products", json=body)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def _shopping_items(db: AsyncSession) -> list[ShoppingListItem]:
+    rows = await db.execute(
+        select(ShoppingListItem).execution_options(populate_existing=True)
+    )
+    return list(rows.scalars().all())
+
+
+class TestUndoRetractsTheAutoAddedItem:
+    """A4 (planner ruling): undoing the consume or discard that left a product below its
+    minimum takes back the shopping item `min_stock` auto-added for it, once the undo has
+    raised the product's active stock back to, or above, that minimum - unless the cook
+    has since purchased it, added their own item instead, or it is from an older, unrelated
+    drop (`services/min_stock.py::after_stock_increase_by_undo`)."""
+
+    async def test_undoing_the_consume_removes_the_item_it_caused(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=5)
+        item = await _item(client, product["id"], quantity=10)
+        await _consume(client, item["id"], 6)  # 10 -> 4, below 5: auto-added
+        assert len(await _shopping_items(seeded_db)) == 1
+
+        with patch(
+            "app.services.min_stock.broadcast_shopping_list_update",
+            new_callable=AsyncMock,
+        ) as broadcast:
+            await _undo(client)
+
+        assert await _shopping_items(seeded_db) == []
+        broadcast.assert_awaited_once()
+        assert broadcast.await_args.kwargs["action"] == "deleted"
+
+    async def test_undoing_a_discard_behaves_the_same(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=5)
+        item = await _item(client, product["id"], quantity=10)
+        discard = await client.patch(
+            f"/api/inventory/{item['id']}", json={"status": "discarded"}
+        )
+        assert discard.status_code == 200, discard.text
+        assert len(await _shopping_items(seeded_db)) == 1  # 10 -> 0, below 5
+
+        await _undo(client)
+
+        assert await _shopping_items(seeded_db) == []
+
+    async def test_stock_still_below_minimum_leaves_the_item(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=10)
+        item = await _item(client, product["id"], quantity=20)
+        await _consume(client, item["id"], 11)  # 20 -> 9, below 10: auto-added
+        await _consume(client, item["id"], 1)  # 9 -> 8, still below: suppressed
+        assert len(await _shopping_items(seeded_db)) == 1
+
+        await _undo(client)  # undoes the second consume only: 8 -> 9, still below 10
+
+        assert len(await _shopping_items(seeded_db)) == 1
+
+    async def test_a_manual_item_is_never_removed(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=5)
+        item = await _item(client, product["id"], quantity=10)
+        manual = await client.post(
+            "/api/shopping/",
+            json={
+                "product_master_id": product["id"],
+                "name": product["canonical_name"],
+                "quantity": 3,
+                "unit": "dl",
+            },
+        )
+        assert manual.status_code == 201, manual.text
+        await _consume(
+            client, item["id"], 6
+        )  # below 5, but the manual item suppresses it
+
+        await _undo(client)
+
+        rows = await _shopping_items(seeded_db)
+        assert len(rows) == 1
+        assert rows[0].source == "manual"
+
+    async def test_a_purchased_auto_item_stays(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _product_with_min_stock(client, min_stock=5)
+        item = await _item(client, product["id"], quantity=10)
+        await _consume(client, item["id"], 6)
+        [added] = await _shopping_items(seeded_db)
+        purchase = await client.post(f"/api/shopping/{added.id}/purchase")
+        assert purchase.status_code == 200, purchase.text
+
+        await _undo(client)
+
+        rows = await _shopping_items(seeded_db)
+        assert len(rows) == 1
+        assert rows[0].is_purchased is True
+
+    async def test_an_older_auto_item_survives(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """An item added by an earlier, unrelated drop in the same product - before the
+        batch this undo reverses - is not this undo's to take back."""
+        product = await _product_with_min_stock(client, min_stock=10)
+        first = await _item(client, product["id"], quantity=10)
+        await _consume(client, first["id"], 6)  # 10 -> 4, below 10: auto-added
+        assert len(await _shopping_items(seeded_db)) == 1
+
+        # A fresh pack arrives (not a consumption-log event) and is partly used - a
+        # second, later batch, unrelated to the one that caused the auto-add above.
+        second = await _item(client, product["id"], quantity=10)
+        await _consume(client, second["id"], 3)  # total: 4 + 10 - 3 = 11, at/above 10
+
+        await _undo(client)  # undoes the second consume only: 11 -> 14
+
+        rows = await _shopping_items(seeded_db)
+        assert len(rows) == 1  # the older item, untouched
+        assert rows[0].source == "auto_restock"

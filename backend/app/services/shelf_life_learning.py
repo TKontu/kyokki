@@ -78,6 +78,11 @@ class ItemUpdateResult:
 
     item: InventoryItem | None
     moved: list[MovedInventoryItem] = field(default_factory=list)
+    #: The product whose active stock this PATCH lowered (A4, F1) - a discard, or a
+    #: quantity corrected down - as `crud.inventory_item.update_inventory_item` reported
+    #: it back. None when nothing was lowered. The endpoint runs the auto-add check with
+    #: it; this service does not call into `app.services.min_stock` itself.
+    lowered_product_id: UUID | None = None
 
 
 def is_observation(item: InventoryItem) -> bool:
@@ -232,7 +237,9 @@ async def update_item(
     async def learn(item: InventoryItem) -> None:
         moved.extend(await learn_from_item(db, item))
 
-    item = await crud_inventory.update_inventory_item(
+    item, lowered_product_id = await crud_inventory.update_inventory_item(
         db, item_id, item_update, on_dated_by_hand=learn
     )
-    return ItemUpdateResult(item=item, moved=moved)
+    return ItemUpdateResult(
+        item=item, moved=moved, lowered_product_id=lowered_product_id
+    )

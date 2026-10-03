@@ -11,7 +11,8 @@ event in the log, so it is not a step here; deleting an item deletes its history
 its steps.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -40,6 +41,33 @@ class UndoStep:
     direction: Literal["up", "down"] | None = None
 
 
+@dataclass(frozen=True)
+class RaisedStock:
+    """How much one undone row's restore raised its product's active stock (A4).
+
+    Only rows that actually raised stock produce one of these (a discard or consume
+    undone, or a correction undone upward); a restore's own undo, which re-discards, and
+    a correction undone downward do not. The caller (the undo endpoint) hands these to
+    `min_stock.after_stock_increase_by_undo`, which decides whether an auto-added item
+    for the product can now come back off the list - never this layer's job.
+    """
+
+    product_id: UUID
+    unit: str
+    amount: Decimal
+
+
+@dataclass(frozen=True)
+class UndoResult:
+    """What one undo did: the items it put back, for the usual broadcast, and - kept
+    separate, since it is a different concern (A4) - what it raised, for the endpoint to
+    offer to `min_stock.after_stock_increase_by_undo`."""
+
+    items: list[InventoryItem]
+    raised: tuple[RaisedStock, ...] = field(default_factory=tuple)
+    since: datetime | None = None
+
+
 def _left_on_item(row: Any) -> Decimal:
     """The quantity the event left on the item row itself.
 
@@ -50,6 +78,18 @@ def _left_on_item(row: Any) -> Decimal:
     if row.action == ConsumptionAction.DISCARD:
         return Decimal(str(row.quantity_consumed))
     return Decimal(str(row.quantity_after))
+
+
+def _active_amount(status: Any, quantity: Decimal) -> Decimal:
+    """`quantity`, if `status` counts as active stock (H23's own `INACTIVE_STATUSES`);
+    zero otherwise - a discarded or emptied item speaks for none of it, however much it
+    still carries frozen on the row. What `after_stock_increase_by_undo` compares before
+    and after an undo: a discard's own undo raises stock by its full frozen amount
+    (inactive to active), not by zero (its `current_quantity` never moves) - and a
+    restore's undo (active to inactive) lowers it the same way, by the same amount."""
+    if str(status) in crud_inventory.INACTIVE_STATUSES:
+        return Decimal(0)
+    return quantity
 
 
 async def _undoable_batch(db: AsyncSession) -> list[Any]:
@@ -86,7 +126,7 @@ async def preview(db: AsyncSession) -> tuple[UUID, Any, list[UndoStep]] | None:
     return rows[0].batch_id, rows[-1].logged_at, steps
 
 
-async def undo(db: AsyncSession, batch_id: UUID) -> list[InventoryItem]:
+async def undo(db: AsyncSession, batch_id: UUID) -> UndoResult:
     """Reverse the most recent action, if it is the one the caller was shown.
 
     The id is what makes this safe on a shared kitchen: the iPad showed "Undo: -1 Cream", and
@@ -117,6 +157,38 @@ async def undo(db: AsyncSession, batch_id: UUID) -> list[InventoryItem]:
                 f"{row.product_name} has changed since; nothing was undone"
             )
 
+    # A4: what this undo is about to raise, worked out from the items and log rows as
+    # they stand right now - before the loop below mutates them - so the endpoint can
+    # offer each product to `min_stock.after_stock_increase_by_undo` once this has
+    # committed. Compared as *active* stock (`_active_amount`), not raw quantity: a
+    # discard's own undo raises stock by its full frozen amount (the row's
+    # `current_quantity` never moves - only its status does, from `discarded` back to
+    # active), and a restore's own undo lowers it the same way, by the same amount - so
+    # going by quantity alone would miss the one and misread the other as a raise. Only
+    # a row that nets positive counts: a restore's own undo is never one of these.
+    raised: list[RaisedStock] = []
+    for row in rows:
+        item = items.get(row.inventory_item_id)
+        if row.product_master_id is None or not row.previous or item is None:
+            continue
+        previous_quantity = row.previous.get("current_quantity")
+        if previous_quantity is None:
+            continue
+        after_undo = _active_amount(
+            row.previous.get("status"), Decimal(str(previous_quantity))
+        )
+        before_undo = _active_amount(item.status, _left_on_item(row))
+        delta = after_undo - before_undo
+        if delta > 0:
+            raised.append(
+                RaisedStock(
+                    product_id=row.product_master_id,
+                    unit=str(row.unit),
+                    amount=delta,
+                )
+            )
+    since = rows[0].logged_at
+
     for row in rows:
         crud_inventory.apply_snapshot(
             items[row.inventory_item_id],
@@ -128,4 +200,8 @@ async def undo(db: AsyncSession, batch_id: UUID) -> list[InventoryItem]:
     restored = [
         await crud_inventory.get_inventory_item(db, item_id) for item_id in items
     ]
-    return [item for item in restored if item is not None]
+    return UndoResult(
+        items=[item for item in restored if item is not None],
+        raised=tuple(raised),
+        since=since,
+    )
