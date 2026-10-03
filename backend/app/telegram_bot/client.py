@@ -15,6 +15,10 @@ class TelegramError(Exception):
     """A Bot API call failed. The message never contains the token."""
 
 
+class TelegramConflict(TelegramError):
+    """getUpdates answered 409: another instance is already polling this bot token."""
+
+
 class TelegramClient:
     def __init__(
         self,
@@ -47,6 +51,9 @@ class TelegramClient:
             body = {}
         if response.status_code != 200 or not body.get("ok"):
             description = body.get("description") or f"HTTP {response.status_code}"
+            if response.status_code == 409 and method == "getUpdates":
+                # Telegram's signal that a second poller is using the same token
+                raise TelegramConflict(f"Telegram {method} failed: {description}")
             raise TelegramError(f"Telegram {method} failed: {description}")
         return body.get("result")
 

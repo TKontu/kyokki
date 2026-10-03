@@ -51,6 +51,12 @@ class ResultNotifier:
         ):
             return messages.result_text(response)
         if response.processing_status == ReceiptStatus.FAILED:
+            # The raw reason can carry gateway/model internals; it goes only to the log
+            # (never the image), and the cook gets a short, generic sentence instead.
+            logger.info(
+                "Receipt failed, replying without the internal reason",
+                extra={"receipt_id": str(receipt_id), "reason": response.error},
+            )
             return messages.failure_text(response.error)
         return None
 
