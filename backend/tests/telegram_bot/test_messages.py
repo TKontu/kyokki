@@ -3,6 +3,8 @@
 from datetime import date, datetime
 from uuid import uuid4
 
+import pytest
+
 from app.schemas.receipt import ReceiptResponse
 from app.telegram_bot import messages
 
@@ -127,8 +129,51 @@ class TestOtherTexts:
 
     def test_failure_is_short(self):
         text = messages.failure_text("Receipt processing failed: " + "x" * 1000)
-        assert text.startswith("Could not read this receipt")
+        assert text.startswith("Couldn't read the receipt")
         assert len(text) < 400
+
+    def test_failure_text_with_no_reason(self):
+        text = messages.failure_text(None)
+        assert text.startswith("Couldn't read the receipt")
+
+    def test_failure_text_for_a_deleted_receipt(self):
+        text = messages.failure_text("the receipt was deleted")
+        assert text.startswith("The receipt was deleted")
+
+    def test_failure_text_for_a_superseded_receipt_says_busy(self):
+        reason = (
+            "The receipt stopped processing (failed as stale or queued again) "
+            "before the read finished"
+        )
+        text = messages.failure_text(reason)
+        assert "busy" in text.lower()
+
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            "Receipt processing failed: ConnectionError: "
+            "http://192.168.0.94:9292/v1/chat/completions",
+            "Receipt processing failed: HTTPStatusError: 503 Service Unavailable "
+            "for url 'http://gateway.internal:9292/v1'",
+            "Receipt processing failed: TimeoutError: read timed out after 90s "
+            "from 10.0.0.5:8008",
+            "Receipt processing failed: KeyError: 'model_name_override'",
+        ],
+    )
+    def test_failure_text_never_echoes_gateway_internals(self, reason):
+        text = messages.failure_text(reason)
+
+        assert "http://" not in text
+        assert "https://" not in text
+        assert "192.168" not in text
+        assert "10.0.0.5" not in text
+        assert "ConnectionError" not in text
+        assert "HTTPStatusError" not in text
+        assert "TimeoutError" not in text
+        assert "KeyError" not in text
+        assert "9292" not in text
+        assert "503" not in text
+        assert text.startswith("Couldn't read the receipt")
 
     def test_unsupported_and_too_large(self):
         assert "PDF" in messages.unsupported_text()

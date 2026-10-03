@@ -2,18 +2,29 @@
 
 import asyncio
 import logging
+import time
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from app.core.config import Settings
 from app.core.logging import get_logger, setup_logging
 from app.core.service_runner import run_service
-from app.telegram_bot.client import TelegramClient
+from app.telegram_bot.client import TelegramClient, TelegramConflict
 from app.telegram_bot.handlers import BotHandler
 from app.telegram_bot.notifier import ResultNotifier
 
 logger = get_logger(__name__)
 
 MAX_BACKOFF_SECONDS = 60.0
+
+# Exit code when a second instance holds the same bot token. Distinct from 1 (plain crash)
+# and 2 (misuse), and distinct enough to recognise in `docker inspect` / `docker logs`.
+CONFLICT_EXIT_CODE = 3
+
+# Telegram can briefly answer 409 right after a restart, while the old long poll on the
+# previous process has not yet expired. Tolerate consecutive 409s for about one long-poll
+# timeout plus a margin before concluding a second instance is really running.
+CONFLICT_GRACE_SECONDS = 60.0
 
 
 class _Updates(Protocol):
@@ -37,13 +48,36 @@ async def poll_loop(
     handler: _Handler,
     poll_seconds: int,
     backoff_base: float = 1.0,
+    conflict_grace_seconds: float = CONFLICT_GRACE_SECONDS,
+    now: Callable[[], float] = time.monotonic,
 ) -> None:
     offset: int | None = None
     failures = 0
+    conflict_since: float | None = None
     while True:
         try:
             updates = await client.get_updates(offset=offset, poll_seconds=poll_seconds)
+        except TelegramConflict:
+            moment = now()
+            if conflict_since is None:
+                conflict_since = moment
+            elif moment - conflict_since >= conflict_grace_seconds:
+                logger.error(
+                    "Telegram getUpdates conflicted with another instance for too long: "
+                    "another instance is polling this bot token; stop it or use a "
+                    "separate dev token"
+                )
+                raise SystemExit(CONFLICT_EXIT_CODE) from None
+            failures += 1
+            delay = min(backoff_base * 2 ** (failures - 1), MAX_BACKOFF_SECONDS)
+            logger.warning(
+                "Telegram getUpdates conflicted with another instance, retrying",
+                extra={"retry_in_seconds": delay},
+            )
+            await asyncio.sleep(delay)
+            continue
         except Exception as exc:
+            conflict_since = None
             failures += 1
             delay = min(backoff_base * 2 ** (failures - 1), MAX_BACKOFF_SECONDS)
             logger.warning(
@@ -52,6 +86,7 @@ async def poll_loop(
             )
             await asyncio.sleep(delay)
             continue
+        conflict_since = None
         failures = 0
         for update in updates:
             # Advance past every update, even one the handler fails on, so it is not redelivered forever

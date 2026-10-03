@@ -50,10 +50,25 @@ def download_failed_text() -> str:
 
 
 def failure_text(reason: str | None) -> str:
-    detail = (reason or "unknown error").strip()
-    if len(detail) > 200:
-        detail = detail[:199] + "…"
-    return f"Could not read this receipt: {detail}\nIt is saved; retry it on the iPad."
+    """A cook-facing sentence for a failed receipt.
+
+    ``reason`` may be the raw error stored on the receipt, which can carry pipeline
+    internals (a gateway URL, an HTTP status, an exception string, a model name). This
+    never echoes any part of it back; it only classifies it into one of a few fixed,
+    safe sentences. The caller is responsible for logging the raw reason, at INFO.
+    """
+    lowered = (reason or "").lower()
+    if "deleted" in lowered:
+        text = "The receipt was deleted. Scan it again if you still have it."
+    elif (
+        "stale" in lowered
+        or "queued again" in lowered
+        or "stopped processing" in lowered
+    ):
+        text = "The reader is busy, try again later. It is saved; retry it on the iPad."
+    else:
+        text = "Couldn't read the receipt. It is saved; retry it on the iPad."
+    return text[:TELEGRAM_TEXT_LIMIT]
 
 
 def _store(receipt: ReceiptResponse) -> str:

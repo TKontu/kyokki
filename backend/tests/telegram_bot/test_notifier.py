@@ -1,5 +1,6 @@
 """The notifier edits the acknowledgement once the worker has read the receipt (MVP-R3)."""
 
+import logging
 from uuid import uuid4
 
 import pytest
@@ -55,19 +56,28 @@ async def test_completed_receipt_edits_the_message_with_the_summary(
     assert notifier.pending == {}
 
 
-async def test_failed_receipt_edits_the_message_with_the_stored_error(
-    db_session, session_factory
+async def test_failed_receipt_edits_the_message_without_the_raw_error(
+    db_session, session_factory, caplog
 ):
-    receipt = await _receipt(db_session, ReceiptStatus.FAILED, error="LLM timed out")
+    raw_reason = "Receipt processing failed: ConnectionError: http://192.168.0.94:9292"
+    receipt = await _receipt(db_session, ReceiptStatus.FAILED, error=raw_reason)
     telegram = FakeTelegram()
     notifier = ResultNotifier(telegram, session_factory)
     notifier.watch(receipt.id, chat_id=1001, message_id=55)
 
-    await notifier.check_once()
+    with caplog.at_level(logging.INFO):
+        await notifier.check_once()
 
     text = telegram.edited[0][2]
-    assert text.startswith("Could not read this receipt")
-    assert "LLM timed out" in text
+    assert text.startswith("Couldn't read the receipt")
+    assert "192.168" not in text
+    assert "ConnectionError" not in text
+    # The raw reason still reaches the log, just not the cook-facing reply.
+    assert any(
+        raw_reason == getattr(r, "reason", None)
+        for r in caplog.records
+        if r.levelno == logging.INFO
+    )
 
 
 @pytest.mark.parametrize("status", [ReceiptStatus.QUEUED, ReceiptStatus.PROCESSING])
@@ -92,7 +102,7 @@ async def test_deleted_receipt_is_reported_and_forgotten(db_session, session_fac
 
     await notifier.check_once()
 
-    assert telegram.edited[0][2].startswith("Could not read this receipt")
+    assert telegram.edited[0][2].startswith("The receipt was deleted")
     assert notifier.pending == {}
 
 
@@ -103,7 +113,9 @@ async def test_edit_failure_falls_back_to_a_new_message(db_session, session_fact
                 "Telegram editMessageText failed: message to edit not found"
             )
 
-    receipt = await _receipt(db_session, ReceiptStatus.FAILED, error="bad file")
+    receipt = await _receipt(
+        db_session, ReceiptStatus.FAILED, error="Receipt processing failed: bad file"
+    )
     telegram = NoEdit()
     notifier = ResultNotifier(telegram, session_factory)
     notifier.watch(receipt.id, chat_id=1001, message_id=55)
@@ -111,7 +123,8 @@ async def test_edit_failure_falls_back_to_a_new_message(db_session, session_fact
     await notifier.check_once()
 
     assert telegram.sent[0][0] == 1001
-    assert "bad file" in telegram.sent[0][1]
+    assert telegram.sent[0][1].startswith("Couldn't read the receipt")
+    assert "bad file" not in telegram.sent[0][1]
     assert notifier.pending == {}
 
 

@@ -209,6 +209,9 @@ one and replies with a summary, for example
 It long-polls Telegram, so the homelab needs no open port.
 
 1. In Telegram, open **@BotFather**, send `/newbot` and pick a name. Copy the token.
+   For development, make a **second** bot this way and use its token instead of the homelab's:
+   one token can only be long-polled by one running instance at a time (see the 409 note below),
+   so a dev machine sharing the homelab's token fights it for updates.
 2. Put it in `stack.env` as `TELEGRAM_BOT_TOKEN=...` and start the stack:
    `docker compose --env-file stack.env -f docker-compose.prod.yml up -d`.
    (No `--build`: `docker-compose.prod.yml` pulls published images and has no
@@ -229,6 +232,17 @@ Behaviour worth knowing:
 - Receipts are queued in the database, so a bot restart loses nothing; they are still read.
   Only the "Received" messages sent before the restart are not edited with the result.
 - Without a token the service logs "Telegram bot disabled" and idles.
+- **Two instances, one token.** Telegram answers `getUpdates` with 409 ("terminated by other
+  getUpdates request") when a second process polls with the same token - for example a dev
+  machine left running against the homelab's token. `kyokki-telegram` tolerates a single
+  transient 409 (Telegram can briefly send one right after a restart), but a 409 that persists
+  for about a minute logs one ERROR ("another instance is polling this bot token; stop it or use
+  a separate dev token") and the process exits non-zero. With this service's `restart:
+  unless-stopped`, Compose then restarts it, which only repeats the same conflict with the other
+  poller; it does not resolve it. If you see `kyokki-telegram` cycling in `docker compose ps` or
+  `docker compose logs -f kyokki-telegram`, find and stop the other poller - most likely a
+  developer's local `python -m app.telegram_bot` left running against the same token - or give
+  the dev side its own bot token (previous bullet) so the two never collide.
 
 **Privacy:** receipts pass through Telegram's servers, and a receipt shows what you bought, where
 and when, and often the last digits of the payment card. Only allowlisted chats are served;

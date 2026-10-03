@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from app.telegram_bot.client import TelegramClient, TelegramError
+from app.telegram_bot.client import TelegramClient, TelegramConflict, TelegramError
 
 TOKEN = "123456:TEST-token-must-not-leak"
 BASE = "https://telegram.test"
@@ -98,3 +98,21 @@ async def test_transport_error_raises_without_the_token():
         await _client(handler).get_updates(offset=None, poll_seconds=1)
 
     assert TOKEN not in str(caught.value)
+
+
+async def test_get_updates_409_raises_a_distinct_conflict_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            409,
+            json={
+                "ok": False,
+                "error_code": 409,
+                "description": "Conflict: terminated by other getUpdates request",
+            },
+        )
+
+    with pytest.raises(TelegramConflict) as caught:
+        await _client(handler).get_updates(offset=None, poll_seconds=1)
+
+    assert TOKEN not in str(caught.value)
+    assert isinstance(caught.value, TelegramError)
