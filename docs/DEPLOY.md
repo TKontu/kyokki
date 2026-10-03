@@ -310,11 +310,14 @@ twice.
 Behaviour worth knowing:
 - Each `application/pdf`, `image/jpeg` or `image/png` attachment becomes one queued receipt,
   including one inside a forwarded (`message/rfc822`) mail - so forwarding the chain's own
-  e-receipt mail works, not just a chain sending straight to the mailbox.
+  e-receipt mail works, not just a chain sending straight to the mailbox. A PDF always
+  counts; an image counts only if it has a filename and no `Content-ID` - a `Content-ID`
+  means the mail's own HTML references it (an inline logo, a tracking pixel), not something
+  attached for its own sake. An iPhone-forwarded photo still counts.
 - A mail with no usable attachment (including an HTML-only e-receipt, which is out of scope)
   or from a sender not in `RECEIPT_MAIL_ALLOWED_SENDERS` is flagged read and left in the
   mailbox, unmoved - nothing else is deleted or changed.
-- The same bytes sent again are rejected as already received (the same duplicate check as
+- The same bytes sent again are skipped as already received (the same duplicate check as
   every other channel); the mail still moves to `RECEIPT_MAIL_PROCESSED_FOLDER`.
 - Logging is INFO-only, and never includes the subject, body or password - only the sender's
   domain and a reason for anything not queued.

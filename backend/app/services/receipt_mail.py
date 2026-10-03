@@ -20,7 +20,13 @@ Design notes:
 - A connection failure (the mailbox is down, DNS fails, auth is rejected) backs off
   exponentially (30s, 60s, ... capped at 1h) instead of hammering the server every poll; a
   per-mail failure (one malformed message) is isolated and never aborts the rest of the pass,
-  matching the watched folder's isolation.
+  matching the watched folder's isolation. The connect itself has a timeout, so a dead or
+  firewalled server cannot block the worker's queue claim forever.
+- Each mail is fetched with ``BODY.PEEK[]``, not ``(RFC822)``: a plain fetch sets ``\\Seen``
+  as a side effect on a real server, so a later failure we isolate (a DB error during
+  ingest, say) would otherwise lose that mail for good - the next ``UNSEEN`` search would
+  never find it again. PEEK leaves it unseen until it is either flagged seen deliberately
+  (no usable attachment, refused sender) or moved (queued).
 """
 
 import asyncio
@@ -56,6 +62,10 @@ ATTACHMENT_CONTENT_TYPES = frozenset({"application/pdf", "image/jpeg", "image/pn
 _BACKOFF_INITIAL_SECONDS = 30.0
 _BACKOFF_MAX_SECONDS = 3600.0
 
+# F2 (review): an unreachable or firewalled server must not block the worker's queue
+# forever - imaplib has no default connect timeout.
+_CONNECT_TIMEOUT_SECONDS = 30.0
+
 
 class ReceiptMailConnectionError(RuntimeError):
     """The mailbox could not be reached, logged in to, or searched this poll."""
@@ -81,7 +91,20 @@ ConnectFn = Callable[[str, int], ImapClient]
 
 
 def _default_connect(host: str, port: int) -> ImapClient:
-    return imaplib.IMAP4_SSL(host, port)
+    return imaplib.IMAP4_SSL(host, port, timeout=_CONNECT_TIMEOUT_SECONDS)
+
+
+def _quoted(mailbox: str) -> str:
+    """An IMAP quoted-string (RFC 3501), so a mailbox name with a space, a quote or a
+    backslash still parses as the single argument it is."""
+    escaped = mailbox.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _exception_label(exc: Exception) -> str:
+    """The exception's class name only - never ``str(exc)``, which could echo text a
+    malicious or misconfigured server put in its own response straight into the log."""
+    return type(exc).__name__
 
 
 @dataclass(frozen=True)
@@ -98,6 +121,10 @@ def _domain_of(from_header: str) -> str:
 
 
 def _sender_allowed(from_header: str, allowed: frozenset[str]) -> bool:
+    # F6 (review): a From header naming more than one mailbox (a comma-separated list)
+    # is not a single address-spec, so parseaddr cannot parse it and returns ('', '') -
+    # addr is then empty and the "not addr" check below fails closed, rather than this
+    # matching on whichever address happens to parse out first.
     _, addr = parseaddr(from_header)
     addr = addr.strip().lower()
     if not addr or "@" not in addr:
@@ -107,17 +134,28 @@ def _sender_allowed(from_header: str, allowed: frozenset[str]) -> bool:
 
 
 def _iter_attachments(msg: Message) -> list[_Attachment]:
-    """Every PDF/JPEG/PNG part, descending into a forwarded ``message/rfc822`` part.
+    """Every part that counts as a receipt attachment, descending into a forwarded
+    ``message/rfc822`` part.
 
     No special-casing is needed for the forwarded case: Python's parser gives a
     ``message/rfc822`` part (sent, as mail requires, with a 7bit/8bit transfer encoding) a
     payload of ``[<the forwarded Message>]``, which makes ``is_multipart()`` true for it -
     so ``Message.walk()`` already recurses into the forwarded message and its own parts.
+
+    Planner ruling (review F3): a PDF part always counts. An image counts only if it has
+    a filename and no ``Content-ID`` - a ``Content-ID`` means the mail's own HTML body
+    references it (an inline logo or a tracking pixel), not something attached for its
+    own sake. An iPhone-forwarded photo (``inline; filename=IMG_...jpg``, no Content-ID)
+    still counts.
     """
     found: list[_Attachment] = []
     for part in msg.walk():
         content_type = part.get_content_type()
         if content_type not in ATTACHMENT_CONTENT_TYPES:
+            continue
+        if content_type != "application/pdf" and (
+            not part.get_filename() or part.get("Content-ID")
+        ):
             continue
         content = part.get_payload(decode=True)
         if not isinstance(content, bytes) or not content:
@@ -167,12 +205,14 @@ class ReceiptMailPoller:
             client = await asyncio.to_thread(self._connect, self.host, self.port)
             await asyncio.to_thread(client.login, self.user, self.password)
             await asyncio.to_thread(self._ensure_processed_folder, client)
-            typ, _ = await asyncio.to_thread(client.select, self.folder)
+            typ, _ = await asyncio.to_thread(client.select, _quoted(self.folder))
             if typ != "OK":
                 raise ReceiptMailConnectionError(
                     f"could not select the mail folder (got {typ})"
                 )
-            supports_move = await asyncio.to_thread(self._supports_move, client)
+            caps = await asyncio.to_thread(self._capabilities, client)
+            supports_move = "MOVE" in caps
+            supports_uidplus = "UIDPLUS" in caps
             # No CHARSET argument (optional per RFC 3501): a bare search-key list defaults
             # to US-ASCII, and real imaplib's uid() types every arg as str, so a literal
             # None here (the common "no charset" idiom for the lower-level search()) would
@@ -190,13 +230,15 @@ class ReceiptMailPoller:
             uid = raw_uid.decode() if isinstance(raw_uid, bytes) else str(raw_uid)
             try:
                 queued += await self._handle_one(
-                    session_factory, client, uid, supports_move
+                    session_factory, client, uid, supports_move, supports_uidplus
                 )
             except Exception as exc:
                 # One malformed or unreadable mail must never stop the rest of the pass.
+                # F1 (review): the fetch below is a PEEK, so a mail whose handling raises
+                # here was never marked \Seen and is retried at the next poll.
                 logger.warning(
                     "E-mail receipt: could not process one mail this pass",
-                    extra={"error": str(exc)},
+                    extra={"error_type": _exception_label(exc)},
                 )
 
         with contextlib.suppress(Exception):
@@ -214,7 +256,10 @@ class ReceiptMailPoller:
         self._retry_at = self._clock() + self._backoff_seconds
         logger.warning(
             "E-mail receipt mailbox unreachable; retrying with backoff",
-            extra={"error": str(exc), "backoff_seconds": self._backoff_seconds},
+            extra={
+                "error_type": _exception_label(exc),
+                "backoff_seconds": self._backoff_seconds,
+            },
         )
 
     async def _handle_one(
@@ -223,8 +268,13 @@ class ReceiptMailPoller:
         client: ImapClient,
         uid: str,
         supports_move: bool,
+        supports_uidplus: bool,
     ) -> int:
-        typ, data = await asyncio.to_thread(client.uid, "FETCH", uid, "(RFC822)")
+        # F1 (review): BODY.PEEK[] fetches the whole message without the implicit
+        # \Seen that a plain (RFC822) fetch sets on a real server - so a mail whose
+        # handling fails below (an exception bubbles up to poll_once, which logs and
+        # moves on) is never silently lost: it stays unseen and is retried next poll.
+        typ, data = await asyncio.to_thread(client.uid, "FETCH", uid, "(BODY.PEEK[])")
         if typ != "OK" or not data or not data[0]:
             raise ReceiptMailConnectionError(f"fetch failed for one mail (got {typ})")
         msg = message_from_bytes(data[0])
@@ -270,7 +320,9 @@ class ReceiptMailPoller:
             await asyncio.to_thread(self._mark_seen, client, uid)
             return 0
 
-        await asyncio.to_thread(self._move, client, uid, supports_move)
+        await asyncio.to_thread(
+            self._move, client, uid, supports_move, supports_uidplus
+        )
         logger.info("E-mail receipt: queued", extra={"attachments_queued": queued})
         return queued
 
@@ -278,29 +330,53 @@ class ReceiptMailPoller:
         # Already exists, or the server rejected it for another reason - either way,
         # SELECT below is the real check for whether the mailbox is usable.
         with contextlib.suppress(Exception):
-            client.create(self.processed_folder)
+            client.create(_quoted(self.processed_folder))
 
-    def _supports_move(self, client: ImapClient) -> bool:
+    def _capabilities(self, client: ImapClient) -> frozenset[str]:
         try:
             typ, data = client.capability()
         except Exception:
-            return False
+            return frozenset()
         if typ != "OK" or not data or not isinstance(data[0], bytes):
-            return False
-        return b"MOVE" in data[0].upper().split()
+            return frozenset()
+        return frozenset(token.decode().upper() for token in data[0].split())
 
     def _mark_seen(self, client: ImapClient, uid: str) -> None:
         client.uid("STORE", uid, "+FLAGS", "(\\Seen)")
 
-    def _move(self, client: ImapClient, uid: str, supports_move: bool) -> None:
+    def _move(
+        self,
+        client: ImapClient,
+        uid: str,
+        supports_move: bool,
+        supports_uidplus: bool,
+    ) -> None:
+        quoted_dest = _quoted(self.processed_folder)
         if supports_move:
-            typ, _ = client.uid("MOVE", uid, self.processed_folder)
+            typ, _ = client.uid("MOVE", uid, quoted_dest)
             if typ == "OK":
                 return
-        # MOVE unsupported, or attempted and refused: copy, flag deleted, expunge.
-        client.uid("COPY", uid, self.processed_folder)
+        # MOVE unsupported, or attempted and refused: copy, then flag the original
+        # \Deleted.
+        client.uid("COPY", uid, quoted_dest)
         client.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
-        client.expunge()
+        if supports_uidplus:
+            # F4 (review): UID EXPUNGE <uid> (RFC 4315) removes only this one message.
+            # A plain EXPUNGE removes every \Deleted message in the mailbox, including
+            # ones another client flagged - too destructive to risk without UIDPLUS
+            # telling us the server supports the targeted form.
+            client.uid("EXPUNGE", uid)
+        else:
+            # No UIDPLUS: leave the original copied-and-flagged-deleted in place for a
+            # later housekeeping expunge (by a real mail client, or a future poll once
+            # UIDPLUS becomes available) - but still mark it \Seen, or this poll's own
+            # fetch already queued its attachment once; without this it would be
+            # found by every future UNSEEN search and re-queued forever.
+            client.uid("STORE", uid, "+FLAGS", "(\\Seen)")
+            logger.info(
+                "E-mail receipt: copied and flagged deleted, not expunged "
+                "(server has no UIDPLUS)",
+            )
 
 
 def build_mail_poller(cfg: Settings) -> ReceiptMailPoller | None:
