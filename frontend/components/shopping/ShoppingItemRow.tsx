@@ -2,8 +2,10 @@
 
 /**
  * One line on the shopping list: tap the circle to tick it bought (or untick it back), "…" to
- * remove it. Urgent, open items carry a badge; nothing else does, so the rail-tier information
- * does not repeat once the group heading already says it.
+ * remove it. An item the kitchen added itself (A1, below its minimum stock) carries a small
+ * "Auto" marker - an icon plus the word, never colour alone, so it reads in black and white too.
+ * Urgent, open items also carry a badge; nothing else does, so the rail-tier information does
+ * not repeat once the group heading already says it.
  */
 
 import React from 'react'
@@ -47,6 +49,11 @@ export function ShoppingItemRow({ item, onToggle, onRemove }: ShoppingItemRowPro
           {item.quantity} {item.unit}
         </p>
       </div>
+      {item.source === 'auto_restock' && (
+        <Badge variant="info" size="sm">
+          <span aria-hidden="true">🔁</span> Auto
+        </Badge>
+      )}
       {!item.is_purchased && item.priority === 'urgent' && (
         <Badge variant="error" size="sm">
           Urgent

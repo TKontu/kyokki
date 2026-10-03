@@ -31,7 +31,7 @@ from app.schemas.ha import (
 )
 from app.schemas.shopping_list_item import ShoppingListItemResponse
 from app.services import ha as ha_service
-from app.services import idempotency, shopping_generate
+from app.services import idempotency, min_stock, shopping_generate
 from app.services import stock as stock_service
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
@@ -116,6 +116,7 @@ async def ha_consume(
             status=used.status,
             product_name=result.product_name,
         )
+    await min_stock.after_stock_decrease(db, result.product_id)
     return response
 
 

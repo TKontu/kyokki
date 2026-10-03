@@ -405,6 +405,17 @@ async def update_inventory_item(
         await on_dated_by_hand(db_item)
 
     await db.commit()
+
+    # F1: a PATCH that discards the item, or corrects its quantity down, lowers active
+    # stock exactly as a consume does - throwing away the last milk still means you need
+    # milk - so it gets the same auto-add check, once this commit has landed. A plain
+    # restore never lowers stock and is not checked; `after_stock_decrease` never raises
+    # (F2), so a failure here cannot turn this PATCH into a 500.
+    if event is ItemEvent.DISCARD or remaining < before:
+        from app.services import min_stock
+
+        await min_stock.after_stock_decrease(db, row.product_master_id)
+
     return await _reload(db, db_item.id)
 
 
@@ -446,6 +457,9 @@ async def move_many(
     # One action, one step for undo: a cleared shelf comes back together
     batch_id = uuid4()
     changed: list[MovedInventoryItem] = []
+    # F1: distinct products actually discarded (never restored - that can only raise
+    # stock), for one auto-add check per product once this commit has landed.
+    discarded_products: set[Any] = set()
     refused = 0
     for item in found:
         row: Any = item
@@ -484,8 +498,17 @@ async def move_many(
                 id=row.id, current_quantity=row.current_quantity, status=new_status
             )
         )
+        if event is ItemEvent.DISCARD:
+            discarded_products.add(row.product_master_id)
 
     await db.commit()
+
+    if discarded_products:
+        from app.services import min_stock
+
+        for product_id in discarded_products:
+            await min_stock.after_stock_decrease(db, product_id)
+
     return BulkResult(
         changed=changed, refused=refused, missing=len(item_ids) - len(found)
     )

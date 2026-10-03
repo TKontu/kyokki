@@ -17,8 +17,9 @@ from app.models.idempotency_key import IdempotencyKey
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
+from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
-from app.services import shelf_life_on_create
+from app.services import min_stock, shelf_life_on_create
 from app.services import stock as stock_service
 from app.services.catalog_estimates import Estimate, EstimateRequest
 
@@ -65,7 +66,13 @@ def _id(obj):
 
 
 async def _product(
-    db: AsyncSession, name: str, *, unit: str = "dl", category: str = "dairy"
+    db: AsyncSession,
+    name: str,
+    *,
+    unit: str = "dl",
+    category: str = "dairy",
+    min_stock: str | None = None,
+    reorder: str | None = None,
 ) -> ProductMaster:
     unit_type = {"dl": "volume", "g": "weight", "pcs": "count"}[unit]
     product = ProductMaster(
@@ -76,6 +83,8 @@ async def _product(
         default_shelf_life_days=7,
         unit_type=unit_type,
         default_unit=unit,
+        min_stock_quantity=Decimal(min_stock) if min_stock is not None else None,
+        reorder_quantity=Decimal(reorder) if reorder is not None else None,
     )
     db.add(product)
     db.add(
@@ -652,6 +661,149 @@ class TestStockConsume:
             await _quantity(seeded_db, later),
         }
         assert restored in ({Decimal("5"), Decimal("8")}, {Decimal("0"), Decimal("10")})
+
+
+async def _shopping_rows(db: AsyncSession) -> list[ShoppingListItem]:
+    rows = await db.execute(
+        select(ShoppingListItem).execution_options(populate_existing=True)
+    )
+    return list(rows.scalars().all())
+
+
+class TestStockConsumeBelowMinimumStock:
+    """A1: a consume that leaves a product's stock below its minimum auto-adds an open
+    shopping item for it (`services.min_stock`), once, and broadcasts."""
+
+    async def test_consuming_below_the_minimum_adds_one_open_item(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        milk = await _product(seeded_db, "Milk", min_stock="10")
+        await _item(seeded_db, milk, "10")
+
+        with patch(
+            "app.services.min_stock.broadcast_shopping_list_update",
+            new_callable=AsyncMock,
+        ) as shopping_broadcast:
+            response = await client.post(
+                URL, json={"product": "milk", "amount": 6, "unit": "dl"}
+            )
+
+        assert response.status_code == 200, response.text
+        rows = await _shopping_rows(seeded_db)
+        assert len(rows) == 1
+        [added] = rows
+        assert (added.product_master_id, added.source) == (_id(milk), "auto_restock")
+        assert added.quantity == Decimal("6")
+        shopping_broadcast.assert_awaited_once()
+        assert shopping_broadcast.await_args.kwargs["action"] == "created"
+        assert shopping_broadcast.await_args.kwargs["shopping_list_item_id"] == added.id
+
+    async def test_a_second_consume_adds_nothing_more(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        milk = await _product(seeded_db, "Milk", min_stock="10")
+        await _item(seeded_db, milk, "10")
+        first = await client.post(
+            URL, json={"product": "milk", "amount": 6, "unit": "dl"}
+        )
+        assert first.status_code == 200, first.text
+
+        second = await client.post(
+            URL, json={"product": "milk", "amount": 1, "unit": "dl"}
+        )
+
+        assert second.status_code == 200, second.text
+        assert len(await _shopping_rows(seeded_db)) == 1
+
+    async def test_dry_run_adds_nothing(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        milk = await _product(seeded_db, "Milk", min_stock="10")
+        await _item(seeded_db, milk, "10")
+
+        response = await client.post(
+            URL, json={"product": "milk", "amount": 6, "unit": "dl", "dry_run": True}
+        )
+
+        assert response.status_code == 200, response.text
+        assert await _shopping_rows(seeded_db) == []
+
+    async def test_no_minimum_does_nothing(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        milk = await _product(seeded_db, "Milk")
+        await _item(seeded_db, milk, "10")
+
+        response = await client.post(
+            URL, json={"product": "milk", "amount": 6, "unit": "dl"}
+        )
+
+        assert response.status_code == 200, response.text
+        assert await _shopping_rows(seeded_db) == []
+
+    async def test_a_failed_auto_add_still_leaves_the_consume_applied(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        """F2: a failure deciding whether to auto-add must never fail an otherwise
+        successful consume - the stock change has already committed."""
+        milk = await _product(seeded_db, "Milk", min_stock="10")
+        await _item(seeded_db, milk, "10")
+
+        with patch(
+            "app.services.min_stock.maybe_auto_add",
+            side_effect=RuntimeError("boom"),
+        ):
+            response = await client.post(
+                URL, json={"product": "milk", "amount": 6, "unit": "dl"}
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["remaining_total"] == 4.0
+        assert await _shopping_rows(seeded_db) == []
+
+
+class TestStockConsumeBelowMinimumStockRace:
+    async def test_two_concurrent_consumes_add_exactly_one_item(
+        self, client: AsyncClient, own_sessions: AsyncSession, broadcast
+    ) -> None:
+        """Two requests consuming different items of the same product: no row lock
+        serialises them (different rows), so only `min_stock`'s own advisory lock
+        (AG6's `GENERATE_LOCK`) keeps this to one item."""
+        milk = await _product(own_sessions, "Milk", min_stock="15")
+        await _item(own_sessions, milk, "10", location="main_fridge")
+        await _item(own_sessions, milk, "10", location="pantry")
+
+        real_on_hand = min_stock._on_hand
+
+        async def slow_on_hand(db, product):
+            result = await real_on_hand(db, product)
+            await asyncio.sleep(0.2)
+            return result
+
+        with patch("app.services.min_stock._on_hand", new=slow_on_hand):
+            first, second = await asyncio.gather(
+                client.post(
+                    URL,
+                    json={
+                        "product": "milk",
+                        "amount": 9,
+                        "unit": "dl",
+                        "location": "main_fridge",
+                    },
+                ),
+                client.post(
+                    URL,
+                    json={
+                        "product": "milk",
+                        "amount": 9,
+                        "unit": "dl",
+                        "location": "pantry",
+                    },
+                ),
+            )
+
+        assert (first.status_code, second.status_code) == (200, 200)
+        assert len(await _shopping_rows(own_sessions)) == 1
 
 
 class TestStockAddLearnsFromATypedDate:

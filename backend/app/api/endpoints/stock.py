@@ -24,7 +24,7 @@ from app.schemas.stock import (
     StockConsumeResponse,
     StockRow,
 )
-from app.services import idempotency
+from app.services import idempotency, min_stock
 from app.services import stock as stock_service
 from app.services.broadcast_helpers import broadcast_inventory_update
 from app.services.generic_products import InvalidProductRequest, UnknownProduct
@@ -33,6 +33,7 @@ from app.services.product_lookup import AmbiguousProduct, ProductNotFound
 from app.services.shelf_life_on_create import schedule_estimates
 
 router = APIRouter()
+
 
 ADD_ROUTE = "POST /api/stock/add"
 CONSUME_ROUTE = "POST /api/stock/consume"
@@ -248,4 +249,5 @@ async def consume_stock(
                 status=used.status,
                 product_name=result.product_name,
             )
+        await min_stock.after_stock_decrease(db, result.product_id)
     return result

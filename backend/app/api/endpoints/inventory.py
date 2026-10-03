@@ -28,9 +28,11 @@ from app.schemas.inventory_item import (
     UndoStepResponse,
 )
 from app.schemas.receipt import ItemSourceResponse
-from app.services import receipt_audit
+from app.services import min_stock, receipt_audit
 from app.services import undo as undo_service
-from app.services.broadcast_helpers import broadcast_inventory_update
+from app.services.broadcast_helpers import (
+    broadcast_inventory_update,
+)
 from app.services.generic_products import InvalidProductRequest
 from app.services.item_status import ItemEvent, ItemFrozen
 from app.services.quick_add import quick_add
@@ -390,6 +392,10 @@ async def consume_inventory_item(
             status=item.status,
             product_name=item.product_name,
         )
+        # Any: the models declare untyped `Column`s, which mypy reads as Column[...], not
+        # values.
+        product_id: Any = item.product_master_id
+        await min_stock.after_stock_decrease(db, product_id)
 
         return item
     except ItemFrozen as exc:

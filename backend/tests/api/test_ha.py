@@ -356,6 +356,89 @@ class TestConsume:
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "conflict"
 
+    async def test_below_the_minimum_adds_one_open_item_and_broadcasts(
+        self, client: AsyncClient, db: AsyncSession, broadcast
+    ) -> None:
+        milk = await _product(db, "Milk", min_stock_quantity=Decimal("10"))
+        await _item(db, milk, "10")
+
+        # `ha_consume` reaches this through `services.min_stock.after_stock_decrease`,
+        # which broadcasts itself (shared by every stock-decreasing path, not just this
+        # one) - so the mock that catches it is `min_stock`'s, not `ha`'s own `broadcast`
+        # fixture (which only patches `ha.py`'s own, locally-triggered broadcasts).
+        with patch(
+            "app.services.min_stock.broadcast_shopping_list_update",
+            new_callable=AsyncMock,
+        ) as shopping_broadcast:
+            response = await client.post(
+                "/api/ha/consume", json={"name": "milk", "amount": 6, "unit": "dl"}
+            )
+
+        assert response.status_code == 200, response.text
+        rows = await _shopping_rows(db)
+        assert len(rows) == 1
+        [added] = rows
+        assert (added.product_master_id, added.source) == (milk.id, "auto_restock")
+        shopping_broadcast.assert_awaited_once()
+        assert shopping_broadcast.await_args.kwargs["action"] == "created"
+
+    async def test_a_second_consume_adds_nothing_more(
+        self, client: AsyncClient, db: AsyncSession, broadcast
+    ) -> None:
+        milk = await _product(db, "Milk", min_stock_quantity=Decimal("10"))
+        await _item(db, milk, "10")
+        first = await client.post(
+            "/api/ha/consume", json={"name": "milk", "amount": 6, "unit": "dl"}
+        )
+        assert first.status_code == 200, first.text
+
+        second = await client.post(
+            "/api/ha/consume", json={"name": "milk", "amount": 1, "unit": "dl"}
+        )
+
+        assert second.status_code == 200, second.text
+        assert len(await _shopping_rows(db)) == 1
+
+    async def test_no_minimum_does_nothing(
+        self, client: AsyncClient, db: AsyncSession, broadcast
+    ) -> None:
+        milk = await _product(db, "Milk")
+        await _item(db, milk, "10")
+
+        response = await client.post(
+            "/api/ha/consume", json={"name": "milk", "amount": 6, "unit": "dl"}
+        )
+
+        assert response.status_code == 200, response.text
+        assert await _shopping_rows(db) == []
+
+    async def test_a_failed_auto_add_still_leaves_the_consume_applied(
+        self, client: AsyncClient, db: AsyncSession, broadcast
+    ) -> None:
+        """F2: a failure deciding whether to auto-add must never fail an otherwise
+        successful consume - the stock change has already committed."""
+        milk = await _product(db, "Milk", min_stock_quantity=Decimal("10"))
+        await _item(db, milk, "10")
+
+        with patch(
+            "app.services.min_stock.maybe_auto_add",
+            side_effect=RuntimeError("boom"),
+        ):
+            response = await client.post(
+                "/api/ha/consume", json={"name": "milk", "amount": 6, "unit": "dl"}
+            )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["item"]["quantity_after"] == 4.0
+        assert await _shopping_rows(db) == []
+
+
+async def _shopping_rows(db: AsyncSession) -> list[ShoppingListItem]:
+    rows = await db.execute(
+        select(ShoppingListItem).execution_options(populate_existing=True)
+    )
+    return list(rows.scalars().all())
+
 
 class TestShoppingAdd:
     async def test_response_shape_defaults_and_broadcast(

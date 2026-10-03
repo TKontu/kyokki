@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +10,7 @@ from app.core.logging import get_logger
 from app.crud import inventory_item as crud_inventory
 from app.crud import product_master as crud_product
 from app.schemas.inventory_item import InventoryItemCreate
+from app.services import min_stock
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
     broadcast_scanner_action,
@@ -328,6 +330,11 @@ async def _handle_consume(
         status=updated.status if updated else None,
         product_name=product.canonical_name,
     )
+    # F1: the scanner's consume mode lowers active stock exactly as every other consume
+    # path does, so it gets the same auto-add check (`after_stock_decrease` never raises).
+    # Any: the models declare untyped `Column`s, which mypy reads as Column[...], not values.
+    product_id: Any = product.id
+    await min_stock.after_stock_decrease(db, product_id)
 
     message = f"Consumed {consume_qty} {inv_item.unit} of {product.canonical_name}"
     if capped:
