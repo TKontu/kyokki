@@ -97,6 +97,79 @@ class TestProductDisplayNames:
 
         assert response.status_code == 422
 
+    async def test_an_empty_name_clears_it(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        """F2 review: `{"fi": ""}` used to store an empty cook row that blocked a
+        future proposal for good - a language already "had" a row, so nothing ever
+        filled it in again."""
+        product = await _create_product(client)
+        await client.patch(
+            f"/api/products/{product['id']}", json={"display_names": {"fi": "Maito"}}
+        )
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"display_names": {"fi": ""}}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["display_names"] == {}
+        assert response.json()["display_name_sources"] == {}
+
+    async def test_a_whitespace_only_name_clears_it_too(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _create_product(client)
+        await client.patch(
+            f"/api/products/{product['id']}", json={"display_names": {"fi": "Maito"}}
+        )
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"display_names": {"fi": "   "}}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["display_names"] == {}
+
+    async def test_clearing_a_language_with_no_row_is_a_no_op(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _create_product(client)
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"display_names": {"fi": ""}}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["display_names"] == {}
+
+    async def test_a_name_over_100_characters_is_a_400(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _create_product(client)
+
+        response = await client.patch(
+            f"/api/products/{product['id']}",
+            json={"display_names": {"fi": "M" * 101}},
+        )
+
+        assert response.status_code == 400
+        reread = await client.get(f"/api/products/{product['id']}")
+        assert reread.json()["display_names"] == {}
+
+    async def test_a_name_of_exactly_100_characters_is_accepted(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        product = await _create_product(client)
+        name = "M" * 100
+
+        response = await client.patch(
+            f"/api/products/{product['id']}", json={"display_names": {"fi": name}}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["display_names"] == {"fi": name}
+
     async def test_other_fields_are_untouched_when_only_the_name_changes(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
@@ -199,3 +272,35 @@ class TestMinStockQuantity:
         assert response.json()["min_stock_quantity"] == "5" or (
             float(response.json()["min_stock_quantity"]) == 5.0
         )
+
+
+class TestHandAddedProductGetsAProposalToo:
+    """F4 (review of PR #162): `POST /products` typed the English name, so it schedules
+    a Finnish proposal too - the same way it already schedules the icon directly,
+    without going through `schedule_estimates` (which this path never calls, since the
+    cook's own shelf life must never be re-estimated)."""
+
+    async def test_it_schedules_the_proposal(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        from unittest.mock import patch
+
+        with patch(
+            "app.api.endpoints.products.display_names.schedule_display_names"
+        ) as scheduled:
+            response = await client.post(
+                "/api/products",
+                json={
+                    "canonical_name": "Hand Added Milk",
+                    "category": "dairy",
+                    "storage_type": "refrigerator",
+                    "default_shelf_life_days": 7,
+                    "unit_type": "volume",
+                    "default_unit": "dl",
+                },
+            )
+
+        assert response.status_code == 201, response.text
+        scheduled.assert_called_once()
+        (tasks_arg, ids_arg), _ = scheduled.call_args
+        assert [str(i) for i in ids_arg] == [response.json()["id"]]

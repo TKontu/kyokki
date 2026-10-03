@@ -71,6 +71,81 @@ async def _reload(db: AsyncSession, product: ProductMaster) -> ProductMaster:
     return await db.get(ProductMaster, product.id, populate_existing=True)  # type: ignore[return-value]
 
 
+class TestSetDisplayName:
+    """`crud.set_display_name` (F2 review): clearing, and the length limit."""
+
+    async def test_an_empty_name_clears_an_existing_row(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        product = await _product(db_session, "Milk")
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="Maito", source="cook"
+        )
+        await db_session.commit()
+
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="", source="cook"
+        )
+        await db_session.commit()
+
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {}
+
+    async def test_a_whitespace_name_clears_too(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        product = await _product(db_session, "Milk")
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="Maito", source="cook"
+        )
+        await db_session.commit()
+
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="   ", source="cook"
+        )
+        await db_session.commit()
+
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {}
+
+    async def test_clearing_a_language_with_no_row_does_nothing(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        product = await _product(db_session, "Milk")
+
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="", source="cook"
+        )
+        await db_session.commit()
+
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {}
+
+    async def test_a_name_over_100_characters_raises(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        product = await _product(db_session, "Milk")
+
+        with pytest.raises(crud_product.DisplayNameTooLong):
+            await crud_product.set_display_name(
+                db_session, product, language="fi", name="M" * 101, source="cook"
+            )
+
+    async def test_a_name_of_exactly_100_characters_is_fine(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        product = await _product(db_session, "Milk")
+        name = "M" * 100
+
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name=name, source="cook"
+        )
+        await db_session.commit()
+
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {"fi": name}
+
+
 class TestSupportedLanguages:
     def test_finnish_is_supported_english_is_not_a_code(self) -> None:
         assert display_names.is_supported("fi") is True
@@ -278,6 +353,29 @@ class TestOnCreateHook:
         stored = await _reload(db_session, product)
         assert stored.display_names == {"fi": "Oma maito"}
 
+    async def test_a_cleared_name_can_be_filled_by_a_later_proposal(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        """F2 review: an empty cook row used to count as "already has a row", so this
+        case silently never proposed again once cleared."""
+        product = await _product(db_session, "Milk")
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="  ", source="cook"
+        )
+        await db_session.commit()
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {}
+
+        async def fake_propose(names, **kwargs):
+            return ["Maito"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names._propose_one_on_create(product.id)
+
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {"fi": "Maito"}
+        assert stored.display_name_sources == {"fi": "model"}
+
     async def test_a_cook_who_sets_it_while_the_model_is_asked_wins(
         self, db_session: AsyncSession, categories, broadcast, session_factory
     ) -> None:
@@ -305,14 +403,171 @@ class TestOnCreateHook:
     ) -> None:
         await display_names._propose_one_on_create(uuid4())  # does not raise
 
-    async def test_propose_for_new_products_never_raises(
+
+class TestBatchedProposals:
+    """F3 review: one gateway call covers every new product in one `schedule_estimates`
+    batch, the same shape `catalog_estimates.estimate_new_products` already uses for the
+    shelf life - a receipt confirm that creates N products must not make N requests."""
+
+    async def test_one_call_covers_the_whole_batch(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        tomato = await _product(db_session, "Tomato")
+        carrot = await _product(db_session, "Carrot")
+        calls = []
+
+        async def fake_propose(names, **kwargs):
+            calls.append(list(names))
+            return ["Tomaatti", "Porkkana"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names.propose_display_names_for_new_products(
+                [tomato.id, carrot.id]
+            )
+
+        assert calls == [["Tomato", "Carrot"]]
+        stored_tomato = await _reload(db_session, tomato)
+        stored_carrot = await _reload(db_session, carrot)
+        assert stored_tomato.display_names == {"fi": "Tomaatti"}
+        assert stored_carrot.display_names == {"fi": "Porkkana"}
+
+    async def test_a_product_that_already_has_a_name_is_left_out_of_the_request(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        named = await _product(db_session, "Milk")
+        await crud_product.set_display_name(
+            db_session, named, language="fi", name="Maito", source="cook"
+        )
+        await db_session.commit()
+        unnamed = await _product(db_session, "Carrot")
+        calls = []
+
+        async def fake_propose(names, **kwargs):
+            calls.append(list(names))
+            return ["Porkkana"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names.propose_display_names_for_new_products(
+                [named.id, unnamed.id]
+            )
+
+        assert calls == [["Carrot"]]
+
+    async def test_no_products_need_one_makes_no_request(
         self, db_session: AsyncSession, categories
     ) -> None:
-        async def boom(product_id: object) -> None:
+        product = await _product(db_session, "Milk")
+        await crud_product.set_display_name(
+            db_session, product, language="fi", name="Maito", source="cook"
+        )
+        await db_session.commit()
+        called = False
+
+        async def fake_propose(names, **kwargs):
+            nonlocal called
+            called = True
+            return []
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names.propose_display_names_for_new_products([product.id])
+
+        assert called is False
+
+    async def test_one_unusable_row_does_not_drop_the_rest_of_the_batch(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        tomato = await _product(db_session, "Tomato")
+        carrot = await _product(db_session, "Carrot")
+
+        async def fake_propose(names, **kwargs):
+            return [None, "Porkkana"]
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names.propose_display_names_for_new_products(
+                [tomato.id, carrot.id]
+            )
+
+        stored_tomato = await _reload(db_session, tomato)
+        stored_carrot = await _reload(db_session, carrot)
+        assert stored_tomato.display_names == {}
+        assert stored_carrot.display_names == {"fi": "Porkkana"}
+
+    async def test_one_products_write_failure_does_not_drop_the_rest_of_the_batch(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        tomato = await _product(db_session, "Tomato")
+        carrot = await _product(db_session, "Carrot")
+        real_set = crud_product.set_display_name
+
+        async def fake_propose(names, **kwargs):
+            return ["Tomaatti", "Porkkana"]
+
+        async def flaky_set(db, product, **kwargs):
+            if str(product.canonical_name) == "Tomato":
+                raise RuntimeError("boom")
+            return await real_set(db, product, **kwargs)
+
+        with (
+            patch.object(display_names, "propose_finnish_names", new=fake_propose),
+            patch.object(crud_product, "set_display_name", new=flaky_set),
+        ):
+            await display_names.propose_display_names_for_new_products(
+                [tomato.id, carrot.id]
+            )
+
+        stored_tomato = await _reload(db_session, tomato)
+        stored_carrot = await _reload(db_session, carrot)
+        assert stored_tomato.display_names == {}
+        assert stored_carrot.display_names == {"fi": "Porkkana"}
+
+    async def test_a_malformed_answer_leaves_the_whole_batch_untouched(
+        self, db_session: AsyncSession, categories, broadcast
+    ) -> None:
+        tomato = await _product(db_session, "Tomato")
+        carrot = await _product(db_session, "Carrot")
+
+        async def fake_propose(names, **kwargs):
+            return None
+
+        with patch.object(display_names, "propose_finnish_names", new=fake_propose):
+            await display_names.propose_display_names_for_new_products(
+                [tomato.id, carrot.id]
+            )
+
+        stored_tomato = await _reload(db_session, tomato)
+        stored_carrot = await _reload(db_session, carrot)
+        assert stored_tomato.display_names == {}
+        assert stored_carrot.display_names == {}
+        broadcast.assert_not_awaited()
+
+    async def test_propose_for_new_products_never_raises_reading_the_batch(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        async def boom(product_ids):
             raise RuntimeError("nope")
 
-        with patch.object(display_names, "_propose_one_on_create", new=boom):
+        with patch.object(display_names, "_pending_products", new=boom):
             await display_names.propose_display_names_for_new_products([uuid4()])
+
+    async def test_propose_for_new_products_never_raises_storing_one(
+        self, db_session: AsyncSession, categories
+    ) -> None:
+        product = await _product(db_session, "Milk")
+
+        async def fake_propose(names, **kwargs):
+            return ["Maito"]
+
+        async def boom(*args, **kwargs):
+            raise RuntimeError("nope")
+
+        with (
+            patch.object(display_names, "propose_finnish_names", new=fake_propose),
+            patch.object(crud_product, "set_display_name", new=boom),
+        ):
+            await display_names.propose_display_names_for_new_products([product.id])
+
+        stored = await _reload(db_session, product)
+        assert stored.display_names == {}
 
     def test_schedule_display_names_queues_a_background_task(self) -> None:
         from fastapi import BackgroundTasks

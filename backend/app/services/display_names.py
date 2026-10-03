@@ -13,13 +13,15 @@ synonyms, in English, exactly as before. This module only ever reads the catalog
 name and writes `product_display_name` - never `product_name`, never matching.
 
 A new product gets a Finnish name proposed by the model in the background, piggybacking on the
-existing on-create estimate hook (`services/shelf_life_on_create.py`) the same way a new
-product's exact emoji is proposed (`services/product_emoji.py`): one batch, one request, through
-the shared gateway helper (`services/llm_http.py`) - a bearer `LLM_API_KEY`, a timeout of at
-least 300 s (a cold start takes 2-5 minutes) with no retry on a timeout, and a 503 with
-Retry-After waited out and retried within that budget. A model failure leaves the product with
-no display name - the frontend's `displayName.ts` falls back to the canonical name - and nothing
-here ever logs a full prompt at INFO.
+existing on-create estimate hook (`services/shelf_life_on_create.py`). `propose_finnish_names`
+is called once for every new product `schedule_estimates` was given - a receipt confirm that
+creates N products makes one request, not N (F3 review) - through the shared gateway helper
+(`services/llm_http.py`): a bearer `LLM_API_KEY`, a timeout of at least 300 s (a cold start
+takes 2-5 minutes) with no retry on a timeout, and a 503 with Retry-After waited out and
+retried within that budget. A model failure, or one unusable row in an otherwise-good answer,
+leaves that product with no display name and never drops any other product's - the frontend's
+`displayName.ts` falls back to the canonical name - and nothing here ever logs a full prompt at
+INFO.
 
 A cook's own name (`source="cook"`, written by `PATCH /products/{id}`) is never overwritten by a
 later proposal: the background job checks the language is not already there - by any source -
@@ -32,17 +34,19 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from contextlib import AbstractAsyncContextManager
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 import httpx
 from fastapi import BackgroundTasks
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.db.session as app_session
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.crud import product_master as crud_product
+from app.models.product_master import ProductMaster
 from app.services.broadcast_helpers import broadcast_product_update
 from app.services.llm_http import LLMAuthError
 from app.services.llm_http import post_chat as llm_post_chat
@@ -248,49 +252,90 @@ def schedule_display_names(
 
 
 async def propose_display_names_for_new_products(product_ids: Sequence[UUID]) -> None:
-    """One product after another. Never raises - a background job has nobody to raise to."""
-    for product_id in product_ids:
-        try:
-            await _propose_one_on_create(product_id)
-        except Exception as exc:  # noqa: BLE001 - see above
-            logger.warning(
-                "Proposing a new product's display name failed",
-                extra={"product_id": str(product_id), "error": repr(exc)},
+    """One gateway call for every new product in this batch (F3 review): a receipt
+    confirm that creates N products makes one request, not N. Never raises - a
+    background job has nobody to raise to; a bad answer for one product, or a failure
+    writing it, never drops any other product's in the same batch.
+    """
+    if not product_ids:
+        return
+    try:
+        pending = await _pending_products(product_ids)
+    except Exception as exc:  # noqa: BLE001 - see above
+        logger.warning(
+            "Could not read new products for a display-name proposal",
+            extra={"product_ids": [str(p) for p in product_ids], "error": repr(exc)},
+        )
+        return
+    if not pending:
+        return
+
+    # Phase 1 ships one language, and the model prompt only knows how to ask for
+    # Finnish; a batch-of-languages request would only matter once SUPPORTED_LANGUAGES
+    # grows (SUPPORTED_LANGUAGES itself still gates who counts as "pending" above).
+    names = [name for _, name in pending]
+    proposed = await propose_finnish_names(names)
+    if not proposed:
+        return
+
+    for (product_id, name), fi_name in zip(pending, proposed, strict=True):
+        if not fi_name:
+            continue  # this one row was unusable; every other product still gets its own
+        await _store_one_proposal(product_id, name, fi_name)
+
+
+async def _pending_products(product_ids: Sequence[UUID]) -> list[tuple[UUID, str]]:
+    """Every product in this batch with no Finnish name yet, id and English name.
+
+    `populate_existing=True`, as `get_display_name_subject` also uses: a product just
+    created earlier in the same request (and so already in this session's identity map,
+    `display_name_rows` loaded then) could otherwise be read back here as it stood at
+    that first load, missing a cook's name set to it since (PR #162 F3 review fix).
+    """
+    async with open_session() as db:
+        products = (
+            (
+                await db.execute(
+                    select(ProductMaster)
+                    .where(ProductMaster.id.in_(product_ids))
+                    .execution_options(populate_existing=True)
+                )
             )
+            .scalars()
+            .all()
+        )
+        return [
+            (cast(UUID, product.id), str(product.canonical_name))
+            for product in products
+            if "fi" not in product.display_names
+        ]
+
+
+async def _store_one_proposal(product_id: UUID, name: str, fi_name: str) -> None:
+    """Write one product's proposed name, if it is still wanted. Never raises - this
+    product's own failure must not stop the rest of the batch (F3 review)."""
+    try:
+        async with open_session() as db:
+            product = await crud_product.get_display_name_subject(db, product_id)
+            if product is None or "fi" in product.display_names:
+                # Gone, or the cook (or an earlier run) already set this language.
+                return
+            await crud_product.set_display_name(
+                db, product, language="fi", name=fi_name, source="model"
+            )
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001 - see module docstring
+        logger.warning(
+            "Storing a product's proposed display name failed",
+            extra={"product_id": str(product_id), "error": repr(exc)},
+        )
+        return
+    await _announce(product_id, name)
 
 
 async def _propose_one_on_create(product_id: UUID) -> None:
-    async with open_session() as db:
-        product = await crud_product.get_display_name_subject(db, product_id)
-        if product is None:
-            return
-        name = str(product.canonical_name)
-        existing = set(product.display_names)
-        missing = [lang for lang in SUPPORTED_LANGUAGES if lang not in existing]
-    if not missing:
-        return
-
-    # Phase 1 ships one language; a batch-of-languages request would only matter once
-    # SUPPORTED_LANGUAGES grows, and this still proposes every missing one then.
-    for language in missing:
-        if language != "fi":
-            continue  # the model prompt only knows how to ask for Finnish so far
-        proposed = await propose_finnish_names([name])
-        if not proposed:
-            continue
-        (fi_name,) = proposed
-        if not fi_name:
-            continue
-        async with open_session() as db:
-            product = await crud_product.get_display_name_subject(db, product_id)
-            if product is None or language in product.display_names:
-                # Gone, or the cook (or an earlier run) already set this language.
-                continue
-            await crud_product.set_display_name(
-                db, product, language=language, name=fi_name, source="model"
-            )
-            await db.commit()
-        await _announce(product_id, name)
+    """One product on its own - the batched path (above) with a single-element batch."""
+    await propose_display_names_for_new_products([product_id])
 
 
 async def _announce(product_id: UUID, name: str) -> None:

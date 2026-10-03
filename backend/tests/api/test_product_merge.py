@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud.product_master import references_to_product
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
+from app.models.product_display_name import ProductDisplayName
 from app.models.product_name import ProductName
 from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
@@ -442,6 +443,111 @@ class TestCollidingRows:
             await count_referencing(seeded_db, StoreProductAlias, UUID(target["id"]))
             == 2
         )
+
+
+class TestMergeMovesDisplayNames:
+    """F1 (review of PR #162): a merge must not CASCADE-delete a cook's Finnish name."""
+
+    async def test_the_source_name_moves_when_the_target_has_none(
+        self, client: AsyncClient, seeded_db: AsyncSession, duplicates
+    ) -> None:
+        source, target = duplicates
+        seeded_db.add(
+            ProductDisplayName(
+                id=uuid4(),
+                product_master_id=UUID(source["id"]),
+                language="fi",
+                name="Jauheliha",
+                source="cook",
+            )
+        )
+        await seeded_db.commit()
+
+        response = await client.post(
+            f"/api/products/{source['id']}/merge", json={"target_id": target["id"]}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["moved"]["product_display_name"] == 1
+        assert response.json()["target"]["display_names"] == {"fi": "Jauheliha"}
+
+    async def test_the_target_keeps_its_own_name_for_a_language_it_already_has(
+        self, client: AsyncClient, seeded_db: AsyncSession, duplicates
+    ) -> None:
+        source, target = duplicates
+        seeded_db.add_all(
+            [
+                ProductDisplayName(
+                    id=uuid4(),
+                    product_master_id=UUID(source["id"]),
+                    language="fi",
+                    name="Jauheliha",
+                    source="cook",
+                ),
+                ProductDisplayName(
+                    id=uuid4(),
+                    product_master_id=UUID(target["id"]),
+                    language="fi",
+                    name="Naudanjauheliha",
+                    source="cook",
+                ),
+            ]
+        )
+        await seeded_db.commit()
+
+        response = await client.post(
+            f"/api/products/{source['id']}/merge", json={"target_id": target["id"]}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["dropped"]["product_display_name"] == 1
+        assert response.json()["target"]["display_names"] == {"fi": "Naudanjauheliha"}
+
+    async def test_a_cook_name_on_the_source_beats_the_targets_model_guess(
+        self, client: AsyncClient, seeded_db: AsyncSession, duplicates
+    ) -> None:
+        source, target = duplicates
+        seeded_db.add_all(
+            [
+                ProductDisplayName(
+                    id=uuid4(),
+                    product_master_id=UUID(source["id"]),
+                    language="fi",
+                    name="Jauheliha",
+                    source="cook",
+                ),
+                ProductDisplayName(
+                    id=uuid4(),
+                    product_master_id=UUID(target["id"]),
+                    language="fi",
+                    name="Arvattu nimi",
+                    source="model",
+                ),
+            ]
+        )
+        await seeded_db.commit()
+
+        response = await client.post(
+            f"/api/products/{source['id']}/merge", json={"target_id": target["id"]}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["moved"]["product_display_name"] == 1
+        assert response.json()["target"]["display_names"] == {"fi": "Jauheliha"}
+        assert response.json()["target"]["display_name_sources"] == {"fi": "cook"}
+
+    async def test_no_display_names_is_a_silent_no_op(
+        self, client: AsyncClient, seeded_db: AsyncSession, duplicates
+    ) -> None:
+        source, target = duplicates
+
+        response = await client.post(
+            f"/api/products/{source['id']}/merge", json={"target_id": target["id"]}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["moved"]["product_display_name"] == 0
+        assert response.json()["dropped"]["product_display_name"] == 0
 
 
 class TestMergeBroadcasts:

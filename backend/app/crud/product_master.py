@@ -193,10 +193,22 @@ async def update_product(
     return db_product
 
 
+MAX_DISPLAY_NAME_LENGTH = 100
+
+
+class DisplayNameTooLong(ValueError):
+    """A display name over MAX_DISPLAY_NAME_LENGTH characters (F2, PR #162 review)."""
+
+
 async def set_display_name(
     db: AsyncSession, product: ProductMaster, *, language: str, name: str, source: str
 ) -> None:
     """Upsert one language's display name on the product (Post-MVP frontier item 13).
+
+    An empty or whitespace-only `name` **clears** the row instead of storing it (F2
+    review): a blank cook row otherwise still counts as "this language already has a
+    row", which silently and permanently stops a background proposal from ever filling
+    it in.
 
     Flushes but does not commit - the caller's own transaction decides when. Queried by
     table rather than through the `display_name_rows` relationship, so this never depends
@@ -206,7 +218,11 @@ async def set_display_name(
     background proposal in `services/display_names.py`) - this never second-guesses which
     one should win; `services/display_names.py` is where a model proposal checks a cook's
     name is not already there before ever calling this.
+
+    Raises:
+        DisplayNameTooLong: `name`, trimmed, is over `MAX_DISPLAY_NAME_LENGTH` characters.
     """
+    stripped = name.strip()
     existing = (
         await db.execute(
             select(ProductDisplayName).where(
@@ -215,16 +231,26 @@ async def set_display_name(
             )
         )
     ).scalar_one_or_none()
+    if not stripped:
+        if existing is not None:
+            await db.delete(existing)
+            await db.flush()
+        return
+    if len(stripped) > MAX_DISPLAY_NAME_LENGTH:
+        raise DisplayNameTooLong(
+            f"a display name is at most {MAX_DISPLAY_NAME_LENGTH} characters "
+            f"({len(stripped)} given)"
+        )
     if existing is not None:
         row: Any = existing
-        row.name = name
+        row.name = stripped
         row.source = source
     else:
         db.add(
             ProductDisplayName(
                 product_master_id=product.id,
                 language=language,
-                name=name,
+                name=stripped,
                 source=source,
             )
         )
@@ -515,6 +541,70 @@ async def _move_names(
     return moved, dropped
 
 
+async def _move_display_names(
+    db: AsyncSession, source_id: UUID, target_id: UUID
+) -> tuple[int, int]:
+    """Re-point the source's display names (Post-MVP frontier item 13), one row per
+    language - `product_display_name` is UNIQUE (product, language), so two rows for the
+    same language cannot both survive.
+
+    The target keeps its own name for a language it already has, *unless* that name is
+    only the model's guess and the source's is the cook's own - a cook's word beats a
+    model's, the same precedence `_fold_alias_evidence` gives a verified alias over an
+    unverified one. Without this, F1's review found, a merge silently let the CASCADE on
+    the deleted source take a cook-typed Finnish name down with it.
+    """
+    kept: dict[str, Any] = {
+        str(row.language): row
+        for row in (
+            await db.execute(
+                select(ProductDisplayName).where(
+                    ProductDisplayName.product_master_id == target_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
+    source_rows = (
+        (
+            await db.execute(
+                select(ProductDisplayName).where(
+                    ProductDisplayName.product_master_id == source_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    moved = dropped = 0
+    for row in source_rows:
+        language = str(row.language)
+        existing = kept.get(language)
+        if existing is None:
+            moving: Any = row
+            moving.product_master_id = target_id
+            kept[language] = row
+            moved += 1
+        elif str(existing.source) == "model" and str(row.source) == "cook":
+            # Cook beats model: the target keeps its own row (and its unique slot), but
+            # the cook's word overwrites its content in place - exactly as `_move_names`
+            # upgrades a colliding model guess into the cook's word, never by deleting
+            # the kept row and moving a new one into its place (which would collide with
+            # the UNIQUE (product, language) index mid-flush).
+            kept_row: Any = existing
+            kept_row.name = row.name
+            kept_row.source = row.source
+            await db.delete(row)
+            moved += 1
+        else:
+            await db.delete(row)
+            dropped += 1
+    await db.flush()
+    return moved, dropped
+
+
 async def merge_product_rows(
     db: AsyncSession, source: ProductMaster, target: ProductMaster
 ) -> MergeResult:
@@ -562,6 +652,20 @@ async def merge_product_rows(
     result.moved[ProductName.__tablename__] = moved_names
     result.dropped[ProductName.__tablename__] = dropped_names
 
+    moved_display_names, dropped_display_names = await _move_display_names(
+        db, source_id, target_id
+    )
+    result.moved[ProductDisplayName.__tablename__] = moved_display_names
+    result.dropped[ProductDisplayName.__tablename__] = dropped_display_names
+    # `source.display_name_rows` loads itself (`lazy="selectin"`) wherever `source` was
+    # fetched, so by now it is a stale, already-loaded Python collection that still
+    # thinks it owns the rows `_move_display_names` just re-pointed or deleted directly
+    # (bypassing that collection). `cascade="delete-orphan"` cascades against whatever is
+    # still in that loaded collection, not a fresh query - without expiring it first,
+    # deleting `source` below would delete the row just moved to `target` right back out
+    # from under it, FK column notwithstanding.
+    db.expire(source, attribute_names=["display_name_rows"])
+
     for model in (ShoppingListItem, ConsumptionLog):
         moved = await db.execute(
             update(model)
@@ -577,6 +681,11 @@ async def merge_product_rows(
     await db.flush()
     await db.delete(source)
     await db.flush()
+    # `target` may already have `display_name_rows` loaded from the query that fetched
+    # it, before `_move_display_names` wrote under it directly (not through the
+    # relationship collection) - without this, the response would serialise the
+    # pre-merge names, not what the merge actually left in place.
+    await db.refresh(target, attribute_names=["display_name_rows"])
     return result
 
 

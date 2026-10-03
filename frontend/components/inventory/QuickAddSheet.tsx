@@ -160,7 +160,10 @@ function QuickAddForm({ onClose }: { onClose: () => void }) {
     )
   }
 
-  const title = selection.kind === 'existing' ? selection.product.canonical_name : selection.name
+  const title =
+    selection.kind === 'existing'
+      ? displayName(selection.product.display_names, selection.product.canonical_name, language)
+      : selection.name
 
   return (
     <BottomSheet

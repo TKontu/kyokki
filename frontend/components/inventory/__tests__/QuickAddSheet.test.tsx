@@ -204,6 +204,17 @@ describe('QuickAddSheet', () => {
 
       expect(await screen.findByText('Added · Maito')).toBeInTheDocument()
     })
+
+    it('titles the add-stock step with the Finnish name too (F5 review)', async () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      mockApi({ products: [{ ...MILK, display_names: { fi: 'Maito' } }] })
+      renderSheet()
+
+      search('mil')
+      fireEvent.click(await screen.findByRole('button', { name: 'Maito' }))
+
+      expect(screen.getByRole('heading', { name: 'Maito' })).toBeInTheDocument()
+    })
   })
 
   it('adds an existing product with its defaults', async () => {

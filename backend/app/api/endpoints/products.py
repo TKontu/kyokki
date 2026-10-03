@@ -167,10 +167,16 @@ async def create_product(
     Its shelf life is one somebody typed, so it is stored as the cook's (Q19) and no
     estimate is scheduled: no estimate path may replace it. Its icon is generated in the
     background (Q18-G2), like every other new food product's, once it is on the gap list.
+    Its Finnish display name is proposed the same way (Post-MVP frontier item 13, F4
+    review): the cook typed the English name here, not a Finnish one, so this path needs
+    its own call too, same as the icon - neither goes through `schedule_estimates`,
+    which this endpoint never calls, since the cook's own shelf life must never be
+    re-estimated.
     """
     async with handle_integrity_errors():
         created = await crud_product.create_product(db, product)
     product_icons.schedule_icons(background_tasks, [UUID(str(created.id))])
+    display_names.schedule_display_names(background_tasks, [UUID(str(created.id))])
     return created
 
 
@@ -187,11 +193,20 @@ async def update_product(
     the cook typed is left alone, and so is anything already gone from the kitchen.
     A new name regenerates the icon (Q18-G2), unless the cook chose the category emoji or
     generation is not configured.
+
+    Returns:
+        - 400: a `display_names` entry (Post-MVP frontier item 13) is over 100
+          characters (F2 review).
     """
     before = await crud_product.get_product(db, product_id)
     old_name = None if before is None else str(before.canonical_name)
-    async with handle_integrity_errors():
-        product = await crud_product.update_product(db, product_id, product_update)
+    try:
+        async with handle_integrity_errors():
+            product = await crud_product.update_product(db, product_id, product_update)
+    except crud_product.DisplayNameTooLong as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     if not product:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
