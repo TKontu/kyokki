@@ -11,17 +11,25 @@ import Link from 'next/link'
 import { ReceiptStatusChip } from '@/components/receipts'
 import { SkeletonCard } from '@/components/ui/Skeleton'
 import { useReceiptList } from '@/hooks/useReceipts'
+import { useT } from '@/lib/i18n'
 import { readMethod, receiptDate, storeName } from '@/lib/receipts'
+import type { Language } from '@/lib/language'
 import type { ReceiptSummary } from '@/types/receipt'
 
 /** Enough history to find anything; the pantry does not need last year's receipts. */
 const PAGE_SIZE = 50
 
-function itemSummary(receipt: ReceiptSummary): string {
-  if (receipt.processing_status === 'failed') return receipt.error ?? 'No items read'
-  if (!receipt.items_extracted) return 'No items read yet'
-  const items = `${receipt.items_extracted} ${receipt.items_extracted === 1 ? 'item' : 'items'}`
-  return `${items}, ${receipt.items_matched} already known`
+function itemSummary(
+  receipt: ReceiptSummary,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
+  if (receipt.processing_status === 'failed')
+    return receipt.error ?? t('receipts.list.noItemsRead')
+  if (!receipt.items_extracted) return t('receipts.list.noItemsYet')
+  return t('receipts.list.itemSummary', {
+    count: receipt.items_extracted,
+    matched: receipt.items_matched,
+  })
 }
 
 /**
@@ -29,8 +37,8 @@ function itemSummary(receipt: ReceiptSummary): string {
  * which of five receipts was read badly without opening each one. A read without the model
  * is worth noticing, so it is coloured like the warning it is; a good read is a quiet aside.
  */
-function ReadMethodNote({ receipt }: { receipt: ReceiptSummary }) {
-  const method = receipt.processing_status === 'failed' ? null : readMethod(receipt)
+function ReadMethodNote({ receipt, language }: { receipt: ReceiptSummary; language: Language }) {
+  const method = receipt.processing_status === 'failed' ? null : readMethod(receipt, language)
   if (!method) return null
 
   return (
@@ -57,7 +65,15 @@ function receiptHref(receipt: Pick<ReceiptSummary, 'id' | 'processing_status'>):
     : `/receipt/${receipt.id}`
 }
 
-function ReceiptRow({ receipt }: { receipt: ReceiptSummary }) {
+function ReceiptRow({
+  receipt,
+  t,
+  language,
+}: {
+  receipt: ReceiptSummary
+  t: (key: string, params?: Record<string, string | number>) => string
+  language: Language
+}) {
   return (
     <li>
       <Link
@@ -70,12 +86,12 @@ function ReceiptRow({ receipt }: { receipt: ReceiptSummary }) {
       >
         <span className="min-w-0">
           <span className="block truncate text-base text-ui-text dark:text-ui-dark-text">
-            {`${storeName(receipt)}, ${receiptDate(receipt)}`}
+            {`${storeName(receipt, language)}, ${receiptDate(receipt, language)}`}
           </span>
           <span className="block truncate text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-            {itemSummary(receipt)}
+            {itemSummary(receipt, t)}
           </span>
-          <ReadMethodNote receipt={receipt} />
+          <ReadMethodNote receipt={receipt} language={language} />
         </span>
         <ReceiptStatusChip status={receipt.processing_status} />
       </Link>
@@ -84,17 +100,20 @@ function ReceiptRow({ receipt }: { receipt: ReceiptSummary }) {
 }
 
 export default function ReceiptsPage() {
+  const { t, language } = useT()
   const { data: receipts, isLoading, isError } = useReceiptList({ limit: PAGE_SIZE })
 
   return (
     <div>
       <header className="flex items-center justify-between border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
-        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">Receipts</h1>
+        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">
+          {t('receipts.list.title')}
+        </h1>
         <Link
           href="/scan"
           className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
         >
-          Scan a receipt
+          {t('receipts.list.scanLink')}
         </Link>
       </header>
       <main className="px-6 py-4">
@@ -102,15 +121,15 @@ export default function ReceiptsPage() {
 
         {isError && (
           <p className="text-base text-ui-text-secondary dark:text-ui-dark-text-secondary">
-            Could not load receipts.
+            {t('receipts.list.loadError')}
           </p>
         )}
 
         {receipts && receipts.length === 0 && (
           <p className="text-base text-ui-text-secondary dark:text-ui-dark-text-secondary">
-            No receipts yet. Share one to the Telegram bot, or{' '}
+            {t('receipts.list.emptyPrefix')}{' '}
             <Link href="/scan" className="underline">
-              scan one here
+              {t('receipts.list.emptyScanLink')}
             </Link>
             .
           </p>
@@ -119,7 +138,7 @@ export default function ReceiptsPage() {
         {receipts && receipts.length > 0 && (
           <ul className="flex flex-col gap-2">
             {receipts.map((receipt) => (
-              <ReceiptRow key={receipt.id} receipt={receipt} />
+              <ReceiptRow key={receipt.id} receipt={receipt} t={t} language={language} />
             ))}
           </ul>
         )}

@@ -9,6 +9,7 @@
 import React from 'react'
 import Link from 'next/link'
 import { isBeingRead, useReceiptList } from '@/hooks/useReceipts'
+import { useT } from '@/lib/i18n'
 import type { ReceiptSummary } from '@/types/receipt'
 
 const boxClass =
@@ -22,6 +23,7 @@ function destination(receipts: ReceiptSummary[]): string {
 }
 
 export function ReceiptsBanner() {
+  const { t } = useT()
   const { data: receipts } = useReceiptList()
   if (!receipts?.length) return null
 
@@ -30,11 +32,10 @@ export function ReceiptsBanner() {
   const failed = receipts.filter((receipt) => receipt.processing_status === 'failed')
 
   if (waiting.length) {
-    const noun = waiting.length === 1 ? 'receipt' : 'receipts'
     return (
       <Link href={destination(waiting)} className={`${boxClass} hover:underline`}>
         <span aria-hidden="true">🧾</span>
-        {`${waiting.length} ${noun} waiting to review`}
+        {t('receipts.banner.waiting', { count: waiting.length })}
       </Link>
     )
   }
@@ -43,7 +44,7 @@ export function ReceiptsBanner() {
     return (
       <p className={boxClass}>
         <span aria-hidden="true">🧾</span>
-        {reading.length === 1 ? 'Reading a receipt…' : `Reading ${reading.length} receipts…`}
+        {t('receipts.banner.reading', { count: reading.length })}
       </p>
     )
   }
@@ -52,9 +53,7 @@ export function ReceiptsBanner() {
     return (
       <Link href={destination(failed)} className={`${boxClass} hover:underline`}>
         <span aria-hidden="true">⚠️</span>
-        {failed.length === 1
-          ? 'A receipt could not be read'
-          : `${failed.length} receipts could not be read`}
+        {t('receipts.banner.failed', { count: failed.length })}
       </Link>
     )
   }

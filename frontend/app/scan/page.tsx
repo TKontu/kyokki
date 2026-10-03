@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation'
 import Button from '@/components/ui/Button'
 import { fieldHintClass, fieldInputClass, fieldLabelClass } from '@/components/ui/formStyles'
 import { useUploadReceipt } from '@/hooks/useReceipts'
+import { useT } from '@/lib/i18n'
 import { isAPIError } from '@/lib/api/errors'
 import { downscaleImage } from '@/lib/images'
 
@@ -26,6 +27,7 @@ function existingReceiptId(error: unknown): string | null {
 
 export default function ScanPage() {
   const router = useRouter()
+  const { t } = useT()
   const upload = useUploadReceipt()
   const [file, setFile] = useState<File | null>(null)
   const [storeChain, setStoreChain] = useState('')
@@ -52,9 +54,7 @@ export default function ScanPage() {
         router.push(`/receipt/${existing}`)
         return
       }
-      setMessage(
-        isAPIError(error) ? error.message : 'Could not upload the receipt. Try again.'
-      )
+      setMessage(isAPIError(error) ? error.message : t('scan.uploadError'))
     }
   }
 
@@ -62,14 +62,14 @@ export default function ScanPage() {
     <div>
       <header className="border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
         <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">
-          Scan a receipt
+          {t('scan.title')}
         </h1>
       </header>
       <main className="px-6 py-4">
         <form className="flex max-w-xl flex-col gap-4" onSubmit={submit}>
           <div>
             <label className={fieldLabelClass} htmlFor="receipt-file">
-              Receipt
+              {t('scan.fileLabel')}
             </label>
             <input
               id="receipt-file"
@@ -81,20 +81,18 @@ export default function ScanPage() {
                 setMessage(null)
               }}
             />
-            <p className={fieldHintClass}>
-              A PDF e-receipt, a screenshot, or a photo of a paper one.
-            </p>
+            <p className={fieldHintClass}>{t('scan.fileHint')}</p>
           </div>
 
           <div>
             <label className={fieldLabelClass} htmlFor="receipt-store">
-              Store (optional)
+              {t('scan.storeLabel')}
             </label>
             <input
               id="receipt-store"
               type="text"
               value={storeChain}
-              placeholder="Read from the receipt when left empty"
+              placeholder={t('scan.storePlaceholder')}
               className={fieldInputClass}
               onChange={(event) => setStoreChain(event.target.value)}
             />
@@ -102,7 +100,7 @@ export default function ScanPage() {
 
           <div>
             <label className={fieldLabelClass} htmlFor="receipt-date">
-              Purchase date (optional)
+              {t('scan.dateLabel')}
             </label>
             <input
               id="receipt-date"
@@ -120,7 +118,7 @@ export default function ScanPage() {
           )}
 
           <Button type="submit" size="lg" disabled={!file} loading={upload.isPending}>
-            Upload
+            {t('scan.upload')}
           </Button>
         </form>
       </main>

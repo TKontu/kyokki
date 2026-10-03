@@ -198,3 +198,34 @@ describe('an area', () => {
     expect(screen.getByRole('link', { name: /Fridge/ })).toHaveAttribute('href', '/')
   })
 })
+
+describe('an area: display language (Post-MVP frontier item 13, phase 3)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('shows the area name and chrome in Finnish', async () => {
+    renderArea('meat', () => [STEAK])
+
+    await screen.findByRole('button', { name: 'Steak, keeps' })
+    expect(screen.getByRole('heading', { name: /Liha ja kala/ })).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'Liha ja kala' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Jääkaappi/ })).toHaveAttribute('href', '/')
+  })
+
+  it('says so in Finnish when it is empty', async () => {
+    renderArea('meat', () => [MILK])
+
+    expect(await screen.findByText('Täällä ei ole mitään.')).toBeInTheDocument()
+  })
+
+  it('says so in Finnish for an area that does not exist', () => {
+    renderArea('garage', () => [])
+
+    expect(screen.getByText('Tällaista jääkaapin osaa ei ole.')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Jääkaappi/ })).toHaveAttribute('href', '/')
+  })
+})

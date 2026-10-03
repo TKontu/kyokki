@@ -6,7 +6,7 @@
  * from three months ago adds a shelf of already-expired food without a word.
  */
 
-import { isStale, readMethod, receiptAgeDays, STALE_AFTER_DAYS } from '../receipts'
+import { isStale, readMethod, receiptAgeDays, receiptDate, storeName, STALE_AFTER_DAYS } from '../receipts'
 
 describe('readMethod', () => {
   it('names a model read so a good read is not silence', () => {
@@ -28,6 +28,58 @@ describe('readMethod', () => {
 
   it('says nothing about a receipt that has not been read', () => {
     expect(readMethod({ extraction_method: null })).toBeNull()
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 3)', () => {
+    it('reads English by default, unchanged', () => {
+      expect(readMethod({ extraction_method: 'text' }, 'en')).toEqual({
+        label: 'read by the model',
+        ok: true,
+      })
+    })
+
+    it('reads Finnish once the device has chosen it', () => {
+      expect(readMethod({ extraction_method: 'text' }, 'fi')).toEqual({
+        label: 'luettu mallilla',
+        ok: true,
+      })
+      expect(readMethod({ extraction_method: 'vision' }, 'fi')).toEqual({
+        label: 'luettu mallilla kuvasta',
+        ok: true,
+      })
+      expect(readMethod({ extraction_method: 'heuristic' }, 'fi')).toEqual({
+        label: 'luettu ilman mallia',
+        ok: false,
+      })
+    })
+
+    it('still says nothing about an unread receipt in Finnish', () => {
+      expect(readMethod({ extraction_method: null }, 'fi')).toBeNull()
+    })
+  })
+})
+
+describe('storeName: display language (Post-MVP frontier item 13, phase 3)', () => {
+  it('keeps a known chain name the same in both languages - a proper noun, not translated', () => {
+    expect(storeName({ store_chain: 's-group' }, 'en')).toBe('S-group')
+    expect(storeName({ store_chain: 's-group' }, 'fi')).toBe('S-group')
+  })
+
+  it('translates the fallback for a receipt with no chain read', () => {
+    expect(storeName({ store_chain: null }, 'en')).toBe('Unknown store')
+    expect(storeName({ store_chain: null }, 'fi')).toBe('Tuntematon kauppa')
+  })
+})
+
+describe('receiptDate: display language (Post-MVP frontier item 13, phase 3)', () => {
+  it('keeps the d.m.yyyy shape in both languages - already locale-neutral', () => {
+    expect(receiptDate({ purchase_date: '2026-09-02' }, 'en')).toBe('2.9.2026')
+    expect(receiptDate({ purchase_date: '2026-09-02' }, 'fi')).toBe('2.9.2026')
+  })
+
+  it('translates the fallback for a receipt with no date read', () => {
+    expect(receiptDate({ purchase_date: null }, 'en')).toBe('date not read')
+    expect(receiptDate({ purchase_date: null }, 'fi')).toBe('päivää ei luettu')
   })
 })
 

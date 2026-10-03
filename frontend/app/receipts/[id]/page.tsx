@@ -14,23 +14,25 @@ import { ReceiptStatusChip } from '@/components/receipts'
 import { SkeletonCard } from '@/components/ui/Skeleton'
 import { useReceiptAudit } from '@/hooks/useReceipts'
 import receiptsAPI from '@/lib/api/receipts'
+import { useT } from '@/lib/i18n'
 import { receiptDate, storeName } from '@/lib/receipts'
 import type { ReceiptAudit, ReceiptAuditLine } from '@/types/receipt'
 
 function OutcomeBadge({ outcome }: { outcome: ReceiptAuditLine['outcome'] }) {
+  const { t } = useT()
   switch (outcome) {
     case 'stocked':
-      return <Badge variant="success">Stocked</Badge>
+      return <Badge variant="success">{t('receipts.audit.outcome.stocked')}</Badge>
     case 'household':
-      return <Badge variant="default">Household</Badge>
+      return <Badge variant="default">{t('receipts.audit.outcome.household')}</Badge>
     case 'skipped':
-      return <Badge variant="warning">Skipped</Badge>
+      return <Badge variant="warning">{t('receipts.audit.outcome.skipped')}</Badge>
     case 'removed':
       // Stocked at confirm, but every item it produced has since been deleted - not the
       // same as the cook having left the line out (audit follow-up).
-      return <Badge variant="warning">Removed from stock</Badge>
+      return <Badge variant="warning">{t('receipts.audit.outcome.removed')}</Badge>
     default:
-      return <Badge variant="info">Pending</Badge>
+      return <Badge variant="info">{t('receipts.audit.outcome.pending')}</Badge>
   }
 }
 
@@ -40,11 +42,12 @@ function OutcomeBadge({ outcome }: { outcome: ReceiptAuditLine['outcome'] }) {
  * known until the audit response says so (the file's own bytes are never parsed here).
  */
 function OriginalFile({ receiptId, contentType }: { receiptId: string; contentType: string | null }) {
+  const { t } = useT()
   const url = receiptsAPI.fileUrl(receiptId)
   if (!contentType) {
     return (
       <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-        The original file is no longer available.
+        {t('receipts.audit.fileGone')}
       </p>
     )
   }
@@ -53,11 +56,11 @@ function OriginalFile({ receiptId, contentType }: { receiptId: string; contentTy
       <div className="flex flex-col gap-2">
         <object data={url} type="application/pdf" className="h-96 w-full rounded-ui border border-ui-border dark:border-ui-dark-border">
           <p className="p-3 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-            This browser cannot show the PDF inline.
+            {t('receipts.audit.pdfInline')}
           </p>
         </object>
         <a href={url} target="_blank" rel="noreferrer" className="text-sm text-ui-text-tertiary underline dark:text-ui-dark-text-tertiary">
-          Open the original
+          {t('receipts.audit.openOriginal')}
         </a>
       </div>
     )
@@ -66,7 +69,7 @@ function OriginalFile({ receiptId, contentType }: { receiptId: string; contentTy
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={url}
-      alt="The scanned receipt"
+      alt={t('receipts.audit.scannedAlt')}
       className="max-h-96 w-full rounded-ui border border-ui-border object-contain dark:border-ui-dark-border"
     />
   )
@@ -74,13 +77,14 @@ function OriginalFile({ receiptId, contentType }: { receiptId: string; contentTy
 
 /** A stocked line's items, each linking to the product it became (no per-item page exists). */
 function StockedItems({ items }: { items: ReceiptAuditLine['items'] }) {
+  const { t } = useT()
   if (items.length === 0) return null
   return (
     <ul className="mt-1 flex flex-wrap gap-2">
       {items.map((item) => (
         <li key={item.id}>
           <Link href="/products" className="text-sm text-ui-text-tertiary underline dark:text-ui-dark-text-tertiary">
-            {item.product_name ?? 'a product'}
+            {item.product_name ?? t('receipts.audit.aProduct')}
           </Link>
         </li>
       ))}
@@ -89,6 +93,7 @@ function StockedItems({ items }: { items: ReceiptAuditLine['items'] }) {
 }
 
 function LineRow({ line }: { line: ReceiptAuditLine }) {
+  const { t } = useT()
   return (
     <li className="rounded-ui border border-ui-border p-3 dark:border-ui-dark-border">
       <div className="flex items-start justify-between gap-3">
@@ -104,8 +109,9 @@ function LineRow({ line }: { line: ReceiptAuditLine }) {
       )}
       {line.reanalysed && (
         <p className="mt-1 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-          <Badge variant="info">Re-analysed</Badge>
-          {line.reanalyse_hint && ` · hint: "${line.reanalyse_hint}"`}
+          <Badge variant="info">{t('receipts.audit.reanalysed')}</Badge>
+          {line.reanalyse_hint &&
+            t('receipts.audit.hint', { hint: line.reanalyse_hint })}
         </p>
       )}
       <StockedItems items={line.items} />
@@ -115,17 +121,18 @@ function LineRow({ line }: { line: ReceiptAuditLine }) {
 
 /** Items created before the line index existed (no backfill, Q26): shown, not attributed. */
 function UnlinkedItems({ items }: { items: ReceiptAudit['unlinked_items'] }) {
+  const { t } = useT()
   if (items.length === 0) return null
   return (
     <section className="mt-4">
       <h2 className="text-base font-medium text-ui-text dark:text-ui-dark-text">
-        Also created from this receipt (line unknown)
+        {t('receipts.audit.unlinkedHeading')}
       </h2>
       <ul className="mt-2 flex flex-col gap-2">
         {items.map((item) => (
           <li key={item.id} className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
             <Link href="/products" className="underline">
-              {item.product_name ?? 'a product'}
+              {item.product_name ?? t('receipts.audit.aProduct')}
             </Link>
           </li>
         ))}
@@ -140,6 +147,7 @@ function UnlinkedItems({ items }: { items: ReceiptAudit['unlinked_items'] }) {
  */
 function TextBlock({ label, text }: { label: string; text: string }) {
   const [open, setOpen] = useState(false)
+  const { t } = useT()
   const region = `audit-text-${label.replace(/\s+/g, '-').toLowerCase()}`
   return (
     <div>
@@ -150,7 +158,9 @@ function TextBlock({ label, text }: { label: string; text: string }) {
         onClick={() => setOpen((shown) => !shown)}
         className="min-h-touch text-sm text-ui-text-secondary underline dark:text-ui-dark-text-secondary"
       >
-        {open ? `Hide ${label}` : `Show ${label}`}
+        {open
+          ? t('receipts.audit.hide', { label })
+          : t('receipts.audit.show', { label })}
       </button>
       <pre
         id={region}
@@ -164,15 +174,18 @@ function TextBlock({ label, text }: { label: string; text: string }) {
 }
 
 function Frame({ children }: { children: React.ReactNode }) {
+  const { t } = useT()
   return (
     <div>
       <header className="flex items-center justify-between border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
-        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">Receipt audit</h1>
+        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">
+          {t('receipts.audit.title')}
+        </h1>
         <Link
           href="/receipts"
           className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
         >
-          Back to receipts
+          {t('receipts.audit.backToReceipts')}
         </Link>
       </header>
       <main className="px-6 py-4">{children}</main>
@@ -181,6 +194,7 @@ function Frame({ children }: { children: React.ReactNode }) {
 }
 
 export default function ReceiptAuditPage({ params }: { params: { id: string } }) {
+  const { t, language } = useT()
   const { data: audit, isLoading, isError } = useReceiptAudit(params.id)
 
   if (isLoading) {
@@ -195,7 +209,7 @@ export default function ReceiptAuditPage({ params }: { params: { id: string } })
     return (
       <Frame>
         <p role="alert" className="text-ui-text dark:text-ui-dark-text">
-          Receipt not found.
+          {t('receipts.audit.notFound')}
         </p>
       </Frame>
     )
@@ -207,7 +221,7 @@ export default function ReceiptAuditPage({ params }: { params: { id: string } })
         <div className="flex items-center justify-between gap-3">
           <span className="min-w-0">
             <span className="block truncate text-lg text-ui-text dark:text-ui-dark-text">
-              {`${storeName(audit)}, ${receiptDate(audit)}`}
+              {`${storeName(audit, language)}, ${receiptDate(audit, language)}`}
             </span>
           </span>
           <ReceiptStatusChip status={audit.processing_status} />
@@ -216,10 +230,12 @@ export default function ReceiptAuditPage({ params }: { params: { id: string } })
         <OriginalFile receiptId={audit.id} contentType={audit.file_content_type} />
 
         <section>
-          <h2 className="text-base font-medium text-ui-text dark:text-ui-dark-text">Lines</h2>
+          <h2 className="text-base font-medium text-ui-text dark:text-ui-dark-text">
+            {t('receipts.audit.linesHeading')}
+          </h2>
           {audit.lines.length === 0 ? (
             <p className="mt-2 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-              No lines were read from this receipt.
+              {t('receipts.audit.noLines')}
             </p>
           ) : (
             <ul className="mt-2 flex flex-col gap-2">
@@ -232,13 +248,21 @@ export default function ReceiptAuditPage({ params }: { params: { id: string } })
         </section>
 
         <div className="flex flex-col gap-2">
-          {audit.ocr_raw_text && <TextBlock label="OCR text" text={audit.ocr_raw_text} />}
+          {audit.ocr_raw_text && (
+            <TextBlock label={t('receipts.audit.ocrTextLabel')} text={audit.ocr_raw_text} />
+          )}
           {audit.model_raw_answer && (
-            <TextBlock label="Model's answer" text={audit.model_raw_answer} />
+            <TextBlock
+              label={t('receipts.audit.modelAnswerLabel')}
+              text={audit.model_raw_answer}
+            />
           )}
           {/* A targeted second call (Q27) ran only when the first answer missed lines */}
           {audit.model_raw_answer_retry && (
-            <TextBlock label="Model's answer (retry)" text={audit.model_raw_answer_retry} />
+            <TextBlock
+              label={t('receipts.audit.modelAnswerRetryLabel')}
+              text={audit.model_raw_answer_retry}
+            />
           )}
         </div>
 
@@ -247,7 +271,7 @@ export default function ReceiptAuditPage({ params }: { params: { id: string } })
             href={`/receipt/${audit.id}`}
             className="text-sm text-ui-text-tertiary underline dark:text-ui-dark-text-tertiary"
           >
-            Go to the review screen
+            {t('receipts.audit.goToReview')}
           </Link>
         )}
       </div>

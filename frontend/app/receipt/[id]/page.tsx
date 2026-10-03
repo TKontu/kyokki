@@ -31,6 +31,7 @@ import {
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { toISODate } from '@/lib/dates'
+import { useT, type TranslateParams } from '@/lib/i18n'
 import { isStale, readMethod, receiptDate, storeName } from '@/lib/receipts'
 import type { Category } from '@/types/category'
 import type {
@@ -49,11 +50,17 @@ interface MissedItem {
   unit: ReceiptUnit
 }
 
-const UNITS: { value: ReceiptUnit; label: string }[] = [
-  { value: 'pcs', label: 'pcs' },
-  { value: 'g', label: 'g' },
-  { value: 'dl', label: 'dl' },
-]
+/** `pcs`/`g`/`dl` in the chosen language; the metric ones read the same in both. */
+function unitsFor(t: (key: string, params?: TranslateParams) => string): {
+  value: ReceiptUnit
+  label: string
+}[] {
+  return [
+    { value: 'pcs', label: t('receipt.units.pcs') },
+    { value: 'g', label: t('receipt.units.g') },
+    { value: 'dl', label: t('receipt.units.dl') },
+  ]
+}
 
 /**
  * Whether the read lines differ from the printed total by more than rounding: 1% of the total,
@@ -79,6 +86,7 @@ function parseAmount(text: string): number {
  * receipt, say so, so the cook knows what to check.
  */
 function CompletenessBanner({ receipt }: { receipt: Receipt }) {
+  const { t } = useT()
   const completeness = receipt.completeness
   if (!completeness) return null
   const recovered = completeness.recovered_by_retry + completeness.recovered_raw_lines
@@ -89,37 +97,34 @@ function CompletenessBanner({ receipt }: { receipt: Receipt }) {
   // the entries the model got wrong were not needed, and there is nothing for the cook to do.
   if (recovered <= 0 && unaccounted <= 0 && !mismatch) return null
   const invalid = completeness.invalid_entries
-  const one = recovered === 1
-  const counted =
+  // Composed from independent pieces, not one templated sentence: "1 of 2 lines was …" has a
+  // plural noun (from the total) and a singular verb (from the one recovered line) - see
+  // `en.ts`'s `receipt.completeness` docstring.
+  const prefix =
     textLines === null
-      ? `${recovered} ${one ? 'line' : 'lines'}`
-      : `${recovered} of ${textLines} ${textLines === 1 ? 'line' : 'lines'}`
+      ? String(recovered)
+      : t('receipt.completeness.countOfTotal', { count: recovered, total: textLines })
+  const lineNoun = t('receipt.completeness.lineNoun', { count: textLines ?? recovered })
+  const notRead = t('receipt.completeness.notRead', { count: recovered })
   return (
     <div
       role="status"
       className="mb-4 rounded-ui border border-yellow-400 bg-yellow-50 p-3 text-sm text-yellow-900 dark:border-yellow-700 dark:bg-yellow-950 dark:text-yellow-200"
     >
-      {recovered > 0 && (
-        <p>
-          {`${counted} ${one ? 'was' : 'were'} not read by the model — ` +
-            (one
-              ? 'it is recovered below, please check it.'
-              : 'they are recovered below, please check them.')}
-        </p>
-      )}
+      {recovered > 0 && <p>{`${prefix} ${lineNoun} ${notRead}`}</p>}
       {unaccounted > 0 && (
-        <p>{`${unaccounted} ${unaccounted === 1 ? 'line' : 'lines'} could not be read — see the receipt text.`}</p>
+        <p>{t('receipt.completeness.unaccounted', { count: unaccounted })}</p>
       )}
       {mismatch && itemsSum !== null && receiptTotal !== null && (
         <p>
-          {`The items add up to ${itemsSum.toFixed(2)} but the receipt total is ` +
-            `${receiptTotal.toFixed(2)} — something may be missing.`}
+          {t('receipt.completeness.mismatch', {
+            sum: itemsSum.toFixed(2),
+            total: receiptTotal.toFixed(2),
+          })}
         </p>
       )}
       {invalid > 0 && (
-        <p className="mt-1">
-          {`The model's answer had ${invalid} unusable ${invalid === 1 ? 'entry' : 'entries'}.`}
-        </p>
+        <p className="mt-1">{t('receipt.completeness.invalid', { count: invalid })}</p>
       )}
     </div>
   )
@@ -130,16 +135,19 @@ function CompletenessBanner({ receipt }: { receipt: Receipt }) {
  * matched to a product, or given a category, it has nothing left to ask.
  */
 function RecoveredMarker({ item, row }: { item: ExtractedItem; row: ReviewRow }) {
+  const { t } = useT()
   if (!item.recovered) return null
   const needsCategory = !chosenProductId(item, row) && row.category === ''
   return (
     <p className="mb-1 flex flex-wrap items-center gap-2 text-sm text-yellow-700 dark:text-yellow-400">
       <span className="rounded-full border border-current px-2 py-0.5 text-xs font-medium">
-        recovered
+        {t('receipt.recoveredBadge')}
       </span>
       {item.recovered === 'raw_line' && (
         <span>
-          {needsCategory ? 'from the receipt text — pick a category' : 'from the receipt text'}
+          {needsCategory
+            ? t('receipt.recoveredRawNeedsCategory')
+            : t('receipt.recoveredRaw')}
         </span>
       )}
     </p>
@@ -167,23 +175,23 @@ function AddMissedItem({
   onDraftChange: (draft: MissedDraft) => void
   onAdd: () => void
 }) {
+  const { t } = useT()
   const ready = draftReady(draft)
   const update = (changes: Partial<MissedDraft>) => onDraftChange({ ...draft, ...changes })
+  const heading = t('receipt.missed.heading')
 
   return (
     <section
-      aria-label="Add a missed item"
+      aria-label={heading}
       className="mt-3 rounded-ui border border-dashed border-ui-border p-3 dark:border-ui-dark-border"
     >
-      <h2 className="text-base font-medium text-ui-text dark:text-ui-dark-text">
-        Add a missed item
-      </h2>
+      <h2 className="text-base font-medium text-ui-text dark:text-ui-dark-text">{heading}</h2>
       <div className="mt-2 flex flex-wrap items-end gap-3">
         <div className="min-w-48 flex-1">
           {/* Labelled "Missed item …" rather than "Name"/"Category": the read rows above
               already have fields called that, and each must stay the only one. */}
           <label htmlFor="missed-name" className={fieldLabelClass}>
-            Missed item name
+            {t('receipt.missed.nameLabel')}
           </label>
           <input
             id="missed-name"
@@ -195,7 +203,7 @@ function AddMissedItem({
         </div>
         <div className="min-w-48 flex-1">
           <label htmlFor="missed-category" className={fieldLabelClass}>
-            Missed item category
+            {t('receipt.missed.categoryLabel')}
           </label>
           <select
             id="missed-category"
@@ -203,7 +211,7 @@ function AddMissedItem({
             onChange={(event) => update({ category: event.target.value })}
             className={`${fieldInputClass} mt-1`}
           >
-            <option value="">Pick a category…</option>
+            <option value="">{t('receipt.pickCategory')}</option>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {`${category.icon ?? ''} ${category.display_name}`.trim()}
@@ -215,7 +223,7 @@ function AddMissedItem({
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <div className="w-28">
           <label htmlFor="missed-quantity" className={fieldLabelClass}>
-            Missed item amount
+            {t('receipt.missed.amountLabel')}
           </label>
           {/* Text, not number: a number field turns "1,5" into nothing (Q27). */}
           <input
@@ -228,9 +236,9 @@ function AddMissedItem({
           />
         </div>
         <ChoiceGroup
-          label="Missed item unit"
+          label={t('receipt.missed.unitLabel')}
           name="missed-unit"
-          options={UNITS}
+          options={unitsFor(t)}
           value={draft.unit}
           onChange={(unit) => update({ unit })}
           className="w-48 grid-cols-3"
@@ -243,7 +251,7 @@ function AddMissedItem({
             if (ready) onAdd()
           }}
         >
-          Add to list
+          {t('receipt.missed.addToList')}
         </Button>
       </div>
     </section>
@@ -253,6 +261,7 @@ function AddMissedItem({
 /** The text the read worked from, so the cook can check a line against it (Q28). */
 function ReceiptText({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
+  const { t } = useT()
   return (
     <div className="mt-6">
       <button
@@ -262,7 +271,7 @@ function ReceiptText({ text }: { text: string }) {
         onClick={() => setOpen((shown) => !shown)}
         className="min-h-touch text-sm text-ui-text-secondary underline dark:text-ui-dark-text-secondary"
       >
-        {open ? 'Hide receipt text' : 'Show receipt text'}
+        {open ? t('receipt.text.hide') : t('receipt.text.show')}
       </button>
       {/* Always rendered, so aria-controls points at something; hidden while collapsed. */}
       <pre
@@ -302,10 +311,13 @@ function Frame({
   receiptId?: string
   children: React.ReactNode
 }) {
+  const { t } = useT()
   return (
     <div>
       <header className="flex items-center justify-between border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
-        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">Receipt</h1>
+        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">
+          {t('receipt.title')}
+        </h1>
         <span className="flex items-center gap-4">
           {/* Everything the audit view shows (Q28) works whatever this screen made of the
               receipt, so the link does not wait on any particular status. */}
@@ -314,14 +326,14 @@ function Frame({
               href={`/receipts/${receiptId}`}
               className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
             >
-              Audit view
+              {t('receipt.auditLink')}
             </Link>
           )}
           <Link
             href="/receipts"
             className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
           >
-            Back to receipts
+            {t('receipt.backToReceipts')}
           </Link>
         </span>
       </header>
@@ -333,6 +345,7 @@ function Frame({
 export default function ReceiptReviewPage({ params }: { params: { id: string } }) {
   const router = useRouter()
   const toast = useToast()
+  const { t, language } = useT()
   const queryClient = useQueryClient()
   const { data: receipt, isLoading, isError } = useReceipt(params.id)
   const { data: categories } = useCategories()
@@ -393,7 +406,10 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   if (isLoading) {
     return (
       <Frame receiptId={params.id}>
-        <div className="h-24 animate-pulse rounded-ui bg-gray-200 dark:bg-gray-700" aria-label="Loading receipt" />
+        <div
+          className="h-24 animate-pulse rounded-ui bg-gray-200 dark:bg-gray-700"
+          aria-label={t('receipt.loading')}
+        />
       </Frame>
     )
   }
@@ -402,7 +418,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
     return (
       <Frame receiptId={params.id}>
         <p role="alert" className="text-ui-text dark:text-ui-dark-text">
-          Receipt not found.
+          {t('receipt.notFound')}
         </p>
       </Frame>
     )
@@ -413,9 +429,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   if (status === 'queued' || status === 'processing') {
     return (
       <Frame receiptId={params.id}>
-        <p className="text-ui-text dark:text-ui-dark-text">
-          Still reading this receipt… it usually takes about a minute.
-        </p>
+        <p className="text-ui-text dark:text-ui-dark-text">{t('receipt.stillReading')}</p>
       </Frame>
     )
   }
@@ -424,7 +438,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
     return (
       <Frame receiptId={params.id}>
         <p role="alert" className="mb-4 text-ui-text dark:text-ui-dark-text">
-          This receipt could not be read.
+          {t('receipt.notRead')}
         </p>
         {receipt.error && (
           <p className="mb-4 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
@@ -436,11 +450,11 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
           loading={reprocess.isPending}
           onClick={() =>
             reprocess.mutate(receipt.id, {
-              onError: () => toast.error('Could not queue this receipt'),
+              onError: () => toast.error(t('receipt.reprocessError')),
             })
           }
         >
-          Read again
+          {t('receipt.readAgain')}
         </Button>
       </Frame>
     )
@@ -449,11 +463,14 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
   if (status === 'confirmed') {
     // Confirming used to drop the read method entirely, so the one screen you come back to
     // when stock looks wrong could not tell you whether the model had ever run (Q9).
-    const method = readMethod(receipt)
+    const method = readMethod(receipt, language)
     return (
       <Frame receiptId={params.id}>
         <p className="text-ui-text dark:text-ui-dark-text">
-          {`${storeName(receipt)}, ${receiptDate(receipt)}: already added to your stock.`}
+          {t('receipt.confirmedSummary', {
+            store: storeName(receipt, language),
+            date: receiptDate(receipt, language),
+          })}
         </p>
         {method && (
           <p
@@ -465,8 +482,8 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
             }
           >
             {method.ok
-              ? `It was ${method.label}.`
-              : `It was ${method.label}, so names are as printed and nothing was categorised.`}
+              ? t('receipt.methodOk', { label: method.label })
+              : t('receipt.methodNotOk', { label: method.label })}
           </p>
         )}
       </Frame>
@@ -482,19 +499,19 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
       <Frame receiptId={params.id}>
         <p role="alert" className="mb-4 text-ui-text dark:text-ui-dark-text">
           {status === 'uploaded'
-            ? 'This receipt was never queued to be read.'
-            : `This receipt is in a state this app does not know: ${status}.`}
+            ? t('receipt.neverQueued')
+            : t('receipt.unknownState', { status })}
         </p>
         <Button
           size="lg"
           loading={reprocess.isPending}
           onClick={() =>
             reprocess.mutate(receipt.id, {
-              onError: () => toast.error('Could not queue this receipt'),
+              onError: () => toast.error(t('receipt.reprocessError')),
             })
           }
         >
-          Read it now
+          {t('receipt.readItNow')}
         </Button>
       </Frame>
     )
@@ -521,7 +538,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
   const submit = () => {
     if (draftStarted && !draftComplete) {
-      toast.error('Finish the missed item or clear its name before confirming')
+      toast.error(t('receipt.missed.incomplete'))
       return
     }
     const items: ConfirmedItemCreate[] = included.map(({ item, row }) => {
@@ -562,12 +579,12 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
       { id: receipt.id, data: { items, non_food_indexes: nonFoodIndexes } },
       {
         onSuccess: (result) => {
+          const store = storeName(receipt, language)
           if (result.items_created === 0) {
-            toast.success(`Dismissed · ${storeName(receipt)}`)
+            toast.success(t('receipt.toast.dismissed', { store }))
           } else {
-            const noun = result.items_created === 1 ? 'item' : 'items'
             toast.success(
-              `Added ${result.items_created} ${noun} · ${storeName(receipt)}`
+              t('receipt.toast.added', { count: result.items_created, store })
             )
           }
           router.push('/')
@@ -575,7 +592,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
         // Keep the review open so nothing edited is lost; 4xx messages are meant for people.
         onError: (error) => {
           const clientError = isAPIError(error) && error.status < 500 && error.message
-          toast.error(clientError ? error.message : 'Could not add these items')
+          toast.error(clientError ? error.message : t('receipt.toast.addError'))
         },
       }
     )
@@ -586,35 +603,38 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
       <header className="border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">
-            {`${storeName(receipt)}, ${receiptDate(receipt)}`}
+            {`${storeName(receipt, language)}, ${receiptDate(receipt, language)}`}
           </h1>
           <Link
             href="/receipts"
             className="text-sm text-ui-text-tertiary hover:underline dark:text-ui-dark-text-tertiary"
           >
-            Back to receipts
+            {t('receipt.backToReceipts')}
           </Link>
         </div>
         <p className="mt-1 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-          {`${receipt.items.length} items read, ${receipt.items_matched} already known`}
+          {t('receipt.itemsRead', {
+            count: receipt.items.length,
+            matched: receipt.items_matched,
+          })}
         </p>
         {/* A good read used to say nothing at all, so "no warning" and "nobody looked"
             were indistinguishable. Both now say which they were (Q9). */}
         {receipt.extraction_method === 'heuristic' ? (
           <p className="mt-2 text-sm text-yellow-700 dark:text-yellow-400">
-            Read without the AI model, so names are as printed.{' '}
+            {t('receipt.readWithoutModel')}{' '}
             <button
               type="button"
               className="underline"
               onClick={() => reprocess.mutate(receipt.id)}
             >
-              Read again with the model
+              {t('receipt.readAgainWithModel')}
             </button>
           </p>
         ) : (
-          readMethod(receipt) && (
+          readMethod(receipt, language) && (
             <p className="mt-1 text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
-              {readMethod(receipt)?.label}
+              {readMethod(receipt, language)?.label}
             </p>
           )
         )}
@@ -646,7 +666,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
           ))}
         </ul>
         {missed.length > 0 && (
-          <ul aria-label="Added by hand" className="mt-3 flex flex-col gap-3">
+          <ul aria-label={t('receipt.handAdded.listLabel')} className="mt-3 flex flex-col gap-3">
             {missed.map((extra) => (
               <li
                 key={extra.key}
@@ -657,18 +677,18 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
                     {extra.name}
                   </p>
                   <p className="text-sm text-ui-text-tertiary dark:text-ui-dark-text-tertiary">
-                    {`${sortedCategories.find((c) => c.id === extra.category)?.display_name ?? extra.category} · ${extra.quantity} ${extra.unit} · added by hand`}
+                    {`${sortedCategories.find((c) => c.id === extra.category)?.display_name ?? extra.category} · ${extra.quantity} ${extra.unit} · ${t('receipt.handAdded.suffix')}`}
                   </p>
                 </div>
                 <Button
                   variant="ghost"
                   size="lg"
-                  aria-label={`Remove ${extra.name}`}
+                  aria-label={t('receipt.handAdded.removeAriaLabel', { name: extra.name })}
                   onClick={() =>
                     setMissed((current) => current.filter((other) => other.key !== extra.key))
                   }
                 >
-                  Remove
+                  {t('receipt.handAdded.remove')}
                 </Button>
               </li>
             ))}
@@ -697,14 +717,17 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
               so a per-item prediction would be wrong exactly when it mattered (Q10). */}
           {isStale(receipt) && (
             <p role="alert" className="text-yellow-700 dark:text-yellow-400">
-              {`This receipt is from ${receiptDate(receipt)} — expiry dates are counted from ` +
-                'then, so most items will be added already expired.'}
+              {t('receipt.staleWarning', { date: receiptDate(receipt, language) })}
             </p>
           )}
-          <p>{skipped > 0 ? `${skipped} skipped` : 'Nothing skipped'}</p>
+          <p>
+            {skipped > 0
+              ? t('receipt.skippedCount', { count: skipped })
+              : t('receipt.nothingSkipped')}
+          </p>
           {household.length > 0 && (
             <p className="truncate">
-              {`${household.length} household ${household.length === 1 ? 'item' : 'items'} · `}
+              {t('receipt.household', { count: household.length })}
               {household
                 .map(({ item, row }) => row.name || item.generic_name || item.name)
                 .join(', ')}
@@ -717,7 +740,7 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
                   setHouseholdSeen(true)
                 }}
               >
-                {foldOpen ? 'Hide' : 'Show'}
+                {foldOpen ? t('receipt.hide') : t('receipt.show')}
               </button>
             </p>
           )}
@@ -732,8 +755,8 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
               read that found no lines gets finished. Without it the receipt stays
               `completed` and the home banner counts it as waiting forever (H08). */}
           {toAdd === 0
-            ? 'Dismiss receipt'
-            : `Add ${toAdd} ${toAdd === 1 ? 'item' : 'items'}`}
+            ? t('receipt.dismiss')
+            : t('receipt.addCount', { count: toAdd })}
         </Button>
       </footer>
     </div>

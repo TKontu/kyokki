@@ -238,3 +238,75 @@ describe('ReceiptAuditPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Receipt not found.')
   })
 })
+
+describe('ReceiptAuditPage: display language (Post-MVP frontier item 13, phase 3)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('shows the chrome in Finnish, with the store/date unchanged', async () => {
+    renderPage(audit())
+
+    expect(screen.getByRole('heading', { name: 'Kuitin tarkastus' })).toBeInTheDocument()
+    expect(await screen.findByText('S-group, 26.9.2026')).toBeInTheDocument()
+    expect(screen.getByText('Lisätty varastoon')).toBeInTheDocument()
+  })
+
+  it('shows each line outcome in Finnish, with the printed line unchanged', async () => {
+    renderPage(
+      audit({
+        lines: [
+          { index: 0, name: 'VALIO MAITO 1L', price: 1.49, outcome: 'stocked', items: [] },
+          { index: 1, name: 'MUOVIKASSI', price: 0.1, outcome: 'household', items: [] },
+          { index: 2, name: 'PIRKKA HERNEET', price: 0.99, outcome: 'skipped', items: [] },
+        ],
+      })
+    )
+
+    expect(await screen.findByText('VALIO MAITO 1L')).toBeInTheDocument()
+    // "Stocked" and the receipt's own "Added to stock" status chip read the same word in
+    // Finnish ("Lisätty varastoon"), so both appear - once per line outcome plus once for
+    // the overall status chip.
+    expect(screen.getAllByText('Lisätty varastoon').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Kotitaloustuote')).toBeInTheDocument()
+    expect(screen.getByText('Ohitettu')).toBeInTheDocument()
+  })
+
+  it('opens the OCR text and the model answer with Finnish labels', async () => {
+    renderPage(
+      audit({
+        ocr_raw_text: 'MAITO 1,49',
+        model_raw_answer: '{"lines": []}',
+      })
+    )
+
+    const ocrToggle = await screen.findByRole('button', { name: 'Näytä OCR-teksti' })
+    const answerToggle = screen.getByRole('button', { name: 'Näytä Mallin vastaus' })
+    fireEvent.click(ocrToggle)
+    fireEvent.click(answerToggle)
+
+    expect(screen.getByRole('button', { name: 'Piilota OCR-teksti' })).toBeInTheDocument()
+    expect(screen.getByText('MAITO 1,49')).toBeInTheDocument()
+  })
+
+  it('says so in Finnish when a receipt cannot be found', async () => {
+    server.use(
+      http.get(`${API_URL}/receipts/missing/audit`, () =>
+        HttpResponse.json({ detail: 'not found' }, { status: 404 })
+      )
+    )
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ReceiptAuditPage params={{ id: 'missing' }} />
+      </QueryClientProvider>
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Kuittia ei löytynyt.')
+  })
+})

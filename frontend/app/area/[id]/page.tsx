@@ -13,7 +13,8 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { IngredientTile, UndoButton } from '@/components/inventory'
 import { useStockActions } from '@/hooks/useStockActions'
-import { AREAS, areaTiles } from '@/lib/fridge'
+import { useT } from '@/lib/i18n'
+import { AREAS, areaLabel, areaTiles } from '@/lib/fridge'
 
 const BACK =
   'inline-flex min-h-touch items-center gap-1 text-sm font-medium text-ui-text-secondary ' +
@@ -29,6 +30,7 @@ function aDayAgo(): string {
 }
 
 export default function AreaPage({ params }: { params: { id: string } }) {
+  const { t, language } = useT()
   const area = AREAS.find((candidate) => candidate.id === params.id)
   const [since] = useState(aDayAgo)
   const { list, items, toggleItem, openMore, sheets } = useStockActions({ consumed_since: since })
@@ -38,44 +40,50 @@ export default function AreaPage({ params }: { params: { id: string } }) {
     return (
       <main className="px-6 py-4">
         <Link href="/" className={BACK}>
-          ← Fridge
+          {t('area.backToFridge')}
         </Link>
-        <p className="mt-4 text-ui-text dark:text-ui-dark-text">No such part of the fridge.</p>
+        <p className="mt-4 text-ui-text dark:text-ui-dark-text">{t('area.notFound')}</p>
       </main>
     )
   }
 
   const tiles = areaTiles(items ?? [], area.id)
+  const label = areaLabel(area.id, language)
 
   return (
     <div>
       <header className="flex items-center justify-between gap-3 border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
         <div className="flex items-center gap-4">
           <Link href="/" className={BACK}>
-            ← Fridge
+            {t('area.backToFridge')}
           </Link>
           <h1 className="flex items-center gap-2 text-xl font-semibold text-ui-text dark:text-ui-dark-text">
             <span aria-hidden="true">{area.icon}</span>
-            {area.label}
+            {label}
           </h1>
         </div>
         <UndoButton />
       </header>
       <main className="px-6 py-4">
-        {isLoading && <p aria-label="Loading inventory" className="h-32 animate-pulse rounded-2xl bg-gray-200 dark:bg-gray-700" />}
+        {isLoading && (
+          <p
+            aria-label={t('inventory.fridgeView.loading')}
+            className="h-32 animate-pulse rounded-2xl bg-gray-200 dark:bg-gray-700"
+          />
+        )}
         {isError && !items && (
           <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-            {error instanceof Error ? error.message : 'Failed to load inventory.'}
+            {error instanceof Error ? error.message : t('inventory.fridgeView.loadError')}
           </p>
         )}
         {items && tiles.length === 0 && (
           <p className="text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
-            Nothing here.
+            {t('area.nothingHere')}
           </p>
         )}
         {tiles.length > 0 && (
           <ul
-            aria-label={area.label}
+            aria-label={label}
             className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6"
           >
             {tiles.map((item) => (

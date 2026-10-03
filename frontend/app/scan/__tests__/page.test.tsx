@@ -146,3 +146,54 @@ describe('ScanPage', () => {
     expect(push).not.toHaveBeenCalled()
   })
 })
+
+describe('ScanPage: display language (Post-MVP frontier item 13, phase 3)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('shows the form chrome in Finnish', () => {
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'Skannaa kuitti' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Kuitti')).toBeInTheDocument()
+    expect(screen.getByLabelText('Kauppa (valinnainen)')).toBeInTheDocument()
+    expect(screen.getByLabelText('Ostopäivä (valinnainen)')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Lähetä' })).toBeInTheDocument()
+  })
+
+  function chooseFi(file: File) {
+    const input = screen.getByLabelText('Kuitti') as HTMLInputElement
+    Object.defineProperty(input, 'files', { value: [file], configurable: true })
+    fireEvent.change(input)
+  }
+
+  it('says why in Finnish when the file cannot be read', async () => {
+    mockScan(() =>
+      HttpResponse.json({ detail: 'Unsupported file type: text/plain' }, { status: 400 })
+    )
+    renderPage()
+
+    chooseFi(pdf('notes.txt'))
+    fireEvent.click(screen.getByRole('button', { name: 'Lähetä' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Unsupported file type: text/plain'
+    )
+  })
+
+  it('says something useful in Finnish when the upload never lands', async () => {
+    server.use(http.post(`${API_URL}/receipts/scan`, () => HttpResponse.error()))
+    renderPage()
+
+    chooseFi(pdf())
+    fireEvent.click(screen.getByRole('button', { name: 'Lähetä' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Kuitin lähetys epäonnistui. Yritä uudelleen.'
+    )
+  })
+})
