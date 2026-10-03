@@ -267,6 +267,201 @@ export const en = {
       dark: { name: 'Dark', hint: 'Always dark' },
     },
   },
+  // Post-MVP frontier item 13, phase 3 (round 2026-10-03-3): the receipt, scan and area
+  // screens, plus the product search the receipt review row uses. Appended at the end, after
+  // `settings`, so a sibling's keys added inside that block do not conflict with this namespace
+  // list. Printed receipt text (the store's own line, its name and its amounts) is data, never
+  // translated here - only the app's own words around it are.
+  receipt: {
+    title: 'Receipt',
+    auditLink: 'Audit view',
+    backToReceipts: 'Back to receipts',
+    loading: 'Loading receipt',
+    stillReading: 'Still reading this receipt… it usually takes about a minute.',
+    notFound: 'Receipt not found.',
+    notRead: 'This receipt could not be read.',
+    readAgain: 'Read again',
+    reprocessError: 'Could not queue this receipt',
+    confirmedSummary: '{store}, {date}: already added to your stock.',
+    methodOk: 'It was {label}.',
+    methodNotOk: 'It was {label}, so names are as printed and nothing was categorised.',
+    neverQueued: 'This receipt was never queued to be read.',
+    unknownState: 'This receipt is in a state this app does not know: {status}.',
+    readItNow: 'Read it now',
+    itemsRead: {
+      one: '{count} item read, {matched} already known',
+      other: '{count} items read, {matched} already known',
+    },
+    readWithoutModel: 'Read without the AI model, so names are as printed.',
+    readAgainWithModel: 'Read again with the model',
+    pickCategory: 'Pick a category…',
+    recoveredBadge: 'recovered',
+    recoveredRawNeedsCategory: 'from the receipt text — pick a category',
+    recoveredRaw: 'from the receipt text',
+    completeness: {
+      // Composed, not one sentence: `recovered` and `textLines` (when present) are
+      // independent counts - "1 of 2 lines was …" has a plural noun (from the total) with a
+      // singular verb (from the one recovered line) - so each piece picks its own form.
+      countOfTotal: '{count} of {total}',
+      lineNoun: { one: 'line', other: 'lines' },
+      notRead: {
+        one: 'was not read by the model — it is recovered below, please check it.',
+        other: 'were not read by the model — they are recovered below, please check them.',
+      },
+      unaccounted: {
+        one: '{count} line could not be read — see the receipt text.',
+        other: '{count} lines could not be read — see the receipt text.',
+      },
+      mismatch:
+        'The items add up to {sum} but the receipt total is {total} — something may be missing.',
+      invalid: {
+        one: "The model's answer had {count} unusable entry.",
+        other: "The model's answer had {count} unusable entries.",
+      },
+    },
+    missed: {
+      heading: 'Add a missed item',
+      nameLabel: 'Missed item name',
+      categoryLabel: 'Missed item category',
+      amountLabel: 'Missed item amount',
+      unitLabel: 'Missed item unit',
+      addToList: 'Add to list',
+      incomplete: 'Finish the missed item or clear its name before confirming',
+    },
+    handAdded: {
+      listLabel: 'Added by hand',
+      suffix: 'added by hand',
+      remove: 'Remove',
+      removeAriaLabel: 'Remove {name}',
+    },
+    units: { pcs: 'pcs', g: 'g', dl: 'dl' },
+    text: {
+      show: 'Show receipt text',
+      hide: 'Hide receipt text',
+    },
+    staleWarning:
+      'This receipt is from {date} — expiry dates are counted from then, so most items ' +
+      'will be added already expired.',
+    skippedCount: '{count} skipped',
+    nothingSkipped: 'Nothing skipped',
+    show: 'Show',
+    hide: 'Hide',
+    household: {
+      one: '{count} household item · ',
+      other: '{count} household items · ',
+    },
+    dismiss: 'Dismiss receipt',
+    addCount: { one: 'Add {count} item', other: 'Add {count} items' },
+    toast: {
+      dismissed: 'Dismissed · {store}',
+      added: { one: 'Added {count} item · {store}', other: 'Added {count} items · {store}' },
+      addError: 'Could not add these items',
+    },
+    itemRow: {
+      include: 'Include {name}',
+      change: 'Change',
+      changeAriaLabel: 'Change {name}',
+      productNameLabel: 'Product name',
+      findExisting: 'Find existing product',
+      findExistingAriaLabel: 'Find a product for {name}',
+      newProduct: 'New product: {term}',
+      reanalyse: 'Re-analyse',
+      whatIsIt: 'What is it?',
+      whatIsItPlaceholder: 'What is it? e.g. cashew nuts',
+      askAgain: 'Ask again',
+      reanalyseError: 'Could not re-analyse this line',
+      confirmOverwrite:
+        'This row has been edited by hand. Replace it with the re-analysed result?',
+      needName: 'Give this product a name to include it',
+      needCategory: 'Pick a category to include it',
+    },
+    provenance: {
+      known: 'known',
+      auto: 'auto',
+    },
+  },
+  receipts: {
+    list: {
+      title: 'Receipts',
+      scanLink: 'Scan a receipt',
+      noItemsRead: 'No items read',
+      noItemsYet: 'No items read yet',
+      itemSummary: {
+        one: '{count} item, {matched} already known',
+        other: '{count} items, {matched} already known',
+      },
+      loadError: 'Could not load receipts.',
+      emptyPrefix: 'No receipts yet. Share one to the Telegram bot, or',
+      emptyScanLink: 'scan one here',
+    },
+    banner: {
+      waiting: {
+        one: '{count} receipt waiting to review',
+        other: '{count} receipts waiting to review',
+      },
+      reading: { one: 'Reading a receipt…', other: 'Reading {count} receipts…' },
+      failed: {
+        one: 'A receipt could not be read',
+        other: '{count} receipts could not be read',
+      },
+    },
+    statusChip: {
+      uploaded: 'Not read yet',
+      queued: 'Waiting to be read',
+      processing: 'Reading',
+      completed: 'Waiting for review',
+      failed: 'Could not read',
+      confirmed: 'Added to stock',
+    },
+    audit: {
+      title: 'Receipt audit',
+      backToReceipts: 'Back to receipts',
+      fileGone: 'The original file is no longer available.',
+      pdfInline: 'This browser cannot show the PDF inline.',
+      openOriginal: 'Open the original',
+      scannedAlt: 'The scanned receipt',
+      outcome: {
+        stocked: 'Stocked',
+        household: 'Household',
+        skipped: 'Skipped',
+        removed: 'Removed from stock',
+        pending: 'Pending',
+      },
+      reanalysed: 'Re-analysed',
+      hint: ' · hint: "{hint}"',
+      linesHeading: 'Lines',
+      noLines: 'No lines were read from this receipt.',
+      unlinkedHeading: 'Also created from this receipt (line unknown)',
+      aProduct: 'a product',
+      ocrTextLabel: 'OCR text',
+      modelAnswerLabel: "Model's answer",
+      modelAnswerRetryLabel: "Model's answer (retry)",
+      show: 'Show {label}',
+      hide: 'Hide {label}',
+      notFound: 'Receipt not found.',
+      goToReview: 'Go to the review screen',
+    },
+  },
+  scan: {
+    title: 'Scan a receipt',
+    fileLabel: 'Receipt',
+    fileHint: 'A PDF e-receipt, a screenshot, or a photo of a paper one.',
+    storeLabel: 'Store (optional)',
+    storePlaceholder: 'Read from the receipt when left empty',
+    dateLabel: 'Purchase date (optional)',
+    upload: 'Upload',
+    uploadError: 'Could not upload the receipt. Try again.',
+  },
+  area: {
+    backToFridge: '← Fridge',
+    notFound: 'No such part of the fridge.',
+    nothingHere: 'Nothing here.',
+  },
+  productSearch: {
+    label: 'Product',
+    createNew: 'Create new: {term}',
+    placeholder: 'Milk, ground beef, apples…',
+  },
 }
 
 // Deliberately not `as const`: a literal type per string would make `fi.ts` a type error for

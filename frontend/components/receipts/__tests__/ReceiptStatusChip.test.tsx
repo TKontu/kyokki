@@ -27,3 +27,29 @@ describe('ReceiptStatusChip', () => {
     expect(screen.queryByText('Not read yet')).not.toBeInTheDocument()
   })
 })
+
+describe('ReceiptStatusChip: display language (Post-MVP frontier item 13, phase 3)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  it.each([
+    ['uploaded', 'Ei vielä luettu'],
+    ['queued', 'Odottaa lukemista'],
+    ['processing', 'Luetaan'],
+    ['completed', 'Odottaa tarkistusta'],
+    ['failed', 'Ei voitu lukea'],
+    ['confirmed', 'Lisätty varastoon'],
+  ])('labels %s as %p in Finnish', (status, label) => {
+    render(<ReceiptStatusChip status={status} />)
+    expect(screen.getByText(label)).toBeInTheDocument()
+  })
+
+  it('shows a status it does not know raw, in Finnish mode too', () => {
+    render(<ReceiptStatusChip status="archived" />)
+    expect(screen.getByText('archived')).toBeInTheDocument()
+  })
+})

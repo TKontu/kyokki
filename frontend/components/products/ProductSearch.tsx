@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/formStyles'
 import { useProductSearch } from '@/hooks/useProducts'
 import { displayName } from '@/lib/displayName'
+import { useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
 import type { Category } from '@/types/category'
 import type { ProductMaster } from '@/types/product'
@@ -44,12 +45,15 @@ export function ProductSearch({
   onPickNew,
   term,
   onTermChange,
-  newLabel = (term) => `Create new: ${term}`,
+  newLabel,
   inputId = 'product-search',
-  placeholder = 'Milk, ground beef, apples…',
+  placeholder,
 }: ProductSearchProps) {
   const search = useProductSearch(term)
   const [language] = useLanguage()
+  const { t } = useT()
+  const effectiveNewLabel = newLabel ?? ((term: string) => t('productSearch.createNew', { term }))
+  const effectivePlaceholder = placeholder ?? t('productSearch.placeholder')
 
   const categoryById = useMemo(
     () => new Map(categories.map((category) => [category.id, category])),
@@ -69,7 +73,7 @@ export function ProductSearch({
   return (
     <>
       <label htmlFor={inputId} className={fieldLabelClass}>
-        Product
+        {t('productSearch.label')}
       </label>
       <input
         id={inputId}
@@ -77,7 +81,7 @@ export function ProductSearch({
         autoComplete="off"
         value={term}
         onChange={(event) => onTermChange(event.target.value)}
-        placeholder={placeholder}
+        placeholder={effectivePlaceholder}
         className={`${fieldInputClass} mt-1`}
       />
       <ul className="mt-3 flex flex-col gap-2">
@@ -106,7 +110,7 @@ export function ProductSearch({
               onClick={() => onPickNew(trimmed)}
               className="flex w-full min-h-touch items-center rounded-ui border border-dashed border-ui-border dark:border-ui-dark-border px-3 text-left text-ui-text dark:text-ui-dark-text"
             >
-              {newLabel(trimmed)}
+              {effectiveNewLabel(trimmed)}
             </button>
           </li>
         )}

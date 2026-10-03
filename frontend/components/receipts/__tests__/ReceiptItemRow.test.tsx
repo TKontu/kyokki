@@ -141,6 +141,17 @@ describe('printed line (Q39)', () => {
     expect(screen.getByLabelText('Product name')).toHaveValue('Something the cook typed')
     expect(screen.getByText('PESTO JA CASHEW')).toBeInTheDocument()
   })
+
+  it('renders the printed line unchanged in Finnish mode (operator ruling)', () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    renderRow({ item: item({ price: 2.49 }) })
+
+    // The printed receipt line, its store name and its amounts are data, never translated -
+    // only the app's own chrome around them changes.
+    expect(screen.getByText('PESTO JA CASHEW · 2.49')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tuotteen nimi')).toBeInTheDocument()
+    window.localStorage.clear()
+  })
 })
 
 describe('re-analyse (Q38)', () => {
@@ -239,5 +250,44 @@ describe('re-analyse (Q38)', () => {
       await screen.findByText('The model did not answer in time')
     ).toBeInTheDocument()
     expect(onReanalysed).not.toHaveBeenCalled()
+  })
+})
+
+describe('display language (Post-MVP frontier item 13, phase 3)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('shows the matched row chrome in Finnish', () => {
+    renderRow({ item: item({ product_id: 'p1', product_name: 'Cashew nuts' }) })
+
+    expect(screen.getByRole('button', { name: 'Muuta: Cashew nuts' })).toBeInTheDocument()
+  })
+
+  it('shows the unmatched row chrome in Finnish', () => {
+    renderRow()
+
+    expect(screen.getByLabelText('Tuotteen nimi')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Etsi tuote: PESTO JA CASHEW' })
+    ).toHaveTextContent('Etsi olemassa oleva tuote')
+  })
+
+  it('shows the re-analyse control in Finnish', () => {
+    renderRow()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Analysoi uudelleen' }))
+
+    expect(screen.getByPlaceholderText('Mikä tämä on? esim. cashewpähkinät')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Kysy uudelleen' })).toBeInTheDocument()
+  })
+
+  it('shows the Finnish error reason when a line cannot be included', () => {
+    renderRow({ row: row({ include: false, name: '' }) })
+
+    expect(screen.getByText('Anna tälle tuotteelle nimi sisällyttääksesi sen')).toBeInTheDocument()
   })
 })

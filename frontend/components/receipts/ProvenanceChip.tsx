@@ -12,6 +12,7 @@
  */
 
 import Badge from '@/components/ui/Badge'
+import { useT } from '@/lib/i18n'
 import type { MatchSource } from '@/types/receipt'
 
 export interface ProvenanceChipProps {
@@ -20,15 +21,16 @@ export interface ProvenanceChipProps {
 }
 
 export function ProvenanceChip({ source, verified }: ProvenanceChipProps) {
+  const { t } = useT()
   if (!source || source === 'none') return null
 
   return verified ? (
     <Badge variant="success" size="sm">
-      known
+      {t('receipt.provenance.known')}
     </Badge>
   ) : (
     <Badge variant="warning" size="sm">
-      auto
+      {t('receipt.provenance.auto')}
     </Badge>
   )
 }

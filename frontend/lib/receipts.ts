@@ -1,8 +1,17 @@
 /**
  * How a receipt is named on screen. Shared by the receipts list (MVP-R8) and the review
  * page (MVP-R7), which see different shapes of the same receipt.
+ *
+ * `storeName`/`receiptDate`/`readMethod` take an optional `Language` (Post-MVP frontier item
+ * 13, phase 3, round 2026-10-03-3), the same no-hooks pattern as `lib/dates.ts` and
+ * `lib/fridge.ts`'s `areaLabel`: the caller (already holding `useT()`) passes the language in,
+ * defaulting to `'en'` so every existing caller - including `components/inventory/ItemEditSheet.tsx`,
+ * out of scope this phase - keeps its English output untouched. The chain names in
+ * `STORE_NAMES` and the `d.m.yyyy` date shape are proper nouns and a locale-neutral format
+ * respectively, not translated.
  */
 
+import type { Language } from './language'
 import type { Receipt } from '@/types/receipt'
 
 const STORE_NAMES: Record<string, string> = {
@@ -13,14 +22,21 @@ const STORE_NAMES: Record<string, string> = {
 }
 
 /** The chain as a person would write it; an unknown chain keeps whatever was read. */
-export function storeName(receipt: Pick<Receipt, 'store_chain'>): string {
-  if (!receipt.store_chain) return 'Unknown store'
+export function storeName(
+  receipt: Pick<Receipt, 'store_chain'>,
+  language: Language = 'en'
+): string {
+  if (!receipt.store_chain) return language === 'fi' ? 'Tuntematon kauppa' : 'Unknown store'
   return STORE_NAMES[receipt.store_chain] ?? receipt.store_chain
 }
 
-/** Finnish day.month.year, or a plain note when the reader did not find a date. */
-export function receiptDate(receipt: Pick<Receipt, 'purchase_date'>): string {
-  if (!receipt.purchase_date) return 'date not read'
+/** Day.month.year (the same shape in both languages), or a plain note when the reader did
+ * not find a date. */
+export function receiptDate(
+  receipt: Pick<Receipt, 'purchase_date'>,
+  language: Language = 'en'
+): string {
+  if (!receipt.purchase_date) return language === 'fi' ? 'päivää ei luettu' : 'date not read'
   const [year, month, day] = receipt.purchase_date.split('-')
   return `${Number(day)}.${Number(month)}.${year}`
 }
@@ -36,8 +52,21 @@ export function receiptDate(receipt: Pick<Receipt, 'purchase_date'>): string {
  * `null` is not a method: a receipt that has not been read yet has nothing to say.
  */
 export function readMethod(
-  receipt: Pick<Receipt, 'extraction_method'>
+  receipt: Pick<Receipt, 'extraction_method'>,
+  language: Language = 'en'
 ): { label: string; ok: boolean } | null {
+  if (language === 'fi') {
+    switch (receipt.extraction_method) {
+      case 'text':
+        return { label: 'luettu mallilla', ok: true }
+      case 'vision':
+        return { label: 'luettu mallilla kuvasta', ok: true }
+      case 'heuristic':
+        return { label: 'luettu ilman mallia', ok: false }
+      default:
+        return null
+    }
+  }
   switch (receipt.extraction_method) {
     case 'text':
       return { label: 'read by the model', ok: true }

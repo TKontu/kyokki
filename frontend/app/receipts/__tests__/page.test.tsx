@@ -145,3 +145,38 @@ describe('ReceiptsPage', () => {
     )
   })
 })
+
+describe('ReceiptsPage: display language (Post-MVP frontier item 13, phase 3)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('names the store (unchanged) and shows the Finnish chrome', async () => {
+    renderPage([summary()])
+
+    expect(screen.getByRole('heading', { name: 'Kuitit' })).toBeInTheDocument()
+    const link = await screen.findByRole('link', { name: /S-group/ })
+    expect(within(link).getByText(/2\.9\.2026/)).toBeInTheDocument()
+    expect(within(link).getByText('41 tuotetta luettu, 3 jo tiedossa')).toBeInTheDocument()
+    expect(within(link).getByText('luettu mallilla')).toBeInTheDocument()
+  })
+
+  it('shows statuses in Finnish', async () => {
+    renderPage([summary({ processing_status: 'completed' })])
+
+    expect(await screen.findByText('Odottaa tarkistusta')).toBeInTheDocument()
+  })
+
+  it('points an empty list at the two ways in, in Finnish', async () => {
+    renderPage([])
+
+    expect(await screen.findByText(/ei kuitteja vielä/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /skannaa yksi tässä/i })).toHaveAttribute(
+      'href',
+      '/scan'
+    )
+  })
+})

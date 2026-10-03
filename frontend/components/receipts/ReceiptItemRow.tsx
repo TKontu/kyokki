@@ -18,6 +18,7 @@ import {
 import { useReanalyseLine } from '@/hooks/useReceipts'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
+import { useT } from '@/lib/i18n'
 import type { Category } from '@/types/category'
 import type { ExtractedItem, ReceiptUnit } from '@/types/receipt'
 
@@ -78,6 +79,7 @@ export function ReceiptItemRow({
   const [hint, setHint] = useState('')
   const toast = useToast()
   const reanalyse = useReanalyseLine()
+  const { t } = useT()
   // Read at response time, not at click time (F3): a mutation can take a while, and an
   // edit made to this row while it is in flight must still be caught. A plain closure
   // over the `dirty` prop would answer with whatever it was when `askAgain` was called.
@@ -98,12 +100,7 @@ export function ReceiptItemRow({
       { receiptId, lineId: item.line_id, hint: hint.trim() || null },
       {
         onSuccess: (updated) => {
-          if (
-            dirtyRef.current &&
-            !window.confirm(
-              'This row has been edited by hand. Replace it with the re-analysed result?'
-            )
-          ) {
+          if (dirtyRef.current && !window.confirm(t('receipt.itemRow.confirmOverwrite'))) {
             return
           }
           onReanalysed(updated)
@@ -112,7 +109,7 @@ export function ReceiptItemRow({
         },
         onError: (error) => {
           toast.error(
-            isAPIError(error) ? error.message : 'Could not re-analyse this line'
+            isAPIError(error) ? error.message : t('receipt.itemRow.reanalyseError')
           )
         },
       }
@@ -135,7 +132,7 @@ export function ReceiptItemRow({
           checked={row.include}
           disabled={!ready}
           onChange={(event) => onChange({ include: event.target.checked })}
-          aria-label={`Include ${row.name || item.name}`}
+          aria-label={t('receipt.itemRow.include', { name: row.name || item.name })}
           className="mt-3 h-6 w-6 shrink-0"
         />
         <div className="flex-1">
@@ -152,20 +149,20 @@ export function ReceiptItemRow({
                 variant="ghost"
                 size="sm"
                 onClick={() => setChanging(true)}
-                aria-label={`Change ${productName ?? item.name}`}
+                aria-label={t('receipt.itemRow.changeAriaLabel', { name: productName ?? item.name })}
               >
-                Change
+                {t('receipt.itemRow.change')}
               </Button>
             </div>
           ) : (
             <>
               <label htmlFor={`${rowId}-name`} className={`${fieldLabelClass} sr-only`}>
-                Product name
+                {t('receipt.itemRow.productNameLabel')}
               </label>
               <input
                 id={`${rowId}-name`}
                 type="text"
-                aria-label="Product name"
+                aria-label={t('receipt.itemRow.productNameLabel')}
                 value={row.name}
                 onChange={(event) => onChange({ name: event.target.value })}
                 className={fieldInputClass}
@@ -176,9 +173,9 @@ export function ReceiptItemRow({
                   size="sm"
                   className="mt-1"
                   onClick={() => setChanging(true)}
-                  aria-label={`Find a product for ${item.name}`}
+                  aria-label={t('receipt.itemRow.findExistingAriaLabel', { name: item.name })}
                 >
-                  Find existing product
+                  {t('receipt.itemRow.findExisting')}
                 </Button>
               )}
             </>
@@ -190,7 +187,7 @@ export function ReceiptItemRow({
                 inputId={`${rowId}-search`}
                 term={searchTerm}
                 onTermChange={setSearchTerm}
-                newLabel={(term) => `New product: ${term}`}
+                newLabel={(term) => t('receipt.itemRow.newProduct', { term })}
                 onPickExisting={(product) => {
                   onChange({
                     productId: product.id,
@@ -212,7 +209,7 @@ export function ReceiptItemRow({
                 className="mt-2"
                 onClick={() => setChanging(false)}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
             </div>
           )}
@@ -233,18 +230,18 @@ export function ReceiptItemRow({
             aria-expanded={reanalysing}
             onClick={() => setReanalysing((open) => !open)}
           >
-            Re-analyse
+            {t('receipt.itemRow.reanalyse')}
           </Button>
           {reanalysing && (
             <div className="mt-2 flex flex-wrap items-end gap-2">
               <div className="min-w-48 flex-1">
                 <label htmlFor={`${rowId}-hint`} className={`${fieldLabelClass} sr-only`}>
-                  What is it?
+                  {t('receipt.itemRow.whatIsIt')}
                 </label>
                 <input
                   id={`${rowId}-hint`}
                   type="text"
-                  placeholder="What is it? e.g. cashew nuts"
+                  placeholder={t('receipt.itemRow.whatIsItPlaceholder')}
                   value={hint}
                   disabled={reanalyse.isPending}
                   onChange={(event) => setHint(event.target.value)}
@@ -257,7 +254,7 @@ export function ReceiptItemRow({
                 disabled={reanalyse.isPending}
                 onClick={askAgain}
               >
-                Ask again
+                {t('receipt.itemRow.askAgain')}
               </Button>
             </div>
           )}
@@ -268,16 +265,16 @@ export function ReceiptItemRow({
         {!matched && (
           <div className="min-w-48 flex-1">
             <label htmlFor={`${rowId}-category`} className={fieldLabelClass}>
-              Category
+              {t('common.category')}
             </label>
             <select
               id={`${rowId}-category`}
-              aria-label="Category"
+              aria-label={t('common.category')}
               value={row.category}
               onChange={(event) => onChange({ category: event.target.value })}
               className={`${fieldInputClass} mt-1`}
             >
-              <option value="">Pick a category…</option>
+              <option value="">{t('receipt.pickCategory')}</option>
               {categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {`${category.icon ?? ''} ${category.display_name}`.trim()}
@@ -291,8 +288,8 @@ export function ReceiptItemRow({
       {!ready && (
         <p className={fieldErrorClass}>
           {row.name.trim() === ''
-            ? 'Give this product a name to include it'
-            : 'Pick a category to include it'}
+            ? t('receipt.itemRow.needName')
+            : t('receipt.itemRow.needCategory')}
         </p>
       )}
     </div>

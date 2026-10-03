@@ -78,3 +78,43 @@ describe('ReceiptsBanner', () => {
     expect(screen.queryByText(/waiting to review|reading a receipt|could not be read/i)).toBeNull()
   })
 })
+
+describe('ReceiptsBanner: display language (Post-MVP frontier item 13, phase 3)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('links to a receipt waiting to review, in Finnish', async () => {
+    renderBanner([receipt('r1', 'completed')])
+
+    const link = await screen.findByRole('link', { name: /1 kuitti odottaa tarkistusta/ })
+    expect(link).toHaveAttribute('href', '/receipt/r1')
+  })
+
+  it('counts several waiting receipts in Finnish', async () => {
+    renderBanner([
+      receipt('new', 'completed', { created_at: '2026-09-16T12:00:00Z' }),
+      receipt('old', 'completed', { created_at: '2026-09-15T12:00:00Z' }),
+    ])
+
+    expect(
+      await screen.findByRole('link', { name: /2 kuittia odottaa tarkistusta/ })
+    ).toBeInTheDocument()
+  })
+
+  it('says a receipt is being read, in Finnish', async () => {
+    renderBanner([receipt('r1', 'processing')])
+
+    expect(await screen.findByText('Luetaan kuittia…')).toBeInTheDocument()
+  })
+
+  it('links a failed receipt so it can be read again, in Finnish', async () => {
+    renderBanner([receipt('r1', 'failed', { error: 'LLM timed out' })])
+
+    const link = await screen.findByRole('link', { name: 'Kuittia ei voitu lukea' })
+    expect(link).toHaveAttribute('href', '/receipt/r1')
+  })
+})

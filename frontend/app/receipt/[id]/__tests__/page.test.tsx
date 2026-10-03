@@ -1375,3 +1375,113 @@ describe('ReceiptReviewPage re-analyse (Q38)', () => {
     expect(screen.getByLabelText('Product name')).toHaveValue('Generic 0')
   })
 })
+
+describe('ReceiptReviewPage: display language (Post-MVP frontier item 13, phase 3)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+  afterEach(() => {
+    window.localStorage.clear()
+  })
+
+  it('shows the review chrome in Finnish, with the printed line unchanged', async () => {
+    mockApi(receipt())
+    renderPage()
+
+    expect(await screen.findByText(/S-group/)).toBeInTheDocument()
+    expect(screen.getByText(/1 tuote luettu, 0 jo tiedossa/)).toBeInTheDocument()
+    // The printed receipt line is data, never translated (operator ruling).
+    expect(screen.getByText('PRINTED 0')).toBeInTheDocument()
+    expect(screen.getByLabelText('Tuotteen nimi')).toHaveValue('Generic 0')
+    expect(screen.getByLabelText('Kategoria')).toHaveValue('dairy')
+    expect(screen.getByRole('button', { name: /^lisää 1 tuote$/i })).toBeEnabled()
+  })
+
+  it('confirms in Finnish mode and sends the same data as English', async () => {
+    const confirms = mockApi(
+      receipt({}, [
+        item(0, { product_id: 'p-milk', product_name: 'Milk', match_confidence: 'exact' }),
+        item(1),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('→ Milk')
+    fireEvent.click(screen.getByRole('button', { name: /^lisää 2 tuotetta$/i }))
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    expect(confirms[0]).toEqual({
+      non_food_indexes: [],
+      items: [
+        { index: 0, line_id: 'line-0', product_id: 'p-milk', quantity: 1, unit: 'pcs', purchase_date: isoDaysAgo(3) },
+        { index: 1, line_id: 'line-1', name: 'Generic 1', category: 'dairy', quantity: 1, unit: 'pcs', purchase_date: isoDaysAgo(3) },
+      ],
+    })
+    expect(await screen.findByText(/Lisätty 1 tuote/)).toBeInTheDocument()
+  })
+
+  it('shows a confirmed receipt read-only, in Finnish', async () => {
+    mockApi(receipt({ processing_status: 'confirmed' }))
+    renderPage()
+
+    expect(await screen.findByText(/lisätty jo varastoon/i)).toBeInTheDocument()
+    expect(screen.getByText(/Tämä on luettu mallilla\./)).toBeInTheDocument()
+  })
+
+  it('shows the Finnish failed-read state', async () => {
+    mockApi(receipt({ processing_status: 'failed', error: 'LLM timed out' }, []))
+    renderPage()
+
+    expect(await screen.findByText('Tätä kuittia ei voitu lukea.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Yritä uudelleen' })).toBeInTheDocument()
+  })
+
+  it('shows the completeness banner composed correctly in Finnish', async () => {
+    const K_RECEIPT: NonNullable<Receipt['completeness']> = {
+      text_lines: 15,
+      model_lines: 6,
+      recovered_by_retry: 9,
+      recovered_raw_lines: 0,
+      unaccounted_lines: 0,
+      invalid_entries: 0,
+      items_sum: 73.07,
+      receipt_total: 73.07,
+    }
+    const read = Array.from({ length: 6 }, (_, index) => item(index))
+    const recovered = Array.from({ length: 9 }, (_, n) =>
+      item(6 + n, { recovered: 'model_retry' })
+    )
+    mockApi(receipt({ completeness: K_RECEIPT }, [...read, ...recovered]))
+    renderPage()
+
+    await screen.findByText('PRINTED 14')
+    expect(
+      screen.getByText('9/15 riviä jäi lukematta mallilta — ne on palautettu alla, tarkista ne.')
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('palautettu')).toHaveLength(9)
+  })
+
+  it('shows the household fold and skip chrome in Finnish', async () => {
+    mockApi(
+      receipt({}, [
+        item(0),
+        item(1, { generic_name: 'Compost bag', suggested_category: null, non_food: true }),
+      ])
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(screen.getByText(/1 kotitaloustuote · Compost bag/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Näytä' }))
+    expect(screen.getAllByRole('listitem')).toHaveLength(2)
+  })
+
+  it('shows the Finnish stale-receipt warning with the receipt date unchanged', async () => {
+    mockApi(receipt({ purchase_date: isoDaysAgo(102) }))
+    renderPage()
+
+    const warning = await screen.findByRole('alert')
+    expect(warning).toHaveTextContent(/viimeiset käyttöpäivät lasketaan siitä/i)
+    expect(warning.textContent).toContain(finnishDaysAgo(102))
+  })
+})

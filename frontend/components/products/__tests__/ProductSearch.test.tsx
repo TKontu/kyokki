@@ -94,4 +94,80 @@ describe('ProductSearch', () => {
       expect(screen.getByRole('button', { name: 'Milk' })).toBeInTheDocument()
     })
   })
+
+  describe('chrome in Finnish (Post-MVP frontier item 13, phase 3)', () => {
+    beforeEach(() => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+    })
+
+    it('labels the field in Finnish', () => {
+      renderSearch(MILK)
+      expect(screen.getByLabelText('Tuote')).toBeInTheDocument()
+    })
+
+    it('offers the default "new" wording in Finnish when the caller gives none', () => {
+      mockUseProductSearch.mockReturnValue({
+        data: [],
+        settled: true,
+        isFetching: false,
+        isPlaceholderData: false,
+        isPending: false,
+      })
+      render(
+        <ProductSearch
+          categories={CATEGORIES}
+          onPickExisting={jest.fn()}
+          onPickNew={jest.fn()}
+          term="Barista oat"
+          onTermChange={jest.fn()}
+        />
+      )
+      expect(
+        screen.getByRole('button', { name: 'Luo uusi: Barista oat' })
+      ).toBeInTheDocument()
+    })
+
+    it('uses the default Finnish placeholder when the caller gives none', () => {
+      mockUseProductSearch.mockReturnValue({
+        data: [],
+        settled: false,
+        isFetching: false,
+        isPlaceholderData: false,
+        isPending: false,
+      })
+      render(
+        <ProductSearch
+          categories={CATEGORIES}
+          onPickExisting={jest.fn()}
+          onPickNew={jest.fn()}
+          term=""
+          onTermChange={jest.fn()}
+        />
+      )
+      expect(screen.getByPlaceholderText('Maito, jauheliha, omenat…')).toBeInTheDocument()
+    })
+
+    it('still honours a caller-supplied label and placeholder', () => {
+      mockUseProductSearch.mockReturnValue({
+        data: [],
+        settled: true,
+        isFetching: false,
+        isPlaceholderData: false,
+        isPending: false,
+      })
+      render(
+        <ProductSearch
+          categories={CATEGORIES}
+          onPickExisting={jest.fn()}
+          onPickNew={jest.fn()}
+          term="Barista oat"
+          onTermChange={jest.fn()}
+          newLabel={(term) => `New product: ${term}`}
+        />
+      )
+      expect(
+        screen.getByRole('button', { name: 'New product: Barista oat' })
+      ).toBeInTheDocument()
+    })
+  })
 })
