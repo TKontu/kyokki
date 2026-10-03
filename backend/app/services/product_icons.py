@@ -67,6 +67,7 @@ from app.models.product_master import EmojiMatch, IconStatus, ProductMaster
 from app.services import comfyui
 from app.services.broadcast_helpers import broadcast_product_update
 from app.services.icon_briefs import brief_for
+from app.services.icon_subjects import subject_for
 from app.services.icon_workflow import build_icon_workflow
 from app.services.product_emoji import is_non_food
 
@@ -91,16 +92,25 @@ RANDOM_SEED_MAX = 2**63 - 1
 
 
 def icon_subject(name: str, hint: str | None = None) -> str:
-    """What to ask ComfyUI to draw: the generic name, the operator's brief, the cook's hint.
+    """What to ask ComfyUI to draw: the name, plus the operator's brief or a cached
+    visual subject where there is one, plus the cook's hint.
 
     `app.services.icon_briefs` is the only source of the operator's own words for a gap
-    product ("a small can or squeeze out tube" for Tomato puree); most gap products have none
-    and generate from their name alone. A cook's Regenerate hint, if given, is appended last.
+    product ("a small can or squeeze out tube" for Tomato puree), and those words always
+    win over a cached subject where both exist. Otherwise `app.services.icon_subjects`
+    may have a cached, LLM-derived visual description (shape, colour, packaging, how it
+    is served) for this product (Q18 subjects).
+
+    The subject *joins* the name rather than replacing it (F1, planner review of PR
+    #160): dropping the name entirely regressed foods SDXL already drew correctly from
+    the word alone - Fish fingers, Karelian pasty and Canned tuna all read worse on the
+    measured sheets with the name gone, because the name carries real information the
+    model already has, not only the misreading the earlier spikes were about. A product
+    with neither a brief nor a cached subject falls back to its name alone, same as
+    before. A cook's Regenerate hint, if given, is appended last in every case.
     """
-    parts = [name]
-    brief = brief_for(name)
-    if brief:
-        parts.append(brief)
+    extra = brief_for(name) or subject_for(name)
+    parts = [name, extra] if extra else [name]
     if hint and hint.strip():
         parts.append(hint.strip())
     return ", ".join(parts)

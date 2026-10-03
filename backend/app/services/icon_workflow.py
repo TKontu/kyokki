@@ -14,6 +14,19 @@ strength range:
 Operator ruling (2026-09-30), quoted in full: "Flat. No faces" - ``flat`` is therefore the
 default style (``emoji`` stays available for an explicit call), and the negative prompt
 excludes faces and characters in both styles.
+
+Q18 subjects (`docs/spikes/q18_subjects/`) tried composition terms on top of that
+("single object, centred, plain background" positive; "multiple objects, collage"
+negative), aimed at the tiled/multiple-subject failures `docs/spikes/Q18_icon_styles.md`
+and `docs/spikes/q18_g2_live/README.md` saw. Measured against the operator's own rule -
+"keep the template change only if it helps on the measurement" - it fixed exactly one
+product (Tomato puree, a genuine tiled-composition failure) and broke three that already
+rendered correctly on the name or operator brief alone (Canned tuna, Fish fingers,
+Karelian pasty - confirmed template-caused, not subject-caused, by a diagnostic render
+using each product's unchanged subject text through the tuned template). **Reverted**
+(`docs/spikes/q18_subjects/README.md`, the four-way measurement): the text below is back
+to its pre-tuning form. The visual-subject fix (`icon_subject` joining a cached
+description with the name) is independent of this and stays.
 """
 
 from __future__ import annotations
@@ -26,6 +39,8 @@ CHECKPOINT = "sd_xl_base_1.0.safetensors"
 LORA_NAME = "SDXL-Emoji-Lora-r4.safetensors"
 # Operator ruling (2026-09-30): "Flat. No faces". The face/character terms apply to both
 # styles - emoji stays available, but nothing generated may show a face or a character.
+# A "multiple objects, collage" addition (Q18 subjects) was tried and reverted - see the
+# module docstring and docs/spikes/q18_subjects/README.md.
 NEGATIVE_PROMPT = (
     "blurry, text, watermark, face, eyes, mouth, smile, cartoon character, mascot, "
     "anthropomorphic"

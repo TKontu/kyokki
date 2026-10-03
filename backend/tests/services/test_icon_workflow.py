@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.icon_workflow import build_icon_workflow
+from app.services.icon_workflow import NEGATIVE_PROMPT, build_icon_workflow
 
 
 class TestGraphShape:
@@ -224,3 +224,27 @@ class TestStyles:
     def test_flat_strength_out_of_range_is_rejected(self, strength: float) -> None:
         with pytest.raises(ValueError):
             build_icon_workflow("Leek", style="flat", seed=1, lora_strength=strength)
+
+
+class TestCompositionTuningReverted:
+    """Q18 subjects composition tuning ("single object, centred, plain white
+    background"; negative "multiple objects, collage") was added, then measured
+    against a4.comfyui in `docs/spikes/q18_subjects/README.md` ("Revised root cause")
+    and reverted: on the stricter, product-by-product reading it fixed exactly one
+    product (Tomato puree, a genuine tiled-composition failure) and broke three that
+    rendered correctly on the name/brief alone before it (Canned tuna, Fish fingers,
+    Karelian pasty - diagnostically confirmed template-caused, not subject-caused).
+    The original assignment's own rule - "keep the template change only if it helps on
+    the measurement" - argues against keeping it net. The positive and negative prompt
+    text are back to their pre-tuning form; the graph shape, trigger words and "Flat.
+    No faces" were never touched either way."""
+
+    def test_the_positive_prompt_has_no_composition_terms(self) -> None:
+        text = build_icon_workflow("Leek", style="flat", seed=1)["3"]["inputs"]["text"]
+        assert text == "flat, Leek, simple flat icon, white background"
+
+    def test_the_negative_prompt_has_no_composition_terms(self) -> None:
+        assert NEGATIVE_PROMPT == (
+            "blurry, text, watermark, face, eyes, mouth, smile, cartoon character, "
+            "mascot, anthropomorphic"
+        )
