@@ -1,4 +1,7 @@
+'use client';
+
 import React from 'react';
+import { useT } from '@/lib/i18n';
 
 export interface BadgeProps {
   children: React.ReactNode;
@@ -72,25 +75,26 @@ export const ExpiryBadge: React.FC<{
   daysUntilExpiry: number;
   className?: string;
 }> = ({ daysUntilExpiry, className = '' }) => {
+  const { t } = useT();
   // Determine color based on days
   let colorClass = '';
   let text = '';
 
   if (daysUntilExpiry < 0) {
     colorClass = 'bg-expiry-expired/10 border-expiry-expired/30 text-expiry-expired dark:bg-expiry-expired/20';
-    text = 'Expired';
+    text = t('badge.expiry.expired');
   } else if (daysUntilExpiry === 0) {
     colorClass = 'bg-expiry-expired/10 border-expiry-expired/30 text-expiry-expired dark:bg-expiry-expired/20';
-    text = 'Today';
+    text = t('badge.expiry.today');
   } else if (daysUntilExpiry <= 2) {
     colorClass = 'bg-expiry-urgent/10 border-expiry-urgent/30 text-expiry-urgent dark:bg-expiry-urgent/20';
-    text = `${daysUntilExpiry}d`;
+    text = t('badge.expiry.days', { count: daysUntilExpiry });
   } else if (daysUntilExpiry <= 5) {
     colorClass = 'bg-expiry-warning/10 border-expiry-warning/30 text-expiry-warning dark:bg-expiry-warning/20';
-    text = `${daysUntilExpiry}d`;
+    text = t('badge.expiry.days', { count: daysUntilExpiry });
   } else {
     colorClass = 'bg-expiry-ok/10 border-expiry-ok/30 text-expiry-ok dark:bg-expiry-ok/20';
-    text = daysUntilExpiry > 10 ? '10d+' : `${daysUntilExpiry}d`;
+    text = daysUntilExpiry > 10 ? t('badge.expiry.tenPlus') : t('badge.expiry.days', { count: daysUntilExpiry });
   }
 
   const combinedClassName = `
@@ -111,12 +115,13 @@ export const StatusBadge: React.FC<{
   status: string;
   className?: string;
 }> = ({ status, className = '' }) => {
+  const { t } = useT();
   const statusConfig: Record<string, { label: string; variant: BadgeProps['variant'] } | undefined> = {
-    sealed: { label: 'Sealed', variant: 'success' },
-    opened: { label: 'Opened', variant: 'info' },
-    partial: { label: 'Partial', variant: 'warning' },
-    empty: { label: 'Empty', variant: 'default' },
-    discarded: { label: 'Discarded', variant: 'error' },
+    sealed: { label: t('badge.status.sealed'), variant: 'success' },
+    opened: { label: t('badge.status.opened'), variant: 'info' },
+    partial: { label: t('badge.status.partial'), variant: 'warning' },
+    empty: { label: t('badge.status.empty'), variant: 'default' },
+    discarded: { label: t('badge.status.discarded'), variant: 'error' },
   };
 
   // An unrecognised status shows itself, neutrally, rather than throwing on `config.variant`

@@ -48,6 +48,26 @@ describe('Settings page', () => {
     })
   })
 
+  describe('display language (Post-MVP frontier item 13, phase 2: the screen\'s own text)', () => {
+    afterEach(() => window.localStorage.clear())
+
+    it('reads its own headings in Finnish once Suomi is chosen', () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      render(<SettingsPage />)
+
+      expect(screen.getByRole('heading', { level: 1, name: 'Asetukset' })).toBeInTheDocument()
+      expect(screen.getByRole('radiogroup', { name: 'Näyttökieli' })).toBeInTheDocument()
+      expect(screen.getByRole('radiogroup', { name: 'Teema' })).toBeInTheDocument()
+      // "English" and "Suomi" are the language's own endonyms, unchanged by the choice
+      expect(screen.getByRole('radio', { name: /^Suomi/ })).toBeInTheDocument()
+      expect(screen.getByRole('radio', { name: /^English/ })).toBeInTheDocument()
+      // The theme's own option names translate too
+      expect(screen.getByRole('radio', { name: /^Järjestelmä/ })).toBeInTheDocument()
+      expect(screen.getByRole('radio', { name: /^Vaalea/ })).toBeInTheDocument()
+      expect(screen.getByRole('radio', { name: /^Tumma/ })).toBeInTheDocument()
+    })
+  })
+
   it('has a heading and a Theme choice of System, Light and Dark', () => {
     render(<SettingsPage />)
 

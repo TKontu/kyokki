@@ -75,6 +75,14 @@ class ShoppingListItemResponse(ShoppingListItemBase):
     is_purchased: bool
     added_at: datetime
     purchased_at: datetime | None = None
+    product_display_names: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "The linked product's name by language code (Post-MVP frontier item 13, "
+            "phase 2), e.g. {'fi': 'Maito'}; empty for a free-text item or one whose "
+            "product has no name in that language - the iPad falls back to `name`."
+        ),
+    )
 
     model_config = {"from_attributes": True}
 

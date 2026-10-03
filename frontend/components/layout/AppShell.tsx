@@ -12,35 +12,38 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useT } from '@/lib/i18n'
 import { StatusBanner } from './StatusBanner'
 
 interface Destination {
   href: string
-  label: string
+  /** A key into `lib/i18n` (Post-MVP frontier item 13, phase 2), not the label itself: the
+   * array is module scope, built once, so the text has to be resolved per render instead. */
+  labelKey: string
   icon: string
   /** Sub-routes that belong to this destination, e.g. a receipt opened from the list. */
   owns?: (pathname: string) => boolean
 }
 
 export const DESTINATIONS: Destination[] = [
-  { href: '/', label: 'Stock', icon: '🧊' },
+  { href: '/', labelKey: 'shell.nav.stock', icon: '🧊' },
   // The iPad's first view onto the shopping list (frontier item 5); the API and the agent CLI
   // have used it since MVP.
-  { href: '/shopping', label: 'Shopping', icon: '🛒' },
+  { href: '/shopping', labelKey: 'shell.nav.shopping', icon: '🛒' },
   // No Scan (Q32): scanning starts from Receipts, which links to /scan
   {
     href: '/receipts',
-    label: 'Receipts',
+    labelKey: 'shell.nav.receipts',
     icon: '🧾',
     // /receipt/<id> is a receipt opened from this list
     owns: (pathname) => pathname.startsWith('/receipt'),
   },
   // The catalog (Q11). Until it existed the product editor could only be reached from an
   // item that happened to be in stock, so most products could not be corrected at all.
-  { href: '/products', label: 'Products', icon: '🏷️' },
+  { href: '/products', labelKey: 'shell.nav.products', icon: '🏷️' },
   // What left the kitchen, and the waste it cost (2026-09-22). The only screen that lists
   // items no longer in stock, which is what makes "Put it back" reachable at all.
-  { href: '/gone', label: 'Gone', icon: '🗑️' },
+  { href: '/gone', labelKey: 'shell.nav.gone', icon: '🗑️' },
 ]
 
 export function isActive(destination: Destination, pathname: string): boolean {
@@ -60,11 +63,12 @@ const activeClass =
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? '/'
+  const { t } = useT()
 
   return (
     <div className="flex min-h-screen flex-col bg-ui-bg dark:bg-ui-dark-bg lg:flex-row">
       <nav
-        aria-label="Main"
+        aria-label={t('shell.nav.main')}
         className={[
           'flex shrink-0 gap-1 border-ui-border bg-ui-bg-secondary p-1',
           'dark:border-ui-dark-border dark:bg-ui-dark-bg-secondary',
@@ -89,14 +93,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span aria-hidden="true" className="text-xl leading-none">
                 {destination.icon}
               </span>
-              {destination.label}
+              {t(destination.labelKey)}
             </Link>
           )
         })}
         <Link
           href="/settings"
-          aria-label="More"
-          title="Settings"
+          aria-label={t('shell.nav.more')}
+          title={t('shell.nav.settings')}
           aria-current={pathname === '/settings' ? 'page' : undefined}
           className={[
             'ml-auto flex min-h-touch min-w-touch shrink-0 items-center justify-center self-center',

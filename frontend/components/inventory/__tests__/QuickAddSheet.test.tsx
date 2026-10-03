@@ -200,9 +200,11 @@ describe('QuickAddSheet', () => {
 
       search('mil')
       fireEvent.click(await screen.findByRole('button', { name: 'Maito' }))
-      fireEvent.click(addButton())
+      // Phase 2: choosing Suomi also translates the button's own text, not only the
+      // product's name - "Add" reads "Lisää".
+      fireEvent.click(screen.getByRole('button', { name: /^lisää$/i }))
 
-      expect(await screen.findByText('Added · Maito')).toBeInTheDocument()
+      expect(await screen.findByText('Lisätty · Maito')).toBeInTheDocument()
     })
 
     it('titles the add-stock step with the Finnish name too (F5 review)', async () => {
@@ -214,6 +216,14 @@ describe('QuickAddSheet', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Maito' }))
 
       expect(screen.getByRole('heading', { name: 'Maito' })).toBeInTheDocument()
+    })
+
+    it('reads the sheet\'s own chrome in Finnish too (phase 2)', () => {
+      window.localStorage.setItem('kyokki.language', 'fi')
+      mockApi()
+      renderSheet()
+
+      expect(screen.getByRole('heading', { name: 'Lisää varastoon' })).toBeInTheDocument()
     })
   })
 

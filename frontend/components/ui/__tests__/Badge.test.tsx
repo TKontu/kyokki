@@ -1,6 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import Badge, { ExpiryBadge, StatusBadge } from '../Badge';
+import { LANGUAGE_KEY } from '@/lib/language';
 
 describe('Badge', () => {
   describe('Rendering', () => {
@@ -144,5 +145,18 @@ describe('StatusBadge', () => {
 
   it('does not throw on an empty status', () => {
     expect(() => render(<StatusBadge status="" />)).not.toThrow();
+  });
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    beforeEach(() => window.localStorage.setItem(LANGUAGE_KEY, 'fi'));
+    afterEach(() => window.localStorage.clear());
+
+    it('reads expiry and status badges in Finnish', () => {
+      render(<ExpiryBadge daysUntilExpiry={0} />);
+      expect(screen.getByText('Tänään')).toBeInTheDocument();
+
+      render(<StatusBadge status="sealed" />);
+      expect(screen.getByText('Avaamaton')).toBeInTheDocument();
+    });
   });
 });

@@ -16,6 +16,7 @@ import React, { useRef, useState } from 'react'
 import Button from '@/components/ui/Button'
 import { fieldErrorClass, fieldInputClass } from '@/components/ui/formStyles'
 import { newIdempotencyKey } from '@/lib/api/shopping'
+import { useT } from '@/lib/i18n'
 import type { ShoppingListItemCreate, ShoppingUnit } from '@/types/shopping'
 
 export const UNITS: readonly ShoppingUnit[] = ['dl', 'tsp', 'tbsp', 'g', 'pcs']
@@ -36,6 +37,7 @@ export function QuickAddRow({ onAdd, pending = false }: QuickAddRowProps) {
   const [amount, setAmount] = useState('')
   const [unit, setUnit] = useState<ShoppingUnit | ''>('')
   const attempt = useRef<PendingAttempt | null>(null)
+  const { t } = useT()
 
   const trimmedName = name.trim()
   const trimmedAmount = amount.trim()
@@ -69,13 +71,17 @@ export function QuickAddRow({ onAdd, pending = false }: QuickAddRowProps) {
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-start gap-2" aria-label="Add an item">
+    <form
+      onSubmit={submit}
+      className="flex flex-wrap items-start gap-2"
+      aria-label={t('shopping.quickAddRow.placeholder')}
+    >
       <input
         type="text"
         value={name}
         onChange={(event) => setName(event.target.value)}
-        placeholder="Add an item"
-        aria-label="Item name"
+        placeholder={t('shopping.quickAddRow.placeholder')}
+        aria-label={t('shopping.quickAddRow.nameLabel')}
         className={`${fieldInputClass} min-w-[8rem] flex-1`}
       />
       <div>
@@ -86,22 +92,22 @@ export function QuickAddRow({ onAdd, pending = false }: QuickAddRowProps) {
           step="any"
           value={amount}
           onChange={(event) => setAmount(event.target.value)}
-          placeholder="Amount"
-          aria-label="Amount"
+          placeholder={t('shopping.quickAddRow.amountPlaceholder')}
+          aria-label={t('shopping.quickAddRow.amountLabel')}
           aria-invalid={amountInvalid}
           aria-describedby={amountInvalid ? 'quick-add-amount-error' : undefined}
           className={`${fieldInputClass} w-24`}
         />
         {amountInvalid && (
           <p id="quick-add-amount-error" className={fieldErrorClass}>
-            Enter a number greater than 0
+            {t('shopping.quickAddRow.amountError')}
           </p>
         )}
       </div>
       <select
         value={unit}
         onChange={(event) => setUnit(event.target.value as ShoppingUnit)}
-        aria-label="Unit"
+        aria-label={t('shopping.quickAddRow.unitLabel')}
         className={`${fieldInputClass} w-24`}
       >
         <option value="">pcs</option>
@@ -112,7 +118,7 @@ export function QuickAddRow({ onAdd, pending = false }: QuickAddRowProps) {
         ))}
       </select>
       <Button type="submit" size="md" disabled={!canSubmit} loading={pending}>
-        Add
+        {t('shopping.quickAddRow.add')}
       </Button>
     </form>
   )

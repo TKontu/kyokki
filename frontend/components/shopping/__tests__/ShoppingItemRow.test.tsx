@@ -1,6 +1,7 @@
 import React from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { ShoppingItemRow } from '../ShoppingItemRow'
+import { LANGUAGE_KEY } from '@/lib/language'
 import type { ShoppingListItem } from '@/types/shopping'
 
 const ITEM: ShoppingListItem = {
@@ -82,5 +83,45 @@ describe('ShoppingItemRow', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remove Bananas' }))
 
     expect(onRemove).toHaveBeenCalledTimes(1)
+  })
+
+  describe('display names (Post-MVP frontier item 13, phase 2)', () => {
+    afterEach(() => window.localStorage.clear())
+
+    it('shows the linked product\'s Finnish name once Suomi is chosen', () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      render(
+        <ShoppingItemRow
+          item={{ ...ITEM, name: 'Milk', product_master_id: 'p-1', product_display_names: { fi: 'Maito' } }}
+          onToggle={jest.fn()}
+          onRemove={jest.fn()}
+        />
+      )
+
+      expect(screen.getByText('Maito')).toBeInTheDocument()
+      expect(screen.queryByText('Milk')).not.toBeInTheDocument()
+    })
+
+    it('keeps the cook\'s own wording for a free-text item, even in Finnish', () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      render(<ShoppingItemRow item={ITEM} onToggle={jest.fn()} onRemove={jest.fn()} />)
+
+      expect(screen.getByText('Bananas')).toBeInTheDocument()
+    })
+
+    it('reads the row\'s own chrome - Auto, Urgent, the toggle label - in Finnish', () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      render(
+        <ShoppingItemRow
+          item={{ ...ITEM, source: 'auto_restock' }}
+          onToggle={jest.fn()}
+          onRemove={jest.fn()}
+        />
+      )
+
+      expect(screen.getByText('Autom.')).toBeInTheDocument()
+      expect(screen.getByText('Kiireellinen')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Merkitse Bananas ostetuksi' })).toBeInTheDocument()
+    })
   })
 })

@@ -11,6 +11,7 @@ import { dotCapacity } from '@/components/fridge/capacity'
 import { crowdedItems } from '@/components/fridge/__fixtures__/crowded'
 import { many, stale } from '@/components/fridge/__fixtures__/stock'
 import { AREAS } from '@/lib/fridge'
+import { LANGUAGE_KEY } from '@/lib/language'
 import type { InventoryItem } from '@/types/inventory'
 
 jest.mock('@/hooks/useInventory')
@@ -262,5 +263,17 @@ describe('FridgeView', () => {
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Minced Meat, going stale' })).toBeInTheDocument()
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    beforeEach(() => window.localStorage.setItem(LANGUAGE_KEY, 'fi'))
+    afterEach(() => window.localStorage.clear())
+
+    it('reads the empty state in Finnish', () => {
+      mockItems([])
+      render(<FridgeView />)
+
+      expect(screen.getByText(/Ei tuotteita/)).toBeInTheDocument()
+    })
   })
 })

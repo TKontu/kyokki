@@ -12,12 +12,14 @@ import Button from '@/components/ui/Button'
 import { useUndo, useUndoPreview } from '@/hooks/useUndo'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
+import { useT } from '@/lib/i18n'
 import { describeUndo } from '@/lib/undo'
 
 export function UndoButton() {
   const { data: preview } = useUndoPreview()
   const undo = useUndo()
   const toast = useToast()
+  const { t } = useT()
 
   const description = preview ? describeUndo(preview) : null
 
@@ -30,7 +32,7 @@ export function UndoButton() {
         toast.error(
           isAPIError(error) && error.status < 500 && error.message
             ? error.message
-            : 'Could not undo'
+            : t('inventory.undo.error')
         ),
     })
   }
@@ -41,10 +43,12 @@ export function UndoButton() {
       size="md"
       disabled={!preview}
       loading={undo.isPending}
-      aria-label={description ? `Undo ${description}` : 'Undo'}
+      aria-label={
+        description ? t('inventory.undo.undoDescribed', { description }) : t('inventory.undo.undo')
+      }
       onClick={handleUndo}
     >
-      <span aria-hidden="true">↶ Undo</span>
+      <span aria-hidden="true">↶ {t('inventory.undo.undo')}</span>
       {description && (
         <span
           aria-hidden="true"

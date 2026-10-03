@@ -11,9 +11,12 @@
  * "Empty". No numbers.
  */
 
+'use client'
+
 import Link from 'next/link'
 import type { CSSProperties } from 'react'
 import type { Area } from '@/lib/fridge'
+import { useT } from '@/lib/i18n'
 import { STALENESS, stalenessOf } from '@/lib/staleness'
 import type { InventoryItem } from '@/types/inventory'
 import { DOT, DOT_GAP, HEADER, PAD, dotCapacity, dotSlot, fitDots } from './capacity'
@@ -57,6 +60,7 @@ export function AreaSpot({
   radius = 'rounded-xl',
   labelSize = 13,
 }: AreaSpotProps) {
+  const { t } = useT()
   // A length in the drawing's units, as a share of the canvas's width
   const u = (units: number) => `calc(${units} * 100cqw / ${width})`
   const place: CSSProperties = {
@@ -76,7 +80,7 @@ export function AreaSpot({
     <section aria-label={area.label} className="absolute" style={place}>
       <Link
         href={`/area/${area.id}`}
-        aria-label={`Open ${area.label}`}
+        aria-label={t('fridge.areaSpot.open', { area: area.label })}
         style={{ padding: u(PAD), gap: u(DOT_GAP) }}
         className={
           `absolute inset-0 flex flex-col overflow-hidden transition-colors ${radius} ` +
@@ -111,7 +115,7 @@ export function AreaSpot({
             className="italic text-slate-500 dark:text-slate-400"
             style={{ fontSize: u(12), paddingLeft: u(4) }}
           >
-            Empty
+            {t('fridge.areaSpot.empty')}
           </span>
         ) : (
           // Each dot is placed in its slot (`dotSlot`), not flowed, so what fits is exact

@@ -10,6 +10,7 @@ import {
   THEME_COLOR_DARK,
   THEME_COLOR_LIGHT,
 } from "@/lib/brand";
+import { LANGUAGE_SCRIPT } from "@/lib/language";
 import { THEME_SCRIPT } from "@/lib/theme";
 import { Providers } from "./providers";
 
@@ -66,11 +67,14 @@ export default function RootLayout({
 }>) {
   return (
     // suppressHydrationWarning: the theme script may put .light or .dark on <html> before
-    // React hydrates, which is the point of it (Q31)
+    // React hydrates (Q31), and LANGUAGE_SCRIPT may set lang="fi" the same way (frontier
+    // item 13 phase 2) - both before React ever compares this attribute to what it rendered.
     <html lang="en" suppressHydrationWarning>
       <head>
         {/* The stored theme, applied before the first paint so a dark kitchen never flashes */}
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        {/* The stored display language, on <html lang> before the first paint */}
+        <script dangerouslySetInnerHTML={{ __html: LANGUAGE_SCRIPT }} />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}

@@ -6,6 +6,7 @@
 import React from 'react'
 import { render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { LANGUAGE_KEY } from '@/lib/language'
 import { AppShell, DESTINATIONS } from '../AppShell'
 
 let pathname = '/'
@@ -135,5 +136,33 @@ describe('AppShell', () => {
     renderShell()
 
     expect(screen.queryByRole('link', { current: 'page' })).not.toBeInTheDocument()
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    beforeEach(() => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+    })
+    afterEach(() => {
+      window.localStorage.clear()
+    })
+
+    it('reads the nav in Finnish once Suomi is chosen', () => {
+      renderShell()
+
+      const nav = screen.getByRole('navigation', { name: 'Päävalikko' })
+      expect(within(nav).getByRole('link', { name: 'Jääkaappi' })).toHaveAttribute('href', '/')
+      expect(within(nav).getByRole('link', { name: 'Ostoslista' })).toHaveAttribute(
+        'href',
+        '/shopping'
+      )
+      expect(within(nav).getByRole('link', { name: 'Käytetty' })).toHaveAttribute(
+        'href',
+        '/gone'
+      )
+      expect(within(nav).getByRole('link', { name: 'Lisää' })).toHaveAttribute(
+        'title',
+        'Asetukset'
+      )
+    })
   })
 })

@@ -10,6 +10,7 @@ import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react
 import { StatusBanner } from '../StatusBanner'
 import { NetworkError } from '@/lib/api/errors'
 import { STALE_AFTER_MS } from '@/hooks/useBackendStatus'
+import { LANGUAGE_KEY } from '@/lib/language'
 
 const newClient = () =>
   new QueryClient({
@@ -182,5 +183,37 @@ describe('StatusBanner', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('and 1 more')
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    beforeEach(() => window.localStorage.setItem(LANGUAGE_KEY, 'fi'))
+    afterEach(() => window.localStorage.clear())
+
+    it('says the server is not answering, in Finnish', async () => {
+      const client = newClient()
+      await landed(client)
+      renderBanner(client)
+
+      await act(async () => {
+        await failed(client, 'receipts')
+      })
+
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('Ei yhteyttä keittiön palvelimeen')
+      expect(screen.getByRole('button', { name: 'Yritä uudelleen' })).toBeInTheDocument()
+    })
+
+    it('names a failed action in Finnish', async () => {
+      const client = newClient()
+      renderBanner(client)
+
+      await act(async () => {
+        await failedAction(client, 'Consume')
+      })
+
+      const alert = await screen.findByRole('alert')
+      expect(alert).toHaveTextContent('Consume epäonnistui')
+      expect(screen.getByRole('button', { name: 'Yritä uudelleen: Consume' })).toBeInTheDocument()
+    })
   })
 })

@@ -9,6 +9,7 @@ import {
   type ToastOptions,
   type ToastType,
 } from '@/hooks/useToast';
+import { useT } from '@/lib/i18n';
 
 const MAX_VISIBLE = 3;
 
@@ -45,6 +46,7 @@ const controlStyles = `
 `;
 
 const Toast: React.FC<ToastProps> = ({ type, message, action, onDismiss, className = '' }) => {
+  const { t } = useT();
   const roleProps =
     type === 'error'
       ? { role: 'alert' as const }
@@ -77,7 +79,7 @@ const Toast: React.FC<ToastProps> = ({ type, message, action, onDismiss, classNa
       )}
       <button
         type="button"
-        aria-label="Dismiss"
+        aria-label={t('status.dismiss')}
         className={controlStyles.trim().replace(/\s+/g, ' ')}
         onClick={onDismiss}
       >

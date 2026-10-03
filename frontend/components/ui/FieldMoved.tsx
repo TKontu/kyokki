@@ -10,20 +10,22 @@
 import React from 'react'
 import Button from '@/components/ui/Button'
 import type { FieldEdit } from '@/hooks/useFieldEdit'
+import { useT } from '@/lib/i18n'
 
 export function FieldMoved({ label, field }: { label: string; field: FieldEdit }) {
+  const { t } = useT()
   if (field.moved === null) return null
   return (
     <div
       role="status"
       className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary"
     >
-      <span>{`${label} changed to ${field.moved} while this was open`}</span>
+      <span>{t('common.fieldChangedWhileOpen', { label, value: field.moved })}</span>
       <Button variant="ghost" size="sm" onClick={field.keepMine}>
-        Keep mine
+        {t('common.keepMine')}
       </Button>
       <Button variant="ghost" size="sm" onClick={field.takeTheirs}>
-        {`Use ${field.moved}`}
+        {t('common.useTheirs', { value: field.moved })}
       </Button>
     </div>
   )

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
+import { LANGUAGE_KEY } from '@/lib/language'
 import { GenerateSheet } from '../GenerateSheet'
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
@@ -167,5 +168,29 @@ describe('GenerateSheet', () => {
 
     expect(await screen.findByText(/Flour/)).toBeInTheDocument()
     expect(screen.getByText(/cannot be counted/)).toBeInTheDocument()
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    afterEach(() => window.localStorage.clear())
+
+    it('reads the sheet in Finnish, and a decimal need with a comma', async () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      api({
+        added: [
+          { product_id: 'p1', name: 'Milk', need: 2.5, unit: 'dl', on_hand: 1, min_stock: 5, item_id: null, reason: null },
+        ],
+        updated: [],
+        unchanged: [],
+        skipped: [],
+        dry_run: true,
+      })
+
+      renderSheet()
+
+      expect(await screen.findByRole('heading', { name: 'Luo vähissä olevista' })).toBeInTheDocument()
+      expect(screen.getByText('Uudet')).toBeInTheDocument()
+      expect(screen.getByText('Milk · 2,5 dl')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Lisää listalle' })).toBeInTheDocument()
+    })
   })
 })

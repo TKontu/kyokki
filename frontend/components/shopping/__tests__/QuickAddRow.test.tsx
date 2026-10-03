@@ -1,6 +1,7 @@
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QuickAddRow } from '../QuickAddRow'
+import { LANGUAGE_KEY } from '@/lib/language'
 
 function uuid(key: string) {
   expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
@@ -125,6 +126,20 @@ describe('QuickAddRow', () => {
       const [, firstKey] = onAdd.mock.calls[0]
       const [, secondKey] = onAdd.mock.calls[1]
       expect(secondKey).not.toBe(firstKey)
+    })
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    afterEach(() => window.localStorage.clear())
+
+    it('reads the row in Finnish once Suomi is chosen', () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      render(<QuickAddRow onAdd={jest.fn()} />)
+
+      expect(screen.getByLabelText('Tuotteen nimi')).toBeInTheDocument()
+      expect(screen.getByLabelText('Määrä')).toBeInTheDocument()
+      expect(screen.getByLabelText('Yksikkö')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Lisää' })).toBeInTheDocument()
     })
   })
 })

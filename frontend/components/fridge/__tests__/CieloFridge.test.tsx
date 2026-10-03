@@ -20,6 +20,7 @@ import {
 import { DOT, dotCapacity } from '../capacity'
 import { crowdedItems } from '../__fixtures__/crowded'
 import { TODAY, item, many } from '../__fixtures__/stock'
+import { LANGUAGE_KEY } from '@/lib/language'
 
 beforeEach(() => {
   jest.useFakeTimers()
@@ -288,5 +289,20 @@ describe('CieloFridge', () => {
     render(<CieloFridge items={[item()]} />)
 
     expect(screen.queryByRole('region', { name: 'Other' })).not.toBeInTheDocument()
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    beforeEach(() => window.localStorage.setItem(LANGUAGE_KEY, 'fi'))
+    afterEach(() => window.localStorage.clear())
+
+    it('reads "Empty" and the area link in Finnish', () => {
+      render(<CieloFridge items={[item()]} />)
+
+      expect(within(area('Veggies')).getByText('Tyhjä')).toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Avaa Spices' })).toHaveAttribute(
+        'href',
+        '/area/spices'
+      )
+    })
   })
 })

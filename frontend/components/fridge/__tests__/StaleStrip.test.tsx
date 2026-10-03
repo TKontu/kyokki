@@ -7,6 +7,7 @@ import React from 'react'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { STALE_STRIP_MAX, StaleStrip } from '../StaleStrip'
 import { TODAY, item, inDays, stale } from '../__fixtures__/stock'
+import { LANGUAGE_KEY } from '@/lib/language'
 
 beforeEach(() => {
   jest.useFakeTimers()
@@ -118,5 +119,32 @@ describe('StaleStrip', () => {
     render(<StaleStrip items={[]} expired={[]} />)
 
     expect(screen.queryByRole('region', { name: 'Going stale' })).not.toBeInTheDocument()
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    beforeEach(() => window.localStorage.setItem(LANGUAGE_KEY, 'fi'))
+    afterEach(() => window.localStorage.clear())
+
+    it('reads the heading and Clear expired in Finnish', () => {
+      render(
+        <StaleStrip
+          items={stale(1)}
+          expired={stale(1)}
+          onConsume={jest.fn()}
+          onClearExpired={jest.fn()}
+        />
+      )
+
+      expect(screen.getByRole('region', { name: 'Vanhenemassa' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Poista vanhentuneet' })).toBeInTheDocument()
+    })
+
+    it('reads the overflow "More" tile in Finnish', () => {
+      render(<StaleStrip items={stale(12)} expired={[]} onConsume={jest.fn()} onMore={jest.fn()} />)
+
+      expect(
+        screen.getByRole('button', { name: 'Kaikki vanhenemassa olevat' })
+      ).toBeInTheDocument()
+    })
   })
 })

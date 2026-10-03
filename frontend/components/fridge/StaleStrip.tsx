@@ -16,6 +16,7 @@
 import React, { useEffect, useState } from 'react'
 import { IngredientTile } from '@/components/inventory/IngredientTile'
 import BottomSheet from '@/components/ui/BottomSheet'
+import { useT } from '@/lib/i18n'
 import type { InventoryItem } from '@/types/inventory'
 
 /** Tiles in the strip's one row, the "More" tile included: about 120 px each at 810 px wide. */
@@ -43,6 +44,7 @@ export interface StaleStripProps {
 }
 
 export function StaleStrip({ items, expired, onConsume, onMore, onClearExpired }: StaleStripProps) {
+  const { t } = useT()
   const [showAll, setShowAll] = useState(false)
   // Everything in the list used up: close it, or the next item going stale would open it
   const empty = items.length === 0
@@ -63,18 +65,18 @@ export function StaleStrip({ items, expired, onConsume, onMore, onClearExpired }
 
   return (
     <section
-      aria-label="Going stale"
+      aria-label={t('fridge.staleStrip.ariaLabel')}
       className="flex shrink-0 flex-col gap-1 rounded-3xl border-2 border-sky-200 bg-sky-50 px-3 pb-3 pt-1 dark:border-sky-900 dark:bg-slate-900"
     >
       <h2 className="flex min-h-touch items-center gap-2 text-base font-semibold text-rose-700 dark:text-rose-300">
-        Going stale
+        {t('fridge.staleStrip.heading')}
         {onClearExpired && expired.length > 0 && (
           <button
             type="button"
             onClick={() => onClearExpired(expired)}
             className="ml-auto min-h-touch px-1 text-sm font-medium underline"
           >
-            Clear expired
+            {t('fridge.staleStrip.clearExpired')}
           </button>
         )}
       </h2>
@@ -88,7 +90,7 @@ export function StaleStrip({ items, expired, onConsume, onMore, onClearExpired }
           <li className="min-w-0">
             <button
               type="button"
-              aria-label="All going stale"
+              aria-label={t('fridge.staleStrip.allAriaLabel')}
               onClick={() => setShowAll(true)}
               className={
                 'flex h-full min-h-touch-lg w-full flex-col items-center justify-center gap-1 ' +
@@ -101,12 +103,16 @@ export function StaleStrip({ items, expired, onConsume, onMore, onClearExpired }
               <span aria-hidden="true" className="text-2xl leading-none">
                 ⋯
               </span>
-              More
+              {t('fridge.staleStrip.more')}
             </button>
           </li>
         )}
       </ul>
-      <BottomSheet open={showAll} onClose={() => setShowAll(false)} title="Going stale">
+      <BottomSheet
+        open={showAll}
+        onClose={() => setShowAll(false)}
+        title={t('fridge.staleStrip.heading')}
+      >
         <ul className="grid grid-cols-4 gap-2 sm:grid-cols-5">
           {items.map((item) => (
             <li key={item.id} lang="fi" className={CELL}>

@@ -10,6 +10,7 @@
 
 import React, { useEffect } from 'react'
 import Button from '@/components/ui/Button'
+import { useT } from '@/lib/i18n'
 
 /**
  * How long to wait before retrying on our own. Short enough that a backend restart or a dropped
@@ -28,6 +29,7 @@ export interface ErrorScreenProps {
 }
 
 export function ErrorScreen({ error, reset, retryMs = AUTO_RETRY_MS }: ErrorScreenProps) {
+  const { t } = useT()
   useEffect(() => {
     const timer = setTimeout(reset, retryMs)
     return () => clearTimeout(timer)
@@ -39,11 +41,10 @@ export function ErrorScreen({ error, reset, retryMs = AUTO_RETRY_MS }: ErrorScre
       className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-6 py-10 text-center"
     >
       <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">
-        Something went wrong
+        {t('errorScreen.title')}
       </h1>
       <p className="max-w-md text-base text-ui-text-secondary dark:text-ui-dark-text-secondary">
-        Kyokki hit an error it could not recover from on its own. It is trying again by itself,
-        so you can leave this screen alone.
+        {t('errorScreen.body')}
       </p>
       {/* The message is for whoever is debugging; it is never the only thing on screen. */}
       {error.message && (
@@ -52,7 +53,7 @@ export function ErrorScreen({ error, reset, retryMs = AUTO_RETRY_MS }: ErrorScre
         </p>
       )}
       <Button size="lg" onClick={reset}>
-        Try again
+        {t('errorScreen.retry')}
       </Button>
     </div>
   )

@@ -6,6 +6,7 @@
 import React from 'react'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { AUTO_RETRY_MS, ErrorScreen } from '../ErrorScreen'
+import { LANGUAGE_KEY } from '@/lib/language'
 
 afterEach(() => jest.useRealTimers())
 
@@ -61,5 +62,17 @@ describe('ErrorScreen', () => {
       jest.advanceTimersByTime(AUTO_RETRY_MS * 2)
     })
     expect(reset).not.toHaveBeenCalled()
+  })
+
+  describe('display language (Post-MVP frontier item 13, phase 2)', () => {
+    beforeEach(() => window.localStorage.setItem(LANGUAGE_KEY, 'fi'))
+    afterEach(() => window.localStorage.clear())
+
+    it('reads in Finnish once Suomi is chosen', () => {
+      renderScreen()
+
+      expect(screen.getByText('Jokin meni pieleen')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Yritä uudelleen' })).toBeInTheDocument()
+    })
   })
 })

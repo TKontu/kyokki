@@ -98,6 +98,17 @@ describe('ItemEditSheet', () => {
     expect(screen.getByRole('heading', { name: 'Kaurajuoma' })).toBeInTheDocument()
   })
 
+  it('reads Save, Expiry and Location in Finnish too (phase 2)', () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    mockApi()
+    renderSheet()
+
+    expect(screen.getByRole('button', { name: 'Tallenna' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Viimeinen käyttöpäivä')).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Sijainti' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Heitä pois' })).toBeInTheDocument()
+  })
+
   it('is prefilled from the item and Save waits for a change', () => {
     mockApi()
     renderSheet()

@@ -15,6 +15,7 @@ import React from 'react'
 import Button from '@/components/ui/Button'
 import { useBackendStatus, STALE_AFTER_MS } from '@/hooks/useBackendStatus'
 import { useFailedActions } from '@/hooks/useFailedActions'
+import { useT } from '@/lib/i18n'
 import { formatAgo } from '@/lib/dates'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -36,6 +37,7 @@ export function StatusBanner() {
   const client = useQueryClient()
   const { unreachable, lastSync } = useBackendStatus()
   const failures = useFailedActions()
+  const { t } = useT()
 
   // What a cook can act on comes first: a tap that did not happen is theirs to retry, while
   // the connection is the app's problem to keep trying at.
@@ -45,26 +47,28 @@ export function StatusBanner() {
       <div role="alert" className={boxClass + toneClass.alarm}>
         {shown.map((failure) => (
           <span key={failure.id} className="flex items-center gap-2">
-            <strong className="font-medium">{`${failure.label} failed`}</strong>
+            <strong className="font-medium">{t('status.failed', { label: failure.label })}</strong>
             <Button
               variant="secondary"
               size="sm"
-              aria-label={`Retry ${failure.label}`}
+              aria-label={t('status.retryLabel', { label: failure.label })}
               onClick={failure.retry}
             >
-              Retry
+              {t('status.retry')}
             </Button>
             <Button
               variant="ghost"
               size="sm"
-              aria-label={`Dismiss ${failure.label}`}
+              aria-label={t('status.dismissLabel', { label: failure.label })}
               onClick={failure.dismiss}
             >
               ✕
             </Button>
           </span>
         ))}
-        {failures.length > MAX_SHOWN && <span>{`and ${failures.length - MAX_SHOWN} more`}</span>}
+        {failures.length > MAX_SHOWN && (
+          <span>{t('status.more', { count: failures.length - MAX_SHOWN })}</span>
+        )}
       </div>
     )
   }
@@ -73,8 +77,8 @@ export function StatusBanner() {
     return (
       <div role="alert" className={boxClass + toneClass.alarm}>
         <span>
-          Not reaching the kitchen server
-          {lastSync !== null && ` · showing stock from ${formatAgo(lastSync)}`}
+          {t('status.unreachable')}
+          {lastSync !== null && t('status.showingFrom', { when: formatAgo(lastSync) })}
         </span>
         <Button
           variant="secondary"
@@ -87,7 +91,7 @@ export function StatusBanner() {
             })
           }
         >
-          Try again
+          {t('status.tryAgain')}
         </Button>
       </div>
     )
@@ -98,7 +102,7 @@ export function StatusBanner() {
   if (lastSync !== null && Date.now() - lastSync > STALE_AFTER_MS) {
     return (
       <div role="status" className={boxClass + toneClass.quiet}>
-        <span>{`Last updated ${formatAgo(lastSync)}`}</span>
+        <span>{t('status.lastUpdated', { when: formatAgo(lastSync) })}</span>
       </div>
     )
   }

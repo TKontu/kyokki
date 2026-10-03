@@ -2,6 +2,7 @@
 
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useT } from '@/lib/i18n';
 
 export interface BottomSheetProps {
   open: boolean;
@@ -39,6 +40,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
   const [mounted, setMounted] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const { t } = useT();
 
   // Keep the latest onClose without re-running the open effect on every render.
   const onCloseRef = useRef(onClose);
@@ -144,7 +146,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
           </h2>
           <button
             type="button"
-            aria-label="Close"
+            aria-label={t('common.close')}
             onClick={onClose}
             className="min-h-touch min-w-touch rounded-ui text-ui-text-secondary dark:text-ui-dark-text-secondary hover:bg-ui-bg-secondary dark:hover:bg-ui-dark-bg-secondary transition-all duration-ui focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 no-select"
           >
