@@ -122,16 +122,22 @@ async def stock_runout(
     within_days: int | None = Query(
         None, ge=0, description="Only products running out within N days"
     ),
+    include_out: bool = Query(
+        False, description="Also list products already out of stock"
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> list[RunoutProduct]:
     """When each product will run out, soonest first (Phase 3, frontier item 8).
 
     See `services.runout` for the method: a simple daily-use rate over the last 60
     days, with no seasonality. `within_days` filters to `days_left <= N`, which leaves
-    out a product without enough history (it has no `days_left` to compare). Writes
-    nothing.
+    out a product without enough history (it has no `days_left` to compare). A product
+    already out of stock is excluded by default - this is a run-out forecast, not a
+    list of what is gone - unless `include_out` is set. Writes nothing.
     """
-    return await runout_service.forecast(db, within_days=within_days)
+    return await runout_service.forecast(
+        db, within_days=within_days, include_out=include_out
+    )
 
 
 @router.post(

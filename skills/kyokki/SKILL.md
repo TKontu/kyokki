@@ -102,10 +102,12 @@ logged as a discard and can be undone with the general undo.
 ### What's about to run out?
 
 A daily use rate from the last 60 days, no seasonality - a product short of history
-reports `insufficient_history`, one with no stock left reports `out`.
+reports `insufficient_history`. One with no stock left reports `out` but is left off
+the list by default; add `--include-out` to see it too.
 
 ```
 kyokki stock runout --within 7
+kyokki stock runout --within 7 --include-out
 ```
 
 ### A receipt

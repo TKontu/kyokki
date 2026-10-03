@@ -507,6 +507,15 @@ def test_stock_runout_human_flags_expires_first(
     assert "2026-10-07 !" in result.out
 
 
+def test_stock_runout_include_out_sends_flag(api: FakeApi, run: Runner) -> None:
+    out_row = {**RUNOUT_ROW, "status": "out", "days_left": 0, "runs_out_on": None}
+    api.on("GET", "/api/stock/runout", body=[out_row])
+    result = run("stock", "runout", "--include-out")
+    assert result.code == 0
+    assert dict(api.last.url.params) == {"include_out": "true"}
+    assert result.json() == [out_row]
+
+
 # --- product ------------------------------------------------------------------
 
 

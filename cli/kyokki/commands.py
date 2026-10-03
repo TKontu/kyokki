@@ -294,7 +294,10 @@ def stock_runout(ctx: Context) -> Outcome:
     rows = ctx.api.request(
         "GET",
         "/api/stock/runout",
-        params={"within_days": a.within},
+        params={
+            "within_days": a.within,
+            "include_out": "true" if a.include_out else None,
+        },
         expect=list,
     ).body
 

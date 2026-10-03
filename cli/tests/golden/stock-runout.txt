@@ -1,14 +1,17 @@
-usage: kyokki stock runout [-h] [--within DAYS] [--url URL] [--token TOKEN]
-                           [--json] [--verbose]
+usage: kyokki stock runout [-h] [--within DAYS] [--include-out] [--url URL]
+                           [--token TOKEN] [--json] [--verbose]
 
 A daily use rate from the last 60 days of consumption (no
 seasonality), and the date active stock runs out at that rate. A
-product without enough history reports insufficient_history; one
-already out of stock reports out. Writes nothing.
+product without enough history reports insufficient_history. One
+already out of stock reports out, but is left off the list by
+default - this answers what will run out soon, not what is gone -
+unless --include-out is given. Writes nothing.
 
 options:
   -h, --help     show this help message and exit
   --within DAYS  only products running out within DAYS days
+  --include-out  also list products already out of stock
 
 connection and output:
   --url URL      Kyokki base URL, e.g. http://kyokki.lan:17300 (default:
@@ -22,6 +25,7 @@ connection and output:
 examples:
   kyokki stock runout
   kyokki stock runout --within 7
+  kyokki stock runout --include-out
 
 exit codes:
   0 ok
