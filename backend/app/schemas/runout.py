@@ -29,7 +29,10 @@ class RunoutProduct(BaseModel):
     active_stock: JsonDecimal = Field(..., description="On hand now, in unit")
     daily_rate: JsonDecimal | None = Field(
         None,
-        description="Consumed per day over the lookback window; null without enough history",
+        description=(
+            "Consumed per day in stock over the lookback window (days with none in "
+            "stock do not count); null without enough history"
+        ),
     )
     runs_out_on: date | None = Field(
         None,
