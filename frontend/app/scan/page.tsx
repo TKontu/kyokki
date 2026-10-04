@@ -24,8 +24,7 @@ import { downscaleImage } from '@/lib/images'
 
 const ACCEPT = 'image/*,application/pdf'
 
-const linkClass =
-  'min-h-touch text-base text-ui-text underline dark:text-ui-dark-text'
+const linkClass = 'min-h-touch text-base text-ui-text underline dark:text-ui-dark-text'
 
 /** A second upload of the same file is refused, and the answer says which receipt it was. */
 function existingReceiptId(error: unknown): string | null {
@@ -96,9 +95,9 @@ function ScanPageContent() {
 
     // One request at a time, in the order picked: the worker reads one file at a time
     const outcomes: Outcome[] = []
-    for (const [index, file] of files.entries()) {
+    for (let index = 0; index < files.length; index++) {
       setProgress({ current: index + 1, total: files.length })
-      outcomes.push(await uploadOne(file))
+      outcomes.push(await uploadOne(files[index]))
     }
     setProgress(null)
 
