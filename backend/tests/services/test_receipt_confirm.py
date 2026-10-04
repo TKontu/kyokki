@@ -9,6 +9,11 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.crud.product_name import (
+    learn_product_name,
+    product_for_name,
+)
+from app.domain.product_names import normalize_product_name
 from app.models.category import Category
 from app.models.inventory_item import InventoryItem
 from app.models.non_food_name import NonFoodName
@@ -17,11 +22,6 @@ from app.models.product_name import ProductName
 from app.models.receipt import Receipt
 from app.models.store_product_alias import StoreProductAlias
 from app.schemas.receipt import ConfirmedItemCreate, ReceiptStatus
-from app.services.product_names import (
-    learn_product_name,
-    normalize_product_name,
-    product_for_name,
-)
 from app.services.product_resolution import (
     ProductResolution,
     Resolution,

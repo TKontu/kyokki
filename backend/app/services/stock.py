@@ -28,6 +28,8 @@ from app.crud import inventory_item as crud_inventory
 from app.crud.consumption_log import ConsumptionAction, add_consumption_log
 from app.crud.inventory_item import _amount_in_item_units, apply_consumption
 from app.crud.product_master import MovedInventoryItem
+from app.domain.item_status import ItemEvent, ItemFrozen, next_status
+from app.domain.units import canonical_factor, quantise, to_canonical_decimal
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
@@ -49,10 +51,8 @@ from app.services.generic_products import (
     build_inventory_item,
 )
 from app.services.idempotency import IdempotencyClaim
-from app.services.item_status import ItemEvent, ItemFrozen, next_status
 from app.services.product_lookup import product_for_request
 from app.services.shelf_life_learning import learn_from_item, lock_product
-from app.services.units import canonical_factor, quantise, to_canonical_decimal
 
 logger = get_logger(__name__)
 

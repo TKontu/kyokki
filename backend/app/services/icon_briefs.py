@@ -10,7 +10,7 @@ file, `app/resources/emoji_curated.json`) - the two can change independently, an
 only place `services/product_icons.py` builds its generation subject text from.
 """
 
-from app.services.product_names import normalize_product_name
+from app.domain.product_names import normalize_product_name
 
 # Verbatim from the gap list's briefs table (F9 review: the previous wording was
 # paraphrased and dropped "should look as they should"). The emoji in the second one is

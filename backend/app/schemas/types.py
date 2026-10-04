@@ -6,7 +6,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, PlainSerializer
 
-from app.services.units import canonical_factor, to_canonical_decimal
+from app.domain.units import canonical_factor, to_canonical_decimal
 
 # DEC-2: Decimal quantities travel as JSON numbers. Validation and Python-side values stay
 # Decimal; only JSON output is converted.

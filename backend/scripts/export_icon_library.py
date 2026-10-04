@@ -44,10 +44,10 @@ from urllib.parse import urlparse
 import httpx
 from PIL import Image, ImageDraw, ImageFont
 
+from app.domain.product_names import normalize_product_name
 from app.services.icon_briefs import brief_for
 from app.services.icon_library import index_entry, slug_for
 from app.services.icon_subjects import subject_for
-from app.services.product_names import normalize_product_name
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 LIBRARY_DIR = BACKEND_DIR / "app" / "resources" / "icon_library"

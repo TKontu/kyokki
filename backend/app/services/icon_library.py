@@ -9,7 +9,7 @@ deployment. See `docs/icon_library/README.md` for what the library is and how an
 gets into it (`scripts/export_icon_library.py`, reviewed by the operator in the PR before
 it ever merges - a contact sheet is part of that review, not this module's job).
 
-Looked up by `app.services.product_names.normalize_product_name`, the same key
+Looked up by `app.domain.product_names.normalize_product_name`, the same key
 `app.services.icon_subjects.subject_for` uses: casefolded, whitespace collapsed.
 Synonyms are not used here - a display name or a model-taught alias is not identity,
 only the product's own canonical name is, exactly as `icon_subjects` already treats it.
@@ -45,10 +45,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.crud import product_master as crud_product
+from app.domain.product_names import normalize_product_name
 from app.models.product_master import EmojiMatch, IconStatus, ProductMaster
 from app.services.icon_briefs import brief_for
 from app.services.icon_subjects import subject_for
-from app.services.product_names import normalize_product_name
 
 logger = get_logger(__name__)
 

@@ -14,7 +14,7 @@ from uuid import UUID
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.product_names import product_for_name
+from app.crud.product_name import product_for_name
 
 
 async def _create_product(

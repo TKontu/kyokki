@@ -45,13 +45,13 @@ import app.db.session as app_session
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.crud import product_master as crud_product
+from app.domain.product_names import normalize_product_name
 from app.models.product_master import EmojiMatch, ProductMaster
 from app.services.broadcast_helpers import broadcast_product_update
 from app.services.llm_http import LLMAuthError
 from app.services.llm_http import post_chat as llm_post_chat
 from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import known_non_food
-from app.services.product_names import normalize_product_name
 
 logger = get_logger(__name__)
 

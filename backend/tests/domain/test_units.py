@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.services.units import (
+from app.domain.units import (
     canonical_factor,
     grams_from_name,
     grams_to_pieces,

@@ -12,6 +12,7 @@ from app.api.exceptions import handle_integrity_errors
 from app.crud import inventory_item as crud_inventory
 from app.crud.product_master import MovedInventoryItem
 from app.db.session import get_db
+from app.domain.item_status import ItemEvent, ItemFrozen
 from app.schemas.consume import ConsumeRequest
 from app.schemas.inventory_item import (
     BulkItemsRequest,
@@ -34,7 +35,6 @@ from app.services.broadcast_helpers import (
     broadcast_inventory_update,
 )
 from app.services.generic_products import InvalidProductRequest
-from app.services.item_status import ItemEvent, ItemFrozen
 from app.services.quick_add import quick_add
 from app.services.shelf_life_learning import update_item
 from app.services.shelf_life_on_create import schedule_estimates

@@ -42,10 +42,10 @@ import httpx
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.domain.product_names import normalize_product_name
 from app.services.icon_briefs import brief_for
 from app.services.llm_extractor import LLMExtractionError, extract_json_object
 from app.services.llm_http import LLMAuthError, post_chat
-from app.services.product_names import normalize_product_name
 
 logger = get_logger(__name__)
 

@@ -96,6 +96,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.domain.units import quantise
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
@@ -107,7 +108,6 @@ from app.services.shopping_generate import _factor as _conversion_factor
 from app.services.shopping_generate import _Incompatible as Incompatible
 from app.services.shopping_generate import _on_hand as _active_stock
 from app.services.stock import stock_summary
-from app.services.units import quantise
 
 logger = get_logger(__name__)
 

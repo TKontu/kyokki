@@ -17,6 +17,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.crud import product_master as crud_product
+from app.crud.product_name import (
+    known_names,
+    learn_product_name,
+    product_for_name,
+)
+from app.domain.product_names import normalize_product_name
 from app.models.product_master import ProductMaster
 from app.models.product_name import NameSource, ProductName
 from app.schemas.product_names import ProductNameEntry
@@ -27,12 +33,6 @@ from app.schemas.stock import (
 )
 from app.services import idempotency
 from app.services.idempotency import IdempotencyClaim
-from app.services.product_names import (
-    known_names,
-    learn_product_name,
-    normalize_product_name,
-    product_for_name,
-)
 from app.services.product_resolution import ResolvableLine, TrigramRetriever
 
 logger = get_logger(__name__)

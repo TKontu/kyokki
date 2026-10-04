@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.crud import inventory_item as crud_inventory
 from app.crud import product_master as crud_product
+from app.domain.storage import location_for_storage
 from app.schemas.inventory_item import InventoryItemCreate
 from app.services import min_stock
 from app.services.broadcast_helpers import (
@@ -23,7 +24,6 @@ from app.services.off_service import (
     enrich_product_from_off,
     fetch_product_from_off,
 )
-from app.services.storage import location_for_storage
 
 logger = get_logger(__name__)
 

@@ -3,9 +3,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.domain.units import unit_type_for
 from app.models.product_master import EmojiMatch, IconStatus, ShelfLifeSource
 from app.schemas.types import JsonDecimal, canonicalize_units
-from app.services.units import unit_type_for
 
 
 class ProductMasterBase(BaseModel):

@@ -25,12 +25,12 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.crud.product_name import learn_product_name
 from app.db.seed_categories import seed_categories
 from app.models.category import Category
 from app.models.product_master import ProductMaster
 from app.models.store_product_alias import StoreProductAlias
 from app.services.llm_extractor import LLMExtractionError
-from app.services.product_names import learn_product_name
 from app.services.product_resolution import (
     CANDIDATES_PER_LINE,
     Candidate,

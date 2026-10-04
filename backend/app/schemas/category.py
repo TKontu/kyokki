@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, computed_field
 
+from app.domain.storage import StorageType, storage_type_for_category
 from app.services.shelf_life_bands import band_for
-from app.services.storage import StorageType, storage_type_for_category
 
 
 class CategoryBase(BaseModel):
