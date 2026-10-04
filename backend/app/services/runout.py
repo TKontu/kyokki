@@ -20,6 +20,40 @@ not diluted across two months of nothing before it existed. That span is floored
 ``MIN_WINDOW_DAYS`` (7), so one or two events in the last day or two cannot imply an
 absurd daily rate.
 
+Only days on which the product had stock count toward that span. A day with nothing in
+the kitchen cannot be a consumption day, so milk used daily for ten days, then out of
+stock for a month, then restocked two days ago is judged on its thirteen in-stock days,
+not on the six weeks the calendar spans. A day on which it *was* in stock but went unused
+is real low use and still counts - which is why the rule reads stock history, not the
+gaps between consume events (those cannot tell the two apart). Precisely::
+
+    span = max(MIN_WINDOW_DAYS,
+               the calendar days d (in TZ), first consume day <= d < today,
+               on which at least one of the product's items was in active stock)
+
+so a product in stock the whole time gets exactly the calendar span
+``today - first consume day``. An item's time in stock is rebuilt from its own columns
+and its log rows, in time order: it enters at ``created_at``; it leaves at a ``discard``
+row's ``logged_at`` and re-enters at a ``restore`` row's; one now ``empty`` or
+``discarded`` left for the last time at ``consumed_at``; one still active is in stock up
+to now. A day counts if any part of it lies inside one of those intervals. An exit the
+history does not record (``consumed_at`` keeps only the latest one, and an item that went
+empty and was then corrected back up has no row for the first) leaves the item counted as
+in stock, which can only lengthen the span. An undo needs no handling here: it deletes
+the rows it reverses and puts the item's columns back (``services.undo``), so what is
+left reads as if the reversed event never happened.
+
+**Fallback.** Where the history cannot account for the use - any counted consume event
+falls on a day on which no item of the product was in stock, as with data logged before
+these columns were kept, or by an item since deleted - the product falls back to the plain
+calendar span ``today - first consume day``, floored as above. A span is never shortened
+from guesswork.
+
+``forecast`` runs a fixed number of statements however many products it reports: the
+stock summary, the consume rows of every product at once (which also name the
+candidates), the products, and two for the stock history (the items, then their
+``discard``/``restore`` rows). Everything else is grouped in Python.
+
 "Enough history" to trust a rate at all is ``MIN_EVENTS`` (3) consume events on at least
 ``MIN_DISTINCT_DAYS`` (2) distinct calendar days, binned in ``TZ`` (Europe/Helsinki, the
 app's timezone - the same one ``services.waste_stats`` bins its weeks in). Short of that,
@@ -58,13 +92,15 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.models.consumption_log import ConsumptionLog
+from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.schemas.consumption_log import ConsumptionAction
+from app.schemas.inventory_item import InventoryStatus
 from app.schemas.runout import RunoutProduct, RunoutStatus
 from app.schemas.stock import StockRow
 from app.services.shopping_generate import _factor as _conversion_factor
@@ -88,35 +124,165 @@ _CONSUME_ACTIONS = (
     ConsumptionAction.USE_PARTIAL.value,
     ConsumptionAction.USE_FULL.value,
 )
+#: The log rows that take an item out of stock and put it back.
+_STOCK_MOVE_ACTIONS = (
+    ConsumptionAction.DISCARD.value,
+    ConsumptionAction.RESTORE.value,
+)
+#: Not active stock: the same pair as ``crud.inventory_item.INACTIVE_STATUSES``, named
+#: from the status vocabulary (``schemas.inventory_item.InventoryStatus``).
+_INACTIVE_STATUSES = (
+    InventoryStatus.EMPTY.value,
+    InventoryStatus.DISCARDED.value,
+)
 
 
 def _today(now: datetime) -> date:
     return now.astimezone(TZ).date()
 
 
-async def _consume_rows(
-    db: AsyncSession, product_id: UUID, floor: datetime
-) -> list[Any]:
-    """Every consume event for ``product_id`` at or after ``floor``, oldest first."""
+async def _consume_rows(db: AsyncSession, floor: datetime) -> dict[UUID, list[Any]]:
+    """Every consume event at or after ``floor``, oldest first, grouped by product.
+
+    A product with any is a candidate even without enough history yet, so it can still
+    report ``insufficient_history``.
+    """
     rows = await db.execute(
         select(
+            ConsumptionLog.product_master_id,
             ConsumptionLog.quantity_consumed,
             ConsumptionLog.unit,
             ConsumptionLog.logged_at,
         )
         .where(
-            ConsumptionLog.product_master_id == product_id,
             ConsumptionLog.action.in_(_CONSUME_ACTIONS),
             ConsumptionLog.logged_at >= floor,
         )
         .order_by(ConsumptionLog.logged_at)
     )
-    return list(rows.all())
+    grouped: dict[UUID, list[Any]] = defaultdict(list)
+    for product_id, quantity, unit, logged_at in rows.all():
+        grouped[product_id].append((quantity, unit, logged_at))
+    return grouped
 
 
-def _summarize(rows: list[Any], unit: str) -> tuple[Decimal, datetime | None, int, int]:
-    """``(total consumed in unit, first event, event count, distinct days)`` over rows
-    that convert into ``unit``; one that cannot is skipped from every figure."""
+async def _in_stock_days(
+    db: AsyncSession, product_ids: set[UUID], *, floor: datetime, anchor: datetime
+) -> dict[UUID, set[date]]:
+    """Per product, the calendar days (in ``TZ``) from ``floor`` to ``anchor`` on which
+    at least one of its items was in active stock - the module docstring's rule.
+
+    Two statements: the items that could have been in stock inside the window, then
+    their ``discard``/``restore`` rows.
+    """
+    if not product_ids:
+        return {}
+    items = (
+        await db.execute(
+            select(
+                InventoryItem.id,
+                InventoryItem.product_master_id,
+                InventoryItem.status,
+                InventoryItem.created_at,
+                InventoryItem.consumed_at,
+            ).where(
+                InventoryItem.product_master_id.in_(product_ids),
+                InventoryItem.created_at <= anchor,
+                or_(
+                    InventoryItem.consumed_at.is_(None),
+                    InventoryItem.consumed_at >= floor,
+                ),
+            )
+        )
+    ).all()
+    if not items:
+        return {}
+
+    moves: dict[UUID, list[tuple[datetime, bool]]] = defaultdict(list)
+    log_rows = await db.execute(
+        select(
+            ConsumptionLog.inventory_item_id,
+            ConsumptionLog.action,
+            ConsumptionLog.logged_at,
+        ).where(
+            ConsumptionLog.inventory_item_id.in_([item.id for item in items]),
+            ConsumptionLog.action.in_(_STOCK_MOVE_ACTIONS),
+            ConsumptionLog.logged_at <= anchor,
+        )
+    )
+    for item_id, action, logged_at in log_rows.all():
+        moves[item_id].append((logged_at, action == ConsumptionAction.RESTORE.value))
+
+    floor_day = _today(floor)
+    days: dict[UUID, set[date]] = defaultdict(set)
+    for item_id, product_id, status, created_at, consumed_at in items:
+        for start, end in _intervals(
+            created_at,
+            moves.get(item_id, []),
+            active=str(status) not in _INACTIVE_STATUSES,
+            consumed_at=consumed_at,
+            anchor=anchor,
+        ):
+            day = max(_today(start), floor_day)
+            last = _today(end)
+            while day <= last:
+                days[product_id].add(day)
+                day += timedelta(days=1)
+    return days
+
+
+def _intervals(
+    created_at: datetime,
+    moves: list[tuple[datetime, bool]],
+    *,
+    active: bool,
+    consumed_at: datetime | None,
+    anchor: datetime,
+) -> list[tuple[datetime, datetime]]:
+    """One item's time in stock. ``moves`` are ``(when, entered)``: a restore enters, a
+    discard leaves. An exit with no record leaves the item in stock up to ``anchor``."""
+    events = [(created_at, True), *moves]
+    if not active and consumed_at is not None:
+        events.append((consumed_at, False))
+    # At the same instant an entry goes first, so that day still counts.
+    events.sort(key=lambda event: (event[0], not event[1]))
+
+    intervals: list[tuple[datetime, datetime]] = []
+    started: datetime | None = None
+    last_at = created_at
+    for at, entered in events:
+        last_at = at
+        if entered and started is None:
+            started = at
+        elif not entered and started is not None:
+            intervals.append((started, at))
+            started = None
+    if started is None and active:
+        # Active now although the rows end on an exit: the status wins over the rows.
+        started = last_at
+    if started is not None:
+        intervals.append((started, anchor))
+    return intervals
+
+
+def _span_days(
+    first_at: datetime, event_days: set[date], in_stock: set[date] | None, today: date
+) -> int:
+    """The module docstring's span: in-stock days from the first consume day up to
+    today, or the calendar span when the history cannot account for every event."""
+    first_day = first_at.astimezone(TZ).date()
+    if in_stock and event_days <= in_stock:
+        span = sum(1 for day in in_stock if first_day <= day < today)
+    else:
+        span = (today - first_day).days
+    return max(MIN_WINDOW_DAYS, span)
+
+
+def _summarize(
+    rows: list[Any], unit: str
+) -> tuple[Decimal, datetime | None, int, set[date]]:
+    """``(total consumed in unit, first event, event count, the days with an event)``
+    over rows that convert into ``unit``; one that cannot is skipped from every figure."""
     total = Decimal(0)
     seen_days: set[date] = set()
     first_at: datetime | None = None
@@ -138,21 +304,7 @@ def _summarize(rows: list[Any], unit: str) -> tuple[Decimal, datetime | None, in
             "runout: skipped consumption rows in an inconvertible unit",
             extra={"unit": unit, "skipped": skipped},
         )
-    return total, first_at, events, len(seen_days)
-
-
-async def _candidate_product_ids(db: AsyncSession, floor: datetime) -> set[UUID]:
-    """Products consumed from at all within the lookback window - a candidate even
-    without enough history yet, so it can still report ``insufficient_history``."""
-    rows = await db.execute(
-        select(ConsumptionLog.product_master_id)
-        .where(
-            ConsumptionLog.action.in_(_CONSUME_ACTIONS),
-            ConsumptionLog.logged_at >= floor,
-        )
-        .distinct()
-    )
-    return set(rows.scalars().all())
+    return total, first_at, events, seen_days
 
 
 async def _load_products(db: AsyncSession, ids: set[UUID]) -> list[Any]:
@@ -162,22 +314,21 @@ async def _load_products(db: AsyncSession, ids: set[UUID]) -> list[Any]:
     return list(rows.scalars().all())
 
 
-async def _one(
-    db: AsyncSession,
+def _one(
     product: Any,
     active_stock: Decimal,
     earliest_expiry: date | None,
+    rows: list[Any],
+    in_stock: set[date] | None,
     *,
-    floor: datetime,
     today: date,
 ) -> RunoutProduct:
     unit = str(product.default_unit)
     name = str(product.canonical_name)
     active_stock = quantise(active_stock)
 
-    rows = await _consume_rows(db, product.id, floor)
-    total, first_at, events, distinct_days = _summarize(rows, unit)
-    enough = events >= MIN_EVENTS and distinct_days >= MIN_DISTINCT_DAYS
+    total, first_at, events, event_days = _summarize(rows, unit)
+    enough = events >= MIN_EVENTS and len(event_days) >= MIN_DISTINCT_DAYS
 
     status: RunoutStatus
     if active_stock <= 0:
@@ -189,7 +340,7 @@ async def _one(
 
     rate: Decimal | None = None
     if enough and first_at is not None:
-        span_days = max(MIN_WINDOW_DAYS, (today - first_at.astimezone(TZ).date()).days)
+        span_days = _span_days(first_at, event_days, in_stock, today)
         rate = quantise(total / span_days)
 
     runs_out_on: date | None = None
@@ -259,9 +410,11 @@ async def forecast(
     for row in stock_rows:
         by_product[row.product_id].append(row)
 
-    candidate_ids = set(by_product) | await _candidate_product_ids(db, floor)
+    consumed = await _consume_rows(db, floor)
+    candidate_ids = set(by_product) | set(consumed)
     if not candidate_ids:
         return []
+    in_stock = await _in_stock_days(db, set(consumed), floor=floor, anchor=anchor)
 
     results: list[RunoutProduct] = []
     for product in await _load_products(db, candidate_ids):
@@ -277,8 +430,13 @@ async def forecast(
             continue
         earliest_expiry = min((row.earliest_expiry for row in rows), default=None)
         results.append(
-            await _one(
-                db, product, active_stock, earliest_expiry, floor=floor, today=today
+            _one(
+                product,
+                active_stock,
+                earliest_expiry,
+                consumed.get(product.id, []),
+                in_stock.get(product.id),
+                today=today,
             )
         )
 
