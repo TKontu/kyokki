@@ -40,30 +40,38 @@ import {
 import { isAPIError } from '@/lib/api/errors'
 import type { EstimateScope } from '@/lib/api/products'
 import { displayName } from '@/lib/displayName'
+import { useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
 import { auditRows, type AuditRow, type Edge } from '@/lib/shelfLifeAudit'
 import type { CatalogEstimateResponse, ProductMaster } from '@/types/product'
 
 type View = 'category' | 'audit'
 
-function shelfLifeNote(product: ProductMaster): { text: string; guess: boolean } {
-  const days = `${product.default_shelf_life_days} ${
-    product.default_shelf_life_days === 1 ? 'day' : 'days'
-  }`
+type Translate = ReturnType<typeof useT>['t']
+
+function shelfLifeNote(product: ProductMaster, t: Translate): { text: string; guess: boolean } {
+  const days = t('products.shelfLife.days', { count: product.default_shelf_life_days })
   switch (product.shelf_life_source) {
     case 'cook':
-      return { text: `${days} · you set this`, guess: false }
+      return { text: t('products.shelfLife.cook', { days }), guess: false }
     case 'model':
-      return { text: `${days} · estimated`, guess: false }
+      return { text: t('products.shelfLife.model', { days }), guess: false }
     default:
-      return { text: `${days} · from the category`, guess: true }
+      return { text: t('products.shelfLife.category', { days }), guess: true }
   }
 }
 
-function sizeNote(product: ProductMaster): string | null {
-  if (product.avg_piece_grams) return `one piece ≈ ${product.avg_piece_grams} g`
-  if (product.pack_grams) return `one pack ≈ ${product.pack_grams} g`
+function sizeNote(product: ProductMaster, t: Translate): string | null {
+  if (product.avg_piece_grams) return t('products.size.piece', { grams: product.avg_piece_grams })
+  if (product.pack_grams) return t('products.size.pack', { grams: product.pack_grams })
   return null
+}
+
+/** A unit the catalogue does not know (none today) shows as served, not as its key. */
+function unitLabel(unit: string, t: Translate): string {
+  const key = `productSheet.units.${unit}`
+  const label = t(key)
+  return label === key ? unit : label
 }
 
 function ProductRow({
@@ -74,8 +82,9 @@ function ProductRow({
   onOpen: () => void
 }) {
   const [language] = useLanguage()
-  const shelfLife = shelfLifeNote(product)
-  const size = sizeNote(product)
+  const { t } = useT()
+  const shelfLife = shelfLifeNote(product, t)
+  const size = sizeNote(product, t)
 
   return (
     <li>
@@ -105,17 +114,24 @@ function ProductRow({
           </span>
         </span>
         <Badge variant="default" size="sm">
-          {product.default_unit}
+          {unitLabel(product.default_unit, t)}
         </Badge>
       </button>
     </li>
   )
 }
 
-function edgeNote(edge: Edge, categoryName: string, band: [number, number]): string {
-  const range = `${categoryName} (${band[0]}-${band[1]} days)`
-  if (edge === 'outside') return `outside the usual range for ${range}`
-  return `near the ${edge === 'short' ? 'shortest' : 'longest'} for ${range}`
+function edgeNote(
+  edge: Edge,
+  categoryName: string,
+  band: [number, number],
+  t: Translate
+): string {
+  const range = t('products.audit.range', { category: categoryName, min: band[0], max: band[1] })
+  if (edge === 'outside') return t('products.audit.outside', { range })
+  return t(edge === 'short' ? 'products.audit.nearShortest' : 'products.audit.nearLongest', {
+    range,
+  })
 }
 
 /** Every product by provenance, the ones worth a second look flagged (H58). */
@@ -129,10 +145,11 @@ function AuditList({
   onOpen: (product: ProductMaster) => void
 }) {
   const [language] = useLanguage()
+  const { t } = useT()
   return (
-    <ul aria-label="Shelf-life audit" className="flex flex-col gap-2">
+    <ul aria-label={t('products.audit.label')} className="flex flex-col gap-2">
       {rows.map(({ product, edge, band }) => {
-        const shelfLife = shelfLifeNote(product)
+        const shelfLife = shelfLifeNote(product, t)
         return (
           <li key={product.id}>
             <button
@@ -167,7 +184,7 @@ function AuditList({
               </span>
               {edge && band && (
                 <span className="text-sm font-medium text-orange-700 dark:text-orange-400">
-                  {`⚠ ${edgeNote(edge, categoryName(product.category), band)}`}
+                  {`⚠ ${edgeNote(edge, categoryName(product.category), band, t)}`}
                 </span>
               )}
             </button>
@@ -192,6 +209,7 @@ function ProposedChanges({
   onApply: () => void
   onDismiss: () => void
 }) {
+  const { t } = useT()
   if (result.applied) return null
 
   if (result.changes.length === 0) {
@@ -202,20 +220,23 @@ function ProposedChanges({
       >
         {result.considered === 0
           ? scope === 'all'
-            ? 'Nothing to estimate: every shelf life is one you set.'
-            : 'Nothing to estimate: no product is still using its category default.'
-          : `Asked about ${result.considered}; the model agreed with what is already stored.`}
+            ? t('products.proposal.nothingAll')
+            : t('products.proposal.nothingGuesses')
+          : t('products.proposal.agreed', { count: result.considered })}
       </p>
     )
   }
 
   return (
     <section
-      aria-label="Proposed shelf lives"
+      aria-label={t('products.proposal.label')}
       className="mb-4 rounded-ui border border-ui-border p-4 dark:border-ui-dark-border"
     >
       <p className="text-sm text-ui-text dark:text-ui-dark-text">
-        {`${result.changes.length} of ${result.considered} would change. Nothing is saved yet.`}
+        {t('products.proposal.wouldChange', {
+          changed: result.changes.length,
+          count: result.considered,
+        })}
       </p>
       <ul className="mt-3 flex flex-col gap-1">
         {result.changes.map((change) => (
@@ -227,17 +248,20 @@ function ProposedChanges({
               {change.canonical_name}
             </span>
             <span className="shrink-0 text-ui-text-secondary dark:text-ui-dark-text-secondary">
-              {`${change.current_days} → ${change.proposed_days} days`}
+              {t('products.proposal.change', {
+                from: change.current_days,
+                to: change.proposed_days,
+              })}
             </span>
           </li>
         ))}
       </ul>
       <div className="mt-4 flex gap-3">
         <Button size="lg" loading={applying} onClick={onApply}>
-          {`Save ${result.changes.length}`}
+          {t('products.proposal.save', { count: result.changes.length })}
         </Button>
         <Button size="lg" variant="secondary" onClick={onDismiss}>
-          Discard
+          {t('products.proposal.discard')}
         </Button>
       </div>
     </section>
@@ -249,6 +273,7 @@ function EmojiReviewList({ products }: { products: ProductMaster[] }) {
   const confirm = useConfirmProductEmoji()
   const reject = useRejectProductEmoji()
   const toast = useToast()
+  const { t } = useT()
 
   if (products.length === 0) return null
 
@@ -259,11 +284,11 @@ function EmojiReviewList({ products }: { products: ProductMaster[] }) {
 
   return (
     <section
-      aria-label="Emoji to confirm"
+      aria-label={t('products.emojiReview.label')}
       className="mb-4 rounded-ui border border-ui-border p-4 dark:border-ui-dark-border"
     >
       <h2 className="text-sm font-medium text-ui-text dark:text-ui-dark-text">
-        {`Emoji to confirm (${products.length})`}
+        {t('products.emojiReview.heading', { count: products.length })}
       </h2>
       <ul className="mt-2 flex flex-col gap-2">
         {products.map((product) => (
@@ -282,11 +307,11 @@ function EmojiReviewList({ products }: { products: ProductMaster[] }) {
                 loading={confirm.isPending && confirm.variables === product.id}
                 onClick={() =>
                   confirm.mutate(product.id, {
-                    onError: (error) => onError(error, 'Could not confirm this emoji'),
+                    onError: (error) => onError(error, t('products.emojiReview.confirmError')),
                   })
                 }
               >
-                Confirm
+                {t('products.emojiReview.confirm')}
               </Button>
               <Button
                 size="sm"
@@ -294,11 +319,11 @@ function EmojiReviewList({ products }: { products: ProductMaster[] }) {
                 loading={reject.isPending && reject.variables === product.id}
                 onClick={() =>
                   reject.mutate(product.id, {
-                    onError: (error) => onError(error, 'Could not reject this emoji'),
+                    onError: (error) => onError(error, t('products.emojiReview.rejectError')),
                   })
                 }
               >
-                Reject
+                {t('products.emojiReview.reject')}
               </Button>
             </span>
           </li>
@@ -345,6 +370,7 @@ function ProductsPageContent() {
   const { data: categories } = useCategories()
   const estimate = useEstimateCatalog()
   const toast = useToast()
+  const { t } = useT()
   // The review list (Q18 build): a proposal is never shown on a tile until confirmed here.
   const { data: proposedEmoji } = useProductList({ emoji_match: 'proposed' })
 
@@ -392,25 +418,25 @@ function ProductsPageContent() {
           // shelf life re-dates the stock that was dated by the old one.
           const redated =
             result.items_redated > 0
-              ? `, ${result.items_redated} ${
-                  result.items_redated === 1 ? 'item' : 'items'
-                } re-dated`
+              ? t('products.toast.redated', { count: result.items_redated })
               : ''
-          toast.success(`Saved ${result.changes.length} shelf lives${redated}`)
+          toast.success(t('products.toast.saved', { count: result.changes.length, redated }))
         }
       },
-      onError: () => toast.error('Could not reach the model'),
+      onError: () => toast.error(t('products.toast.modelError')),
     })
 
   return (
     <div>
       <header className="border-b border-ui-border px-6 py-4 dark:border-ui-dark-border">
-        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">Products</h1>
+        <h1 className="text-xl font-semibold text-ui-text dark:text-ui-dark-text">
+          {t('products.title')}
+        </h1>
         <p className="mt-1 text-sm text-ui-text-secondary dark:text-ui-dark-text-secondary">
           {products === undefined
-            ? 'Loading the catalog'
-            : `${products.length} ${products.length === 1 ? 'product' : 'products'}` +
-              (guesses > 0 ? `, ${guesses} still using a category default` : '')}
+            ? t('products.loading')
+            : t('products.count', { count: products.length }) +
+              (guesses > 0 ? t('products.guessesSuffix', { count: guesses }) : '')}
         </p>
       </header>
 
@@ -420,8 +446,8 @@ function ProductsPageContent() {
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <input
             type="search"
-            aria-label="Search products"
-            placeholder="Search"
+            aria-label={t('products.searchLabel')}
+            placeholder={t('products.searchPlaceholder')}
             value={term}
             onChange={(event) => setTermAndUrl(event.target.value)}
             className={
@@ -436,7 +462,7 @@ function ProductsPageContent() {
               loading={dryRunning('guesses')}
               onClick={() => run(false, 'guesses')}
             >
-              Estimate the guesses
+              {t('products.estimateGuesses')}
             </Button>
           )}
           {estimable > 0 && (
@@ -445,20 +471,20 @@ function ProductsPageContent() {
               loading={dryRunning('all')}
               onClick={() => run(false, 'all')}
             >
-              Re-estimate all (keeps yours)
+              {t('products.reestimateAll')}
             </Button>
           )}
         </div>
 
         <div className="mb-4 max-w-md">
           <ChoiceGroup
-            label="Show"
+            label={t('products.view.label')}
             name="products-view"
             className="grid-cols-2"
             value={view}
             options={[
-              { value: 'category', label: 'By category' },
-              { value: 'audit', label: 'Audit shelf lives' },
+              { value: 'category', label: t('products.view.category') },
+              { value: 'audit', label: t('products.view.audit') },
             ]}
             onChange={setView}
           />
@@ -477,14 +503,14 @@ function ProductsPageContent() {
         {isLoading && <SkeletonCard />}
         {isError && (
           <p role="alert" className="text-ui-text dark:text-ui-dark-text">
-            Could not load the catalog.
+            {t('products.loadError')}
           </p>
         )}
         {products?.length === 0 && (
           <p className="text-ui-text-secondary dark:text-ui-dark-text-secondary">
             {search
-              ? `Nothing matching “${search}”.`
-              : 'No products yet. They are created when you confirm a receipt.'}
+              ? t('products.nothingMatching', { term: search })
+              : t('products.empty')}
           </p>
         )}
 
