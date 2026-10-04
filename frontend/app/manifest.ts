@@ -2,21 +2,6 @@ import type { MetadataRoute } from 'next'
 import { BACKGROUND_COLOR, BRAND_COLOR, BRAND_NAME, ICON_SIZES, iconPath } from '@/lib/brand'
 
 /**
- * Web app manifest (MVP-P2), served at /manifest.webmanifest.
- *
- * This is what turns Add to Home Screen on the iPad into a full-screen app rather than a
- * bookmark. iOS also needs the `appleWebApp` metadata in `app/layout.tsx`, and it ignores
- * `orientation` for home-screen web apps - the wall mount decides that. The iPad is mounted
- * upright (Q17), so the app asks for portrait where a platform listens.
- *
- * Production is served over HTTPS, so Android Chrome can install the app. There is still no
- * service worker yet; offline stays post-MVP.
- *
- * `share_target` makes the installed app a target in Android's share sheet: shared receipt
- * photos and PDFs are posted to /api/receipts/share, which queues each one and redirects to
- * the receipt, the receipt list, or the scan page with a failure note.
- */
-/**
  * Web Share Target as the W3C spec defines it. Next 14's `MetadataRoute.Manifest` types
  * `share_target` with lowercase methods and `params` as a name/value array, which is not
  * the shape Chrome reads, so the field is replaced with the spec's shape here.
@@ -37,6 +22,21 @@ type KyokkiManifest = Omit<MetadataRoute.Manifest, 'share_target'> & {
   share_target: ShareTarget
 }
 
+/**
+ * Web app manifest (MVP-P2), served at /manifest.webmanifest.
+ *
+ * This is what turns Add to Home Screen on the iPad into a full-screen app rather than a
+ * bookmark. iOS also needs the `appleWebApp` metadata in `app/layout.tsx`, and it ignores
+ * `orientation` for home-screen web apps - the wall mount decides that. The iPad is mounted
+ * upright (Q17), so the app asks for portrait where a platform listens.
+ *
+ * Production is served over HTTPS, so Android Chrome can install the app. There is still no
+ * service worker yet; offline stays post-MVP.
+ *
+ * `share_target` makes the installed app a target in Android's share sheet: shared receipt
+ * photos and PDFs are posted to /api/receipts/share, which queues each one and redirects to
+ * the receipt, the receipt list, or the scan page with a failure note.
+ */
 export default function manifest(): KyokkiManifest {
   return {
     name: BRAND_NAME,
