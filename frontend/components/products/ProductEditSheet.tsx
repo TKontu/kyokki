@@ -74,6 +74,7 @@ import {
 import { iconUrl } from '@/lib/api/products'
 import { isAPIError } from '@/lib/api/errors'
 import { displayName } from '@/lib/displayName'
+import { useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
 import { resolveProductIcon } from '@/lib/productIcon'
 import type { Unit } from '@/types/inventory'
@@ -118,6 +119,13 @@ export function ProductEditSheet({
 }: ProductEditSheetProps) {
   const toast = useToast()
   const [language] = useLanguage()
+  const { t } = useT()
+  // A unit the catalogue does not know (none today) shows as served, not as its key.
+  const unitLabel = (value: string) => {
+    const key = `productSheet.units.${value}`
+    const label = t(key)
+    return label === key ? value : label
+  }
   const save = useUpdateProduct()
   const categories = useCategories()
   const redraw = useRedrawProductIcon()
@@ -254,14 +262,14 @@ export function ProductEditSheet({
           setLiveAnswer(updated)
           setHint('')
         },
-        onError: (error) => actionError(error, 'Could not ask for a new image'),
+        onError: (error) => actionError(error, t('productSheet.icon.regenerateError')),
       }
     )
   }
   const useCategoryIcon = () => {
     clearIcon.mutate(product.id, {
       onSuccess: (updated) => setLiveAnswer(updated),
-      onError: (error) => actionError(error, 'Could not change the icon'),
+      onError: (error) => actionError(error, t('productSheet.icon.clearError')),
     })
   }
   // The mark/unmark routes answer a mark entry, not the full product (unlike every other
@@ -276,20 +284,20 @@ export function ProductEditSheet({
           icon_canonical_at: entry.marked_at,
           updated_at: new Date().toISOString(),
         }),
-      onError: (error) => actionError(error, 'Could not change the canonical mark'),
+      onError: (error) => actionError(error, t('productSheet.icon.canonicalError')),
     })
   }
   const busyGenerating = redraw.isPending || iconStatus === 'pending'
   const iconNote = !generationEnabled
-    ? 'Icon generation is not configured on this server'
+    ? t('productSheet.icon.notConfigured')
     : iconStatus === 'pending'
-      ? 'Generating… this takes a few minutes'
+      ? t('productSheet.icon.pending')
       : iconStatus === 'failed'
-        ? 'Could not generate one this time. Try again, perhaps with a hint.'
+        ? t('productSheet.icon.failed')
         : iconStatus === 'cleared'
-          ? 'Showing the category emoji'
+          ? t('productSheet.icon.cleared')
           : iconStatus === null
-            ? 'Not generated yet'
+            ? t('productSheet.icon.notGenerated')
             : null
 
   const pickEmoji = (chosen: string | null) => {
@@ -297,29 +305,29 @@ export function ProductEditSheet({
       { id: product.id, emoji: chosen },
       {
         onSuccess: (updated) => setLiveAnswer(updated),
-        onError: (error) => actionError(error, 'Could not change the emoji'),
+        onError: (error) => actionError(error, t('productSheet.emoji.pickError')),
       }
     )
   }
   const onConfirmEmoji = () => {
     confirmEmoji.mutate(product.id, {
       onSuccess: (updated) => setLiveAnswer(updated),
-      onError: (error) => actionError(error, 'Could not confirm this emoji'),
+      onError: (error) => actionError(error, t('productSheet.emoji.confirmError')),
     })
   }
   const onRejectEmoji = () => {
     rejectEmoji.mutate(product.id, {
       onSuccess: (updated) => setLiveAnswer(updated),
-      onError: (error) => actionError(error, 'Could not reject this emoji'),
+      onError: (error) => actionError(error, t('productSheet.emoji.rejectError')),
     })
   }
   const emojiNote =
     emojiMatch === 'proposed'
-      ? 'A guess, waiting to be confirmed'
+      ? t('productSheet.emoji.proposed')
       : emojiMatch === 'cook'
-        ? 'Your own choice'
+        ? t('productSheet.emoji.cook')
         : emojiMatch === 'exact'
-          ? 'Exact match'
+          ? t('productSheet.emoji.exact')
           : null
 
   const submit = () => {
@@ -327,13 +335,13 @@ export function ProductEditSheet({
       { id: product.id, data: changes },
       {
         onSuccess: (updated) => {
-          toast.success(`Saved ${updated.canonical_name}`)
+          toast.success(t('productSheet.saved', { name: updated.canonical_name }))
           onSaved?.(updated)
           onClose()
         },
         onError: (error) => {
           const readable = isAPIError(error) && error.status < 500 && error.message
-          toast.error(readable ? error.message : 'Could not save this product')
+          toast.error(readable ? error.message : t('productSheet.saveError'))
         },
       }
     )
@@ -343,11 +351,13 @@ export function ProductEditSheet({
     <BottomSheet
       open
       onClose={onClose}
-      title={`Edit ${displayName(product.display_names, product.canonical_name, language)}`}
+      title={t('productSheet.title', {
+        name: displayName(product.display_names, product.canonical_name, language),
+      })}
       footer={
         <div className="flex gap-2">
           <Button variant="secondary" fullWidth onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             data-primary
@@ -356,13 +366,13 @@ export function ProductEditSheet({
             loading={save.isPending}
             onClick={submit}
           >
-            Save
+            {t('common.save')}
           </Button>
         </div>
       }
     >
       <fieldset className="mb-4">
-        <legend className={fieldLabelClass}>Icon</legend>
+        <legend className={fieldLabelClass}>{t('productSheet.icon.legend')}</legend>
         <div className="mt-1 flex items-center gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-ui border border-ui-border dark:border-ui-dark-border">
             {(() => {
@@ -395,13 +405,13 @@ export function ProductEditSheet({
         {generationEnabled && !emojiWins && (
           <>
             <label htmlFor="product-icon-hint" className={`${fieldLabelClass} mt-2`}>
-              Hint for the image
+              {t('productSheet.icon.hintLabel')}
             </label>
             <input
               id="product-icon-hint"
               type="text"
               maxLength={200}
-              placeholder="optional, e.g. oval rye pastry with rice filling"
+              placeholder={t('productSheet.icon.hintPlaceholder')}
               value={hint}
               onChange={(event) => setHint(event.target.value)}
               className={`${fieldInputClass} mt-1`}
@@ -410,7 +420,7 @@ export function ProductEditSheet({
         )}
         {generationEnabled && emojiWins && (
           <p className={`${fieldHintClass} mt-2`}>
-            Showing the emoji. Choose &quot;No emoji&quot; to use a generated icon.
+            {t('productSheet.icon.emojiWins')}
           </p>
         )}
         <div className="mt-2 flex gap-2">
@@ -421,7 +431,7 @@ export function ProductEditSheet({
               loading={busyGenerating}
               onClick={regenerateIcon}
             >
-              Regenerate
+              {t('productSheet.icon.regenerate')}
             </Button>
           )}
           {iconStatus !== 'cleared' && (
@@ -431,7 +441,7 @@ export function ProductEditSheet({
               loading={clearIcon.isPending}
               onClick={useCategoryIcon}
             >
-              Use category emoji
+              {t('productSheet.icon.useCategoryEmoji')}
             </Button>
           )}
         </div>
@@ -444,14 +454,14 @@ export function ProductEditSheet({
               loading={markIcon.isPending || unmarkIcon.isPending}
               onClick={toggleCanonical}
             >
-              {marked ? 'Canonical ✓' : 'Keep as canonical'}
+              {marked ? t('productSheet.icon.canonical') : t('productSheet.icon.keepCanonical')}
             </Button>
           </div>
         )}
       </fieldset>
 
       <fieldset className="mb-4">
-        <legend className={fieldLabelClass}>Emoji</legend>
+        <legend className={fieldLabelClass}>{t('productSheet.emoji.legend')}</legend>
         {emojiMatch === 'proposed' && (
           <div className="mt-1 flex items-center gap-3">
             <span aria-hidden="true" className="text-3xl leading-none">
@@ -463,7 +473,7 @@ export function ProductEditSheet({
               loading={confirmEmoji.isPending}
               onClick={onConfirmEmoji}
             >
-              Confirm
+              {t('productSheet.emoji.confirm')}
             </Button>
             <Button
               variant="ghost"
@@ -471,7 +481,7 @@ export function ProductEditSheet({
               loading={rejectEmoji.isPending}
               onClick={onRejectEmoji}
             >
-              Reject
+              {t('productSheet.emoji.reject')}
             </Button>
           </div>
         )}
@@ -480,14 +490,14 @@ export function ProductEditSheet({
         )}
         <div
           role="group"
-          aria-label="Pick an emoji"
+          aria-label={t('productSheet.emoji.pickLabel')}
           className="mt-2 max-h-40 overflow-y-auto rounded-ui border border-ui-border p-2 dark:border-ui-dark-border"
         >
           <div className="flex flex-wrap gap-1">
             <button
               type="button"
-              title="No emoji"
-              aria-label="No emoji"
+              title={t('productSheet.emoji.none')}
+              aria-label={t('productSheet.emoji.none')}
               aria-pressed={emojiMatch === 'cleared'}
               disabled={setEmoji.isPending}
               onClick={() => pickEmoji(null)}
@@ -529,102 +539,102 @@ export function ProductEditSheet({
       </fieldset>
 
       <label htmlFor="product-name" className={fieldLabelClass}>
-        Name
+        {t('productSheet.fields.name')}
       </label>
       <input
         id="product-name"
         type="text"
-        aria-label="Name"
+        aria-label={t('productSheet.fields.name')}
         value={name}
         onChange={(event) => nameField.set(event.target.value)}
         className={`${fieldInputClass} mt-1`}
       />
-      <FieldMoved label="Name" field={nameField} />
+      <FieldMoved label={t('productSheet.fields.name')} field={nameField} />
 
       <label htmlFor="product-display-name-fi" className={`${fieldLabelClass} mt-4`}>
-        Finnish name
+        {t('productSheet.fields.finnishName')}
       </label>
       <input
         id="product-display-name-fi"
         type="text"
-        aria-label="Finnish name"
-        placeholder="e.g. Maito"
+        aria-label={t('productSheet.fields.finnishName')}
+        placeholder={t('productSheet.fields.finnishPlaceholder')}
         value={displayNameFi}
         onChange={(event) => displayNameField.set(event.target.value)}
         className={`${fieldInputClass} mt-1`}
       />
       <p className={fieldHintClass}>
         {liveProduct.display_name_sources?.fi === 'model'
-          ? 'Proposed by the model; shown in Suomi until you change it'
+          ? t('productSheet.fields.finnishProposed')
           : liveProduct.display_names?.fi
-            ? 'Your own name, shown in Suomi'
-            : 'Blank until proposed, or typed here; English shows the canonical name either way'}
+            ? t('productSheet.fields.finnishOwn')
+            : t('productSheet.fields.finnishBlank')}
       </p>
-      <FieldMoved label="Finnish name" field={displayNameField} />
+      <FieldMoved label={t('productSheet.fields.finnishName')} field={displayNameField} />
 
       <div className="mt-4 flex flex-wrap gap-4">
         <div className="w-32">
           <label htmlFor="product-shelf-life" className={fieldLabelClass}>
-            Keeps for
+            {t('productSheet.fields.keepsFor')}
           </label>
           <input
             id="product-shelf-life"
             type="number"
             inputMode="numeric"
             min="1"
-            aria-label="Keeps for"
+            aria-label={t('productSheet.fields.keepsFor')}
             value={shelfLife}
             onChange={(event) => shelfLifeField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
           <p className={fieldHintClass}>
             {product.shelf_life_source === 'category'
-              ? 'days, sealed; follows the category'
-              : 'days, sealed'}
+              ? t('productSheet.fields.keepsForHintCategory')
+              : t('productSheet.fields.keepsForHint')}
           </p>
-          <FieldMoved label="Keeps for" field={shelfLifeField} />
+          <FieldMoved label={t('productSheet.fields.keepsFor')} field={shelfLifeField} />
         </div>
 
         <div className="w-32">
           <label htmlFor="product-opened-shelf-life" className={fieldLabelClass}>
-            Once opened
+            {t('productSheet.fields.opened')}
           </label>
           <input
             id="product-opened-shelf-life"
             type="number"
             inputMode="numeric"
             min="1"
-            aria-label="Once opened"
+            aria-label={t('productSheet.fields.opened')}
             value={openedShelfLife}
             onChange={(event) => openedField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
-          <p className={fieldHintClass}>days, blank if unknown</p>
-          <FieldMoved label="Once opened" field={openedField} />
+          <p className={fieldHintClass}>{t('productSheet.fields.openedHint')}</p>
+          <FieldMoved label={t('productSheet.fields.opened')} field={openedField} />
         </div>
 
         <div className="w-32">
           <label htmlFor="product-frozen-shelf-life" className={fieldLabelClass}>
-            Once frozen
+            {t('productSheet.fields.frozen')}
           </label>
           <input
             id="product-frozen-shelf-life"
             type="number"
             inputMode="numeric"
             min="1"
-            aria-label="Once frozen"
+            aria-label={t('productSheet.fields.frozen')}
             placeholder={categoryFrozen == null ? '' : String(categoryFrozen)}
             value={frozenShelfLife}
             onChange={(event) => frozenField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
-          <p className={fieldHintClass}>days, blank for the category&apos;s</p>
-          <FieldMoved label="Once frozen" field={frozenField} />
+          <p className={fieldHintClass}>{t('productSheet.fields.frozenHint')}</p>
+          <FieldMoved label={t('productSheet.fields.frozen')} field={frozenField} />
         </div>
 
         <div className="w-32">
           <label htmlFor="product-piece-grams" className={fieldLabelClass}>
-            One piece
+            {t('productSheet.fields.piece')}
           </label>
           <input
             id="product-piece-grams"
@@ -632,17 +642,17 @@ export function ProductEditSheet({
             inputMode="decimal"
             min="0"
             step="any"
-            aria-label="One piece"
+            aria-label={t('productSheet.fields.piece')}
             value={pieceGrams}
             onChange={(event) => pieceField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
-          <p className={fieldHintClass}>grams, blank if unknown</p>
+          <p className={fieldHintClass}>{t('productSheet.fields.gramsHint')}</p>
         </div>
 
         <div className="w-32">
           <label htmlFor="product-pack-grams" className={fieldLabelClass}>
-            One pack
+            {t('productSheet.fields.pack')}
           </label>
           <input
             id="product-pack-grams"
@@ -650,17 +660,17 @@ export function ProductEditSheet({
             inputMode="decimal"
             min="0"
             step="any"
-            aria-label="One pack"
+            aria-label={t('productSheet.fields.pack')}
             value={packGrams}
             onChange={(event) => packField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
-          <p className={fieldHintClass}>grams, blank if unknown</p>
+          <p className={fieldHintClass}>{t('productSheet.fields.gramsHint')}</p>
         </div>
 
         <div className="w-32">
           <label htmlFor="product-min-stock" className={fieldLabelClass}>
-            Minimum stock
+            {t('productSheet.fields.minStock')}
           </label>
           <input
             id="product-min-stock"
@@ -668,23 +678,27 @@ export function ProductEditSheet({
             inputMode="decimal"
             min="0"
             step="any"
-            aria-label="Minimum stock"
+            aria-label={t('productSheet.fields.minStock')}
             value={minStock}
             onChange={(event) => minStockField.set(event.target.value)}
             className={`${fieldInputClass} mt-1`}
           />
-          <p className={fieldHintClass}>{`${product.default_unit}, blank for no auto shopping`}</p>
-          <FieldMoved label="Minimum stock" field={minStockField} />
+          <p className={fieldHintClass}>
+            {t('productSheet.fields.minStockHint', {
+              unit: unitLabel(product.default_unit),
+            })}
+          </p>
+          <FieldMoved label={t('productSheet.fields.minStock')} field={minStockField} />
         </div>
       </div>
 
       <div className="mt-4">
         <ChoiceGroup
-          label="Counted in"
+          label={t('productSheet.fields.unit')}
           name="product-unit"
           className="grid-cols-5"
           value={unit}
-          options={UNITS.map((value) => ({ value, label: value }))}
+          options={UNITS.map((value) => ({ value, label: unitLabel(value) }))}
           onChange={unitField.set}
         />
       </div>
@@ -692,7 +706,7 @@ export function ProductEditSheet({
       {sortedCategories.length > 0 && (
         <div className="mt-4">
           <ChoiceGroup
-            label="Category"
+            label={t('common.category')}
             name="product-category"
             className="grid-cols-2 sm:grid-cols-3"
             value={category}
@@ -702,7 +716,7 @@ export function ProductEditSheet({
             }))}
             onChange={categoryField.set}
           />
-          <FieldMoved label="Category" field={categoryField} />
+          <FieldMoved label={t('common.category')} field={categoryField} />
         </div>
       )}
 

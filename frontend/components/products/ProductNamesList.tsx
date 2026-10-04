@@ -18,21 +18,24 @@ import Button from '@/components/ui/Button'
 import { fieldHintClass, fieldLabelClass } from '@/components/ui/formStyles'
 import { useForgetName, useProductNames } from '@/hooks/useProducts'
 import { useToast } from '@/hooks/useToast'
+import { useT } from '@/lib/i18n'
 import type { NameSource } from '@/types/product'
 
 type Kind = 'name' | 'printed'
 
 function SourceChip({ source }: { source: NameSource }) {
-  if (source === 'canonical') return <Badge size="sm">name</Badge>
+  const { t } = useT()
+  if (source === 'canonical')
+    return <Badge size="sm">{t('productSheet.names.source.canonical')}</Badge>
   if (source === 'cook')
     return (
       <Badge variant="success" size="sm">
-        yours
+        {t('productSheet.names.source.cook')}
       </Badge>
     )
   return (
     <Badge variant="warning" size="sm">
-      auto
+      {t('productSheet.names.source.auto')}
     </Badge>
   )
 }
@@ -50,19 +53,25 @@ function RemoveButton({
   onArm: () => void
   onConfirm: () => void
 }) {
+  const { t } = useT()
   return armed ? (
     <Button
       variant="danger"
       size="sm"
-      aria-label={`Confirm remove ${word}`}
+      aria-label={t('productSheet.names.confirmRemove', { word })}
       loading={busy}
       disabled={busy}
       onClick={onConfirm}
     >
-      Remove?
+      {t('productSheet.names.removeArmed')}
     </Button>
   ) : (
-    <Button variant="ghost" size="sm" aria-label={`Remove ${word}`} onClick={onArm}>
+    <Button
+      variant="ghost"
+      size="sm"
+      aria-label={t('productSheet.names.remove', { word })}
+      onClick={onArm}
+    >
       ✕
     </Button>
   )
@@ -70,6 +79,7 @@ function RemoveButton({
 
 export function ProductNamesList({ productId }: { productId: string }) {
   const toast = useToast()
+  const { t } = useT()
   const names = useProductNames(productId)
   const forget = useForgetName(productId)
   const [armed, setArmed] = useState<string | null>(null)
@@ -80,9 +90,9 @@ export function ProductNamesList({ productId }: { productId: string }) {
       {
         onSuccess: () => {
           setArmed(null)
-          toast.success(`"${word}" no longer finds this product`)
+          toast.success(t('productSheet.names.removed', { word }))
         },
-        onError: () => toast.error(`Could not remove "${word}"`),
+        onError: () => toast.error(t('productSheet.names.removeError', { word })),
       }
     )
   }
@@ -93,10 +103,10 @@ export function ProductNamesList({ productId }: { productId: string }) {
   return (
     <section aria-labelledby="product-names-heading" className="mt-6">
       <h3 id="product-names-heading" className={fieldLabelClass}>
-        Matching names
+        {t('productSheet.names.heading')}
       </h3>
       <p className={fieldHintClass}>
-        Receipt lines with these words land on this product without asking the model.
+        {t('productSheet.names.hint')}
       </p>
       <ul className="mt-2 divide-y divide-ui-border dark:divide-ui-dark-border">
         {learned.map((row) => (
@@ -122,11 +132,11 @@ export function ProductNamesList({ productId }: { productId: string }) {
             </span>
             {alias.verified ? (
               <Badge variant="success" size="sm">
-                known
+                {t('productSheet.names.source.known')}
               </Badge>
             ) : (
               <Badge variant="warning" size="sm">
-                auto
+                {t('productSheet.names.source.auto')}
               </Badge>
             )}
             <RemoveButton

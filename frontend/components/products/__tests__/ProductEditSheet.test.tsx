@@ -217,7 +217,8 @@ describe('ProductEditSheet', () => {
       window.localStorage.setItem('kyokki.language', 'fi')
       renderSheet({ ...PRODUCT, display_names: { fi: 'Jauheliha' } })
 
-      expect(screen.getByRole('heading', { name: 'Edit Jauheliha' })).toBeInTheDocument()
+      // Phase 4 translates the sheet's own "Edit" too; the name is still the point here.
+      expect(screen.getByRole('heading', { name: 'Muokkaa: Jauheliha' })).toBeInTheDocument()
     })
   })
 
@@ -923,5 +924,111 @@ describe('ProductEditSheet icon curation', () => {
 
     await waitFor(() => expect(unmarked).toBe(true))
     expect(await screen.findByText('Keep as canonical')).toBeInTheDocument()
+  })
+})
+
+// Post-MVP frontier item 13, phase 4: the sheet's own words follow the chosen language. The
+// product's names, the learned names and the printed receipt names are data and stay as stored.
+describe('ProductEditSheet chrome in Finnish (Post-MVP frontier item 13, phase 4)', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+
+  it('reads the title, footer and field labels in Finnish', () => {
+    renderSheet()
+
+    expect(screen.getByRole('heading', { name: 'Muokkaa: Ground beef' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Peruuta' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Tallenna' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Nimi')).toHaveValue('Ground beef')
+    expect(screen.getByLabelText('Suomenkielinen nimi')).toBeInTheDocument()
+    expect(screen.getByLabelText('Säilyy')).toHaveValue(5)
+    expect(screen.getByText('päivää avaamattomana; seuraa kategoriaa')).toBeInTheDocument()
+    expect(screen.getByLabelText('Avattuna')).toBeInTheDocument()
+    expect(screen.getByLabelText('Pakastettuna')).toBeInTheDocument()
+    expect(screen.getByLabelText('Yksi kappale')).toBeInTheDocument()
+    expect(screen.getByLabelText('Yksi pakkaus')).toBeInTheDocument()
+    expect(screen.getByLabelText('Vähimmäismäärä')).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Yksikkö' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'kpl' })).toBeInTheDocument()
+  })
+
+  it('reads the icon and emoji areas in Finnish', () => {
+    renderSheet({ ...PRODUCT, icon_status: 'ready', icon_version: 1790000000 })
+
+    expect(screen.getByRole('group', { name: 'Kuvake' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Vihje kuvaa varten')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Luo uudelleen' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Käytä kategorian emojia' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Emoji' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Valitse emoji' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ei emojia' })).toBeInTheDocument()
+  })
+
+  it('explains an emoji win in Finnish', () => {
+    renderSheet({ ...PRODUCT, emoji: '🧀', emoji_match: 'exact' })
+
+    expect(
+      screen.getByText(/Valitse "Ei emojia", jos haluat luodun kuvakkeen/)
+    ).toBeInTheDocument()
+    expect(screen.getByText('Tarkka osuma')).toBeInTheDocument()
+  })
+
+  it('says a pending render is on its way in Finnish', () => {
+    renderSheet({ ...PRODUCT, icon_status: 'pending' })
+
+    expect(screen.getByText('Luodaan… tämä kestää muutaman minuutin')).toBeInTheDocument()
+  })
+
+  it('offers Confirm and Reject for a proposal in Finnish', () => {
+    renderSheet({ ...PRODUCT, emoji: '🥩', emoji_match: 'proposed' })
+
+    expect(screen.getByText('Arvaus, odottaa vahvistusta')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Vahvista' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hylkää' })).toBeInTheDocument()
+  })
+
+  it('toasts a save in Finnish', async () => {
+    mockApi()
+    renderSheet()
+
+    fireEvent.change(screen.getByLabelText('Nimi'), { target: { value: 'Mince' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Tallenna' }))
+
+    expect(await screen.findByText('Tallennettu · Mince')).toBeInTheDocument()
+  })
+
+  it('reads the names list in Finnish, the names themselves unchanged', async () => {
+    renderSheet()
+
+    const guess = await screen.findByText('minced pork')
+    expect(screen.getByRole('heading', { name: 'Tunnistettavat nimet' })).toBeInTheDocument()
+    expect(guess.closest('li')).toHaveTextContent('arvio')
+    expect(screen.getByText('jauheliha').closest('li')).toHaveTextContent('oma')
+    expect(screen.getByText('ground beef').closest('li')).toHaveTextContent('nimi')
+    expect(screen.getByText('NAUDAN JAUHELIHA 400G')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Poista minced pork' }))
+    expect(
+      screen.getByRole('button', { name: 'Vahvista poisto: minced pork' })
+    ).toHaveTextContent('Poistetaanko?')
+  })
+
+  it('toasts a removed name in Finnish', async () => {
+    server.use(
+      http.delete(
+        `${API_URL}/products/p-1/names/:nameId`,
+        () => new HttpResponse(null, { status: 204 })
+      )
+    )
+    renderSheet()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Poista minced pork' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Vahvista poisto: minced pork' }))
+
+    expect(
+      await screen.findByText('"minced pork" ei enää löydä tätä tuotetta')
+    ).toBeInTheDocument()
   })
 })

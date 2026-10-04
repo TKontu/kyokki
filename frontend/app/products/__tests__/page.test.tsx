@@ -548,3 +548,123 @@ describe('the q URL filter', () => {
     expect(replace).toHaveBeenCalledWith('/products')
   })
 })
+
+// Post-MVP frontier item 13, phase 4: the screen's own words follow the chosen language.
+// Product and category names are data and stay as served (`Meat & Poultry` below).
+describe('chrome in Finnish (Post-MVP frontier item 13, phase 4)', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    window.localStorage.setItem('kyokki.language', 'fi')
+  })
+
+  it('reads the header, search, buttons and view choice in Finnish', async () => {
+    renderPage([product()])
+
+    expect(screen.getByRole('heading', { name: 'Tuotteet' })).toBeInTheDocument()
+    expect(
+      await screen.findByText('1 tuote, joista 1 käyttää yhä kategorian oletusta')
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Hae tuotteita')).toHaveAttribute('placeholder', 'Hae')
+    expect(screen.getByRole('button', { name: 'Arvioi oletusarvot' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Arvioi kaikki uudelleen (omasi säilyvät)' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('radiogroup', { name: 'Näytä' })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: 'Kategorioittain' })).toBeInTheDocument()
+    expect(screen.getByText('5 päivää · kategorian oletus')).toBeInTheDocument()
+  })
+
+  it('counts with the Finnish plural', async () => {
+    renderPage([
+      product({ shelf_life_source: 'cook' }),
+      product({ id: 'p-2', canonical_name: 'Pork', shelf_life_source: 'cook', default_shelf_life_days: 1 }),
+    ])
+
+    expect(await screen.findByText('2 tuotetta')).toBeInTheDocument()
+    expect(screen.getByText('1 päivä · itse asetettu')).toBeInTheDocument()
+  })
+
+  it('says what was saved in a Finnish toast', async () => {
+    renderPage([product()], {
+      considered: 1,
+      answered: 1,
+      applied: true,
+      items_redated: 3,
+      changes: [
+        {
+          id: 'p-mince',
+          canonical_name: 'Ground beef',
+          category: 'meat',
+          current_days: 5,
+          proposed_days: 2,
+          current_opened: null,
+          proposed_opened: null,
+        },
+      ],
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Arvioi oletusarvot' }))
+
+    expect(
+      await screen.findByText(/Tallennettu 1 säilyvyysaika, 3 tuotteen päiväys päivitetty/)
+    ).toBeInTheDocument()
+  })
+
+  it('shows a proposal in Finnish', async () => {
+    renderPage([product()], {
+      considered: 1,
+      answered: 1,
+      applied: false,
+      items_redated: 0,
+      changes: [
+        {
+          id: 'p-mince',
+          canonical_name: 'Ground beef',
+          category: 'meat',
+          current_days: 5,
+          proposed_days: 2,
+          current_opened: null,
+          proposed_opened: null,
+        },
+      ],
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Arvioi oletusarvot' }))
+
+    const proposal = await screen.findByRole('region', { name: 'Ehdotetut säilyvyysajat' })
+    expect(proposal).toHaveTextContent('1/1 muuttuisi. Mitään ei ole vielä tallennettu.')
+    expect(proposal).toHaveTextContent('5 → 2 pv')
+    expect(within(proposal).getByRole('button', { name: 'Tallenna 1' })).toBeInTheDocument()
+    expect(within(proposal).getByRole('button', { name: 'Hylkää' })).toBeInTheDocument()
+  })
+
+  it('flags the audit in Finnish', async () => {
+    renderPage([
+      product({ id: 'p-model', canonical_name: 'Chicken', default_shelf_life_days: 58, shelf_life_source: 'model' }),
+    ])
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'Tarkista säilyvyysajat' }))
+    const list = screen.getByRole('list', { name: 'Säilyvyysaikojen tarkistus' })
+
+    expect(within(list).getByRole('button', { name: /Chicken/ })).toHaveTextContent(
+      'lähellä pisintä: Meat & Poultry (1-60 pv)'
+    )
+  })
+
+  it('lists emoji to confirm in Finnish', async () => {
+    renderPage([product({ emoji: '🥩', emoji_match: 'proposed' })])
+
+    const review = await screen.findByRole('region', { name: 'Vahvistettavat emojit' })
+    expect(review).toHaveTextContent('Vahvistettavat emojit (1)')
+    expect(within(review).getByRole('button', { name: 'Vahvista' })).toBeInTheDocument()
+    expect(within(review).getByRole('button', { name: 'Hylkää' })).toBeInTheDocument()
+  })
+
+  it('points an empty catalog at receipts in Finnish', async () => {
+    renderPage([])
+
+    expect(
+      await screen.findByText('Ei vielä tuotteita. Ne luodaan, kun vahvistat kuitin.')
+    ).toBeInTheDocument()
+  })
+})
