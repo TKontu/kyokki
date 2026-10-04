@@ -463,6 +463,17 @@ export const fi: Messages = {
     dateLabel: 'Ostopäivä (valinnainen)',
     upload: 'Lähetä',
     uploadError: 'Kuitin lähetys epäonnistui. Yritä uudelleen.',
+    uploadMany: { one: 'Lähetä', other: 'Lähetä {count} kuittia' },
+    manyHint: 'Kauppa ja päivä, jos annettu, koskevat kaikkia tiedostoja.',
+    progress: 'Lähetetään {current}/{total}',
+    results: 'Tulokset',
+    resultUploaded: 'Lähetetty',
+    resultExisting: 'Jo lähetetty aiemmin',
+    resultFailed: 'Epäonnistui: {message}',
+    allReceipts: 'Kaikki kuitit',
+    sharedFailed:
+      'Jaettuja tiedostoja ei voitu lisätä jonoon (ei kuittitiedosto tai liian suuri). Valitse ' +
+      'ne tästä.',
   },
   area: {
     backToFridge: '← Jääkaappi',
