@@ -906,7 +906,9 @@ Ordered by expected value once MVP is live.
     in the header rather than on a toast; it reverses any logged change, consume included.
 13. Product name languages: generic names are English since MVP-R2. Phase 1 done (#162): a
     per-device display language and per-product display names; receipts stay as printed. Phase 2
-    done (#168): the daily screens' own text. Phase 3: products, receipt and scan screens.
+    done (#168): the daily screens' own text. Phase 3 done (#174): receipt, scan and area screens.
+    Phase 4 done (#179): the products screen and the product sheet. Left: the operator's wording
+    pass and odd model-proposed display names (operator, 2026-10-04: "surface level").
 14. Meal sections (breakfast, lunch, dinner, snack) in the fridge view (asked 2026-09-24,
     deferred from wave V). Needs a per-product meal tag (model and migration) and an operator
     call on tags versus rules; the meal context of item 8 is the same data.
@@ -2454,14 +2456,15 @@ deployed. No migration. Each PR had a verdict; #164 and #168 had fix passes.
   7-day minimum span. It needs at least 3 events on at least 2 days. It reports `runs_out_on`,
   `days_left` and `expires_first`. It is served at `GET /api/stock/runout?within_days=N`,
   `GET /api/ha/runout` and `kyokki stock runout`.
-  - [ ] Low: one query per product; the rate is diluted after a long out-of-stock gap.
+  - [x] Low: one query per product; the rate is diluted after a long out-of-stock gap (#178,
+    round 2026-10-04-1).
 - **Telegram hygiene (#166, H47):** a run of 409s on `getUpdates` lasting 60 s or more gives one
   ERROR and exit code 3. `failure_text` only classifies and never echoes internals. DEPLOY
   documents a separate dev token. With two pollers both may exit; the homelab one restarts.
 - **Min-stock follow-ups (#167):** the PATCH and bulk-discard paths run the min-stock check from
   the endpoint (crud no longer imports `min_stock`). Undo takes back an open, untouched
   `auto_restock` item the undone batch caused, once stock is back at the minimum.
-  - [ ] The wider crud → service inversion: `crud/inventory_item.py` and `crud/product_master.py`
+  - [x] (#180, round 2026-10-04-1) The wider crud → service inversion: `crud/inventory_item.py` and `crud/product_master.py`
     import `item_status`, `units`, `product_names` and `storage` (the spec's grep acceptance was a
     planner miss).
 - **Display language phase 2 (#168, frontier item 13):** `lib/i18n` (`fi` is typed against `en`,
@@ -2509,12 +2512,40 @@ deployed. No migration. Each PR had a verdict; #164 and #168 had fix passes.
   - the prompt carries up to 3 printed receipt aliases;
   - `backfill_display_names --refresh-model`.
 - **Finnish phase 3 (#174):** the receipt flow, scan, area and ProductSearch.
-  - [ ] Phase 4: the products screen and `ProductEditSheet`.
+  - [x] Phase 4: the products screen and `ProductEditSheet` (#179, round 2026-10-04-1).
   - [ ] Wording pass: "kpl", "Kotitaloustuote", "arvio"/"tiedossa", "luettu mallilla", plus the
     earlier list.
 - **Process:** two planner misses on shared components. ProductSearch is used by QuickAddSheet
   (#174 F1), and the text libs were missing from #168's ownership. Check the importers of a granted
   component before splitting ownership.
+
+**Round 2026-10-04-1** (base `1fc6043`). Merged 2026-10-04 by the operator: #178 to #180. Deployed
+2026-10-04 (`9842aa0`). No migration. No verdict panels this round (straight from executor to merge).
+- **Finnish phase 4 (#179, frontier item 13):** `app/products/page.tsx`, `ProductEditSheet` and
+  `ProductNamesList` use `useT()` (`products` and `productSheet` namespaces). English is byte-identical;
+  unit labels read kpl/tl/rkl in Finnish. Operator on the iPad: "Suomi works".
+  - [ ] Wording pass: the PR body's "Wording to check" list, plus the earlier lists.
+  - [ ] Some model-proposed Finnish display names are poor (operator, 2026-10-04). The cook can fix
+    one on the product sheet; a bulk review or `backfill_display_names --refresh-model` is the
+    operator's call.
+  - Note: the English "shelf lives" toast says "lives" even for 1; kept to stay byte-identical.
+- **Run-out forecast (#178):** the span counts only days with at least one item in stock
+  (`created_at`, discard/restore log rows, `consumed_at`); in stock but unused still dilutes. If a
+  consume event falls on a day with no item in stock, that product keeps the calendar span.
+  `forecast()` runs a fixed number of statements regardless of product count. Production after deploy: 63 rows,
+  4 forecasts, 30 insufficient history, 29 out.
+- **crud imports no services (#180):** pure rules live in `app/domain/` (`units`, `item_status`,
+  `storage`, `product_names.normalize_product_name`); `product_name` table queries in
+  `crud/product_name.py`. The `app.services.*` modules are re-export shims, so no importer changed.
+  `tests/test_layering.py` fails on any `app.services` import under `app/crud` and on
+  services/crud/api imports under `app/domain`. Logger name for name learning is now
+  `app.crud.product_name`.
+  - [ ] Optional: move importers off the shims and delete them; `app.schemas.category` still imports
+    `app.services.storage`.
+- **Ratio:** 1 forward : 2 maintenance. A1 held the shared i18n files, so no second frontend lane
+  could run; the other forward items wait on HTTPS, meal sections, AG0 and DEC-7/8/9.
+- **Environment:** the workspace reboot dropped PostgreSQL and Redis from the container; the
+  planner reinstalled `postgresql-16` and `redis-server`. Docker is still absent.
 
 ---
 
@@ -2666,7 +2697,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [x] H47 (#166)
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Deployed 2026-10-03. Round 2026-10-03-2: [x] icon library (#171). Round 2026-10-03-3: [x] icon curation (#175)  [x] run-out list (#172)  [x] Finnish names on rename (#173)  [x] Finnish receipt screens (#174), merged 2026-10-03. Next: deploy, then the operator uses the iPad and curates icons
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Deployed 2026-10-03. Round 2026-10-03-2: [x] icon library (#171). Round 2026-10-03-3: [x] icon curation (#175)  [x] run-out list (#172)  [x] Finnish names on rename (#173)  [x] Finnish receipt screens (#174), merged 2026-10-03, deployed 2026-10-04. Round 2026-10-04-1: [x] Finnish products screen (#179)  [x] run-out in-stock days (#178)  [x] crud imports no services (#180), merged and deployed 2026-10-04. Next: the operator curates icons and uses the iPad; next round from findings (multi-file receipt upload is unblocked now that A1 freed the i18n files)
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
