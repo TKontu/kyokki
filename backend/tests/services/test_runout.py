@@ -396,3 +396,212 @@ class TestSorting:
         ordered_ids = [r.product_id for r in results]
 
         assert ordered_ids.index(fast.id) < ordered_ids.index(slow.id)
+
+
+# --- In-stock days (#165 follow-up): days with nothing in stock do not dilute the rate ---
+
+
+def _at(days_ago: float) -> datetime:
+    return NOW - timedelta(days=days_ago)
+
+
+async def _held_item(
+    db: AsyncSession,
+    product: ProductMaster,
+    quantity: str,
+    *,
+    created_days_ago: float,
+    status: str = "sealed",
+    consumed_days_ago: float | None = None,
+    unit: str = "dl",
+) -> InventoryItem:
+    """An item with an explicit history: entered ``created_days_ago``, and - for an
+    ``empty`` or ``discarded`` one - left ``consumed_days_ago``."""
+    gone = status in ("empty", "discarded")
+    item = InventoryItem(
+        id=uuid4(),
+        product_master_id=product.id,
+        initial_quantity=Decimal(quantity),
+        current_quantity=Decimal("0") if status == "empty" else Decimal(quantity),
+        unit=unit,
+        status=status,
+        expiry_date=TODAY + timedelta(days=30),
+        location="main_fridge",
+        created_at=_at(created_days_ago),
+        consumed_at=(
+            _at(consumed_days_ago) if gone and consumed_days_ago is not None else None
+        ),
+    )
+    db.add(item)
+    await db.commit()
+    return item
+
+
+async def _item_log(
+    db: AsyncSession,
+    item: InventoryItem,
+    action: str,
+    *,
+    days_ago: float,
+    quantity: str,
+) -> ConsumptionLog:
+    log = ConsumptionLog(
+        inventory_item_id=item.id,
+        product_master_id=item.product_master_id,
+        action=action,
+        quantity_consumed=Decimal(quantity),
+        quantity_after=Decimal("0"),
+        unit=str(item.unit),
+        batch_id=uuid4(),
+        previous={},
+        logged_at=_at(days_ago),
+    )
+    db.add(log)
+    await db.commit()
+    return log
+
+
+class TestInStockDays:
+    async def test_out_of_stock_gap_does_not_dilute_the_rate(
+        self, db: AsyncSession
+    ) -> None:
+        """Milk used daily from day 0 to day 10, out of stock for 30 days, restocked on
+        day 40; today is day 42."""
+        milk = await _product(db, "Milk", unit="dl")
+        # The first carton: in from day 0 (an hour before the first use), empty on day 10.
+        await _held_item(
+            db,
+            milk,
+            "11",
+            created_days_ago=42 + 1 / 24,
+            status="empty",
+            consumed_days_ago=32 - 1 / 24,
+        )
+        # The restock on day 40, still in the fridge.
+        await _held_item(db, milk, "5", created_days_ago=2 + 1 / 24)
+        for day in [*range(0, 11), 40, 41, 42]:
+            await _log(db, milk, "use_partial", days_ago=42 - day, quantity="1")
+
+        result = await _one(db, milk.id)
+
+        # 14 dl over the in-stock days from day 0 up to today: days 0-10 (11) and
+        # days 40-41 (2) = 13, not the 42 the calendar spans.
+        assert result.status == "forecast"
+        assert result.daily_rate == Decimal("1.08")  # 14 / 13
+        assert result.days_left == 5  # 5 dl / 1.08 dl/day = 4.6
+        assert result.runs_out_on == TODAY + timedelta(days=5)
+
+    async def test_in_stock_but_unused_still_dilutes(self, db: AsyncSession) -> None:
+        """The same use pattern, but the carton never ran out: the 30 quiet days are
+        real low use and still count."""
+        milk = await _product(db, "Milk", unit="dl")
+        await _held_item(db, milk, "5", created_days_ago=42 + 1 / 24)
+        for day in [*range(0, 11), 40, 41, 42]:
+            await _log(db, milk, "use_partial", days_ago=42 - day, quantity="1")
+
+        result = await _one(db, milk.id)
+
+        assert result.status == "forecast"
+        assert result.daily_rate == Decimal("0.33")  # 14 / 42
+        assert result.days_left == 15  # 5 / 0.33 = 15.2
+        assert result.runs_out_on == TODAY + timedelta(days=15)
+
+    async def test_a_restored_item_is_in_stock_again_from_the_restore(
+        self, db: AsyncSession
+    ) -> None:
+        """Bought on day 0, used to day 5, thrown away on day 5, restored on day 35 (the
+        discard was a mis-tap noticed late); today is day 40."""
+        jam = await _product(db, "Jam", unit="dl")
+        item = await _held_item(db, jam, "10", created_days_ago=40 + 1 / 24)
+        await _item_log(db, item, "discard", days_ago=35 - 2 / 24, quantity="10")
+        await _item_log(db, item, "restore", days_ago=5 + 1 / 24, quantity="10")
+        for day in [*range(0, 6), *range(35, 41)]:
+            await _log(db, jam, "use_partial", days_ago=40 - day, quantity="1")
+
+        result = await _one(db, jam.id)
+
+        # 12 dl over days 0-5 (6) and days 35-39 (5) = 11 in-stock days.
+        assert result.status == "forecast"
+        assert result.daily_rate == Decimal("1.09")  # 12 / 11
+
+    async def test_a_discarded_item_leaves_stock(self, db: AsyncSession) -> None:
+        """A discard ends the item's time in stock just as running empty does."""
+        jam = await _product(db, "Jam", unit="dl")
+        old = await _held_item(
+            db,
+            jam,
+            "10",
+            created_days_ago=40 + 1 / 24,
+            status="discarded",
+            consumed_days_ago=35 - 2 / 24,
+        )
+        await _item_log(db, old, "discard", days_ago=35 - 2 / 24, quantity="10")
+        await _held_item(db, jam, "10", created_days_ago=5 + 1 / 24)
+        for day in [*range(0, 6), *range(35, 41)]:
+            await _log(db, jam, "use_partial", days_ago=40 - day, quantity="1")
+
+        result = await _one(db, jam.id)
+
+        assert result.daily_rate == Decimal("1.09")  # 12 / 11
+
+    async def test_falls_back_when_consume_events_predate_every_item(
+        self, db: AsyncSession
+    ) -> None:
+        """Uses logged before any item that could have held them (older data): the
+        history cannot be reconstructed, so the span is the plain calendar one."""
+        milk = await _product(db, "Milk", unit="dl")
+        await _held_item(db, milk, "5", created_days_ago=2 + 1 / 24)
+        for days_ago in (8, 6, 4, 2, 0):
+            await _log(db, milk, "use_partial", days_ago=days_ago, quantity="2")
+
+        result = await _one(db, milk.id)
+
+        # 10 dl / 8 calendar days, not 10 dl over the 2 days the item has been in.
+        assert result.daily_rate == Decimal("1.25")
+        assert result.days_left == 4
+
+
+class TestQueryCount:
+    async def _seed(self, db: AsyncSession, count: int) -> None:
+        for i in range(count):
+            product = await _product(db, f"Product {count}-{i}", unit="dl")
+            gone = await _held_item(
+                db,
+                product,
+                "4",
+                created_days_ago=20,
+                status="discarded",
+                consumed_days_ago=12,
+            )
+            await _item_log(db, gone, "discard", days_ago=12, quantity="4")
+            await _held_item(db, product, "5", created_days_ago=6)
+            for days_ago in (19, 15, 5, 3, 1):
+                await _log(db, product, "use_partial", days_ago=days_ago, quantity="1")
+
+    async def _statements(self, db: AsyncSession) -> tuple[int, int]:
+        from sqlalchemy import event
+
+        statements: list[str] = []
+        engine = db.bind.sync_engine
+
+        def count(conn, cursor, statement, *args) -> None:
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", count)
+        try:
+            results = await runout.forecast(db, now=NOW)
+        finally:
+            event.remove(engine, "before_cursor_execute", count)
+        return len(statements), len(results)
+
+    async def test_same_statement_count_for_3_and_12_products(
+        self, db: AsyncSession
+    ) -> None:
+        await self._seed(db, 3)
+        three, reported_three = await self._statements(db)
+        await self._seed(db, 9)
+        twelve, reported_twelve = await self._statements(db)
+
+        assert reported_three == 3
+        assert reported_twelve == 12
+        assert three == twelve
