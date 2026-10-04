@@ -15,10 +15,11 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.exceptions import handle_integrity_errors
+from app.core.logging import get_logger
 from app.crud import receipt as crud_receipt
 from app.db.session import get_db
 from app.schemas.receipt import (
@@ -46,7 +47,14 @@ from app.services.shelf_life_on_create import (
     schedule_estimates,
 )
 
+logger = get_logger(__name__)
+
 router = APIRouter()
+
+# Where a share lands (frontier item 10). The scan page renders the failure note, so
+# these paths are a contract with the frontend.
+SHARE_FAILED_LOCATION = "/scan?shared=failed"
+SHARE_MANY_LOCATION = "/receipts"
 
 
 @router.post(
@@ -102,6 +110,56 @@ async def upload_receipt(
         )
 
     return result.receipt
+
+
+@router.post("/share", status_code=status.HTTP_303_SEE_OTHER)
+async def share_receipts(
+    receipts: list[UploadFile] = File(default=[]),
+    title: str | None = Form(None),
+    text: str | None = Form(None),
+    url: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Receive receipts shared to the installed PWA (Android Web Share Target).
+
+    The browser navigates here with a multipart form post, so the answer is a 303 to a
+    page: one accepted receipt opens its review page, several open the receipt list, and
+    none lands on the scan page with a failure note. A file of an unsupported type or over
+    the size limit is skipped without stopping the others; a file already received counts
+    as accepted and opens the existing receipt. ``title``, ``text`` and ``url`` are what
+    Android sends alongside the files; they are accepted and ignored.
+    """
+    accepted: list[UUID] = []
+    for upload in receipts:
+        content = await upload.read()
+        content_type = upload.content_type or ""
+        try:
+            result = await ingest_receipt_file(
+                db,
+                content=content,
+                filename=upload.filename or "receipt",
+                content_type=content_type,
+            )
+        except (UnsupportedReceiptType, ReceiptTooLarge) as exc:
+            logger.info(
+                "Shared receipt file skipped",
+                extra={
+                    "reason": type(exc).__name__,
+                    "content_type": content_type or "unknown",
+                    "size_bytes": len(content),
+                },
+            )
+            continue
+        if result.receipt.id not in accepted:
+            accepted.append(result.receipt.id)
+
+    if len(accepted) == 1:
+        location = f"/receipt/{accepted[0]}"
+    elif accepted:
+        location = SHARE_MANY_LOCATION
+    else:
+        location = SHARE_FAILED_LOCATION
+    return RedirectResponse(location, status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/{receipt_id}", response_model=ReceiptResponse)
