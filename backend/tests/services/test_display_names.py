@@ -416,9 +416,11 @@ class TestBatchedProposals:
         carrot = await _product(db_session, "Carrot")
         calls = []
 
+        FI = {"Tomato": "Tomaatti", "Carrot": "Porkkana"}
+
         async def fake_propose(names, **kwargs):
             calls.append(list(names))
-            return ["Tomaatti", "Porkkana"]
+            return [FI.get(n) for n in names]
 
         with patch.object(display_names, "propose_finnish_names", new=fake_propose):
             await display_names.propose_display_names_for_new_products(
@@ -479,8 +481,10 @@ class TestBatchedProposals:
         tomato = await _product(db_session, "Tomato")
         carrot = await _product(db_session, "Carrot")
 
+        FI = {"Carrot": "Porkkana"}
+
         async def fake_propose(names, **kwargs):
-            return [None, "Porkkana"]
+            return [FI.get(n) for n in names]
 
         with patch.object(display_names, "propose_finnish_names", new=fake_propose):
             await display_names.propose_display_names_for_new_products(
@@ -498,9 +502,10 @@ class TestBatchedProposals:
         tomato = await _product(db_session, "Tomato")
         carrot = await _product(db_session, "Carrot")
         real_set = crud_product.set_display_name
+        FI = {"Tomato": "Tomaatti", "Carrot": "Porkkana"}
 
         async def fake_propose(names, **kwargs):
-            return ["Tomaatti", "Porkkana"]
+            return [FI.get(n) for n in names]
 
         async def flaky_set(db, product, **kwargs):
             if str(product.canonical_name) == "Tomato":
