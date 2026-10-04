@@ -9,10 +9,35 @@ import { BACKGROUND_COLOR, BRAND_COLOR, BRAND_NAME, ICON_SIZES, iconPath } from 
  * `orientation` for home-screen web apps - the wall mount decides that. The iPad is mounted
  * upright (Q17), so the app asks for portrait where a platform listens.
  *
- * No service worker: the stack is served over plain HTTP on the LAN, which is not a secure
- * context, so registration would be refused. Offline stays post-MVP for that reason.
+ * Production is served over HTTPS, so Android Chrome can install the app. There is still no
+ * service worker yet; offline stays post-MVP.
+ *
+ * `share_target` makes the installed app a target in Android's share sheet: shared receipt
+ * photos and PDFs are posted to /api/receipts/share, which queues each one and redirects to
+ * the receipt, the receipt list, or the scan page with a failure note.
  */
-export default function manifest(): MetadataRoute.Manifest {
+/**
+ * Web Share Target as the W3C spec defines it. Next 14's `MetadataRoute.Manifest` types
+ * `share_target` with lowercase methods and `params` as a name/value array, which is not
+ * the shape Chrome reads, so the field is replaced with the spec's shape here.
+ */
+interface ShareTarget {
+  action: string
+  method: 'GET' | 'POST'
+  enctype: 'application/x-www-form-urlencoded' | 'multipart/form-data'
+  params: {
+    title?: string
+    text?: string
+    url?: string
+    files?: { name: string; accept: string[] }[]
+  }
+}
+
+type KyokkiManifest = Omit<MetadataRoute.Manifest, 'share_target'> & {
+  share_target: ShareTarget
+}
+
+export default function manifest(): KyokkiManifest {
   return {
     name: BRAND_NAME,
     short_name: BRAND_NAME,
@@ -28,5 +53,16 @@ export default function manifest(): MetadataRoute.Manifest {
       sizes: `${size}x${size}`,
       type: 'image/png',
     })),
+    share_target: {
+      action: '/api/receipts/share',
+      method: 'POST',
+      enctype: 'multipart/form-data',
+      params: {
+        title: 'title',
+        text: 'text',
+        url: 'url',
+        files: [{ name: 'receipts', accept: ['image/*', 'application/pdf'] }],
+      },
+    },
   }
 }
