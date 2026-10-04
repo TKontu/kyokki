@@ -13,6 +13,12 @@ cycle is masked, so this needs a fresh subprocess to catch.
 `app.schemas` (directly or by importing the routers/services that do), so they are the ones
 a regression through them would actually have to pass - the two narrower modules above
 could stay fixed in isolation while a production entry point still failed.
+
+Round 2026-10-04-1 moved the code of `app.services.{storage,units,item_status}` into
+`app.domain` (the services modules are now re-exports), and the `product_name` queries into
+`app.crud.product_name`, so the new modules and the re-exporting shims are each imported
+first in a fresh interpreter too. `app.domain.storage` keeps the lazy `StorageLocation`
+resolution described above.
 """
 
 from __future__ import annotations
@@ -30,7 +36,15 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize(
     "module",
     [
+        "app.domain.units",
+        "app.domain.item_status",
+        "app.domain.storage",
+        "app.domain.product_names",
+        "app.crud.product_name",
         "app.services.storage",
+        "app.services.units",
+        "app.services.item_status",
+        "app.services.product_names",
         "app.schemas.category",
         "app.main",
         "app.worker.receipt_worker",

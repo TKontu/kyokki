@@ -11,6 +11,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import undefer
 
+from app.crud.product_name import learn_product_name
+from app.domain.product_names import normalize_product_name
+from app.domain.storage import storage_type_for_category
+from app.domain.units import unit_type_for
 from app.models.category import Category
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
@@ -21,9 +25,6 @@ from app.models.product_name import ProductName
 from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
 from app.schemas.product_master import ProductMasterCreate, ProductMasterUpdate
-from app.services.product_names import learn_product_name, normalize_product_name
-from app.services.storage import storage_type_for_category
-from app.services.units import unit_type_for
 
 
 def _unit_type(unit: str) -> str:
@@ -723,8 +724,6 @@ async def enrich_product_from_off_data(
         from app.crud.category import get_category
 
         category_defaults = await get_category(db, enriched_data["category"])
-
-        from app.services.storage import storage_type_for_category
 
         storage_type = storage_type_for_category(enriched_data["category"])
 
