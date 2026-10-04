@@ -88,7 +88,7 @@ def _normalized(name: str) -> str:
     string to `normalize_product_name` even though it is the same text. NFC-folding first
     means "Crème fraîche" matches the curated table's entry whichever form it comes in as.
     This stays local to this module rather than changing the shared
-    `services/product_names.py` key (PR #137 review).
+    `domain/product_names.py` key (PR #137 review).
     """
     return normalize_product_name(unicodedata.normalize("NFC", name or ""))
 

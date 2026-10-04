@@ -3,7 +3,7 @@
 The key half of `docs/PRODUCT_RESOLUTION_SPEC.md`: a line resolves to a product through an
 exact key, never through a similarity score. The key format is `app.domain.product_names`;
 this module holds the operations on it - look a name up, learn a new one, list and forget
-them. `services/product_names.py` re-exports all of it for its existing importers.
+them.
 """
 
 from collections.abc import Iterable

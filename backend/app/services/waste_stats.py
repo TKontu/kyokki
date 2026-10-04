@@ -3,7 +3,7 @@
 Counted by events, not amounts - grams and pieces do not add up (`ActionSummary`). A discarded
 item that was later restored is not waste: `item_status.is_frozen` freezes an item the moment
 it is discarded, and the only way out is an explicit restore (`crud.inventory_item._event_for`,
-`services.item_status.next_status`), so an item can never be discarded twice running without a
+`domain.item_status.next_status`), so an item can never be discarded twice running without a
 restore in between. That means "a restore for the same item logged after this discard" can only
 be the restore undoing it - no batch bookkeeping is needed to pair them up.
 
@@ -53,7 +53,7 @@ def _not_reversed_by_a_restore() -> ColumnElement[bool]:
     """True unless this is a discard that a later restore on the same item undid.
 
     A discarded item is frozen until an explicit restore (``is_frozen`` in
-    ``app/services/item_status.py``), so it cannot be discarded a second time before being
+    ``app/domain/item_status.py``), so it cannot be discarded a second time before being
     restored. A restore logged after a discard on the same item can therefore only be the one
     undoing that discard - while the item still exists, matching on ``inventory_item_id``
     is exact.

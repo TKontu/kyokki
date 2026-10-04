@@ -14,7 +14,7 @@ class InventoryStatus(StrEnum):
 
     Until H24 this was a `Literal` on the PATCH schema and a free `str` on create, so
     `POST /inventory` stored any string at all while `PATCH` answered 422 for the same value.
-    The legal *moves* between these live in `services/item_status.py`; this is only the set.
+    The legal *moves* between these live in `domain/item_status.py`; this is only the set.
     """
 
     SEALED = "sealed"
