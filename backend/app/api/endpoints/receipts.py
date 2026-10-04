@@ -129,7 +129,7 @@ async def share_receipts(
     as accepted and opens the existing receipt. ``title``, ``text`` and ``url`` are what
     Android sends alongside the files; they are accepted and ignored.
     """
-    accepted: list[UUID] = []
+    accepted: list[str] = []
     for upload in receipts:
         content = await upload.read()
         content_type = upload.content_type or ""
@@ -150,8 +150,9 @@ async def share_receipts(
                 },
             )
             continue
-        if result.receipt.id not in accepted:
-            accepted.append(result.receipt.id)
+        receipt_id = str(result.receipt.id)
+        if receipt_id not in accepted:
+            accepted.append(receipt_id)
 
     if len(accepted) == 1:
         location = f"/receipt/{accepted[0]}"
