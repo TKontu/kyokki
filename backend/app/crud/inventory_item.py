@@ -13,10 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.crud.consumption_log import ConsumptionAction, add_consumption_log
 from app.crud.product_master import MovedInventoryItem
-from app.models.inventory_item import InventoryItem
-from app.models.product_master import ProductMaster
-from app.schemas.inventory_item import InventoryItemCreate, InventoryItemUpdate
-from app.services.item_status import (
+from app.domain.item_status import (
     DISCARDED,
     ItemEvent,
     ItemFrozen,
@@ -24,7 +21,10 @@ from app.services.item_status import (
     next_status,
     opens_the_pack,
 )
-from app.services.units import quantise, to_canonical_decimal, unit_type_for
+from app.domain.units import quantise, to_canonical_decimal, unit_type_for
+from app.models.inventory_item import InventoryItem
+from app.models.product_master import ProductMaster
+from app.schemas.inventory_item import InventoryItemCreate, InventoryItemUpdate
 
 # Items in these states are gone from the kitchen and hidden from default listings.
 INACTIVE_STATUSES = ("empty", "discarded")
@@ -300,7 +300,7 @@ async def update_inventory_item(
         A tuple of (updated inventory item if found else None, the id of the product
         whose active stock this update lowered - a discard, or a quantity corrected down -
         or None when nothing was lowered). The caller decides what to do with the second
-        element (F1); this layer never calls into `app.services` itself.
+        element (F1); this layer never calls into the service layer itself.
 
     Raises:
         ItemFrozen: The item has been thrown away and this is not a restore.
