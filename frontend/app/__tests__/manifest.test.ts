@@ -39,4 +39,20 @@ describe('manifest', () => {
     expect(m.theme_color).toBe(BRAND_COLOR)
     expect(m.background_color).toBe('#ffffff')
   })
+
+  it('is an Android share target for receipt photos and PDFs (frontier item 10)', () => {
+    // The browser navigates to the action with a multipart form post; the backend
+    // answers with a redirect to the receipt, the list, or the scan page
+    expect(m.share_target).toEqual({
+      action: '/api/receipts/share',
+      method: 'POST',
+      enctype: 'multipart/form-data',
+      params: {
+        title: 'title',
+        text: 'text',
+        url: 'url',
+        files: [{ name: 'receipts', accept: ['image/*', 'application/pdf'] }],
+      },
+    })
+  })
 })
