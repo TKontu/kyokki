@@ -460,6 +460,17 @@ export const en = {
     dateLabel: 'Purchase date (optional)',
     upload: 'Upload',
     uploadError: 'Could not upload the receipt. Try again.',
+    uploadMany: { one: 'Upload', other: 'Upload {count} receipts' },
+    manyHint: 'The store and date, if given, apply to every file.',
+    progress: 'Uploading {current} of {total}',
+    results: 'Results',
+    resultUploaded: 'Uploaded',
+    resultExisting: 'Already here',
+    resultFailed: 'Failed: {message}',
+    allReceipts: 'All receipts',
+    sharedFailed:
+      'The shared files could not be queued (not a receipt type, or too large). Try picking ' +
+      'them here.',
   },
   area: {
     backToFridge: '← Fridge',
