@@ -16,13 +16,14 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.product_master import references_to_product
+from app.crud.product_name import product_for_name
+from app.domain.product_names import normalize_product_name
 from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
 from app.models.product_display_name import ProductDisplayName
 from app.models.product_name import ProductName
 from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
-from app.services.product_names import normalize_product_name, product_for_name
 
 PRODUCT = {
     "category": "dairy",

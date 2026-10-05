@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.crud.shopping_list_item import shopping_list_item as crud_shopping
+from app.domain.units import canonical_factor, quantise
 from app.models.product_master import ProductMaster
 from app.models.shopping_list_item import ShoppingListItem
 from app.schemas.shopping_list_item import (
@@ -38,7 +39,6 @@ from app.schemas.stock import StockRow
 from app.services import idempotency
 from app.services.idempotency import IdempotencyClaim
 from app.services.stock import stock_summary
-from app.services.units import canonical_factor, quantise
 
 logger = get_logger(__name__)
 

@@ -14,6 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.category import get_category
 from app.crud.product_master import MovedInventoryItem
+from app.crud.product_name import (
+    learn_product_name,
+    product_for_name,
+)
+from app.domain.product_names import normalize_product_name
+from app.domain.storage import location_for_storage, storage_type_for_category
+from app.domain.units import grams_to_pieces, pieces_to_grams, unit_type_for
 from app.models.category import Category
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
@@ -21,13 +28,6 @@ from app.services.expiry_recompute import (
     recompute_expiry_for_products,
     sealed_expiry,
 )
-from app.services.product_names import (
-    learn_product_name,
-    normalize_product_name,
-    product_for_name,
-)
-from app.services.storage import location_for_storage, storage_type_for_category
-from app.services.units import grams_to_pieces, pieces_to_grams, unit_type_for
 
 
 class InvalidProductRequest(ValueError):

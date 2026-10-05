@@ -11,9 +11,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.domain.units import canonical_factor
 from app.schemas.shopping_list_item import ShoppingPriority
 from app.schemas.types import JsonDecimal, canonicalize_units
-from app.services.units import canonical_factor
 
 
 class HaStatusResponse(BaseModel):

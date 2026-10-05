@@ -56,7 +56,7 @@ class ProductName(Base):
         nullable=False,
         index=True,
     )
-    # Normalised by services.product_names.normalize_product_name: casefolded, single spaces.
+    # Normalised by domain.product_names.normalize_product_name: casefolded, single spaces.
     name = Column(String, nullable=False, index=True)
     source = Column(String, nullable=False, default="model")
     created_at = Column(

@@ -6,13 +6,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.schemas.inventory_item import StorageLocation
-from app.services.storage import location_for_storage, storage_type_for_category
-from app.services.units import (
+from app.domain.storage import location_for_storage, storage_type_for_category
+from app.domain.units import (
     grams_to_pieces,
     pieces_to_grams,
     receipt_line_quantity,
 )
+from app.schemas.inventory_item import StorageLocation
 
 
 class ReceiptStatus(StrEnum):
@@ -457,7 +457,7 @@ class ConfirmedItemCreate(BaseModel):
 
     @model_validator(mode="after")
     def canonical_units(self) -> "ConfirmedItemCreate":
-        from app.services.units import canonical_factor, to_canonical_decimal
+        from app.domain.units import canonical_factor, to_canonical_decimal
 
         _, canonical = canonical_factor(self.unit)
         converted = to_canonical_decimal(Decimal(str(self.quantity)), self.unit)

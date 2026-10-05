@@ -46,12 +46,13 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.crud.product_name import known_names
+from app.domain.product_names import normalize_product_name
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
 from app.models.store_product_alias import StoreProductAlias
 from app.services.llm_extractor import LLMExtractionError
 from app.services.matching_service import normalize_receipt_name
-from app.services.product_names import known_names, normalize_product_name
 from app.services.product_selection import SelectionLine, select_products
 
 logger = get_logger(__name__)

@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.crud import inventory_item as crud_inventory
 from app.crud.shopping_list_item import shopping_list_item as crud_shopping
+from app.domain.units import quantise
 from app.models.product_master import ProductMaster
 from app.models.shopping_list_item import ShoppingListItem
 from app.schemas.shopping_list_item import (
@@ -44,7 +45,6 @@ from app.schemas.shopping_list_item import (
 )
 from app.services.broadcast_helpers import broadcast_shopping_list_update
 from app.services.undo import RaisedStock
-from app.services.units import quantise
 
 # `shopping_generate` itself imports `stock_summary` from `services.stock`, and `stock.py`
 # imports this module - a module-level import of `shopping_generate` here would be

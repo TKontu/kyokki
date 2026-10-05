@@ -2,12 +2,12 @@
 
 Operator ruling (2026-10-02): "the system should have selectable display language. But of
 course if the receipts are finnish the input data should kept as original." Products are
-generic and English since MVP-R2 (`product_master.canonical_name`, `services/product_names.py`);
+generic and English since MVP-R2 (`product_master.canonical_name`, `domain/product_names.py`);
 this module is Phase 1 of making that cook-facing rather than catalog-facing: an optional name
 per language, stored in `product_display_name` (`models/product_display_name.py`) and read
 through `ProductMaster.display_names`.
 
-A display name is **not** a resolution key. `services/product_names.py` and `product_name` are
+A display name is **not** a resolution key. `domain/product_names.py` and `product_name` are
 untouched here: a receipt line still resolves only through the canonical name and its learned
 synonyms, in English, exactly as before. This module only ever reads the catalog to ask about a
 name and writes `product_display_name` - never `product_name`, never matching.

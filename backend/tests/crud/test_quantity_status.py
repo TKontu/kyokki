@@ -13,9 +13,7 @@ from pathlib import Path
 import pytest
 
 from app.crud.inventory_item import _start_opened_clock
-from app.models.inventory_item import InventoryItem
-from app.models.product_master import ProductMaster
-from app.services.item_status import (
+from app.domain.item_status import (
     PARTIAL_THRESHOLD,
     ItemEvent,
     ItemFrozen,
@@ -23,6 +21,8 @@ from app.services.item_status import (
     next_status,
     opens_the_pack,
 )
+from app.models.inventory_item import InventoryItem
+from app.models.product_master import ProductMaster
 
 CONTRACT = json.loads(
     (

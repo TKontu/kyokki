@@ -14,7 +14,7 @@ cached here, in `app/resources/icon_subjects.json`, so a render never waits on a
 call. This module only reads that file; nothing here ever calls the gateway.
 
 Looked up the same way `icon_briefs.brief_for` is: casefolded, whitespace collapsed
-(`app.services.product_names.normalize_product_name`), so "fish fingers" and " Fish
+(`app.domain.product_names.normalize_product_name`), so "fish fingers" and " Fish
 Fingers " are the same entry. `app.services.product_icons.icon_subject` is the only
 caller, and the operator's own brief always wins over this cache there.
 """
@@ -25,7 +25,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from app.services.product_names import normalize_product_name
+from app.domain.product_names import normalize_product_name
 
 _PATH = Path(__file__).resolve().parent.parent / "resources" / "icon_subjects.json"
 

@@ -8,7 +8,7 @@ optional per-language name the cook sees instead, when a language other than Eng
 chosen (`frontend/lib/language.ts`). English always shows the canonical name, never a row
 here.
 
-This is deliberately **not** `product_name` (`services/product_names.py`): that table is the
+This is deliberately **not** `product_name` (`domain/product_names.py`): that table is the
 resolution key a receipt line matches against, one row per unique name, enforced by a
 catalog-wide unique index. A display name is neither unique across products (two products may
 both be "Maito" in Finnish) nor a key anything resolves by - it is read, never matched.

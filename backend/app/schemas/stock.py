@@ -5,9 +5,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.domain.units import canonical_factor
 from app.schemas.inventory_item import InventoryItemResponse, StorageLocation
 from app.schemas.types import JsonDecimal
-from app.services.units import canonical_factor
 
 
 class StockRow(BaseModel):

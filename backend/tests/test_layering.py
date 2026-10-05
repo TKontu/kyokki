@@ -13,8 +13,9 @@ History: #167 removed the last `app.services.min_stock` calls from
 `app/crud/inventory_item.py` and guarded only that module. Round 2026-10-04-1 (A2) moved
 the remaining helpers crud imported (`item_status`, `units`, `product_names`, `storage`)
 into `app/domain`, and the `product_name` table queries into `app/crud/product_name.py`,
-so the guard now covers every `app.services` import. The `app.services.*` modules remain
-as re-exports for their other importers.
+so the guard now covers every `app.services` import. It left re-exports of those four
+modules in `app/services` for their other importers; round 2026-10-04-2 moved every
+importer to the real homes and deleted them, and a guard here keeps them deleted.
 
 The check walks every import in the AST, so it catches `import app.services.x`,
 `from app.services import x` and `from app.services.x import y` alike, at module level or
@@ -73,6 +74,29 @@ def test_domain_imports_no_service_crud_or_api() -> None:
     offenders = _offenders(DOMAIN_DIR, ("app.services", "app.crud", "app.api"))
     assert offenders == {}, (
         f"app/domain must not import app.services, app.crud or app.api: {offenders}"
+    )
+
+
+REMOVED_SHIMS = ("units", "item_status", "storage", "product_names")
+
+
+def test_the_removed_service_shims_stay_removed() -> None:
+    """The `app.services` re-exports of the domain modules are gone, and nothing
+    under `app/`, `scripts/` or `tests/` imports them: each name is imported from
+    `app.domain.<module>` or `app.crud.product_name`, where it really lives."""
+    restored = [
+        name
+        for name in REMOVED_SHIMS
+        if (BACKEND_ROOT / "app" / "services" / f"{name}.py").exists()
+    ]
+    assert restored == [], f"app/services shims came back: {restored}"
+
+    forbidden = tuple(f"app.services.{name}" for name in REMOVED_SHIMS)
+    offenders: dict[str, set[str]] = {}
+    for directory in ("app", "scripts", "tests"):
+        offenders.update(_offenders(BACKEND_ROOT / directory, forbidden))
+    assert offenders == {}, (
+        f"import these from app.domain or app.crud.product_name instead: {offenders}"
     )
 
 

@@ -20,6 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.logging import get_logger
+from app.crud.product_name import (
+    learn_product_name,
+    product_for_name,
+)
+from app.domain.product_names import normalize_product_name
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
@@ -36,11 +41,6 @@ from app.services.generic_products import (
 )
 from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import forget_non_food, remember_non_food
-from app.services.product_names import (
-    learn_product_name,
-    normalize_product_name,
-    product_for_name,
-)
 from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)

@@ -16,7 +16,7 @@ class ConsumptionAction(StrEnum):
     the cook fixing a number by hand. Neither is consumption, and a waste total must not count
     them.
 
-    Follows `services.item_status.ItemEvent`, with consume split in two so "finished it" can
+    Follows `domain.item_status.ItemEvent`, with consume split in two so "finished it" can
     be told from "had some".
     """
 

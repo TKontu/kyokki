@@ -3,7 +3,7 @@
 import pytest
 
 from app.db.seed_categories import SEED_CATEGORIES
-from app.services.storage import location_for_storage, storage_type_for_category
+from app.domain.storage import location_for_storage, storage_type_for_category
 
 
 class TestStorageTypeForCategory:
@@ -29,7 +29,7 @@ class TestStorageTypeForCategory:
         assert storage_type_for_category(category) == expected
 
     def test_every_seeded_category_is_mapped_explicitly(self):
-        from app.services.storage import CATEGORY_STORAGE
+        from app.domain.storage import CATEGORY_STORAGE
 
         assert {c["id"] for c in SEED_CATEGORIES} == set(CATEGORY_STORAGE)
 

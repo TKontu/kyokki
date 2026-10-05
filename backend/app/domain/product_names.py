@@ -1,4 +1,4 @@
-"""The product-name lookup key, the pure half of `app.services.product_names`.
+"""The product-name lookup key, the pure half of product-name resolution.
 
 A line resolves to a product through an exact key, never through a similarity score
 (`docs/PRODUCT_RESOLUTION_SPEC.md`). This module owns the key format; the queries on the

@@ -24,6 +24,12 @@ from app.core.config import settings
 from app.crud import product_master as crud_product
 from app.crud import store_product_alias as crud_alias
 from app.crud.product_master import MovedInventoryItem
+from app.crud.product_name import (
+    CanonicalName,
+    UnknownName,
+    forget_product_name,
+    names_for_product,
+)
 from app.db.session import get_db
 from app.schemas.product_master import (
     CatalogEstimateChange,
@@ -61,12 +67,6 @@ from app.services.product_merge import (
     MergeIntoItself,
     UnknownProduct,
     merge_products,
-)
-from app.services.product_names import (
-    CanonicalName,
-    UnknownName,
-    forget_product_name,
-    names_for_product,
 )
 
 router = APIRouter()

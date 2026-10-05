@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
-from app.services.units import canonical_factor, to_canonical_decimal
+from app.domain.units import canonical_factor, to_canonical_decimal
 
 # Matches the leading number and optional unit in an OFF quantity string.
 # e.g. "1 L", "500g", "33 cl", "1,5 L", "6 x 250 ml" (matches first group)
@@ -170,7 +170,7 @@ def map_off_category_to_system(off_category: str | None) -> str:
 def parse_off_quantity(quantity_str: str | None) -> tuple[Decimal | None, str]:
     """Parse an OFF quantity string into a (amount, unit) pair.
 
-    Normalises to the canonical units (DEC-1, MVP-U1) via ``app.services.units``: L→dl (×10),
+    Normalises to the canonical units (DEC-1, MVP-U1) via ``app.domain.units``: L→dl (×10),
     cl→dl (×0.1), ml→dl (×0.01), kg→g (×1000). Returns (None, "pcs") when the string is
     absent, empty, or contains no recognisable unit.
 

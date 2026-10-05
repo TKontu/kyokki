@@ -1401,7 +1401,7 @@ class TestRenameKeepsNames:
     async def test_both_names_still_find_it(
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
-        from app.services.product_names import known_names
+        from app.crud.product_name import known_names
 
         product = (await client.post("/api/products", json=self.PRODUCT)).json()
         await client.patch(
@@ -1416,8 +1416,8 @@ class TestRenameKeepsNames:
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
         """First claim wins; the canonical-name fallback still finds the renamed one."""
+        from app.crud.product_name import product_for_name
         from app.models.product_name import ProductName
-        from app.services.product_names import product_for_name
 
         other = (
             await client.post(
@@ -1557,7 +1557,7 @@ class TestProductNames:
         self, client: AsyncClient, seeded_db: AsyncSession
     ) -> None:
         """The reported pair: "ketchup" must stop meaning Taco sauce."""
-        from app.services.product_names import known_names
+        from app.crud.product_name import known_names
 
         product = await self._product(client)
         await self._learn(seeded_db, product["id"], "ketchup", "model")

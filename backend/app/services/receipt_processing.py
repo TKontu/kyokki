@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.crud.category import get_categories
+from app.domain.units import grams_from_name
 from app.models.receipt import Receipt
 from app.parsers.amounts import (
     amount_style,
@@ -66,7 +67,6 @@ from app.services.product_resolution import (
     canonical_names,
 )
 from app.services.store_chain import normalize_store_chain
-from app.services.units import grams_from_name
 
 logger = get_logger(__name__)
 

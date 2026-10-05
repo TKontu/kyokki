@@ -11,19 +11,19 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.category import Category
-from app.models.product_master import ProductMaster
-from app.models.product_name import ProductName
-from app.services.product_names import (
+from app.crud.product_name import (
     CanonicalName,
     UnknownName,
     forget_product_name,
     known_names,
     learn_product_name,
     names_for_product,
-    normalize_product_name,
     product_for_name,
 )
+from app.domain.product_names import normalize_product_name
+from app.models.category import Category
+from app.models.product_master import ProductMaster
+from app.models.product_name import ProductName
 
 
 async def _product(
