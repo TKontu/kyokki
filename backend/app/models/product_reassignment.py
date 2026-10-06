@@ -15,7 +15,8 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from app.db.base_class import Base
 
 
-class ProductReassignment(Base):
+# `Base` is `declarative_base()`, typed Any: the [misc] every model here carries.
+class ProductReassignment(Base):  # type: ignore[misc]
     __tablename__ = "product_reassignment"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)

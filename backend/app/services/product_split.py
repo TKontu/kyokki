@@ -630,7 +630,7 @@ async def _broadcast(
             status=str(moved.status),
             product_name=str(product.canonical_name),
         )
-    names = {
+    names: dict[Any, str] = {
         source.id: str(source.canonical_name),
         target.id: str(target.canonical_name),
     }
