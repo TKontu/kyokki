@@ -2,7 +2,9 @@
 
 /**
  * "Generate from low stock" (AG6 on the iPad): a dry run shows what would be added or raised
- * before anything is written, then "Add to list" applies the same sources for real.
+ * before anything is written, then "Add to list" applies the same sources for real. Two
+ * sources, both on by default (CL6): low stock, and what the run-out forecast says runs out
+ * soon - a line that one picked shows the day. Changing them asks for a new preview.
  */
 
 import React, { useEffect, useRef, useState } from 'react'
@@ -12,9 +14,14 @@ import { useGenerateShoppingList } from '@/hooks/useShopping'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
 import { newIdempotencyKey } from '@/lib/api/shopping'
-import { formatNumber, useT } from '@/lib/i18n'
+import { formatDate, formatNumber, useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
-import type { ShoppingGenerateResponse } from '@/types/shopping'
+import type { Language } from '@/lib/language'
+import type {
+  ShoppingGenerateLine,
+  ShoppingGenerateResponse,
+  ShoppingGenerateSource,
+} from '@/types/shopping'
 
 export interface GenerateSheetProps {
   open: boolean
@@ -29,40 +36,102 @@ function changeCount(preview: ShoppingGenerateResponse): number {
   return preview.added.length + preview.updated.length
 }
 
+/** Every source, in the order the sheet offers (and sends) them. */
+const SOURCES: ShoppingGenerateSource[] = ['low_stock', 'runout']
+const SOURCE_LABELS: Record<ShoppingGenerateSource, string> = {
+  low_stock: 'shopping.generate.lowStock',
+  runout: 'shopping.generate.runout',
+}
+
+/** One source as a tappable on/off pill built on a real checkbox. */
+function SourceToggle({
+  checked,
+  onChange,
+  children,
+}: {
+  checked: boolean
+  onChange: () => void
+  children: React.ReactNode
+}) {
+  return (
+    // `relative` keeps the visually hidden input inside its label (as `ChoiceGroup` does).
+    <label
+      className={`relative flex min-h-touch cursor-pointer items-center justify-center rounded-ui border px-3 text-sm ${
+        checked
+          ? 'border-ui-text bg-ui-text text-white dark:border-ui-dark-text dark:bg-ui-dark-text dark:text-ui-dark-bg'
+          : 'border-ui-border text-ui-text dark:border-ui-dark-border dark:text-ui-dark-text'
+      }`}
+    >
+      <input type="checkbox" className="sr-only" checked={checked} onChange={onChange} />
+      {children}
+    </label>
+  )
+}
+
+function LineText({
+  line,
+  language,
+  t,
+}: {
+  line: ShoppingGenerateLine
+  language: Language
+  t: (key: string, params?: Record<string, string | number>) => string
+}) {
+  const need = line.need === null ? '' : formatNumber(line.need, language)
+  const date = line.runs_out_on
+    ? ` · ${t('shopping.generate.runsOut', { date: formatDate(line.runs_out_on, language) })}`
+    : ''
+  return <>{`${line.name} · ${need} ${line.unit}${date}`}</>
+}
+
 function GenerateForm({ onClose }: { onClose: () => void }) {
   const generate = useGenerateShoppingList()
   const toast = useToast()
   const [language] = useLanguage()
   const { t } = useT()
   const [preview, setPreview] = useState<ShoppingGenerateResponse | null>(null)
-  const asked = useRef(false)
+  const [sources, setSources] = useState<ShoppingGenerateSource[]>(SOURCES)
+  // Only the newest preview counts: a slower answer for sources since changed is dropped.
+  const previewRun = useRef(0)
   // F1: one key for the whole apply action. Minted the first time "Add to list" is pressed,
   // and reused by a later press while the sheet is still open - a retry of the same action,
   // not a new one - then forgotten once it succeeds (the sheet closes anyway).
   const applyKey = useRef<string | null>(null)
 
   useEffect(() => {
-    if (asked.current) return
-    asked.current = true
+    const run = ++previewRun.current
+    setPreview(null)
+    // Other sources are another action: a retry key minted for the old ones is not reused.
+    applyKey.current = null
+    if (sources.length === 0) return
     generate.mutate(
-      { sources: ['low_stock'], dry_run: true },
+      { sources, dry_run: true },
       {
-        onSuccess: setPreview,
+        onSuccess: (result) => {
+          if (run === previewRun.current) setPreview(result)
+        },
         onError: (error) => {
+          if (run !== previewRun.current) return
           toast.error(errorText(error, t('shopping.generate.checkError')))
           onClose()
         },
       }
     )
-    // Runs once, when the sheet mounts.
+    // Runs when the sheet mounts, and again whenever the chosen sources change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [sources])
+
+  const toggle = (source: ShoppingGenerateSource) =>
+    setSources((current) =>
+      SOURCES.filter((s) => (s === source ? !current.includes(s) : current.includes(s)))
+    )
 
   const apply = () => {
+    if (sources.length === 0) return
     const idempotencyKey = applyKey.current ?? newIdempotencyKey()
     applyKey.current = idempotencyKey
     generate.mutate(
-      { sources: ['low_stock'], dry_run: false, idempotencyKey },
+      { sources, dry_run: false, idempotencyKey },
       {
         onSuccess: (result) => {
           applyKey.current = null
@@ -80,6 +149,7 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
   }
 
   const nothingToDo = preview !== null && changeCount(preview) === 0
+  const noSource = sources.length === 0
 
   return (
     <BottomSheet
@@ -94,7 +164,7 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
           <Button
             data-primary
             size="lg"
-            disabled={!preview || nothingToDo}
+            disabled={noSource || !preview || nothingToDo}
             loading={generate.isPending}
             onClick={apply}
           >
@@ -103,7 +173,27 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
         </div>
       }
     >
-      {!preview && (
+      <div
+        role="group"
+        aria-label={t('shopping.generate.sources')}
+        className="mb-4 grid grid-cols-2 gap-2"
+      >
+        {SOURCES.map((source) => (
+          <SourceToggle
+            key={source}
+            checked={sources.includes(source)}
+            onChange={() => toggle(source)}
+          >
+            {t(SOURCE_LABELS[source])}
+          </SourceToggle>
+        ))}
+      </div>
+      {noSource && (
+        <p className="py-8 text-center text-ui-text-secondary dark:text-ui-dark-text-secondary">
+          {t('shopping.generate.noSource')}
+        </p>
+      )}
+      {!noSource && !preview && (
         <p className="py-8 text-center text-ui-text-secondary dark:text-ui-dark-text-secondary">
           {t('shopping.generate.checking')}
         </p>
@@ -123,8 +213,7 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
               <ul>
                 {preview.added.map((line) => (
                   <li key={line.product_id} className="text-ui-text dark:text-ui-dark-text">
-                    {line.name} · {line.need === null ? '' : formatNumber(line.need, language)}{' '}
-                    {line.unit}
+                    <LineText line={line} language={language} t={t} />
                   </li>
                 ))}
               </ul>
@@ -138,8 +227,7 @@ function GenerateForm({ onClose }: { onClose: () => void }) {
               <ul>
                 {preview.updated.map((line) => (
                   <li key={line.product_id} className="text-ui-text dark:text-ui-dark-text">
-                    {line.name} · {line.need === null ? '' : formatNumber(line.need, language)}{' '}
-                    {line.unit}
+                    <LineText line={line} language={language} t={t} />
                   </li>
                 ))}
               </ul>

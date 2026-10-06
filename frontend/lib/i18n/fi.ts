@@ -240,6 +240,11 @@ export const fi: Messages = {
       nothingToAdd: 'Ei lisättävää',
       checkError: 'Varastotilanteen tarkistus epäonnistui',
       generateError: 'Listan luonti epäonnistui',
+      sources: 'Lähteet',
+      lowStock: 'Vähissä',
+      runout: 'Loppumassa pian',
+      noSource: 'Valitse vähintään yksi lähde.',
+      runsOut: 'loppuu ~{date}',
     },
   },
   gone: {

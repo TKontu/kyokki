@@ -231,6 +231,11 @@ export const en = {
       nothingToAdd: 'Nothing to add',
       checkError: 'Could not check low stock',
       generateError: 'Could not generate the list',
+      sources: 'Sources',
+      lowStock: 'Low stock',
+      runout: 'Running out soon',
+      noSource: 'Choose at least one source.',
+      runsOut: 'runs out ~{date}',
     },
   },
   gone: {
