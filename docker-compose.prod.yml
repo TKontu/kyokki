@@ -70,6 +70,8 @@ x-backend-env: &backend-env
   TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
   TELEGRAM_API_BASE: ${TELEGRAM_API_BASE:-https://api.telegram.org}
   TELEGRAM_POLL_TIMEOUT: ${TELEGRAM_POLL_TIMEOUT:-50}
+  # The app's public HTTPS address; Telegram results link to /receipt/<id> under it (CL5)
+  KYOKKI_PUBLIC_URL: ${KYOKKI_PUBLIC_URL:-}
   ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
 
 x-backend-volumes: &backend-volumes

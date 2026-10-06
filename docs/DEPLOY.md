@@ -229,8 +229,11 @@ Behaviour worth knowing:
   received, so a receipt is never imported twice. The API answers 409 with the existing id.
 - Photos sent the normal way are compressed by Telegram; send them **as a file** for better OCR.
   Files over 20 MB cannot be downloaded by bots.
-- Receipts are queued in the database, so a bot restart loses nothing; they are still read.
-  Only the "Received" messages sent before the restart are not edited with the result.
+- Receipts are queued in the database, so a bot restart loses nothing; they are still read,
+  and the bot remembers which "Received" message to edit (`telegram_receipt_message`).
+- Receipts that arrive by e-mail or the watched folder are reported to every chat in
+  `TELEGRAM_ALLOWED_CHAT_IDS` once read. With `KYOKKI_PUBLIC_URL` set (the app's HTTPS address),
+  each result links to its review page.
 - Without a token the service logs "Telegram bot disabled" and idles.
 - **Two instances, one token.** Telegram answers `getUpdates` with 409 ("terminated by other
   getUpdates request") when a second process polls with the same token - for example a dev
