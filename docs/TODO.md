@@ -2558,8 +2558,10 @@ handoff #182). Not yet deployed. No migration, no new setting.
   none → `/scan?shared=failed`. A duplicate counts as accepted. The share passes the Next
   middleware, so the proxy token applies. Next 14's manifest type has the wrong `share_target`
   shape, so `manifest.ts` declares the W3C one locally.
-  - [ ] **Operator:** after deploy, install the PWA on the Android phone from the HTTPS host and
-    share one photo, two files, and a non-receipt; expect the three landings above.
+  - [ ] **ON HOLD (operator, 2026-10-06): the Android workstream is paused until the operator
+    re-initiates it.** Deployed but unverified on a phone. Do not plan Android work or this check.
+    When resumed: install the PWA on the Android phone from the HTTPS host and share one photo, two
+    files, and a non-receipt; expect the three landings above.
 - **Several receipts per upload (#184, frontier item 8):** `/scan` takes `multiple`; uploads run one
   at a time with store and date applied to all; 409 counts as done; a failure keeps the page with a
   per-file result list. `?shared=failed` shows a note. One file behaves as before.
