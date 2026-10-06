@@ -1,5 +1,8 @@
 """Reply texts. Plain text only (no parse mode), so product names need no escaping."""
 
+from collections.abc import Sequence
+from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from app.schemas.receipt import ReceiptResponse, ReceiptStatus
@@ -22,7 +25,14 @@ def help_text() -> str:
         "- Order PDFs (S-kaupat, K-Ruoka)\n"
         "- S-Group and K-Plussa app receipts or screenshots\n"
         "- Photos of paper receipts, best sent as a file (uncompressed)\n"
-        "You get a summary when a receipt has been read. Review it on the iPad."
+        "You get a summary when a receipt has been read. Review it on the iPad.\n"
+        "\n"
+        "Commands:\n"
+        "/list - the shopping list, numbered\n"
+        "/add <name> [amount] [unit] - add to the list, e.g. /add milk 2 l\n"
+        "/bought <number or name> - tick a line bought, e.g. /bought 2\n"
+        "/used <name> [amount] [unit] - record something used up, e.g. /used milk 2 dl\n"
+        "/help - this text"
     )
 
 
@@ -139,3 +149,110 @@ def duplicate_text(receipt: ReceiptResponse) -> str:
     if status == ReceiptStatus.FAILED:
         return "Already received, but it could not be read. Retry it on the iPad."
     return "Already received, it is still being read."
+
+
+# Commands (CL3)
+
+MAX_CANDIDATES = 5
+_PRIORITY_NOTES = {"urgent": " (urgent)", "low": " (low)"}
+
+
+def amount_text(value: Decimal) -> str:
+    """``2.00`` as ``2``, ``1.50`` as ``1.5``: no trailing zeros, no exponent."""
+    text = format(Decimal(value), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def shopping_list_text(rows: Sequence[Any]) -> str:
+    """Numbered open lines, ``1. Milk — 2 l (urgent)``, in the order given."""
+    lines = [
+        f"{number}. {_short(str(row.name))} — {amount_text(row.quantity)} {row.unit}"
+        f"{_PRIORITY_NOTES.get(str(row.priority), '')}"
+        for number, row in enumerate(rows, start=1)
+    ]
+    return "\n".join(lines)[:TELEGRAM_TEXT_LIMIT]
+
+
+def list_empty_text() -> str:
+    return "The shopping list is empty."
+
+
+def added_text(name: str, quantity: Decimal, unit: str, *, linked: bool) -> str:
+    link = (
+        "linked to the product"
+        if linked
+        else "not linked to a product, so a restock will not tick it off"
+    )
+    return f"Added {_short(name)} — {amount_text(quantity)} {unit} ({link})."
+
+
+def add_usage_text() -> str:
+    return "Say what to add, e.g. /add milk or /add milk 2 l."
+
+
+def unknown_unit_text(unit: str) -> str:
+    return f"Unknown unit {_short(unit)!r}. Use l, dl, cl, ml, kg, g, tsp, tbsp or pcs."
+
+
+def bought_usage_text() -> str:
+    return "Say which line, e.g. /bought 2 (the number from /list) or /bought milk."
+
+
+def bought_text(name: str) -> str:
+    return f"Ticked {_short(name)} as bought."
+
+
+def list_changed_text() -> str:
+    return "The list has changed since your last /list. Send /list and try again."
+
+
+def no_such_number_text(number: int, count: int) -> str:
+    noun = "line" if count == 1 else "lines"
+    return f"There is no line {number}: your last /list had {count} {noun}."
+
+
+def bought_not_found_text(name: str) -> str:
+    return f"Nothing on the list is called {_short(name)!r}. Send /list to see it."
+
+
+def bought_ambiguous_text(names: Sequence[str]) -> str:
+    shown = ", ".join(_short(name) for name in names[:MAX_CANDIDATES])
+    rest = len(names) - MAX_CANDIDATES
+    more = f", … (+{rest})" if rest > 0 else ""
+    return f"Several lines match: {shown}{more}. Send /list and tick one by number."
+
+
+def used_usage_text() -> str:
+    return "Say what was used, e.g. /used eggs or /used milk 2 dl."
+
+
+def used_text(name: str, before: Decimal, after: Decimal, unit: str) -> str:
+    return f"Used {_short(name)}: {amount_text(before)} → {amount_text(after)} {unit}."
+
+
+def used_needs_amount_text(name: str, unit: str) -> str:
+    return (
+        f"How much {_short(name)} was used? "
+        f"Add the amount, e.g. /used {_short(name).lower()} 2 {unit}."
+    )
+
+
+def not_found_text(name: str) -> str:
+    return f"No product is called {_short(name)!r}. Nothing changed."
+
+
+def ambiguous_text(name: str, candidates: Sequence[str]) -> str:
+    lines = [f"Which one is {_short(name)!r}? Nothing changed. Try one of:"]
+    lines.extend(f"- {_short(candidate)}" for candidate in candidates[:MAX_CANDIDATES])
+    return "\n".join(lines)
+
+
+def insufficient_text(name: str, available: Decimal, unit: str) -> str:
+    return (
+        f"Only {amount_text(available)} {unit} of {_short(name)} is in stock. "
+        "Nothing changed."
+    )
+
+
+def invalid_consume_text(reason: str) -> str:
+    return f"Nothing changed: {reason[:200]}"
