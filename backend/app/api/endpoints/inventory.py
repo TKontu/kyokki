@@ -227,9 +227,15 @@ async def quick_add_inventory_item(
         status=str(item.status),
         product_name=item.product_name,
     )
+    product_id = cast(UUID, item.product_master_id)
+    # Built first: a failure inside the hook below rolls the session back, which
+    # expires `item`.
+    response = InventoryItemResponse.model_validate(item)
+    # The bought thing comes off the shopping list (CL2) - `min_stock` decides.
+    await min_stock.after_stock_increase(db, [product_id])
     if result.product_created:
-        schedule_estimates(background_tasks, [cast(UUID, item.product_master_id)])
-    return InventoryItemResponse.model_validate(item)
+        schedule_estimates(background_tasks, [product_id])
+    return response
 
 
 @router.patch("/{item_id}", response_model=InventoryItemUpdateResponse)

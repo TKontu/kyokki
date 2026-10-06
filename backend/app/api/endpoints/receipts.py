@@ -1,7 +1,7 @@
 """API endpoints for Receipt upload and management."""
 
 from datetime import date
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi import (
@@ -33,6 +33,7 @@ from app.schemas.receipt import (
     ReceiptSummary,
 )
 from app.services import (
+    min_stock,
     receipt_audit,
     receipt_confirm,
     receipt_line_reanalyse,
@@ -377,6 +378,10 @@ async def confirm_receipt(
     except receipt_confirm.InvalidConfirmItem as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    # The bought things come off the shopping list (CL2) - `min_stock` decides.
+    await min_stock.after_stock_increase(
+        db, [cast(UUID, product.id) for _item, product in result.inventory_items]
+    )
     schedule_estimates(background_tasks, result.created_product_ids)
     return ReceiptConfirmResponse(
         success=True,
