@@ -3,10 +3,11 @@ Generated-UTC: 2026-10-06T19:36:34Z
 Base-SHA: 3f27f980605ef801d8dea7b8b4eebd41abea4bcb
 
 ## Round delta
-- Round 2026-10-06-2 merged (#191 to #194), **not deployed** (nor are 2026-10-04-2 and 2026-10-06-1):
+- Round 2026-10-06-2 merged (#191 to #194), **deployed 2026-10-06 (`3f27f98`)** together with 2026-10-04-2 and 2026-10-06-1:
   bot shopping/consume commands (CL3), run-out as a shopping source (CL6), icon spike Q18-S2 (no
   winner; Q18-S3 proposed). CL8 design: `docs/PRODUCT_IDENTITY_SPEC.md`.
-- Pending deploy step: `KYOKKI_PUBLIC_URL` in the homelab `.env`; migration `d8f3a61c2b57`.
+- Deploy verified read-only (health, share target, runout, learned_shelf_life). Whether
+  `KYOKKI_PUBLIC_URL` is set cannot be seen from the API; a Telegram result shows it.
 
 ## Active PRs and conflicts
 - Only this reconcile.
