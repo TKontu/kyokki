@@ -8,6 +8,7 @@ from .endpoints import (
     health,
     icon_library,
     inventory,
+    product_audit,
     products,
     receipts,
     scanner,
@@ -36,3 +37,4 @@ api_router.include_router(scanner.router, prefix="/scanner", tags=["scanner"])
 api_router.include_router(websockets.router, tags=["websockets"])
 api_router.include_router(events.router, tags=["events"])
 api_router.include_router(ha.router, prefix="/ha", tags=["ha"])
+api_router.include_router(product_audit.router, prefix="/audit", tags=["audit"])
