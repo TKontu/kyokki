@@ -29,7 +29,8 @@ from app.models.receipt import Receipt
 from app.schemas.receipt import ReceiptResponse, ReceiptStatus
 from app.telegram_bot import messages
 from app.telegram_bot.client import TelegramError
-from app.telegram_bot.handlers import BotApi, SessionFactory
+from app.telegram_bot.commands import SessionFactory
+from app.telegram_bot.handlers import BotApi
 
 logger = get_logger(__name__)
 

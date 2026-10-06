@@ -1,12 +1,9 @@
 """Turn one Telegram update into a reply and a receipt queued for the worker service."""
 
-from collections.abc import Callable, Iterable
-from contextlib import AbstractAsyncContextManager
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import UUID
-
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.schemas.receipt import ReceiptResponse
@@ -18,10 +15,9 @@ from app.services.receipt_ingest import (
 )
 from app.telegram_bot import messages
 from app.telegram_bot.client import MAX_FILE_BYTES, TelegramError
+from app.telegram_bot.commands import Commands, SessionFactory
 
 logger = get_logger(__name__)
-
-SessionFactory = Callable[[], AbstractAsyncContextManager[AsyncSession]]
 
 
 class BotApi(Protocol):
@@ -60,6 +56,7 @@ class BotHandler:
         self.session_factory = session_factory
         self.notifier = notifier
         self.allowed_chat_ids = frozenset(allowed_chat_ids)
+        self.commands = Commands(session_factory)
 
     async def handle_update(self, update: dict[str, Any]) -> None:
         message = update.get("message")
@@ -83,7 +80,13 @@ class BotHandler:
 
         incoming = _incoming_file(message)
         if incoming is None:
-            await self.client.send_message(chat_id, messages.help_text())
+            # Slash commands only (CL3); plain text keeps the help reply
+            reply = (
+                await self.commands.handle(chat_id, text)
+                if text.startswith("/")
+                else messages.help_text()
+            )
+            await self.client.send_message(chat_id, reply)
             return
         await self._receive(chat_id, incoming)
 
