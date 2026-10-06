@@ -175,6 +175,35 @@ class TestOtherTexts:
         assert "503" not in text
         assert text.startswith("Couldn't read the receipt")
 
+    def test_review_link_is_appended_when_a_public_url_is_set(self):
+        receipt_id = uuid4()
+        text = messages.with_review_link(
+            "Review on the iPad.", "https://kyokki.example", receipt_id
+        )
+        assert (
+            text == f"Review on the iPad.\nhttps://kyokki.example/receipt/{receipt_id}"
+        )
+
+    def test_review_link_has_no_double_slash(self):
+        receipt_id = uuid4()
+        text = messages.with_review_link("x", "https://kyokki.example/", receipt_id)
+        assert text == f"x\nhttps://kyokki.example/receipt/{receipt_id}"
+
+    @pytest.mark.parametrize("public_url", ["", None])
+    def test_no_review_link_without_a_public_url(self, public_url):
+        assert messages.with_review_link("x", public_url, uuid4()) == "x"
+
+    def test_review_link_survives_the_telegram_limit(self):
+        receipt_id = uuid4()
+        long_text = messages.result_text(
+            _receipt([_line("X" * 500) for _ in range(40)])
+        )
+        text = messages.with_review_link(
+            long_text, "https://kyokki.example", receipt_id
+        )
+        assert len(text) <= messages.TELEGRAM_TEXT_LIMIT
+        assert text.endswith(f"\nhttps://kyokki.example/receipt/{receipt_id}")
+
     def test_unsupported_and_too_large(self):
         assert "PDF" in messages.unsupported_text()
         assert "20 MB" in messages.too_large_text()
