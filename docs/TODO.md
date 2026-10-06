@@ -2586,7 +2586,7 @@ shopping live keys, shopping remove keys, Q24 idempotency order. Open, as new it
 - [ ] **CL1 (M) Confirm from Telegram.** The bot only queues and says "Review it on the iPad"
   (`telegram_bot/messages.py:23`). Inline buttons "Confirm matched" / "Review", reusing the CLI's
   all-matched confirm (`cli/kyokki/cli.py`); the summary lists unmatched lines.
-- [ ] **CL2 (M) Restocking closes shopping items.** Receipt confirm, quick add and `stock/add` never
+- [x] (#190, round 2026-10-06-1) **CL2 (M) Restocking closes shopping items.** Receipt confirm, quick add and `stock/add` never
   touch the shopping list (`services/receipt_confirm.py`, `quick_add.py`, `stock.py`), so bought
   items stay on it. Mark matching open items bought (auto-restock ones included).
 - [ ] **CL3 (M) Telegram shopping and consume.** `/list`, `/add <name>`, `/ate <name>` on the
@@ -2596,7 +2596,7 @@ shopping live keys, shopping remove keys, Q24 idempotency order. Open, as new it
   names; an export from Settings, an apply script, and a seed loader for a fresh install. Only
   icons have this today (`scripts/apply_icon_bundle.py`; `resources/icon_library/index.json` is
   still empty). Needs a short design first (what is canonical vs per-household).
-- [ ] **CL5 (S-M) Bot replies survive restarts and cover every source.** The receipt→message map
+- [x] (#188, round 2026-10-06-1) **CL5 (S-M) Bot replies survive restarts and cover every source.** The receipt→message map
   is in memory (`telegram_bot/notifier.py`); e-mail and folder receipts never notify; no review link
   (needs a public URL setting).
 - [ ] **CL6 (M) Run-out forecast feeds shopping** (`generate` knows only `low_stock`) and gets an
@@ -2618,6 +2618,34 @@ shopping live keys, shopping remove keys, Q24 idempotency order. Open, as new it
   receipt cover it (`mark_purchased` only flips the flag today)? May the bot confirm all matched
   lines without a look at the iPad? For CL4, is the canonical catalog shared defaults (shipped to
   any install) or this household's backup?
+
+**Round 2026-10-06-1** (base `d6ec2a7`). Merged 2026-10-06 by the operator: #188 to #190 (and #187).
+Not yet deployed. Migration `d8f3a61c2b57` (`telegram_receipt_message`); new setting
+`KYOKKI_PUBLIC_URL`.
+- **CL7 (new, operator report 2026-10-06), done in #189:** a bell-pepper date edit learned 28 days but
+  the screen showed 21. The PATCH never broadcast `product_update` and the iPad never refetched the
+  product. Now `PATCH /api/inventory/{id}` answers `learned_shelf_life {product_id, old_days,
+  new_days}` (a PATCH-only response model), broadcasts `product_update` when learned, and the sheet
+  says "{name} now keeps N days" or "Date saved for this item only" (opened / in the freezer / no
+  purchase date). Opened items still teach nothing (the "pieces do not open" option is the
+  operator's call).
+  - [ ] Wording pass: the new `inventory.itemEdit` keys.
+- **CL2, #190:** receipt confirm, quick add and agent `stock/add` mark every open shopping row of the
+  product purchased (`min_stock.after_stock_increase`, own transaction, never raises, one
+  `shopping_list_update` "purchased" per row). Free text untouched; replays do nothing.
+- **CL5, #188:** `telegram_receipt_message` holds which chat is owed which result; a restart no
+  longer loses an edit. Receipts from e-mail and the folder created after the bot started post to
+  every allowed chat. `KYOKKI_PUBLIC_URL` (in `docker-compose.prod.yml` via planner fix-up 9c4c2c4)
+  adds `/receipt/<id>` links.
+  - [ ] Low: receipts uploaded on the iPad (`/scan`, share target) also post to Telegram; a chat that
+    keeps rejecting is retried every poll (~3 s) with a WARNING. Change if the operator minds.
+  - [ ] **Operator:** set `KYOKKI_PUBLIC_URL=https://kyokki.lan.tuomovendelin.fi` in the homelab
+    `.env` before deploying.
+  - Note: the only-head migration test moved to the new revision's test (the repo's hand-off pattern).
+- **Ratio:** 3 forward : 0 maintenance. CL1/CL4 wait on rulings; CL3 waited on `telegram_bot/**`
+  (free now); CL6 waited on the shopping service (free now).
+- **Process:** a combined merge of the three branches was tested before the operator merged
+  (343 overlapping tests green); the planned `inventory.py` region split merged cleanly.
 
 ---
 
@@ -2769,7 +2797,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [x] H47 (#166)
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Deployed 2026-10-03. Round 2026-10-03-2: [x] icon library (#171). Round 2026-10-03-3: [x] icon curation (#175)  [x] run-out list (#172)  [x] Finnish names on rename (#173)  [x] Finnish receipt screens (#174), merged 2026-10-03, deployed 2026-10-04. Round 2026-10-04-1: [x] Finnish products screen (#179)  [x] run-out in-stock days (#178)  [x] crud imports no services (#180), merged and deployed 2026-10-04. Round 2026-10-04-2: [x] share target (#185)  [x] several receipts per upload (#184)  [x] shims removed (#183)  [x] flaky display-name test (#186), merged 2026-10-05, not deployed. Next: core-loop items CL1-CL6 (round block 2026-10-04-2 audit), after the operator's three rulings there
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Deployed 2026-10-03. Round 2026-10-03-2: [x] icon library (#171). Round 2026-10-03-3: [x] icon curation (#175)  [x] run-out list (#172)  [x] Finnish names on rename (#173)  [x] Finnish receipt screens (#174), merged 2026-10-03, deployed 2026-10-04. Round 2026-10-04-1: [x] Finnish products screen (#179)  [x] run-out in-stock days (#178)  [x] crud imports no services (#180), merged and deployed 2026-10-04. Round 2026-10-04-2: [x] share target (#185)  [x] several receipts per upload (#184)  [x] shims removed (#183)  [x] flaky display-name test (#186), merged 2026-10-05, not deployed. Round 2026-10-06-1: [x] CL2 restock clears shopping (#190)  [x] CL5 durable bot results (#188)  [x] CL7 learning feedback (#189), merged 2026-10-06, not deployed. Next: Q18-S2 icon spike, CL3, CL6; CL1/CL4 after the operator's rulings
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
