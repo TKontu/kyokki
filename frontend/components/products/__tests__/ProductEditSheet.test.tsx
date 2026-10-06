@@ -8,14 +8,14 @@
  */
 
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
 import ProductEditSheet from '../ProductEditSheet'
 import type { Category } from '@/types/category'
-import type { ProductMaster, ProductNames } from '@/types/product'
+import type { ProductMaster, ProductNames, ProductSource } from '@/types/product'
 
 const CATEGORIES: Category[] = [
   {
@@ -61,6 +61,42 @@ const NAMES: ProductNames = {
   ],
 }
 
+const SOURCE_GROUPS: ProductSource[] = [
+  {
+    key: 'line:s-group:naudan jauheliha',
+    label: 'NAUDAN JAUHELIHA 400G',
+    store_chain: 's-group',
+    kind: 'receipt',
+    item_ids: ['i-1', 'i-2'],
+    active_count: 2,
+    total_count: 5,
+    first_seen: '2026-09-01',
+    last_seen: '2026-10-06',
+  },
+  {
+    key: 'manual',
+    label: '',
+    store_chain: null,
+    kind: 'manual',
+    item_ids: ['i-3'],
+    active_count: 1,
+    total_count: 1,
+    first_seen: '2026-09-20',
+    last_seen: '2026-09-20',
+  },
+  {
+    key: 'line:k-group:jauheliha',
+    label: 'JAUHELIHA',
+    store_chain: 'k-group',
+    kind: 'receipt',
+    item_ids: [],
+    active_count: 0,
+    total_count: 2,
+    first_seen: '2026-08-01',
+    last_seen: '2026-08-10',
+  },
+]
+
 const EMOJI_REFERENCE = [
   { emoji: '🥩', name: 'cut of meat' },
   { emoji: '🥨', name: 'pretzel' },
@@ -76,6 +112,10 @@ beforeEach(() => {
   server.use(
     http.get(`${API_URL}/categories`, () => HttpResponse.json(CATEGORIES)),
     http.get(`${API_URL}/products/p-1/names`, () => HttpResponse.json(NAMES)),
+    // CL8 L3: one group by default, which keeps the Sources section hidden
+    http.get(`${API_URL}/products/p-1/sources`, () =>
+      HttpResponse.json({ product_id: 'p-1', sources: [SOURCE_GROUPS[0]] })
+    ),
     http.get(`${API_URL}/products/emoji/reference`, () =>
       HttpResponse.json(EMOJI_REFERENCE)
     ),
@@ -1029,6 +1069,82 @@ describe('ProductEditSheet chrome in Finnish (Post-MVP frontier item 13, phase 4
 
     expect(
       await screen.findByText('"minced pork" ei enää löydä tätä tuotetta')
+    ).toBeInTheDocument()
+  })
+})
+
+describe('ProductEditSheet: Sources (CL8 L3)', () => {
+  beforeEach(() => {
+    window.localStorage.clear()
+    server.use(
+      http.get(`${API_URL}/products/p-1/sources`, () =>
+        HttpResponse.json({ product_id: 'p-1', sources: SOURCE_GROUPS })
+      )
+    )
+  })
+
+  it('lists where the items came from', async () => {
+    renderSheet()
+
+    const section = await screen.findByRole('region', { name: 'Sources' })
+    const rows = within(section).getAllByRole('listitem')
+    expect(rows).toHaveLength(3)
+    expect(rows[0]).toHaveTextContent('NAUDAN JAUHELIHA 400G')
+    expect(rows[0]).toHaveTextContent('S-group')
+    expect(rows[0]).toHaveTextContent('2 in stock · 5 total')
+    expect(rows[0]).toHaveTextContent('1 September 2026 – 6 October 2026')
+    expect(rows[1]).toHaveTextContent('Added by hand')
+    expect(rows[1]).toHaveTextContent('1 in stock · 1 total')
+    // Nothing in stock to move: no button for a group of used-up items
+    expect(within(rows[2]).queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('hides the section when the product has only one group', async () => {
+    server.use(
+      http.get(`${API_URL}/products/p-1/sources`, () =>
+        HttpResponse.json({ product_id: 'p-1', sources: [SOURCE_GROUPS[0]] })
+      )
+    )
+    renderSheet()
+
+    // The names list loads from its own request; by then the sources have answered too
+    await screen.findByText('minced pork')
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Sources' })).toBeNull())
+  })
+
+  it("opens the split sheet with a group's items, and comes back on Cancel", async () => {
+    let body: unknown
+    server.use(
+      http.post(`${API_URL}/products/p-1/split`, async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ reassignment_id: 'r-1' })
+      })
+    )
+    renderSheet()
+
+    const section = await screen.findByRole('region', { name: 'Sources' })
+    fireEvent.click(
+      within(section).getByRole('button', { name: 'Move these: NAUDAN JAUHELIHA 400G' })
+    )
+
+    expect(await screen.findByRole('heading', { name: 'Move off Ground beef' })).toBeInTheDocument()
+    // The whole group is the selection, so there is no "also move" toggle
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(body).toBeUndefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(await screen.findByLabelText('Name')).toHaveValue('Ground beef')
+  })
+
+  it('reads in Finnish', async () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    renderSheet()
+
+    const section = await screen.findByRole('region', { name: 'Alkuperä' })
+    expect(section).toHaveTextContent('2 varastossa · 5 yhteensä')
+    expect(section).toHaveTextContent('Lisätty käsin')
+    expect(
+      within(section).getByRole('button', { name: 'Siirrä nämä: NAUDAN JAUHELIHA 400G' })
     ).toBeInTheDocument()
   })
 })

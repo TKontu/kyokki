@@ -180,3 +180,77 @@ export interface ProductNames {
   names: ProductNameEntry[]
   printed: PrintedNameEntry[]
 }
+
+/**
+ * "This is not X" (CL8 L3, `docs/PRODUCT_IDENTITY_SPEC.md`): where a product's items came
+ * from, grouped by store chain and printed receipt name, so the cook can move a wrongly
+ * joined group off it. `kind: 'manual'` is the one group of items with no receipt line.
+ */
+export type ProductSourceKind = 'receipt' | 'manual'
+
+export interface ProductSource {
+  key: string // stable opaque id of the group
+  label: string // the printed receipt text, or "" for hand-added items
+  store_chain: string | null // null when not from a receipt
+  kind: ProductSourceKind
+  item_ids: string[] // the group's active items (not consumed or discarded)
+  active_count: number
+  total_count: number // including the used-up and thrown-away ones
+  first_seen: string | null // YYYY-MM-DD, the earliest purchase date
+  last_seen: string | null
+}
+
+/** GET /products/{id}/sources: the groups, newest `last_seen` first. */
+export interface ProductSources {
+  product_id: string
+  sources: ProductSource[]
+}
+
+/** Where a split moves the items: an existing product, or a new one made for them. */
+export type ProductSplitTarget =
+  | { product_id: string }
+  | { new: { name: string; category: string } }
+
+/** POST /products/{id}/split. `move_keys` (default true) re-points the printed names too. */
+export interface ProductSplitRequest {
+  item_ids: string[]
+  target: ProductSplitTarget
+  move_keys?: boolean
+}
+
+/** A printed name or learned name that the split re-pointed at the target. */
+export interface MovedKey {
+  kind: 'alias' | 'name'
+  value: string
+  store_chain: string | null
+}
+
+/** What the source product keeps now, and how many observations are left to learn from. */
+export interface SourceShelfLife {
+  days: number
+  source: ShelfLifeSource
+  observations_left: number
+}
+
+export interface ProductSplitResponse {
+  reassignment_id: string
+  source_product: ProductMaster
+  target_product: ProductMaster
+  target_created: boolean
+  moved_item_ids: string[]
+  moved_keys: MovedKey[]
+  source_shelf_life: SourceShelfLife
+}
+
+/** POST /products/reassignments/{id}/undo. */
+export interface ReassignmentUndoResponse {
+  reassignment_id: string
+  restored_item_ids: string[]
+}
+
+/** The 409 `detail` of a split whose new name is already a product's: offer that one. */
+export interface NameExistsDetail {
+  code: 'name_exists'
+  product_id: string
+  name: string
+}

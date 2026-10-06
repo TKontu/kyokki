@@ -17,10 +17,12 @@ import Button from '@/components/ui/Button'
 import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
 import { fieldInputClass, fieldLabelClass } from '@/components/ui/formStyles'
 import { ProductEditSheet } from '@/components/products/ProductEditSheet'
+import { SplitSheet } from '@/components/products/SplitSheet'
 import { FieldMoved } from '@/components/ui/FieldMoved'
 import { useDeleteInventoryItem, useUpdateInventoryItem } from '@/hooks/useInventory'
 import { useFieldEdit } from '@/hooks/useFieldEdit'
 import { useItemSource } from '@/hooks/useItemSource'
+import { useProductSources } from '@/hooks/useProductSplit'
 import { useProduct } from '@/hooks/useProducts'
 import { useToast } from '@/hooks/useToast'
 import { isAPIError } from '@/lib/api/errors'
@@ -59,6 +61,9 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [editingProduct, setEditingProduct] = useState(false)
   const product = useProduct(editingProduct ? item.product_master_id : null)
+  // CL8 L3: the item's receipt-line group, looked up only once the cook says it is not this
+  const [splitting, setSplitting] = useState(false)
+  const productSources = useProductSources(splitting ? item.product_master_id : null)
   // Nothing to fetch for a hand-added item (Q26): it has no receipt to ask about.
   const source = useItemSource(item.receipt_id ? item.id : null)
 
@@ -142,6 +147,32 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
       >
         <p className="text-base text-ui-text dark:text-ui-dark-text">
           {t('inventory.itemEdit.deleteBody', { name })}
+        </p>
+      </BottomSheet>
+    )
+  }
+
+  if (splitting) {
+    // A failed lookup still opens the sheet: the item alone can always be moved
+    if (!productSources.isPending) {
+      const group =
+        productSources.data?.sources.find((source) => source.item_ids.includes(item.id)) ?? null
+      return (
+        <SplitSheet
+          productId={item.product_master_id}
+          productName={name}
+          productCategory={item.category}
+          itemIds={[item.id]}
+          sourceGroup={group}
+          onClose={() => setSplitting(false)}
+          onDone={onClose}
+        />
+      )
+    }
+    return (
+      <BottomSheet open onClose={onClose} title={name}>
+        <p className="text-base text-ui-text-secondary dark:text-ui-dark-text-secondary">
+          {t('inventory.itemEdit.loadingSources', { name })}
         </p>
       </BottomSheet>
     )
@@ -279,6 +310,14 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
         <div>
           <Button variant="ghost" size="md" disabled={busy} onClick={editProduct}>
             {t('inventory.itemEdit.changeProductDetails')}
+          </Button>
+        </div>
+
+        {/* CL8 L3: a wrong join made two foods one product, so editing one edited the
+            other. This moves the item (and its receipt-line group) to its own product. */}
+        <div>
+          <Button variant="ghost" size="md" disabled={busy} onClick={() => setSplitting(true)}>
+            {t('inventory.itemEdit.notThis', { name })}
           </Button>
         </div>
 

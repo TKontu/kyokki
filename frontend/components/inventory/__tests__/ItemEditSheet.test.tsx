@@ -649,3 +649,93 @@ describe('ItemEditSheet: what a date edit taught (CL7)', () => {
     expect(await screen.findByText('Kaurajuoma säilyy nyt 28 päivää')).toBeInTheDocument()
   })
 })
+
+describe('ItemEditSheet: "This is not X" (CL8 L3)', () => {
+  beforeEach(() => window.localStorage.clear())
+
+  const SOURCES = {
+    product_id: 'prod-oat',
+    sources: [
+      {
+        key: 'line:s-group:kaurajuoma',
+        label: 'KAURAJUOMA',
+        store_chain: 's-group',
+        kind: 'receipt',
+        item_ids: ['item-oat', 'item-oat-2'],
+        active_count: 2,
+        total_count: 2,
+        first_seen: '2026-09-10',
+        last_seen: '2026-09-20',
+      },
+      {
+        key: 'manual',
+        label: '',
+        store_chain: null,
+        kind: 'manual',
+        item_ids: ['item-oat-3'],
+        active_count: 1,
+        total_count: 1,
+        first_seen: null,
+        last_seen: null,
+      },
+    ],
+  }
+
+  function mockSources() {
+    let fetched = 0
+    server.use(
+      http.get(`${API_URL}/categories`, () => HttpResponse.json([])),
+      http.get(`${API_URL}/products/prod-oat/sources`, () => {
+        fetched += 1
+        return HttpResponse.json(SOURCES)
+      })
+    )
+    return () => fetched
+  }
+
+  it('offers the split below the product details, without fetching until asked', () => {
+    mockApi()
+    const fetched = mockSources()
+    renderSheet()
+
+    const entry = screen.getByRole('button', { name: 'This is not Oat drink…' })
+    expect(entry.className).toContain('min-h-touch')
+    expect(fetched()).toBe(0)
+  })
+
+  it("opens the split sheet with the item's group", async () => {
+    mockApi()
+    mockSources()
+    renderSheet()
+
+    fireEvent.click(screen.getByRole('button', { name: 'This is not Oat drink…' }))
+
+    expect(await screen.findByRole('heading', { name: 'Move off Oat drink' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'Also move the 1 other item that came via KAURAJUOMA (S-group)',
+      })
+    ).toBeChecked()
+  })
+
+  it('goes back to the item on Cancel', async () => {
+    mockApi()
+    mockSources()
+    renderSheet()
+
+    fireEvent.click(screen.getByRole('button', { name: 'This is not Oat drink…' }))
+    await screen.findByRole('heading', { name: 'Move off Oat drink' })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(await screen.findByRole('heading', { name: 'Oat drink' })).toBeInTheDocument()
+  })
+
+  it('reads in Finnish', () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    mockApi()
+    mockSources()
+    renderSheet({ ...OAT, product_display_names: { fi: 'Kaurajuoma' } })
+
+    expect(screen.getByRole('button', { name: 'Tämä ei ole Kaurajuoma…' })).toBeInTheDocument()
+  })
+})
