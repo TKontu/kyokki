@@ -295,6 +295,51 @@ describe('useInventory Hooks', () => {
       expect(result.current.data?.current_quantity).toBe(500)
       expect(result.current.data?.status).toBe('partial')
     })
+
+    // CL7: a date edit that taught the product a shelf life refreshes the product sheet
+    describe('after a date edit', () => {
+      async function patchAnswering(learned: unknown) {
+        const queryClient = new QueryClient({
+          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+        })
+        const invalidate = jest.spyOn(queryClient, 'invalidateQueries')
+        const wrapper = ({ children }: { children: React.ReactNode }) => (
+          <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+        )
+        ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ...mockInventoryItem,
+            expiry_date: '2024-01-29',
+            learned_shelf_life: learned,
+          }),
+        })
+        const { result } = renderHook(() => useUpdateInventoryItem(), { wrapper })
+        result.current.mutate({ id: mockInventoryItem.id, data: { expiry_date: '2024-01-29' } })
+        await waitFor(() => expect(result.current.isSuccess).toBe(true))
+        return { result, invalidated: invalidate.mock.calls.map(([filters]) => filters?.queryKey) }
+      }
+
+      it('invalidates the products when the product learned a shelf life', async () => {
+        const learned = {
+          product_id: mockInventoryItem.product_master_id,
+          old_days: 21,
+          new_days: 28,
+        }
+        const { result, invalidated } = await patchAnswering(learned)
+
+        expect(invalidated).toContainEqual(['products'])
+        expect(result.current.data?.learned_shelf_life).toEqual(learned)
+      })
+
+      it('leaves the products alone when nothing was learned', async () => {
+        const { result, invalidated } = await patchAnswering(null)
+
+        expect(invalidated).not.toContainEqual(['products'])
+        expect(result.current.data?.learned_shelf_life).toBeNull()
+      })
+    })
   })
 
   describe('useConsumeInventoryItem', () => {

@@ -29,7 +29,11 @@ import { formatDate, useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
 import { receiptDate, storeName } from '@/lib/receipts'
 import { isInactive, locationOptions } from '@/lib/stock'
-import type { InventoryItem, InventoryItemUpdate } from '@/types/inventory'
+import type {
+  InventoryItem,
+  InventoryItemUpdate,
+  InventoryItemUpdateResult,
+} from '@/types/inventory'
 
 export interface ItemEditSheetProps {
   item: InventoryItem | null
@@ -69,12 +73,33 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   const busy = update.isPending || remove.isPending
   const canSave = Object.keys(changes).length > 0 && !busy
 
-  const patch = (data: InventoryItemUpdate, success: string) => {
+  // CL7: a new date either taught the product how long it keeps, or was for this item only
+  // - and the cook should be able to tell which. An unchanged answer is just "Saved".
+  const savedToast = (saved: InventoryItemUpdateResult): string => {
+    const learned = saved.learned_shelf_life
+    if (learned) {
+      return t('inventory.itemEdit.learnedToast', { name, count: learned.new_days })
+    }
+    if (!changes.expiry_date) return t('inventory.itemEdit.savedToast', { name })
+    if (saved.opened_date) return t('inventory.itemEdit.savedItemOnlyOpenedToast', { name })
+    if (saved.location === 'freezer') {
+      return t('inventory.itemEdit.savedItemOnlyFreezerToast', { name })
+    }
+    if (!saved.purchase_date) {
+      return t('inventory.itemEdit.savedItemOnlyNoPurchaseToast', { name })
+    }
+    return t('inventory.itemEdit.savedToast', { name })
+  }
+
+  const patch = (
+    data: InventoryItemUpdate,
+    success: string | ((saved: InventoryItemUpdateResult) => string)
+  ) => {
     update.mutate(
       { id: item.id, data },
       {
-        onSuccess: () => {
-          toast.success(success)
+        onSuccess: (saved) => {
+          toast.success(typeof success === 'string' ? success : success(saved))
           onClose()
         },
         onError: (error) => toast.error(errorText(error, t('inventory.itemEdit.saveError', { name }))),
@@ -166,7 +191,7 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
             fullWidth
             disabled={!canSave}
             loading={update.isPending}
-            onClick={() => patch(changes, t('inventory.itemEdit.savedToast', { name }))}
+            onClick={() => patch(changes, savedToast)}
           >
             {t('inventory.itemEdit.save')}
           </Button>

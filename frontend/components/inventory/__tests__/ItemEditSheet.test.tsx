@@ -569,3 +569,83 @@ describe('ItemEditSheet: the product behind the item (Q25)', () => {
     expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled()
   })
 })
+
+describe('ItemEditSheet: what a date edit taught (CL7)', () => {
+  beforeEach(() => window.localStorage.clear())
+
+  const SEALED: InventoryItem = { ...OAT, status: 'sealed', opened_date: null }
+  const LEARNED = { product_id: 'prod-oat', old_days: 21, new_days: 28 }
+
+  // The server answers with the item as it now is, and what the edit taught
+  function answer(learned: typeof LEARNED | null, item: InventoryItem = OAT) {
+    return mockApi({
+      patchResponse: (body) => HttpResponse.json({ ...item, ...body, learned_shelf_life: learned }),
+    })
+  }
+
+  async function editDate(item: InventoryItem, learned: typeof LEARNED | null) {
+    answer(learned, item)
+    const onClose = renderSheet(item)
+    change('Expiry', '2026-10-08')
+    fireEvent.click(save())
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  }
+
+  it('says how long the product now keeps when it learned', async () => {
+    await editDate(SEALED, LEARNED)
+
+    expect(await screen.findByText('Oat drink now keeps 28 days')).toBeInTheDocument()
+  })
+
+  it('says the date was for this item only when it is opened', async () => {
+    await editDate(OAT, null)
+
+    expect(
+      await screen.findByText('Date saved for this item only · Oat drink is opened')
+    ).toBeInTheDocument()
+  })
+
+  it('says the date was for this item only when it is in the freezer', async () => {
+    await editDate({ ...SEALED, location: 'freezer' }, null)
+
+    expect(
+      await screen.findByText('Date saved for this item only · Oat drink is in the freezer')
+    ).toBeInTheDocument()
+  })
+
+  it('says the date was for this item only when it has no purchase date', async () => {
+    await editDate({ ...SEALED, purchase_date: null }, null)
+
+    expect(
+      await screen.findByText('Date saved for this item only · Oat drink has no purchase date')
+    ).toBeInTheDocument()
+  })
+
+  it('says only Saved when a sealed item taught nothing new', async () => {
+    await editDate(SEALED, null)
+
+    expect(await screen.findByText('Saved · Oat drink')).toBeInTheDocument()
+  })
+
+  it('keeps the plain saved toast for an edit that leaves the date alone', async () => {
+    answer(null)
+    const onClose = renderSheet(OAT)
+    fireEvent.click(screen.getByText('Pantry'))
+    fireEvent.click(save())
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+
+    expect(await screen.findByText('Saved · Oat drink')).toBeInTheDocument()
+  })
+
+  it('says it in Finnish too', async () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    const finnish = { ...SEALED, product_display_names: { fi: 'Kaurajuoma' } }
+    answer(LEARNED, finnish)
+    const onClose = renderSheet(finnish)
+    change('Viimeinen käyttöpäivä', '2026-10-08')
+    fireEvent.click(screen.getByRole('button', { name: 'Tallenna' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+
+    expect(await screen.findByText('Kaurajuoma säilyy nyt 28 päivää')).toBeInTheDocument()
+  })
+})

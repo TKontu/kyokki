@@ -83,6 +83,10 @@ class ItemUpdateResult:
     #: it back. None when nothing was lowered. The endpoint runs the auto-add check with
     #: it; this service does not call into `app.services.min_stock` itself.
     lowered_product_id: UUID | None = None
+    #: The shelf life the product learned from this PATCH's date (CL7), so the cook can
+    #: be told and every screen refreshed. None when nothing was learned or it did not
+    #: change.
+    learned: LearnedShelfLife | None = None
 
 
 def is_observation(item: InventoryItem) -> bool:
@@ -194,17 +198,29 @@ async def learn_shelf_life(
     )
 
 
+async def learn_from_item_reporting(
+    db: AsyncSession, item: InventoryItem
+) -> tuple[LearnedShelfLife | None, list[MovedInventoryItem]]:
+    """Learn from one item if it is an observation: what was learned, and what moved.
+
+    The learned shelf life is None when nothing changed (not an observation, or the same
+    answer again); the list is the product's other items that moved with it.
+    """
+    if not is_observation(item):
+        return None, []
+    row: Any = item
+    learned = await learn_shelf_life(db, row.product_master_id)
+    if learned is None:
+        return None, []
+    return learned, [moved for moved in learned.moved if moved.id != row.id]
+
+
 async def learn_from_item(
     db: AsyncSession, item: InventoryItem
 ) -> list[MovedInventoryItem]:
     """Learn from one item if it is an observation. Returns the other items that moved."""
-    if not is_observation(item):
-        return []
-    row: Any = item
-    learned = await learn_shelf_life(db, row.product_master_id)
-    if learned is None:
-        return []
-    return [moved for moved in learned.moved if moved.id != row.id]
+    _, moved = await learn_from_item_reporting(db, item)
+    return moved
 
 
 async def update_item(
@@ -234,12 +250,20 @@ async def update_item(
         if product_id is not None:
             await lock_product(db, product_id)
 
+    learned: list[LearnedShelfLife] = []
+
     async def learn(item: InventoryItem) -> None:
-        moved.extend(await learn_from_item(db, item))
+        taught, others = await learn_from_item_reporting(db, item)
+        moved.extend(others)
+        if taught is not None:
+            learned.append(taught)
 
     item, lowered_product_id = await crud_inventory.update_inventory_item(
         db, item_id, item_update, on_dated_by_hand=learn
     )
     return ItemUpdateResult(
-        item=item, moved=moved, lowered_product_id=lowered_product_id
+        item=item,
+        moved=moved,
+        lowered_product_id=lowered_product_id,
+        learned=learned[-1] if learned else None,
     )

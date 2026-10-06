@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
-from app.services.shelf_life_learning import learn_shelf_life
+from app.schemas.inventory_item import InventoryItemUpdate
+from app.services.shelf_life_learning import learn_shelf_life, update_item
 
 BOUGHT = date(2026, 9, 1)
 
@@ -411,3 +412,42 @@ class TestReCorrecting:
         assert learned is not None
         assert learned.observations == 1
         assert tortillas.default_shelf_life_days == 60
+
+
+class TestUpdateItemReportsWhatWasLearned:
+    """CL7: the PATCH's result says what the product learned, so the cook can be told."""
+
+    async def test_a_sealed_items_new_date_reports_the_learned_shelf_life(
+        self, db_session: AsyncSession, tortillas: ProductMaster
+    ) -> None:
+        item = _item(tortillas, expiry_source="calculated")
+        await _add(db_session, item)
+
+        result = await update_item(
+            db_session,
+            item.id,
+            InventoryItemUpdate(expiry_date=BOUGHT + timedelta(days=28)),
+        )
+        await db_session.commit()
+
+        assert result.learned is not None
+        assert result.learned.product_id == tortillas.id
+        assert (result.learned.old_days, result.learned.new_days) == (7, 28)
+
+    async def test_an_opened_items_new_date_reports_nothing_learned(
+        self, db_session: AsyncSession, tortillas: ProductMaster
+    ) -> None:
+        item = _item(
+            tortillas, expiry_source="calculated", status="opened", opened_date=BOUGHT
+        )
+        await _add(db_session, item)
+
+        result = await update_item(
+            db_session,
+            item.id,
+            InventoryItemUpdate(expiry_date=BOUGHT + timedelta(days=28)),
+        )
+        await db_session.commit()
+
+        assert result.item is not None
+        assert result.learned is None
