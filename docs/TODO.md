@@ -2601,6 +2601,19 @@ shopping live keys, shopping remove keys, Q24 idempotency order. Open, as new it
   (needs a public URL setting).
 - [ ] **CL6 (M) Run-out forecast feeds shopping** (`generate` knows only `low_stock`) and gets an
   iPad view; then stock adds become undoable (`services/undo.py`).
+- [ ] **Q18-S2 (M) Icon style spike, operator-approved for the next round (2026-10-06).** Operator: generated
+  icons are "ugly and lazy"; "red bell pepper" renders as a blank red silhouette. Cause (planner, from
+  `services/icon_workflow.py`): the `flat` trigger at 0.75 plus "simple flat icon" asks for minimalism; the
+  negative prompt does not exclude silhouettes or line art; the IP-Adapter reference slot (nodes 9-11) is
+  never used (`product_icons.py:389` passes none). Spike: render the known failures (red bell pepper,
+  Quark, Tomato puree, Fish fingers, Canned tuna, Karelian pasty, plus a few) x 3 setups - today's;
+  `emoji` trigger ~0.4 with "glossy, soft gradient shading, highlight, full colour" and a negative adding
+  "silhouette, monochrome, outline, line art, flat colour"; the same plus IP-Adapter **style transfer** from
+  a style board of Microsoft Fluent Emoji 3D images (MIT, close to the Apple look; not Apple's own art) - 2
+  seeds each, a contact sheet for the operator. "No faces" stays. The winner is wired into
+  `build_icon_workflow` in the round after, only if it wins on the sheet (the operator's measurement
+  rule). Supersedes the 2026-09-30 "Flat" ruling only if chosen. One render at a time on `a4.comfyui`
+  through the gateway.
 - **Operator rulings these need:** does ticking a shopping item "bought" add stock, or does the
   receipt cover it (`mark_purchased` only flips the flag today)? May the bot confirm all matched
   lines without a look at the iPad? For CL4, is the canonical catalog shared defaults (shipped to
