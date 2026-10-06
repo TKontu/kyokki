@@ -1,32 +1,33 @@
 # Handoff
-Generated-UTC: 2026-10-04T19:14:19Z
-Base-SHA: e84646ebe879b75bf4d58731427b92dcd426e845
+Generated-UTC: 2026-10-05T05:29:40Z
+Base-SHA: d6ec2a797c2213031950301a32dd67b59b9b53cc
 
 ## Round delta
-- Round 2026-10-04-1 is merged, deployed and reconciled (#178 to #181):
-  - Finnish products screen and product sheet (#179);
-  - run-out rate counts only in-stock days, with a fixed query count (#178);
-  - crud imports no services (#180): code in `app/domain/` and `crud/product_name.py`, shims at the
-    old `app.services.*` paths.
-- No migration; Alembic head `c9a51b6756c1`. Outcomes are in `docs/TODO.md` (round block 2026-10-04-1).
-- Operator: "Suomi works"; some model-proposed Finnish names are poor ("surface level").
-- Icon curation is enabled in production.
+- Round 2026-10-04-2 merged 2026-10-05 (#182 to #186), **not deployed**. No migration, no setting.
+  - #185: the Android share target, `POST /api/receipts/share` (303 to the receipt, the list, or
+    `/scan?shared=failed`);
+  - #184: several receipts per upload on `/scan`;
+  - #183: the `app.services.{units,item_status,storage,product_names}` shims are deleted (use
+    `app.domain.*`, `app.crud.product_name`);
+  - #186: the flaky display-name test fixed (stubs answered by position).
+- Core-loop audit (operator ask): new backlog items CL1 to CL6 in `docs/TODO.md` (round block
+  2026-10-04-2). Log: `.rounds/2026-10-04-2/round.md`.
 
 ## Active PRs and conflicts
-- None open.
+- Only this reconcile.
 
 ## Non-obvious decisions or blockers
-- **HTTPS is NOT a blocker.** Production already serves the app over HTTPS (Let's Encrypt; the
-  operator pointed it out 2026-10-04). `docs/TODO.md` still lists "HTTPS on the LAN" as held on
-  the operator (frontier 4, the round blocks). Correct that when planning. The Android share target
-  (a `share_target` in `frontend/app/manifest.ts`, absent today) and PWA camera
-  scanning are therefore plannable forward lanes.
-- `lib/i18n/{en,fi}.ts` are single shared dictionaries. Two frontend lanes that add UI text in one
-  round conflict unless one owns them or the namespaces are split explicitly.
-- After the reboot the container lacked PostgreSQL and Redis; they were reinstalled with apt
-  (`postgresql-16`, `redis-server`). Docker is absent. A further reboot may drop them again.
-- Still held on the operator: meal sections, AG0 recipes, DEC-6 to DEC-9; the Finnish wording pass.
+- **The planner cannot merge** (`gh pr merge` is denied); the operator merges each round.
+- Telegram is the operator's main input. CL1 (confirm from the bot), CL2 (restock clears shopping)
+  and CL3 (bot shopping/consume) are the highest-value gaps. CL1 and CL3 both edit
+  `backend/app/telegram_bot/**`, so they cannot share a round unless the module is split explicitly.
+- Rulings needed before CL planning: does a shopping "bought" tick add stock; may the bot confirm
+  all matched lines unseen; is CL4's canonical catalog shared defaults or a household backup.
+- `lib/i18n/{en,fi}.ts` are single shared dictionaries: one frontend lane per round owns them.
+- The container has no Docker; PostgreSQL 16 and Redis are apt-installed and may vanish on reboot.
+- Still operator-held: DEC-7 (camera scanning), DEC-8, DEC-9, meal sections, AG0; the Finnish
+  wording pass; `LLM_MAX_TOKENS` 16384; an icon bundle (the repo library is still empty).
 
 ## Next action
-`/plan-round` from `docs/TODO.md`: first correct the stale HTTPS-held lines, then weigh the share
-target, camera scanning and multi-file receipt upload as forward lanes.
+Deploy d6ec2a7 and try the share target on Android; answer the three rulings; then `/plan-round`
+from the CL items in `docs/TODO.md`.
