@@ -20,7 +20,9 @@ from app.schemas.inventory_item import (
     InventoryItemCreate,
     InventoryItemResponse,
     InventoryItemUpdate,
+    InventoryItemUpdateResponse,
     InventoryStatus,
+    LearnedShelfLifeResponse,
     QuickAddRequest,
     StorageLocation,
     UndoPreviewResponse,
@@ -33,6 +35,7 @@ from app.services import min_stock, receipt_audit
 from app.services import undo as undo_service
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
+    broadcast_product_update,
 )
 from app.services.generic_products import InvalidProductRequest
 from app.services.quick_add import quick_add
@@ -229,12 +232,12 @@ async def quick_add_inventory_item(
     return InventoryItemResponse.model_validate(item)
 
 
-@router.patch("/{item_id}", response_model=InventoryItemResponse)
+@router.patch("/{item_id}", response_model=InventoryItemUpdateResponse)
 async def update_inventory_item(
     item_id: UUID,
     item_update: InventoryItemUpdate,
     db: AsyncSession = Depends(get_db),
-) -> InventoryItemResponse:
+) -> InventoryItemUpdateResponse:
     """Update an inventory item.
 
     An item that has been thrown away is frozen: it answers 409 rather than quietly walking
@@ -271,7 +274,22 @@ async def update_inventory_item(
     if result.lowered_product_id is not None:
         await min_stock.after_stock_decrease(db, result.lowered_product_id)
 
-    return item
+    response = InventoryItemUpdateResponse.model_validate(item)
+    learned = result.learned
+    if learned is not None:
+        # CL7: every open screen shows the product's new shelf life at once, and the
+        # answer tells the cook what the edit taught
+        await broadcast_product_update(
+            product_id=learned.product_id,
+            action="updated",
+            product_name=item.product_name,
+        )
+        response.learned_shelf_life = LearnedShelfLifeResponse(
+            product_id=learned.product_id,
+            old_days=learned.old_days,
+            new_days=learned.new_days,
+        )
+    return response
 
 
 async def _announce_moved(

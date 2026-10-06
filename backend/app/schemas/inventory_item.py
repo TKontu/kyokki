@@ -278,3 +278,26 @@ class InventoryItemResponse(InventoryItemBase):
         shown = match in (EmojiMatch.EXACT, EmojiMatch.COOK)
         data.product_emoji = emoji if shown and emoji else None
         return data
+
+
+class LearnedShelfLifeResponse(BaseModel):
+    """What a date edit taught the product (CL7)."""
+
+    product_id: UUID
+    old_days: int = Field(..., description="The product's shelf life before the edit")
+    new_days: int = Field(..., description="The shelf life it learned from the edit")
+
+
+class InventoryItemUpdateResponse(InventoryItemResponse):
+    """`PATCH /inventory/{id}`: the item, and what its new date taught the product (CL7).
+
+    Only the PATCH answers this; every other endpoint keeps `InventoryItemResponse`.
+    """
+
+    learned_shelf_life: LearnedShelfLifeResponse | None = Field(
+        None,
+        description=(
+            "The product's new shelf life when this edit's date taught it one; null when "
+            "nothing was learned (opened, frozen, no purchase date, or the same answer)"
+        ),
+    )

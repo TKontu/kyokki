@@ -2352,3 +2352,104 @@ class TestCorrectedDatesTeachTheProduct:
             4,
             "cook",
         )
+
+
+class TestADateEditSaysWhatItTaught:
+    """CL7: the PATCH answers what the product learned and tells every screen.
+
+    The operator edited a bell pepper from 21 days to 28, checked the product at once and
+    still saw 21: nothing told the other screens the product had changed, and nothing told
+    the cook whether the edit had taught anything at all.
+    """
+
+    TODAY = date.today()
+
+    async def _add(self, client: AsyncClient, **fields) -> dict:
+        body = {
+            "name": "Bell pepper",
+            "category": "produce",
+            "quantity": 1,
+            "unit": "pcs",
+            "location": "main_fridge",
+            "purchase_date": str(self.TODAY),
+            **fields,
+        }
+        response = await client.post("/api/inventory/quick-add", json=body)
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    async def _patch(self, client: AsyncClient, item_id: str, body: dict):
+        with (
+            patch(
+                "app.api.endpoints.inventory.broadcast_inventory_update",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "app.api.endpoints.inventory.broadcast_product_update",
+                new_callable=AsyncMock,
+            ) as product_broadcast,
+        ):
+            response = await client.patch(f"/api/inventory/{item_id}", json=body)
+        return response, product_broadcast
+
+    async def test_a_learned_shelf_life_is_answered_and_broadcast(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        item = await self._add(client)
+        product_id = item["product_master_id"]
+        old_days = (
+            await seeded_db.get(ProductMaster, UUID(product_id), populate_existing=True)
+        ).default_shelf_life_days
+        assert old_days != 28
+
+        response, product_broadcast = await self._patch(
+            client, item["id"], {"expiry_date": str(self.TODAY + timedelta(days=28))}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["learned_shelf_life"] == {
+            "product_id": product_id,
+            "old_days": old_days,
+            "new_days": 28,
+        }
+        product_broadcast.assert_awaited_once()
+        assert str(product_broadcast.await_args.kwargs["product_id"]) == product_id
+        assert product_broadcast.await_args.kwargs["action"] == "updated"
+
+    async def test_an_opened_items_edit_answers_null_and_broadcasts_no_product(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        item = await self._add(client)
+        opened = await client.patch(
+            f"/api/inventory/{item['id']}", json={"opened_date": str(self.TODAY)}
+        )
+        assert opened.status_code == 200
+
+        response, product_broadcast = await self._patch(
+            client, item["id"], {"expiry_date": str(self.TODAY + timedelta(days=28))}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["learned_shelf_life"] is None
+        product_broadcast.assert_not_awaited()
+
+    async def test_an_edit_of_other_fields_answers_null(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        item = await self._add(client)
+
+        response, product_broadcast = await self._patch(
+            client, item["id"], {"notes": "crisper drawer"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["learned_shelf_life"] is None
+        product_broadcast.assert_not_awaited()
+
+    async def test_other_endpoints_do_not_carry_the_field(
+        self, client: AsyncClient, seeded_db: AsyncSession
+    ) -> None:
+        item = await self._add(client)
+        assert "learned_shelf_life" not in item
+        fetched = (await client.get(f"/api/inventory/{item['id']}")).json()
+        assert "learned_shelf_life" not in fetched
