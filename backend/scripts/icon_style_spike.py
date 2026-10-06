@@ -153,7 +153,7 @@ def build_board(source_dir: Path, out_path: Path) -> Path:
     for index, path in enumerate(files):
         with Image.open(path) as source:
             image = source.convert("RGBA")
-        image.thumbnail((cell - 2 * pad, cell - 2 * pad), Image.LANCZOS)
+        image.thumbnail((cell - 2 * pad, cell - 2 * pad), Image.Resampling.LANCZOS)
         x = (index % cols) * cell + (cell - image.width) // 2
         y = y_offset + (index // cols) * cell + (cell - image.height) // 2
         board.paste(image, (x, y), image)
@@ -254,7 +254,7 @@ def write_thumbnails(full_path: Path, out_dir: Path) -> None:
     with Image.open(full_path) as source:
         image = source.convert("RGBA")
     for size in THUMBNAIL_SIZES:
-        image.resize((size, size), Image.LANCZOS).save(
+        image.resize((size, size), Image.Resampling.LANCZOS).save(
             out_dir / f"{full_path.stem}_{size}.png"
         )
 
@@ -343,6 +343,14 @@ def write_sheets(out_dir: Path) -> list[Path]:
     return written
 
 
+def dump_renders(meta: dict[str, Any]) -> str:
+    """renders.json with one result per line, so the diff stays small and greppable."""
+    head = {k: v for k, v in meta.items() if k != "results"}
+    rows = ",\n".join("    " + json.dumps(r) for r in meta.get("results", []))
+    body = json.dumps(head, indent=2)[:-2]
+    return f'{body},\n  "results": [\n{rows}\n  ]\n}}\n'
+
+
 # --- the command ---------------------------------------------------------------------------
 
 
@@ -411,9 +419,7 @@ def main(argv: list[str] | None = None) -> int:
         meta["total_seconds"] = round(time.monotonic() - started, 1)
         meta["seeds"] = list(SEEDS)
         meta["results"] = [asdict(r) for r in results]
-        (out_dir / "renders.json").write_text(
-            json.dumps(meta, indent=2) + "\n", encoding="utf-8"
-        )
+        (out_dir / "renders.json").write_text(dump_renders(meta), encoding="utf-8")
         ok = sum(1 for r in results if r.ok)
         print(f"{ok}/{len(results)} renders ok in {meta['total_seconds']}s")
 
