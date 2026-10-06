@@ -39,10 +39,8 @@ class TestTheRevision:
     def test_it_follows_the_display_names(self) -> None:
         assert _load_migration().down_revision == "61f6f69cc22f"
 
-    def test_it_is_the_only_head(self) -> None:
-        script = _script()
-        (head,) = script.get_heads()
-        assert head == _load_migration().revision
+    # Was "the only head" until CL5's d8f3a61c2b57 followed it (round 2026-10-06-1,
+    # `test_telegram_receipt_message_migration.py`); that test owns the head now.
 
     def test_history_stays_one_line_through_it(self) -> None:
         script = _script()
