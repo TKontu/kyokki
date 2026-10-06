@@ -2634,8 +2634,12 @@ shopping live keys, shopping remove keys, Q24 idempotency order. Open, as new it
      must be forgotten so the next receipt does not re-join) moves, and the old product's learned
      shelf life is recomputed without it. Today only merge exists (`POST /products/{id}/merge`) and
      names can be removed (`ProductNamesList`), but an item cannot leave its product.
-  Production note (2026-10-06, read-only): "Karelian stew" now exists as its own product
-  (`karjalan paisti`, shelf 6, cook), so the operator split it by hand at some cost.
+  Production trace (2026-10-06, read-only): `KARJALANPAISTI` got generic name "Karelian pie" from
+  extraction and was `selected` onto the pie product `14edd43e`; the cook then renamed that product
+  "Karelian stew", so the rice pies (`VUOKSEN RIISIPIIRAKKA`, 30.9 and 6.10) on it now read as stew.
+  **Design: `docs/PRODUCT_IDENTITY_SPEC.md`** (root-cause map P1-P9, one decision point with exact
+  keys K1-K4, provenance per join, split / undo split / un-merge, migration, audit, lanes L0-L4, six
+  operator decisions).
 - **Operator rulings these need:** does ticking a shopping item "bought" add stock, or does the
   receipt cover it (`mark_purchased` only flips the flag today)? May the bot confirm all matched
   lines without a look at the iPad? For CL4, is the canonical catalog shared defaults (shipped to
