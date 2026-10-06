@@ -2614,6 +2614,28 @@ shopping live keys, shopping remove keys, Q24 idempotency order. Open, as new it
   `build_icon_workflow` in the round after, only if it wins on the sheet (the operator's measurement
   rule). Supersedes the 2026-09-30 "Flat" ruling only if chosen. One render at a time on `a4.comfyui`
   through the gateway.
+- [ ] **CL8 (M-L, high) No fuzzy identity; a wrong merge must be undoable (operator, 2026-10-06).**
+  Operator: "Get rid of fuzzy matching. Karelian stew / karjalan paisti should not match to Karelian
+  pie / karjalanpiirakka. When you have a mismatch and it merges, it is almost impossible to revert
+  the match, as editing the item originating from the stew edits the pies and vice versa. Horrible."
+  Two parts:
+  1. **No near-miss joins.** `PRODUCT_RESOLUTION_SPEC.md` already says identity is a key, not a
+     score, and `rapidfuzz` use left is only OCR line alignment (`receipt_processing.py:181`)
+     and an unused `matching_service` matcher. The remaining near-miss paths to audit and close:
+     trigram candidates offered to the model (`product_resolution.py` ~126-200,
+     `product_selection.py`), whose pick then becomes the product; Q37 generic-name snapping
+     (`product_resolution.py` ~338-360, `receipt_confirm.py:135`); name lookups by candidates
+     (`product_lookup.candidates_for`, used by CLI/HA/bot only to *suggest*). Rule to enforce: a line
+     joins an existing product only on an exact key (normalised canonical name, a cook/learned name,
+     or a verified printed alias); otherwise it is a new product or an explicit cook choice on the
+     review screen. Test: "Karjalan paisti" / "Karelian stew" never resolves to "Karelian pie".
+  2. **Un-merge.** An item must be movable to another or a new product from the item sheet ("This is
+     not X"): the item (and, optionally, the printed alias / learned name that caused it, which
+     must be forgotten so the next receipt does not re-join) moves, and the old product's learned
+     shelf life is recomputed without it. Today only merge exists (`POST /products/{id}/merge`) and
+     names can be removed (`ProductNamesList`), but an item cannot leave its product.
+  Production note (2026-10-06, read-only): "Karelian stew" now exists as its own product
+  (`karjalan paisti`, shelf 6, cook), so the operator split it by hand at some cost.
 - **Operator rulings these need:** does ticking a shopping item "bought" add stock, or does the
   receipt cover it (`mark_purchased` only flips the flag today)? May the bot confirm all matched
   lines without a look at the iPad? For CL4, is the canonical catalog shared defaults (shipped to
