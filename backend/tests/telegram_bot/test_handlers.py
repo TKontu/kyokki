@@ -42,7 +42,7 @@ class FakeNotifier:
     def __init__(self):
         self.watched: list[tuple] = []
 
-    def watch(self, receipt_id, chat_id: int, message_id: int) -> None:
+    async def watch(self, receipt_id, chat_id: int, message_id: int) -> None:
         self.watched.append((receipt_id, chat_id, message_id))
 
     def empty(self) -> bool:

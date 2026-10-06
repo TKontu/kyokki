@@ -1,5 +1,7 @@
 """Reply texts. Plain text only (no parse mode), so product names need no escaping."""
 
+from uuid import UUID
+
 from app.schemas.receipt import ReceiptResponse, ReceiptStatus
 
 TELEGRAM_TEXT_LIMIT = 4096
@@ -111,6 +113,23 @@ def result_text(receipt: ReceiptResponse) -> str:
         )
     lines.append("Review on the iPad.")
     return "\n".join(lines)[:TELEGRAM_TEXT_LIMIT]
+
+
+def review_url(public_url: str | None, receipt_id: UUID) -> str | None:
+    """The receipt's review page on the PWA, or None when no public URL is configured."""
+    base = (public_url or "").strip().rstrip("/")
+    if not base:
+        return None
+    return f"{base}/receipt/{receipt_id}"
+
+
+def with_review_link(text: str, public_url: str | None, receipt_id: UUID) -> str:
+    """``text`` ending with a line linking to the review page (CL5), within the limit."""
+    url = review_url(public_url, receipt_id)
+    if url is None:
+        return text
+    link = "\n" + url
+    return text[: TELEGRAM_TEXT_LIMIT - len(link)] + link
 
 
 def duplicate_text(receipt: ReceiptResponse) -> str:

@@ -124,7 +124,12 @@ async def run(settings: Settings) -> None:
         token=settings.TELEGRAM_BOT_TOKEN.get_secret_value(),
         base_url=settings.TELEGRAM_API_BASE,
     )
-    notifier = ResultNotifier(client, AsyncSessionLocal)
+    notifier = ResultNotifier(
+        client,
+        AsyncSessionLocal,
+        chat_ids=settings.TELEGRAM_ALLOWED_CHAT_IDS,
+        public_url=settings.KYOKKI_PUBLIC_URL,
+    )
     handler = BotHandler(
         client=client,
         session_factory=AsyncSessionLocal,

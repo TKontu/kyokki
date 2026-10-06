@@ -37,7 +37,7 @@ class BotApi(Protocol):
 
 
 class Notifier(Protocol):
-    def watch(self, receipt_id: UUID, chat_id: int, message_id: int) -> None: ...
+    async def watch(self, receipt_id: UUID, chat_id: int, message_id: int) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -136,8 +136,9 @@ class BotHandler:
         message_id = await self.client.send_message(
             chat_id, messages.received_text(ahead)
         )
-        # The worker service reads it from the queue; the notifier edits the acknowledgement
-        self.notifier.watch(receipt.id, chat_id, message_id)
+        # The worker service reads it from the queue; the notifier edits the acknowledgement,
+        # durably (CL5)
+        await self.notifier.watch(receipt.id, chat_id, message_id)
         logger.info(
             "Receipt received from Telegram",
             extra={"receipt_id": str(receipt.id), "queued_ahead": ahead},

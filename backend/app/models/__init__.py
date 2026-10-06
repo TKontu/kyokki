@@ -12,6 +12,7 @@ from app.models.product_name import ProductName
 from app.models.receipt import Receipt
 from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
+from app.models.telegram_receipt_message import TelegramReceiptMessage
 
 __all__ = [
     "Category",
@@ -26,4 +27,5 @@ __all__ = [
     "NonFoodName",
     "IdempotencyKey",
     "ProductEmojiLearned",
+    "TelegramReceiptMessage",
 ]

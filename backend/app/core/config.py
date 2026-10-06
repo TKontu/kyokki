@@ -218,6 +218,9 @@ class Settings(BaseSettings):
     TELEGRAM_ALLOWED_CHAT_IDS: Annotated[list[int], NoDecode] = []
     TELEGRAM_API_BASE: str = "https://api.telegram.org"
     TELEGRAM_POLL_TIMEOUT: int = 50  # getUpdates long-poll seconds
+    # Public root of the PWA, e.g. https://kyokki.example.com. When set, the bot's result
+    # messages end with a link to the receipt's review page; empty means no link.
+    KYOKKI_PUBLIC_URL: str = ""
 
     @field_validator("TELEGRAM_BOT_TOKEN", mode="before")
     @classmethod
