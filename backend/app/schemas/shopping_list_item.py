@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Any
 from uuid import UUID
@@ -89,7 +89,7 @@ class ShoppingListItemResponse(ShoppingListItemBase):
 
 #: The sources `POST /api/shopping/generate` understands (``shopping_generate.SOURCES``).
 #: ``recipe`` and ``meal_plan`` wait for AG5.
-GENERATE_SOURCES: tuple[str, ...] = ("low_stock",)
+GENERATE_SOURCES: tuple[str, ...] = ("low_stock", "runout")
 
 
 def _sources_required(schema: dict[str, Any]) -> None:
@@ -101,7 +101,7 @@ def _sources_required(schema: dict[str, Any]) -> None:
 
 
 class ShoppingGenerateRequest(BaseModel):
-    """What to build a shopping list from (AG6). Only ``low_stock`` exists for now.
+    """What to build a shopping list from (AG6): ``low_stock`` and ``runout`` (CL6).
 
     ``sources`` takes any JSON value here and is checked by the service: anything but a
     non-empty list of known source names (a bare string, an object, a list holding an
@@ -118,7 +118,14 @@ class ShoppingGenerateRequest(BaseModel):
                 "items": {"type": "string", "enum": list(GENERATE_SOURCES)},
             }
         ),
-    ] = Field(None, description="low_stock: every product below its min_stock_quantity")
+    ] = Field(
+        None,
+        description=(
+            "low_stock: every product below its min_stock_quantity. runout: every "
+            "product the run-out forecast says runs out within 7 days, or that ran out "
+            "after regular use"
+        ),
+    )
     dry_run: bool = Field(False, description="Plan only; nothing is written")
 
     model_config = {"json_schema_extra": _sources_required}
@@ -138,6 +145,11 @@ class ShoppingGenerateLine(BaseModel):
       hold it (``"the open list item is in g, which cannot hold a need in dl"``). Carries
       ``need`` and ``on_hand``, and ``item_id`` is that open item, left as it was; no
       second item is added beside it.
+
+    A ``runout`` line (CL6) carries ``runs_out_on``, the forecast day the product runs out
+    (today for one already out), and says why in ``reason``. ``on_hand`` is its active
+    stock; ``min_stock`` is the product's own, or 0 when it has none. Only ``runout``
+    lines carry ``runs_out_on``: a product both sources pick gets the ``low_stock`` line.
     """
 
     product_id: UUID
@@ -148,6 +160,7 @@ class ShoppingGenerateLine(BaseModel):
     min_stock: JsonDecimal
     item_id: UUID | None = None
     reason: str | None = None
+    runs_out_on: date | None = None
 
 
 class ShoppingGenerateResponse(BaseModel):

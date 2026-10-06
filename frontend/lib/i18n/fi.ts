@@ -188,7 +188,7 @@ export const fi: Messages = {
   shopping: {
     header: {
       title: 'Ostoslista',
-      generate: 'Luo vähissä olevista',
+      generate: 'Luo ostoslista',
     },
     empty: 'Listalla ei ole mitään.',
     groups: {
@@ -228,7 +228,7 @@ export const fi: Messages = {
       remove: 'Poista {name}',
     },
     generate: {
-      title: 'Luo vähissä olevista',
+      title: 'Luo ostoslista',
       cancel: 'Peruuta',
       addToList: 'Lisää listalle',
       checking: 'Tarkistetaan varastoa…',
@@ -240,6 +240,11 @@ export const fi: Messages = {
       nothingToAdd: 'Ei lisättävää',
       checkError: 'Varastotilanteen tarkistus epäonnistui',
       generateError: 'Listan luonti epäonnistui',
+      sources: 'Lähteet',
+      lowStock: 'Vähissä',
+      runout: 'Loppumassa pian',
+      noSource: 'Valitse vähintään yksi lähde.',
+      runsOut: 'loppuu ~{date}',
     },
   },
   gone: {

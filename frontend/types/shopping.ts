@@ -60,8 +60,12 @@ export interface ShoppingListParams {
   include_purchased?: boolean
 }
 
-/** The sources `POST /api/shopping/generate` understands today (`recipe`, `meal_plan` wait). */
-export type ShoppingGenerateSource = 'low_stock'
+/**
+ * The sources `POST /api/shopping/generate` understands today (`recipe`, `meal_plan` wait):
+ * `low_stock` (below `min_stock_quantity`) and `runout` (CL6: the run-out forecast says it
+ * runs out within 7 days, or it ran out after regular use).
+ */
+export type ShoppingGenerateSource = 'low_stock' | 'runout'
 
 export interface ShoppingGenerateRequest {
   sources: ShoppingGenerateSource[]
@@ -70,8 +74,10 @@ export interface ShoppingGenerateRequest {
 
 /**
  * One product the generator looked at, and what came of it.
- * `need`/`on_hand`/`min_stock` are in `unit`, the product's own unit. `reason` is set only on
- * a skipped line.
+ * `need`/`on_hand`/`min_stock` are in `unit`, the product's own unit. `reason` says why on a
+ * skipped line, and on a `runout` line. `runs_out_on` (`YYYY-MM-DD`) is set only on a `runout`
+ * line: the forecast day it runs out (today when it already has); `min_stock` is then the
+ * product's own, or 0 when it has none.
  */
 export interface ShoppingGenerateLine {
   product_id: string
@@ -82,6 +88,7 @@ export interface ShoppingGenerateLine {
   min_stock: number
   item_id: string | null
   reason: string | null
+  runs_out_on?: string | null
 }
 
 /**

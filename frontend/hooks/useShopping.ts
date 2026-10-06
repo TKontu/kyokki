@@ -150,10 +150,11 @@ export function useClearPurchasedShoppingItems() {
 }
 
 /**
- * Mutation: generate from low stock. Call with `dry_run: true` first to preview (nothing is
- * written and nothing here is invalidated, and no key is needed - the API never remembers a dry
- * run), then again with `dry_run: false` and an `idempotencyKey` to apply. F1: the caller mints
- * that key once when the apply starts and reuses it for a retry of the same apply.
+ * Mutation: generate from the chosen sources (`low_stock`, `runout`). Call with `dry_run: true`
+ * first to preview (nothing is written and nothing here is invalidated, and no key is needed -
+ * the API never remembers a dry run), then again with `dry_run: false` and an `idempotencyKey`
+ * to apply. F1: the caller mints that key once when the apply starts and reuses it for a retry
+ * of the same apply.
  */
 export function useGenerateShoppingList() {
   const queryClient = useQueryClient()

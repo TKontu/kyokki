@@ -51,7 +51,7 @@ describe('GenerateSheet', () => {
     renderSheet()
 
     expect(await screen.findByText(/Milk/)).toBeInTheDocument()
-    expect(asked).toEqual([{ sources: ['low_stock'], dry_run: true }])
+    expect(asked).toEqual([{ sources: ['low_stock', 'runout'], dry_run: true }])
   })
 
   it('applies on "Add to list", using the same sources', async () => {
@@ -78,7 +78,7 @@ describe('GenerateSheet', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add to list' }))
 
     await waitFor(() => expect(asked).toHaveLength(2))
-    expect(asked[1]).toEqual({ sources: ['low_stock'], dry_run: false })
+    expect(asked[1]).toEqual({ sources: ['low_stock', 'runout'], dry_run: false })
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
 
@@ -170,6 +170,122 @@ describe('GenerateSheet', () => {
     expect(screen.getByText(/cannot be counted/)).toBeInTheDocument()
   })
 
+  describe('sources (CL6: running out soon)', () => {
+    const empty = { added: [], updated: [], unchanged: [], skipped: [], dry_run: true }
+
+    it('offers both sources, on by default', async () => {
+      api(empty)
+
+      renderSheet()
+
+      expect(screen.getByRole('checkbox', { name: 'Low stock' })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: 'Running out soon' })).toBeChecked()
+    })
+
+    it('sends only the source left on, for the preview and the apply', async () => {
+      const asked = api({
+        added: [{ product_id: 'p1', name: 'Milk', need: 4, unit: 'dl', on_hand: 1, min_stock: 5, item_id: null, reason: null }],
+        updated: [],
+        unchanged: [],
+        skipped: [],
+        dry_run: true,
+      })
+      renderSheet()
+      await screen.findByText(/Milk/)
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Running out soon' }))
+
+      await waitFor(() => expect(asked).toHaveLength(2))
+      expect(asked[1]).toEqual({ sources: ['low_stock'], dry_run: true })
+      await screen.findByText(/Milk/)
+      fireEvent.click(screen.getByRole('button', { name: 'Add to list' }))
+      await waitFor(() => expect(asked).toHaveLength(3))
+      expect(asked[2]).toEqual({ sources: ['low_stock'], dry_run: false })
+    })
+
+    it('cannot submit with no source on', async () => {
+      const asked = api({
+        added: [{ product_id: 'p1', name: 'Milk', need: 4, unit: 'dl', on_hand: 1, min_stock: 5, item_id: null, reason: null }],
+        updated: [],
+        unchanged: [],
+        skipped: [],
+        dry_run: true,
+      })
+      renderSheet()
+      await screen.findByText(/Milk/)
+
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Low stock' }))
+      await waitFor(() => expect(asked).toHaveLength(2))
+      await screen.findByText(/Milk/)
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Running out soon' }))
+
+      expect(await screen.findByText('Choose at least one source.')).toBeInTheDocument()
+      const add = screen.getByRole('button', { name: 'Add to list' })
+      expect(add).toBeDisabled()
+      fireEvent.click(add)
+      expect(asked).toHaveLength(2)
+      expect(asked.every((body) => body.dry_run)).toBe(true)
+    })
+
+    it('dates a line the run-out forecast picked', async () => {
+      api({
+        added: [
+          {
+            product_id: 'p1',
+            name: 'Milk',
+            need: 9,
+            unit: 'dl',
+            on_hand: 3,
+            min_stock: 0,
+            item_id: null,
+            reason: 'runs out around 2026-10-12 at 1.25 dl a day',
+            runs_out_on: '2026-10-12',
+          },
+        ],
+        updated: [],
+        unchanged: [],
+        skipped: [],
+        dry_run: true,
+      })
+
+      renderSheet()
+
+      expect(await screen.findByText('Milk · 9 dl · runs out ~12 October 2026')).toBeInTheDocument()
+    })
+
+    it('reads the sources and the date in Finnish', async () => {
+      window.localStorage.setItem(LANGUAGE_KEY, 'fi')
+      api({
+        added: [],
+        updated: [
+          {
+            product_id: 'p1',
+            name: 'Maito',
+            need: 9,
+            unit: 'dl',
+            on_hand: 3,
+            min_stock: 0,
+            item_id: 'i1',
+            reason: 'runs out around 2026-10-12 at 1.25 dl a day',
+            runs_out_on: '2026-10-12',
+          },
+        ],
+        unchanged: [],
+        skipped: [],
+        dry_run: true,
+      })
+
+      renderSheet()
+
+      expect(screen.getByRole('checkbox', { name: 'Vähissä' })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: 'Loppumassa pian' })).toBeChecked()
+      expect(
+        await screen.findByText('Maito · 9 dl · loppuu ~12. lokakuuta 2026')
+      ).toBeInTheDocument()
+      window.localStorage.clear()
+    })
+  })
+
   describe('display language (Post-MVP frontier item 13, phase 2)', () => {
     afterEach(() => window.localStorage.clear())
 
@@ -187,7 +303,7 @@ describe('GenerateSheet', () => {
 
       renderSheet()
 
-      expect(screen.getByRole('heading', { name: 'Luo vähissä olevista' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Luo ostoslista' })).toBeInTheDocument()
       // Waits for the dry run itself, not just the title (which renders before it resolves)
       expect(await screen.findByText('Milk · 2,5 dl')).toBeInTheDocument()
       expect(screen.getByText('Uudet')).toBeInTheDocument()

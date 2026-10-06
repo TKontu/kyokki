@@ -308,9 +308,9 @@ describe('The Shopping screen', () => {
     renderShopping()
     await screen.findByText('Nothing on the list.')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Generate from low stock' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate shopping list' }))
 
-    expect(await screen.findByRole('dialog', { name: 'Generate from low stock' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Generate shopping list' })).toBeInTheDocument()
   })
 
   it('has nothing to show when the list is empty', async () => {
@@ -329,7 +329,7 @@ describe('The Shopping screen', () => {
       renderShopping()
 
       expect(await screen.findByRole('heading', { name: 'Ostoslista' })).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: 'Luo vähissä olevista' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Luo ostoslista' })).toBeInTheDocument()
       expect(await screen.findByRole('heading', { name: 'Kiireelliset' })).toBeInTheDocument()
     })
 

@@ -179,7 +179,7 @@ export const en = {
   shopping: {
     header: {
       title: 'Shopping',
-      generate: 'Generate from low stock',
+      generate: 'Generate shopping list',
     },
     empty: 'Nothing on the list.',
     groups: {
@@ -219,7 +219,7 @@ export const en = {
       remove: 'Remove {name}',
     },
     generate: {
-      title: 'Generate from low stock',
+      title: 'Generate shopping list',
       cancel: 'Cancel',
       addToList: 'Add to list',
       checking: 'Checking stock…',
@@ -231,6 +231,11 @@ export const en = {
       nothingToAdd: 'Nothing to add',
       checkError: 'Could not check low stock',
       generateError: 'Could not generate the list',
+      sources: 'Sources',
+      lowStock: 'Low stock',
+      runout: 'Running out soon',
+      noSource: 'Choose at least one source.',
+      runsOut: 'runs out ~{date}',
     },
   },
   gone: {

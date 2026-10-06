@@ -148,6 +148,10 @@ async def generate_shopping_list(
     its `reorder_quantity`, or the shortfall when that is not set. An open item for the
     product is raised to the need instead of being joined by a second one.
 
+    `runout` (CL6): every product the run-out forecast says runs out within
+    `RUNOUT_WITHIN_DAYS` (or ran out after regular use) needs its `reorder_quantity`, or a
+    week at its rate. A product `low_stock` already listed gets no second line.
+
     Errors: 400 `invalid` (`sources` is not a non-empty list of known source names:
     a bare string, an object, a list holding a non-string, an unknown name, an empty
     list, or no `sources`), 409 `conflict`

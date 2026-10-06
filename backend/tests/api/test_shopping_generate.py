@@ -1,6 +1,6 @@
 """AG6: POST /api/shopping/generate - a shopping list from what is below its minimum."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -10,6 +10,7 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.consumption_log import ConsumptionLog
 from app.models.idempotency_key import IdempotencyKey
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
@@ -181,6 +182,7 @@ class TestGenerate:
             [],
             ["recipe"],
             ["low_stock", "nope"],
+            ["runout", "nope"],
             "low_stock",
             {"recipe": {"id": "abc"}},
             ["low_stock", {"recipe": {"id": "abc"}}],
@@ -293,6 +295,51 @@ class TestIdempotency:
         assert real.status_code == 200
         assert real.json()["dry_run"] is False
         assert await _count(seeded_db, ShoppingListItem) == 1
+
+
+class TestRunoutSource:
+    """CL6: the run-out forecast as a source, end to end."""
+
+    async def test_a_product_running_out_soon_is_added_with_its_date(
+        self, client: AsyncClient, seeded_db, broadcast
+    ) -> None:
+        product = ProductMaster(
+            id=uuid4(),
+            canonical_name="Milk",
+            category="dairy",
+            storage_type="refrigerator",
+            default_shelf_life_days=7,
+            unit_type="volume",
+            default_unit="dl",
+        )
+        seeded_db.add(product)
+        await seeded_db.commit()
+        await _stock(seeded_db, product, "3")
+        now = datetime.now(UTC)
+        for ago in (8, 6, 4, 2, 0):  # 10 dl over 8 days: 1.25 dl a day
+            seeded_db.add(
+                ConsumptionLog(
+                    product_master_id=product.id,
+                    action="use_partial",
+                    quantity_consumed=Decimal("2"),
+                    quantity_after=Decimal("0"),
+                    unit="dl",
+                    batch_id=uuid4(),
+                    previous={},
+                    logged_at=now - timedelta(days=ago),
+                )
+            )
+        await seeded_db.commit()
+
+        response = await client.post(URL, json={"sources": ["runout"]})
+
+        assert response.status_code == 200
+        [line] = response.json()["added"]
+        assert (line["name"], line["need"], line["unit"]) == ("Milk", 9, "dl")
+        assert line["min_stock"] == 0  # the product has no minimum
+        assert date.fromisoformat(line["runs_out_on"]) >= TODAY
+        assert await _count(seeded_db, ShoppingListItem) == 1
+        broadcast.assert_awaited_once()
 
 
 class TestPublishedSchema:
