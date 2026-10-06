@@ -24,9 +24,9 @@ empty and both add.
 """
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -379,3 +379,98 @@ async def after_stock_increase_by_undo(
             priority=removed.priority,
             is_purchased=None,
         )
+
+
+class BoughtItem(NamedTuple):
+    """What `after_stock_increase`'s broadcast carries for one item `mark_bought`
+    ticked - read before the commit, so nothing has to be reloaded afterwards."""
+
+    id: UUID
+    name: str
+    quantity: Decimal
+    unit: str
+    priority: str
+
+
+async def mark_bought(db: AsyncSession, product_id: UUID) -> list[BoughtItem]:
+    """Mark every open (unpurchased) shopping item linked to `product_id` purchased,
+    whatever its `source` (CL2): new stock of the product is what those items were for.
+    A free-text item is never touched - it has no product to match - and an item already
+    bought keeps its own `purchased_at`. Quantities are not compared: an item is closed
+    whatever amount it asked for.
+
+    Manages its own transaction exactly as `maybe_auto_add` does, under the same
+    `GENERATE_LOCK`, so a restock racing a consume's auto-add, or an on-demand generate,
+    sees the other's committed item rather than a stale read: commits what it marks (or,
+    when there is nothing, to release the lock promptly), and rolls back and re-raises on
+    failure.
+
+    Returns the items marked, for the caller to broadcast `shopping_list_update` with.
+    Raises on failure - `after_stock_increase` is the entry point that never does.
+    """
+    from app.services.shopping_generate import GENERATE_LOCK
+
+    try:
+        await db.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(GENERATE_LOCK, 0)))
+        )
+        # `get_by_product` already filters to linked, unpurchased items.
+        # Any: the models declare untyped `Column`s, which mypy reads as Column[...],
+        # not values.
+        items: list[Any] = await crud_shopping.get_by_product(
+            db, product_master_id=product_id
+        )
+        now = datetime.now(UTC)
+        bought = []
+        for item in items:
+            item.is_purchased = True
+            item.purchased_at = now
+            bought.append(
+                BoughtItem(item.id, item.name, item.quantity, item.unit, item.priority)
+            )
+        await db.commit()
+    except BaseException:
+        await db.rollback()
+        raise
+    return bought
+
+
+async def after_stock_increase(db: AsyncSession, product_ids: Sequence[UUID]) -> None:
+    """Call this once, after any change that adds new stock has committed - a receipt
+    confirm, the iPad's quick add, the agent's `/stock/add` - with the product of every
+    item it created (duplicates are handled once).
+
+    Marks each product's open shopping items purchased (`mark_bought`) and broadcasts one
+    `shopping_list_update` per item, with the same `purchased` action the Shopping
+    screen's own tick sends. Never raises, for the same reason `after_stock_decrease`
+    does not: the stock has already committed by the time this runs, so a failure here -
+    a locked row, a dropped connection - must never turn an otherwise-successful request
+    into a 500. Logged at WARNING rather than silently swallowed, and one product's
+    failure does not stop the next.
+    """
+    for product_id in dict.fromkeys(product_ids):
+        try:
+            bought = await mark_bought(db, product_id)
+        except Exception:
+            logger.warning(
+                "Ticking shopping items bought after new stock failed; the stock"
+                " change itself is unaffected",
+                exc_info=True,
+                extra={"product_id": str(product_id)},
+            )
+            continue
+
+        logger.info(
+            "Marked open shopping items bought after new stock",
+            extra={"product_id": str(product_id), "count": len(bought)},
+        )
+        for item in bought:
+            await broadcast_shopping_list_update(
+                shopping_list_item_id=item.id,
+                action="purchased",
+                name=item.name,
+                quantity=item.quantity,
+                unit=item.unit,
+                priority=item.priority,
+                is_purchased=True,
+            )

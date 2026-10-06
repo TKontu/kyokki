@@ -188,6 +188,9 @@ async def add_stock(
             status=str(sibling.status),
             product_name=item.product_name,
         )
+    # The bought thing comes off the shopping list (CL2) - `min_stock` decides. A
+    # replay returned above, so it never reaches this.
+    await min_stock.after_stock_increase(db, [item.product_master_id])
     if result.product_created:
         schedule_estimates(background_tasks, [item.product_master_id])
     return result.response

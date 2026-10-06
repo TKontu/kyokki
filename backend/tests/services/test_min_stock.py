@@ -6,9 +6,9 @@ consumptions racing add exactly one item.
 """
 
 import asyncio
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
@@ -267,3 +267,176 @@ class TestConcurrency:
         assert sorted([first is None, second is None]) == [False, True]
         async with factory() as check:
             assert await _count(check) == 1
+
+
+async def _free_text_item(db: AsyncSession, name: str) -> ShoppingListItem:
+    item = ShoppingListItem(
+        id=uuid4(),
+        product_master_id=None,
+        name=name,
+        quantity=Decimal("1"),
+        unit="pcs",
+        priority="normal",
+        source="manual",
+        is_purchased=False,
+    )
+    db.add(item)
+    await db.commit()
+    return item
+
+
+async def _purchased_item(
+    db: AsyncSession, product: ProductMaster, purchased_at: datetime
+) -> ShoppingListItem:
+    item = ShoppingListItem(
+        id=uuid4(),
+        product_master_id=product.id,
+        name=product.canonical_name,
+        quantity=Decimal("1"),
+        unit="dl",
+        priority="normal",
+        source="manual",
+        is_purchased=True,
+        purchased_at=purchased_at,
+    )
+    db.add(item)
+    await db.commit()
+    return item
+
+
+async def _reload(db: AsyncSession, item_id) -> ShoppingListItem:
+    rows = await db.execute(
+        select(ShoppingListItem)
+        .where(ShoppingListItem.id == item_id)
+        .execution_options(populate_existing=True)
+    )
+    return rows.scalar_one()
+
+
+@pytest.fixture
+def shopping_broadcast():
+    with patch(
+        "app.services.min_stock.broadcast_shopping_list_update", new_callable=AsyncMock
+    ) as mock:
+        yield mock
+
+
+class TestAfterStockIncrease:
+    """CL2: new stock of a product ticks its open shopping items bought."""
+
+    async def test_open_manual_and_auto_items_are_marked_purchased(
+        self, db, shopping_broadcast
+    ) -> None:
+        milk = await _product(db, "Milk")
+        manual = await _open_item(db, milk, "2", source="manual")
+        auto = await _open_item(db, milk, "5", source="auto_restock")
+        before = datetime.now(UTC)
+
+        await min_stock.after_stock_increase(db, [milk.id])
+
+        for item_id in (manual.id, auto.id):
+            row = await _reload(db, item_id)
+            assert row.is_purchased is True
+            assert row.purchased_at is not None
+            assert row.purchased_at >= before - timedelta(seconds=5)
+
+    async def test_an_already_purchased_item_keeps_its_timestamp(
+        self, db, shopping_broadcast
+    ) -> None:
+        milk = await _product(db, "Milk")
+        old = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
+        bought = await _purchased_item(db, milk, old)
+
+        await min_stock.after_stock_increase(db, [milk.id])
+
+        row = await _reload(db, bought.id)
+        assert (row.is_purchased, row.purchased_at) == (True, old)
+        shopping_broadcast.assert_not_awaited()
+
+    async def test_other_products_and_free_text_items_are_untouched(
+        self, db, shopping_broadcast
+    ) -> None:
+        milk = await _product(db, "Milk")
+        bread = await _product(db, "Bread", unit="pcs")
+        other = await _open_item(db, bread, "1", unit="pcs")
+        free = await _free_text_item(db, "Milk")
+
+        await min_stock.after_stock_increase(db, [milk.id])
+
+        for item_id in (other.id, free.id):
+            row = await _reload(db, item_id)
+            assert (row.is_purchased, row.purchased_at) == (False, None)
+        shopping_broadcast.assert_not_awaited()
+
+    async def test_duplicate_ids_are_handled_once(self, db, shopping_broadcast) -> None:
+        milk = await _product(db, "Milk")
+        item = await _open_item(db, milk, "2")
+
+        with patch.object(
+            min_stock.crud_shopping,
+            "get_by_product",
+            wraps=min_stock.crud_shopping.get_by_product,
+        ) as spy:
+            await min_stock.after_stock_increase(db, [milk.id, milk.id, milk.id])
+
+        assert spy.await_count == 1
+        assert (await _reload(db, item.id)).is_purchased is True
+        assert shopping_broadcast.await_count == 1
+
+    async def test_one_broadcast_per_changed_row(self, db, shopping_broadcast) -> None:
+        milk = await _product(db, "Milk")
+        bread = await _product(db, "Bread", unit="pcs")
+        first = await _open_item(db, milk, "2")
+        second = await _open_item(db, milk, "3", source="auto_restock")
+        third = await _open_item(db, bread, "1", unit="pcs")
+
+        await min_stock.after_stock_increase(db, [milk.id, bread.id])
+
+        assert shopping_broadcast.await_count == 3
+        sent = {
+            c.kwargs["shopping_list_item_id"]: c.kwargs
+            for c in shopping_broadcast.await_args_list
+        }
+        assert set(sent) == {first.id, second.id, third.id}
+        for kwargs in sent.values():
+            assert kwargs["action"] == "purchased"
+            assert kwargs["is_purchased"] is True
+        assert sent[second.id]["name"] == "Milk"
+        assert sent[second.id]["quantity"] == Decimal("3")
+
+    async def test_no_ids_does_nothing(self, db, shopping_broadcast) -> None:
+        await min_stock.after_stock_increase(db, [])
+
+        shopping_broadcast.assert_not_awaited()
+
+    async def test_a_failure_is_logged_and_not_raised(
+        self, db, shopping_broadcast
+    ) -> None:
+        milk = await _product(db, "Milk")
+        bread = await _product(db, "Bread", unit="pcs")
+        await _open_item(db, milk, "2")
+        bread_item = await _open_item(db, bread, "1", unit="pcs")
+        real = min_stock.crud_shopping.get_by_product
+        # Read now: the rollback after the failure expires every loaded object.
+        milk_id, bread_id, bread_item_id = milk.id, bread.id, bread_item.id
+
+        async def failing_for_milk(session, *, product_master_id):
+            if product_master_id == milk_id:
+                raise RuntimeError("boom")
+            return await real(session, product_master_id=product_master_id)
+
+        # The app's "app" logger does not propagate, so caplog cannot see it.
+        with (
+            patch.object(
+                min_stock.crud_shopping, "get_by_product", side_effect=failing_for_milk
+            ),
+            patch.object(min_stock, "logger") as logger,
+        ):
+            await min_stock.after_stock_increase(db, [milk_id, bread_id])
+
+        logger.warning.assert_called_once()
+        assert logger.warning.call_args.kwargs["exc_info"] is True
+        assert logger.warning.call_args.kwargs["extra"] == {"product_id": str(milk_id)}
+        # The failure for one product does not stop the next.
+        assert (await _reload(db, bread_item_id)).is_purchased is True
+        assert shopping_broadcast.await_count == 1
