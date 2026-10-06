@@ -148,6 +148,11 @@ export const en = {
         'back — set the date yourself then.',
       freezerKeptNote: 'Your date will be kept, not the freezer one.',
       savedToast: 'Saved · {name}',
+      // CL7: what a date edit taught the product, or why it taught nothing
+      learnedToast: { one: '{name} now keeps {count} day', other: '{name} now keeps {count} days' },
+      savedItemOnlyOpenedToast: 'Date saved for this item only · {name} is opened',
+      savedItemOnlyFreezerToast: 'Date saved for this item only · {name} is in the freezer',
+      savedItemOnlyNoPurchaseToast: 'Date saved for this item only · {name} has no purchase date',
       saveError: 'Could not save {name}',
       deletedToast: 'Deleted · {name}',
       deleteError: 'Could not delete {name}',

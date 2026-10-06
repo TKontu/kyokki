@@ -99,6 +99,19 @@ export interface InventoryItemUpdate {
   notes?: string | null
 }
 
+/** What a date edit taught the product (CL7): its shelf life before and after. */
+export interface LearnedShelfLife {
+  product_id: string
+  old_days: number
+  new_days: number
+}
+
+/** `PATCH /inventory/{id}` answers the item and, only there, what its new date taught. */
+export interface InventoryItemUpdateResult extends InventoryItem {
+  /** Null when nothing was learned: opened, frozen, no purchase date, or the same answer */
+  learned_shelf_life: LearnedShelfLife | null
+}
+
 export interface ConsumeRequest {
   quantity: number // > 0
 }

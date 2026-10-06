@@ -128,6 +128,11 @@ export function useUpdateInventoryItem() {
       // Invalidate lists to reflect changes
       queryClient.invalidateQueries({ queryKey: inventoryKeys.lists() })
       queryClient.invalidateQueries({ queryKey: consumptionLogKeys.all })
+      // CL7: a date that taught the product a new shelf life changed the product too, so
+      // its sheet shows the new number at once rather than at the next refetch
+      if (updatedItem.learned_shelf_life) {
+        queryClient.invalidateQueries({ queryKey: productKeys.all })
+      }
     },
   })
 }

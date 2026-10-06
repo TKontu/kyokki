@@ -11,6 +11,7 @@ import type {
   InventoryItemCreate,
   InventoryItemStatus,
   InventoryItemUpdate,
+  InventoryItemUpdateResult,
   InventoryLocation,
   ConsumeRequest,
   InventoryListParams,
@@ -114,12 +115,15 @@ export async function source(id: string): Promise<ItemSource | null> {
 }
 
 /**
- * Update an existing inventory item
+ * Update an existing inventory item. The answer also says what a new date taught the
+ * product (CL7); null when it taught nothing.
  */
-export async function update(id: string, data: InventoryItemUpdate): Promise<InventoryItem> {
-  return normalizeInventoryItem(
-    await apiClient.patch<InventoryItem>(`/inventory/${id}`, data)
-  )
+export async function update(
+  id: string,
+  data: InventoryItemUpdate
+): Promise<InventoryItemUpdateResult> {
+  const raw = await apiClient.patch<InventoryItemUpdateResult>(`/inventory/${id}`, data)
+  return { ...normalizeInventoryItem(raw), learned_shelf_life: raw.learned_shelf_life ?? null }
 }
 
 /**
