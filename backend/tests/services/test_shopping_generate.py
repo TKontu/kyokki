@@ -1,6 +1,6 @@
 """AG6: a shopping list from what is below its minimum stock (services/shopping_generate.py)."""
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 from uuid import uuid4
@@ -10,10 +10,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.seed_categories import seed_categories
+from app.models.consumption_log import ConsumptionLog
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.shopping_list_item import ShoppingListItem
-from app.services import shopping_generate
+from app.services import runout, shopping_generate
 from app.services.shopping_generate import InvalidGenerate
 
 TODAY = date.today()
@@ -394,3 +395,220 @@ class TestSerialised:
             await shopping_generate.generate(db, LOW, dry_run=True)
 
         assert not any("pg_advisory" in sql for sql in taken)
+
+
+# --- The run-out forecast as a source (CL6) ---------------------------------------------
+
+RUNOUT = ["runout"]
+
+
+async def _used(
+    db: AsyncSession,
+    product: ProductMaster,
+    *,
+    days_ago: list[int],
+    quantity: str,
+    unit: str = "dl",
+) -> None:
+    """Consumption history, as ``tests/services/test_runout.py`` builds it, against the
+    real clock (``generate`` has no ``now``)."""
+    now = datetime.now(UTC)
+    for ago in days_ago:
+        db.add(
+            ConsumptionLog(
+                inventory_item_id=None,
+                product_master_id=product.id,
+                action="use_partial",
+                quantity_consumed=Decimal(quantity),
+                quantity_after=Decimal("0"),
+                unit=unit,
+                batch_id=uuid4(),
+                previous={},
+                logged_at=now - timedelta(days=ago),
+            )
+        )
+    await db.commit()
+
+
+#: 2 dl on each of five days over the last 8: 10 dl / 8 days = 1.25 dl a day.
+STEADY = [8, 6, 4, 2, 0]
+
+
+def _forecast_day(days_left: int) -> date:
+    return runout._today(datetime.now(UTC)) + timedelta(days=days_left)
+
+
+class TestRunout:
+    async def test_running_out_in_days_adds_a_week_at_the_rate(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "3")  # 3 / 1.25 = 2.4: out in 2 days
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        [line] = result.added
+        # 7 days at 1.25 dl = 8.75 dl, rounded up to whole dl.
+        assert (line.product_id, line.need, line.unit) == (milk.id, Decimal("9"), "dl")
+        assert line.on_hand == Decimal("3")
+        assert line.min_stock == Decimal("0")  # the product has no minimum
+        assert line.runs_out_on == _forecast_day(2)
+        assert line.reason
+        assert result.updated == result.unchanged == result.skipped == []
+        [item] = await _items(db)
+        assert line.item_id == item.id
+        assert (item.quantity, item.unit, item.source) == (
+            Decimal("9"),
+            "dl",
+            "auto_restock",
+        )
+
+    async def test_reorder_quantity_is_the_need_when_set(self, db) -> None:
+        milk = await _product(db, "Milk", reorder="12")
+        await _stock(db, milk, "3")
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        assert [line.need for line in result.added] == [Decimal("12")]
+
+    async def test_count_units_round_up_to_whole_pieces(self, db) -> None:
+        eggs = await _product(db, "Eggs", unit="pcs")
+        await _stock(db, eggs, "1", unit="pcs")
+        # 3 pcs over a span floored to 7 days: 0.43 a day; 7 days of that is 3.01.
+        await _used(db, eggs, days_ago=[2, 1, 0], quantity="1", unit="pcs")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        [line] = result.added
+        assert (line.need, line.unit) == (Decimal("4"), "pcs")
+
+    async def test_running_out_in_twenty_days_is_not_added(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "25")  # 25 / 1.25 = 20 days
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        assert result.added == result.updated == result.unchanged == []
+        assert result.skipped == []
+        assert await _count(db) == 0
+
+    async def test_insufficient_history_is_not_added(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "1")
+        await _used(db, milk, days_ago=[0], quantity="2")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        assert result.added == result.skipped == []
+        assert await _count(db) == 0
+
+    async def test_out_after_regular_use_is_added(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "0", status="empty")
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        [line] = result.added
+        assert (line.need, line.on_hand) == (Decimal("9"), Decimal("0"))
+        assert line.runs_out_on == _forecast_day(0)
+
+    async def test_out_without_history_is_not_added(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "0", status="empty")
+        await _used(db, milk, days_ago=[0], quantity="2")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        assert result.added == []
+        assert await _count(db) == 0
+
+    async def test_an_open_item_already_covering_it_is_unchanged(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "3")
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+        open_item = await _open_item(db, milk, "10")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        assert result.added == result.updated == []
+        [line] = result.unchanged
+        assert (line.item_id, line.need) == (open_item.id, Decimal("9"))
+        [item] = await _items(db)
+        assert item.quantity == Decimal("10")
+
+    async def test_a_smaller_open_item_is_raised(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "3")
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+        open_item = await _open_item(db, milk, "2")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        [line] = result.updated
+        assert line.item_id == open_item.id
+        [item] = await _items(db)
+        assert (item.quantity, item.source) == (Decimal("9"), "manual")
+
+    async def test_an_open_item_in_an_incompatible_unit_is_skipped(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "3")
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+        open_item = await _open_item(db, milk, "500", unit="g")
+
+        result = await shopping_generate.generate(db, RUNOUT, dry_run=False)
+
+        assert result.added == result.updated == result.unchanged == []
+        [line] = result.skipped
+        assert (line.item_id, line.need) == (open_item.id, Decimal("9"))
+        assert line.reason == (
+            "the open list item is in g, which cannot hold a need in dl"
+        )
+
+    async def test_a_product_both_sources_pick_gets_one_line(self, db) -> None:
+        milk = await _product(db, "Milk", min_stock="10")
+        await _stock(db, milk, "3")
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+
+        result = await shopping_generate.generate(
+            db, ["low_stock", "runout"], dry_run=False
+        )
+
+        # Low stock wins: its shortfall, not a week at the rate.
+        [line] = result.added
+        assert (line.product_id, line.need, line.runs_out_on) == (
+            milk.id,
+            Decimal("7"),
+            None,
+        )
+        assert result.updated == result.unchanged == result.skipped == []
+        assert await _count(db) == 1
+
+    async def test_a_dry_run_writes_nothing(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "3")
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+        milk_id = milk.id
+
+        plan = await shopping_generate.generate(db, RUNOUT, dry_run=True)
+
+        assert [(line.product_id, line.need) for line in plan.added] == [
+            (milk_id, Decimal("9"))
+        ]
+        assert plan.added[0].item_id is None
+        assert await _count(db) == 0
+
+    async def test_low_stock_alone_ignores_the_forecast(self, db) -> None:
+        milk = await _product(db, "Milk")
+        await _stock(db, milk, "3")
+        await _used(db, milk, days_ago=STEADY, quantity="2")
+
+        result = await shopping_generate.generate(db, LOW, dry_run=False)
+
+        assert result.added == []
+        assert await _count(db) == 0
+
+    async def test_runout_is_a_known_source(self) -> None:
+        assert "runout" in shopping_generate.SOURCES
+        assert shopping_generate.RUNOUT_WITHIN_DAYS == 7
