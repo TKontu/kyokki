@@ -303,7 +303,7 @@ describe('GenerateSheet', () => {
 
       renderSheet()
 
-      expect(screen.getByRole('heading', { name: 'Luo vähissä olevista' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Luo ostoslista' })).toBeInTheDocument()
       // Waits for the dry run itself, not just the title (which renders before it resolves)
       expect(await screen.findByText('Milk · 2,5 dl')).toBeInTheDocument()
       expect(screen.getByText('Uudet')).toBeInTheDocument()

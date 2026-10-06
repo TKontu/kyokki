@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * "Generate from low stock" (AG6 on the iPad): a dry run shows what would be added or raised
+ * "Generate shopping list" (AG6 on the iPad; CL6 added "running out soon"): a dry run shows what would be added or raised
  * before anything is written, then "Add to list" applies the same sources for real. Two
  * sources, both on by default (CL6): low stock, and what the run-out forecast says runs out
  * soon - a line that one picked shows the day. Changing them asks for a new preview.
