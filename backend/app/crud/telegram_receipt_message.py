@@ -4,6 +4,7 @@ The callers commit. A row with ``notified_at`` empty is a result still owed to t
 """
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -62,15 +63,30 @@ async def claim_for_chats(
     )
 
 
-async def unnotified(db: AsyncSession) -> list[TelegramReceiptMessage]:
+@dataclass(frozen=True)
+class Owed:
+    """A result still owed to a chat; ``message_id`` None means send a new message."""
+
+    receipt_id: UUID
+    chat_id: int
+    message_id: int | None
+
+
+async def unnotified(db: AsyncSession) -> list[Owed]:
     """Every result still owed, oldest first."""
-    result = await db.scalars(
-        select(TelegramReceiptMessage)
+    result = await db.execute(
+        select(
+            TelegramReceiptMessage.receipt_id,
+            TelegramReceiptMessage.chat_id,
+            TelegramReceiptMessage.message_id,
+        )
         .where(TelegramReceiptMessage.notified_at.is_(None))
         .order_by(TelegramReceiptMessage.created_at)
-        .execution_options(populate_existing=True)
     )
-    return list(result.all())
+    return [
+        Owed(receipt_id=receipt_id, chat_id=chat_id, message_id=message_id)
+        for receipt_id, chat_id, message_id in result.all()
+    ]
 
 
 async def mark_notified(db: AsyncSession, receipt_id: UUID, chat_id: int) -> None:
