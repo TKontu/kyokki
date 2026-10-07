@@ -1,27 +1,26 @@
 # Handoff
-Generated-UTC: 2026-10-06T09:04:25Z
-Base-SHA: d30cfa3c0851ca9ced851f7d4aed0c95113de229
+Generated-UTC: 2026-10-06T19:36:34Z
+Base-SHA: 3f27f980605ef801d8dea7b8b4eebd41abea4bcb
 
 ## Round delta
-- Rounds 2026-10-04-2 and 2026-10-06-1 merged (#183 to #190), **neither deployed**.
-  - 10-04-2: Android share target, several receipts per upload, shims removed, a flaky test fixed.
-  - 10-06-1: restock ticks shopping rows bought (CL2); date edits say what they taught and refresh
-    the product (CL7); durable Telegram results for every source plus review links (CL5).
-- Migration `d8f3a61c2b57` (`telegram_receipt_message`); new setting `KYOKKI_PUBLIC_URL`.
-- Log: `.rounds/2026-10-06-1/round.md`; outcomes in `docs/TODO.md` round blocks.
+- Round 2026-10-06-2 merged (#191 to #194), **deployed 2026-10-06 (`3f27f98`)** together with 2026-10-04-2 and 2026-10-06-1:
+  bot shopping/consume commands (CL3), run-out as a shopping source (CL6), icon spike Q18-S2 (no
+  winner; Q18-S3 proposed). CL8 design: `docs/PRODUCT_IDENTITY_SPEC.md`.
+- Deploy verified read-only (health, share target, runout, learned_shelf_life). Whether
+  `KYOKKI_PUBLIC_URL` is set cannot be seen from the API; a Telegram result shows it.
 
 ## Active PRs and conflicts
 - Only this reconcile.
 
 ## Non-obvious decisions or blockers
-- **The planner cannot merge** (`gh pr merge` is denied); the operator merges.
-- A migration lane must also own `tests/db/` only-head and table-count tests.
-- Approved for the next round: **Q18-S2** icon style spike (contact sheet; "Flat" stands until the
-  operator picks). Plannable now: CL3 (bot shopping/consume), CL6 (run-out feeds shopping).
-- Rulings still open: bought tick adds stock?; bot confirms matched lines unseen (CL1)?; CL4
-  catalog = shared defaults or household backup?; partial use of pieces opens the rest?
-- `lib/i18n/{en,fi}.ts`: one frontend lane per round. No Docker in the container; PostgreSQL 16
-  and Redis are apt-installed and may vanish on reboot.
+- **The planner cannot merge**; the operator merges.
+- **Production data is wrong now:** product `14edd43e` "Karelian stew" holds the stew and two rice-pie
+  purchases (VUOKSEN RIISIPIIRAKKA 30.9, 6.10). The CL8 split (or a manual fix) repairs it.
+- CL8 L1 (the exact-key rule) waits on spec decisions 1, 2, 6; L2 split uses the spec's recommended
+  defaults for 4 (ask) and 5 (no min-stock copy) unless the operator says otherwise.
+- **Android workstream ON HOLD** (operator, 2026-10-06) until the operator re-initiates it.
+- A migration lane owns the `tests/db/` only-head and table-count tests.
+- Open rulings: CL1 bot confirm, CL4 catalog scope, bought-adds-stock, pieces-open, Q18-S3.
 
 ## Next action
-Operator: set `KYOKKI_PUBLIC_URL` and deploy d30cfa3. Planner: `/plan-round` with Q18-S2, CL3, CL6.
+`/plan-round`: CL8 L0+L2 (schema, backfill, split API), L3 split UI against the same contract, L4 audit.
