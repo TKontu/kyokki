@@ -42,6 +42,14 @@ class InventoryItem(Base):
     # The printed name as read, capped, kept alongside the index so the item's sheet still
     # reads right if `ocr_structured` is ever re-read differently.
     receipt_line_text = Column(Text, nullable=True)
+    # The line's own `line_id` in `receipt.ocr_structured` (CL8): survives a re-read that
+    # moves the line to another position. Backfilled from `receipt_line_index` where the
+    # stored line still carries one.
+    receipt_line_id = Column(UUID(as_uuid=True), nullable=True)
+    # How this item came to be on its product, and by which key (CL8 provenance, filled in by
+    # the identity lane; NULL until then): `docs/PRODUCT_IDENTITY_SPEC.md`.
+    join_source = Column(String, nullable=True)
+    join_key = Column(String, nullable=True)
 
     # Quantity (approximate tracking)
     initial_quantity = Column(Numeric(10, 2), nullable=False)

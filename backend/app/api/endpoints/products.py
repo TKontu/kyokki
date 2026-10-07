@@ -1,6 +1,6 @@
 """API endpoints for Product CRUD operations."""
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from fastapi import (
@@ -48,6 +48,16 @@ from app.schemas.product_names import (
     ProductNameEntry,
     ProductNamesResponse,
 )
+from app.schemas.product_split import (
+    ExistingTarget,
+    MovedKey,
+    ProductSource,
+    ProductSourcesResponse,
+    SourceShelfLife,
+    SplitRequest,
+    SplitResponse,
+    UndoSplitResponse,
+)
 from app.schemas.stock import ResolveResponse, TeachNameRequest
 from app.services import display_names, product_emoji, product_icons, product_lookup
 from app.services.broadcast_helpers import (
@@ -68,6 +78,18 @@ from app.services.product_merge import (
     UnknownProduct,
     merge_products,
 )
+from app.services.product_split import (
+    InvalidSplit,
+    NameExists,
+    NewProduct,
+    StaleReassignment,
+    UnknownReassignment,
+    product_sources,
+    split_items,
+    undo_split,
+)
+from app.services.product_split import UnknownProduct as SplitUnknownProduct
+from app.services.shelf_life_on_create import schedule_estimates
 
 router = APIRouter()
 
@@ -138,6 +160,37 @@ async def resolve_product_name(
     create when nothing matched.
     """
     return await product_lookup.resolve(db, name)
+
+
+# Declared before every `/{product_id}/...` route, so no path parameter can take
+# "reassignments" for a product id (CL8).
+@router.post("/reassignments/{reassignment_id}/undo", response_model=UndoSplitResponse)
+async def undo_product_split(
+    reassignment_id: UUID, db: AsyncSession = Depends(get_db)
+) -> UndoSplitResponse:
+    """Reverse a split exactly (CL8): items, their history and keys go back, and a product
+    the split created is deleted if nothing else refers to it.
+
+    Returns:
+        - 200: Undone.
+        - 404: No such split.
+        - 409 `{"code": "stale"}`: already undone, or a moved item has changed product.
+    """
+    try:
+        async with handle_integrity_errors():
+            result = await undo_split(db, reassignment_id)
+    except UnknownReassignment as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except StaleReassignment as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail={"code": "stale"}
+        ) from exc
+    return UndoSplitResponse(
+        reassignment_id=result.reassignment_id,
+        restored_item_ids=result.restored_item_ids,
+    )
 
 
 @router.get("/{product_id}", response_model=ProductMasterResponse)
@@ -701,6 +754,107 @@ async def merge_product(
         ),
         moved=result.moved,
         dropped=result.dropped,
+    )
+
+
+@router.get("/{product_id}/sources", response_model=ProductSourcesResponse)
+async def list_product_sources(
+    product_id: UUID, db: AsyncSession = Depends(get_db)
+) -> ProductSourcesResponse:
+    """Where this product's items came from, grouped by store chain and printed receipt
+    text, plus one group for hand-added items (CL8), newest first - so the cook can move
+    a wrongly joined group off it.
+    """
+    try:
+        groups = await product_sources(db, product_id)
+    except SplitUnknownProduct as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    return ProductSourcesResponse(
+        product_id=product_id,
+        sources=[
+            ProductSource.model_validate(group, from_attributes=True)
+            for group in groups
+        ],
+    )
+
+
+@router.post("/{product_id}/split", response_model=SplitResponse)
+async def split_product(
+    product_id: UUID,
+    request: SplitRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+) -> SplitResponse:
+    """Move items off this product onto an existing product or a new one (CL8).
+
+    A new product is estimated, drawn and named in the background once this has answered,
+    like any other new product.
+
+    Returns:
+        - 200: Split; `reassignment_id` undoes it.
+        - 400 `{"code": "invalid", "message": ...}`: no items, an item not on this
+          product, the target is this product, an unknown category or an empty name.
+        - 404: The product or the target does not exist.
+        - 409 `{"code": "name_exists", "product_id": ..., "name": ...}`: the new name
+          already means a product.
+    """
+    if isinstance(request.target, ExistingTarget):
+        target_kwargs: dict[str, Any] = {"target_product_id": request.target.product_id}
+    else:
+        target_kwargs = {
+            "new": NewProduct(
+                name=request.target.new.name, category=request.target.new.category
+            )
+        }
+    try:
+        async with handle_integrity_errors():
+            result = await split_items(
+                db,
+                product_id,
+                request.item_ids,
+                move_keys=request.move_keys,
+                **target_kwargs,
+            )
+    except SplitUnknownProduct as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except InvalidSplit as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "invalid", "message": str(exc)},
+        ) from exc
+    except NameExists as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "name_exists",
+                "product_id": str(exc.product_id),
+                "name": exc.name,
+            },
+        ) from exc
+
+    if result.target_created:
+        schedule_estimates(background_tasks, [cast(UUID, result.target.id)])
+    return SplitResponse(
+        reassignment_id=result.reassignment_id,
+        source_product=ProductMasterResponse.model_validate(
+            result.source, from_attributes=True
+        ),
+        target_product=ProductMasterResponse.model_validate(
+            result.target, from_attributes=True
+        ),
+        target_created=result.target_created,
+        moved_item_ids=result.moved_item_ids,
+        moved_keys=[
+            MovedKey.model_validate(key, from_attributes=True)
+            for key in result.moved_keys
+        ],
+        source_shelf_life=SourceShelfLife.model_validate(
+            result.source_shelf_life, from_attributes=True
+        ),
     )
 
 

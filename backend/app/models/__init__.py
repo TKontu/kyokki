@@ -9,6 +9,7 @@ from app.models.product_display_name import ProductDisplayName
 from app.models.product_emoji_learned import ProductEmojiLearned
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
+from app.models.product_reassignment import ProductReassignment
 from app.models.receipt import Receipt
 from app.models.shopping_list_item import ShoppingListItem
 from app.models.store_product_alias import StoreProductAlias
@@ -28,4 +29,5 @@ __all__ = [
     "IdempotencyKey",
     "ProductEmojiLearned",
     "TelegramReceiptMessage",
+    "ProductReassignment",
 ]

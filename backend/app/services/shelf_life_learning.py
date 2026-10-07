@@ -37,7 +37,7 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -137,6 +137,27 @@ async def lock_product(db: AsyncSession, product_id: UUID) -> ProductMaster | No
     return product
 
 
+def _observations(query: Select[Any], product_id: UUID) -> Select[Any]:
+    """Narrow ``query`` to this product's observations (see the module docstring)."""
+    return (
+        query.where(InventoryItem.product_master_id == product_id)
+        .where(InventoryItem.expiry_source == STATED)
+        .where(InventoryItem.purchase_date.is_not(None))
+        .where(InventoryItem.opened_date.is_(None))
+        .where(InventoryItem.location != FREEZER)
+        .where(InventoryItem.expiry_date > InventoryItem.purchase_date)
+    )
+
+
+async def count_observations(db: AsyncSession, product_id: UUID) -> int:
+    """How many of the cook's dates this product could learn from (CL8: what a split
+    leaves the source with). Counts them all, not only the recent ones learning reads."""
+    total = await db.scalar(
+        _observations(select(func.count()).select_from(InventoryItem), product_id)
+    )
+    return int(total or 0)
+
+
 async def learn_shelf_life(
     db: AsyncSession, product_id: UUID
 ) -> LearnedShelfLife | None:
@@ -152,13 +173,10 @@ async def learn_shelf_life(
 
     rows = (
         await db.execute(
-            select(InventoryItem.purchase_date, InventoryItem.expiry_date)
-            .where(InventoryItem.product_master_id == product_id)
-            .where(InventoryItem.expiry_source == STATED)
-            .where(InventoryItem.purchase_date.is_not(None))
-            .where(InventoryItem.opened_date.is_(None))
-            .where(InventoryItem.location != FREEZER)
-            .where(InventoryItem.expiry_date > InventoryItem.purchase_date)
+            _observations(
+                select(InventoryItem.purchase_date, InventoryItem.expiry_date),
+                product_id,
+            )
             .order_by(
                 InventoryItem.purchase_date.desc(),
                 InventoryItem.created_at.desc(),
@@ -239,7 +257,9 @@ async def update_item(
     moved: list[MovedInventoryItem] = []
     if "expiry_date" in item_update.model_fields_set:
         # A new date may teach the product, so its row is locked before the item's
-        # (see `lock_product`). Read without a lock: an item never changes product.
+        # (see `lock_product`). Read without a lock: an item changes product only through
+        # a split or its undo (`services.product_split`, CL8), which re-learns both
+        # products itself, so one landing in between leaves nothing unlearned.
         product_id = (
             await db.execute(
                 select(InventoryItem.product_master_id).where(

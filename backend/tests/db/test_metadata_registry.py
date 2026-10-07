@@ -22,6 +22,7 @@ def test_base_metadata_registers_every_model_table() -> None:
         "product_emoji_learned",
         "product_display_name",
         "telegram_receipt_message",
+        "product_reassignment",
     }
     assert expected <= tables, f"missing tables: {expected - tables}"
     assert len(model_names) == len(expected)

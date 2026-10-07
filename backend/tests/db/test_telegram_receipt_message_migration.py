@@ -31,10 +31,6 @@ class TestTheRevision:
     def test_it_follows_icon_curation(self) -> None:
         assert _load_migration().down_revision == "c9a51b6756c1"
 
-    def test_it_is_the_only_head(self) -> None:
-        (head,) = _script().get_heads()
-        assert head == _load_migration().revision
-
     def test_history_stays_one_line_through_it(self) -> None:
         script = _script()
         (head,) = script.get_heads()
