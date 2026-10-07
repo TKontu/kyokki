@@ -1,26 +1,24 @@
 # Handoff
-Generated-UTC: 2026-10-06T19:36:34Z
-Base-SHA: 3f27f980605ef801d8dea7b8b4eebd41abea4bcb
+Generated-UTC: 2026-10-07T14:45:55Z
+Base-SHA: 0daf92fce59ce8c6e37502a0d9e17c0bc819da02
 
 ## Round delta
-- Round 2026-10-06-2 merged (#191 to #194), **deployed 2026-10-06 (`3f27f98`)** together with 2026-10-04-2 and 2026-10-06-1:
-  bot shopping/consume commands (CL3), run-out as a shopping source (CL6), icon spike Q18-S2 (no
-  winner; Q18-S3 proposed). CL8 design: `docs/PRODUCT_IDENTITY_SPEC.md`.
-- Deploy verified read-only (health, share target, runout, learned_shelf_life). Whether
-  `KYOKKI_PUBLIC_URL` is set cannot be seen from the API; a Telegram result shows it.
+- Round 2026-10-06-3 merged and **deployed 2026-10-07** (#196 to #198): CL8 split / undo (API + iPad)
+  and `GET /api/audit/product-joins`. Migration `e2a9c4f71b38`. The operator already split the rice
+  pies off "Karelian stew" to "Karjalan piirakka".
+- Audit on production: 5 products flagged (Rice cake, Rye bread, Cold cuts, Apple, Oat drink); see the
+  round block in `docs/TODO.md`.
 
 ## Active PRs and conflicts
 - Only this reconcile.
 
 ## Non-obvious decisions or blockers
-- **The planner cannot merge**; the operator merges.
-- **Production data is wrong now:** product `14edd43e` "Karelian stew" holds the stew and two rice-pie
-  purchases (VUOKSEN RIISIPIIRAKKA 30.9, 6.10). The CL8 split (or a manual fix) repairs it.
-- CL8 L1 (the exact-key rule) waits on spec decisions 1, 2, 6; L2 split uses the spec's recommended
-  defaults for 4 (ask) and 5 (no min-stock copy) unless the operator says otherwise.
-- **Android workstream ON HOLD** (operator, 2026-10-06) until the operator re-initiates it.
+- **The planner cannot merge**; the operator merges. **Android workstream ON HOLD** until the operator
+  re-initiates it.
+- CL8 L1 (exact keys; near names only suggest) waits on `docs/PRODUCT_IDENTITY_SPEC.md` decisions
+  1, 2, 6. `inventory_item.join_source`/`join_key` exist but are not written until L1.
 - A migration lane owns the `tests/db/` only-head and table-count tests.
 - Open rulings: CL1 bot confirm, CL4 catalog scope, bought-adds-stock, pieces-open, Q18-S3.
 
 ## Next action
-`/plan-round`: CL8 L0+L2 (schema, backfill, split API), L3 split UI against the same contract, L4 audit.
+Operator: answer CL8 decisions 1, 2, 6 and review the audit list. Planner: `/plan-round` with CL8 L1.
