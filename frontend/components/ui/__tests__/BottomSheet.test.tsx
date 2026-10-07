@@ -245,5 +245,136 @@ describe('BottomSheet', () => {
       expect(document.body.style.overflow).toBe('auto');
       document.body.style.overflow = '';
     });
+
+    // iOS Safari scrolls the page behind an overflow:hidden body on touch (operator,
+    // 2026-10-07: "touching the screen scrolls the background"). Pinning the body with
+    // position:fixed is what actually holds it still there.
+    describe('iOS-safe lock', () => {
+      let scrollTo: jest.SpyInstance;
+
+      beforeEach(() => {
+        document.body.removeAttribute('style');
+        scrollTo = jest.spyOn(window, 'scrollTo').mockImplementation(() => {});
+        Object.defineProperty(window, 'scrollY', { value: 320, configurable: true });
+      });
+      afterEach(() => {
+        scrollTo.mockRestore();
+        Object.defineProperty(window, 'scrollY', { value: 0, configurable: true });
+        document.body.removeAttribute('style');
+      });
+
+      function Sheet({ title, open = true }: { title: string; open?: boolean }) {
+        return (
+          <BottomSheet open={open} title={title} onClose={() => {}}>
+            <button>{`In ${title}`}</button>
+          </BottomSheet>
+        );
+      }
+
+      function Two({ outer, inner }: { outer: boolean; inner: boolean }) {
+        return (
+          <>
+            <Sheet title="Outer" open={outer} />
+            <Sheet title="Inner" open={inner} />
+          </>
+        );
+      }
+
+      it('pins the body where the page was, and puts the page back on close', () => {
+        document.body.style.position = 'relative';
+        const { rerender } = render(<Sheet title="One" />);
+
+        expect(document.body.style.position).toBe('fixed');
+        expect(document.body.style.top).toBe('-320px');
+        expect(document.body.style.width).toBe('100%');
+        expect(document.body.style.overflow).toBe('hidden');
+
+        rerender(<Sheet title="One" open={false} />);
+
+        expect(document.body.style.position).toBe('relative');
+        expect(document.body.style.top).toBe('');
+        expect(document.body.style.width).toBe('');
+        expect(document.body.style.overflow).toBe('');
+        expect(scrollTo).toHaveBeenCalledWith(0, 320);
+      });
+
+      it('nested sheets lock once and restore the body exactly when the last closes', () => {
+        const { rerender } = render(<Two outer inner={false} />);
+        rerender(<Two outer inner />);
+        expect(document.body.style.position).toBe('fixed');
+        expect(document.body.style.top).toBe('-320px');
+
+        rerender(<Two outer inner={false} />);
+        // The outer one is still open: still locked, at the same place
+        expect(document.body.style.position).toBe('fixed');
+        expect(document.body.style.top).toBe('-320px');
+        expect(scrollTo).not.toHaveBeenCalled();
+
+        rerender(<Two outer={false} inner={false} />);
+        expect(document.body.getAttribute('style') ?? '').toBe('');
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+        expect(scrollTo).toHaveBeenCalledWith(0, 320);
+      });
+
+      it('closing the outer sheet first still unlocks once the inner one closes', () => {
+        const { rerender } = render(<Two outer inner />);
+
+        rerender(<Two outer={false} inner />);
+        expect(document.body.style.position).toBe('fixed');
+
+        rerender(<Two outer={false} inner={false} />);
+        expect(document.body.getAttribute('style') ?? '').toBe('');
+        expect(scrollTo).toHaveBeenCalledTimes(1);
+      });
+
+      it('a sheet swapped for another in one render never leaves the body locked', () => {
+        // What the item sheet does: its own sheet goes, the product's sheet comes, same commit
+        const { rerender } = render(<Two outer inner={false} />);
+        rerender(<Two outer={false} inner />);
+        expect(document.body.style.position).toBe('fixed');
+        expect(document.body.style.top).toBe('-320px');
+
+        rerender(<Two outer={false} inner={false} />);
+        expect(document.body.getAttribute('style') ?? '').toBe('');
+      });
+
+      it('unmounting while open unlocks', () => {
+        const { unmount } = render(<Two outer inner />);
+        unmount();
+
+        expect(document.body.getAttribute('style') ?? '').toBe('');
+        expect(scrollTo).toHaveBeenCalledWith(0, 320);
+      });
+    });
+
+    describe('touch', () => {
+      it('the backdrop takes no pan and contains overscroll; the sheet body pans vertically', () => {
+        render(
+          <BottomSheet open title="Touch" onClose={() => {}}>
+            <p>content</p>
+          </BottomSheet>
+        );
+        const backdrop = screen.getByTestId('bottom-sheet-backdrop');
+        expect(backdrop).toHaveClass('touch-none', 'overscroll-contain');
+        const scroller = screen.getByText('content').parentElement as HTMLElement;
+        expect(scroller).toHaveClass('overflow-y-auto', 'overscroll-contain', 'touch-pan-y');
+      });
+
+      it('a touchmove on the backdrop itself is cancelled', () => {
+        render(
+          <BottomSheet open title="Touch" onClose={() => {}}>
+            <p>content</p>
+          </BottomSheet>
+        );
+        const backdrop = screen.getByTestId('bottom-sheet-backdrop');
+        const onBackdrop = new Event('touchmove', { bubbles: true, cancelable: true });
+        backdrop.dispatchEvent(onBackdrop);
+        expect(onBackdrop.defaultPrevented).toBe(true);
+
+        const inside = new Event('touchmove', { bubbles: true, cancelable: true });
+        screen.getByText('content').dispatchEvent(inside);
+        expect(inside.defaultPrevented).toBe(false);
+      });
+    });
   });
 });

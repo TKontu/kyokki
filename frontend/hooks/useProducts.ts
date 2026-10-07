@@ -6,7 +6,7 @@ import {
 } from '@tanstack/react-query'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
 import productsAPI, { type EstimateScope } from '@/lib/api/products'
-import type { ProductListParams, ProductMasterUpdate } from '@/types/product'
+import type { ProductListParams, ProductMaster, ProductMasterUpdate } from '@/types/product'
 
 export const productKeys = {
   all: ['products'] as const,
@@ -16,6 +16,20 @@ export const productKeys = {
   names: (id: string) => [...productKeys.all, 'names', id] as const,
 }
 
+/**
+ * How often to re-read a product while its icon renders (Q18-G2, F4 review): without a poll
+ * the product edit sheet never learns a render finished unless something else happens to
+ * refetch it, and "Generating..." never clears on its own. Nothing pending, no poll - and none
+ * for a pending status this server can no longer finish (generation switched off since).
+ */
+export function iconPollInterval(
+  product: Pick<ProductMaster, 'icon_status' | 'generation_enabled'> | undefined
+): number | false {
+  return product?.icon_status === 'pending' && product.generation_enabled !== false
+    ? 5_000
+    : false
+}
+
 /** One product, for the editor: a stock row only carries the product's name. */
 export function useProduct(id: string | null) {
   return useQuery({
@@ -23,11 +37,7 @@ export function useProduct(id: string | null) {
     queryFn: () => productsAPI.get(id as string),
     enabled: Boolean(id),
     staleTime: 30_000,
-    // While an icon is generating, poll until it lands (Q18-G2, F4 review): without this
-    // the product edit sheet never learns a render finished unless something else happens
-    // to refetch it, and "Generating..." never clears on its own.
-    refetchInterval: (query) =>
-      query.state.data?.icon_status === 'pending' ? 5_000 : false,
+    refetchInterval: (query) => iconPollInterval(query.state.data),
   })
 }
 
@@ -80,7 +90,16 @@ export function useUpdateProduct() {
   return useMutation({
     mutationFn: ({ id, data }: { id: string; data: ProductMasterUpdate }) =>
       productsAPI.update(id, data),
-    onSuccess: () => {
+    onSuccess: (updated) => {
+      // The answer is the product as saved: show it everywhere at once, so the row and a
+      // sheet reopened straight away never show the old values while the refetch is out
+      // (operator, 2026-10-07: "gives the impression that the edit did not succeed").
+      queryClient.setQueryData(productKeys.detail(updated.id), updated)
+      queryClient.setQueriesData<ProductMaster[]>({ queryKey: productKeys.lists() }, (list) =>
+        Array.isArray(list)
+          ? list.map((product) => (product.id === updated.id ? updated : product))
+          : list
+      )
       queryClient.invalidateQueries({ queryKey: productKeys.all })
       // Stock rows show the product's name, so they are stale too.
       queryClient.invalidateQueries({ queryKey: ['inventory'] })

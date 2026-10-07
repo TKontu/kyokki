@@ -111,6 +111,20 @@ function renderPage(initialProducts: ProductMaster[], estimate?: CatalogEstimate
       products = products.map((p) => (p.id === params.id ? (updated as ProductMaster) : p))
       return HttpResponse.json(updated)
     }),
+    // Saving from the sheet (operator, 2026-10-07): the next list read answers the edit
+    http.patch(`${API_URL}/products/:id`, async ({ params, request }) => {
+      const body = (await request.json()) as Partial<ProductMaster>
+      const updated = {
+        ...(products.find((p) => p.id === params.id) as ProductMaster),
+        ...body,
+        updated_at: '2026-10-07T10:00:00Z',
+      }
+      products = products.map((p) => (p.id === params.id ? updated : p))
+      return HttpResponse.json(updated)
+    }),
+    http.get(`${API_URL}/products/:id`, ({ params }) =>
+      HttpResponse.json(products.find((p) => p.id === params.id))
+    ),
     http.get(`${API_URL}/products/:id/names`, () =>
       HttpResponse.json({ names: [], printed: [] })
     ),
@@ -213,6 +227,44 @@ describe('ProductsPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Ground beef/ }))
 
     expect(await screen.findByLabelText('Keeps for')).toHaveValue(5)
+  })
+
+  it('shows a saved edit on the row and in the reopened sheet without a reload', async () => {
+    // Operator, 2026-10-07: "it does not automatically refresh the products, which gives the
+    // impression that the edit did not succeed. Refreshing the screen reveals the edit."
+    renderPage([product()])
+
+    fireEvent.click(await screen.findByRole('button', { name: /Ground beef/ }))
+    fireEvent.change(await screen.findByLabelText('Keeps for'), { target: { value: '9' } })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Minced beef' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const row = await screen.findByRole('button', { name: /Minced beef/ })
+    expect(row).toHaveTextContent('9 days')
+
+    fireEvent.click(row)
+    expect(await screen.findByLabelText('Keeps for')).toHaveValue(9)
+    expect(screen.getByLabelText('Name')).toHaveValue('Minced beef')
+  })
+
+  it('a sheet opened on an old copy of the product follows the server', async () => {
+    // The row hands the sheet the product as the list last had it; the sheet's own read of
+    // the product is newer, and an untouched field must show that, not the list's copy.
+    renderPage([product()])
+    const row = await screen.findByRole('button', { name: /Ground beef/ })
+    // The product moved on the server after the list was read (another screen, a learned
+    // shelf life): the list still has 5, the product itself now says 12.
+    server.use(
+      http.get(`${API_URL}/products/p-mince`, () =>
+        HttpResponse.json(
+          product({ default_shelf_life_days: 12, updated_at: '2026-10-07T11:00:00Z' })
+        )
+      )
+    )
+    fireEvent.click(row)
+
+    await waitFor(() => expect(screen.getByLabelText('Keeps for')).toHaveValue(12))
   })
 
   it('proposes before it writes, and only writes on a second tap', async () => {
