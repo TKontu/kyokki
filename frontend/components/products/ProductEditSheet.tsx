@@ -54,12 +54,14 @@ import {
   fieldLabelClass,
 } from '@/components/ui/formStyles'
 import { ProductNamesList } from '@/components/products/ProductNamesList'
+import { SplitSheet } from '@/components/products/SplitSheet'
 import { useCategories } from '@/hooks/useCategories'
 import {
   useIconLibraryStatus,
   useMarkIcon,
   useUnmarkIcon,
 } from '@/hooks/useIconLibrary'
+import { useProductSources } from '@/hooks/useProductSplit'
 import { useToast } from '@/hooks/useToast'
 import {
   useClearProductIcon,
@@ -74,13 +76,14 @@ import {
 import { iconUrl } from '@/lib/api/products'
 import { isAPIError } from '@/lib/api/errors'
 import { displayName } from '@/lib/displayName'
-import { useT } from '@/lib/i18n'
+import { formatDate, useT } from '@/lib/i18n'
 import { useLanguage } from '@/lib/language'
 import { resolveProductIcon } from '@/lib/productIcon'
+import { storeName } from '@/lib/receipts'
 import type { Unit } from '@/types/inventory'
 import { useFieldEdit } from '@/hooks/useFieldEdit'
 import { FieldMoved } from '@/components/ui/FieldMoved'
-import type { ProductMaster, ProductMasterUpdate } from '@/types/product'
+import type { ProductMaster, ProductMasterUpdate, ProductSource } from '@/types/product'
 
 /** An empty input is how "not known" is written in this sheet. */
 function blankIfNull(value: number | null): string {
@@ -138,6 +141,9 @@ export function ProductEditSheet({
   const markIcon = useMarkIcon()
   const unmarkIcon = useUnmarkIcon()
   const [hint, setHint] = useState('')
+  // CL8 L3: where the items came from, and the group the cook is moving off (if any)
+  const sources = useProductSources(product.id)
+  const [moving, setMoving] = useState<ProductSource | null>(null)
   // What the last icon or emoji action answered, until the product itself catches up (both
   // act at once, outside Save, so this sheet's own prop is briefly behind the server).
   const [liveAnswer, setLiveAnswer] = useState<ProductMaster | null>(null)
@@ -347,13 +353,28 @@ export function ProductEditSheet({
     )
   }
 
+  const productName = displayName(product.display_names, product.canonical_name, language)
+
+  if (moving) {
+    return (
+      <SplitSheet
+        productId={product.id}
+        productName={productName}
+        productCategory={product.category}
+        itemIds={moving.item_ids}
+        sourceGroup={moving}
+        onClose={() => setMoving(null)}
+      />
+    )
+  }
+
+  const sourceGroups = sources.data?.sources ?? []
+
   return (
     <BottomSheet
       open
       onClose={onClose}
-      title={t('productSheet.title', {
-        name: displayName(product.display_names, product.canonical_name, language),
-      })}
+      title={t('productSheet.title', { name: productName })}
       footer={
         <div className="flex gap-2">
           <Button variant="secondary" fullWidth onClick={onClose}>
@@ -721,6 +742,60 @@ export function ProductEditSheet({
       )}
 
       <ProductNamesList productId={product.id} />
+
+      {/* CL8 L3: one product, several sources - a wrong join shows up here as a group that is
+          really something else, and Move these… takes it off. One group: nothing to split. */}
+      {sourceGroups.length > 1 && (
+        <section aria-labelledby="product-sources-heading" className="mt-6">
+          <h3 id="product-sources-heading" className={fieldLabelClass}>
+            {t('split.sources.heading')}
+          </h3>
+          <p className={fieldHintClass}>{t('split.sources.hint')}</p>
+          <ul className="mt-2 divide-y divide-ui-border dark:divide-ui-dark-border">
+            {sourceGroups.map((group) => {
+              const label = group.label || t('split.sources.manual')
+              const dates =
+                group.first_seen && group.last_seen
+                  ? t('split.sources.dates', {
+                      first: formatDate(group.first_seen, language),
+                      last: formatDate(group.last_seen, language),
+                    })
+                  : null
+              return (
+                <li key={group.key} className="flex items-center gap-2 py-1.5">
+                  <span className="flex flex-1 flex-col">
+                    <span>
+                      <span className={group.label ? 'font-mono text-sm' : ''}>{label}</span>
+                      {group.store_chain && (
+                        <span className={`ml-2 ${fieldHintClass} inline`}>
+                          {storeName({ store_chain: group.store_chain }, language)}
+                        </span>
+                      )}
+                    </span>
+                    <span className={fieldHintClass}>
+                      {t('split.sources.counts', {
+                        active: group.active_count,
+                        total: group.total_count,
+                      })}
+                      {dates ? ` · ${dates}` : ''}
+                    </span>
+                  </span>
+                  {group.item_ids.length > 0 && (
+                    <Button
+                      variant="secondary"
+                      size="md"
+                      aria-label={t('split.sources.moveTheseLabel', { label })}
+                      onClick={() => setMoving(group)}
+                    >
+                      {t('split.sources.moveThese')}
+                    </Button>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
     </BottomSheet>
   )
 }

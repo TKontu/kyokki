@@ -8,6 +8,10 @@ import type {
   ProductMaster,
   ProductMasterUpdate,
   ProductNames,
+  ProductSources,
+  ProductSplitRequest,
+  ProductSplitResponse,
+  ReassignmentUndoResponse,
 } from '@/types/product'
 
 export async function list(params?: ProductListParams): Promise<ProductMaster[]> {
@@ -126,6 +130,28 @@ export async function languages(): Promise<string[]> {
   return apiClient.get<string[]>('/products/languages')
 }
 
+/** Where a product's items came from, grouped (CL8 L3): what the cook may move off it. */
+export async function sources(productId: string): Promise<ProductSources> {
+  return apiClient.get<ProductSources>(`/products/${productId}/sources`)
+}
+
+/**
+ * Move items off a product onto an existing product or a new one (CL8 L3). 409 with
+ * `detail.code === 'name_exists'` when the new name is already a product's: the caller
+ * offers that product instead.
+ */
+export async function split(
+  productId: string,
+  body: ProductSplitRequest
+): Promise<ProductSplitResponse> {
+  return apiClient.post<ProductSplitResponse>(`/products/${productId}/split`, body)
+}
+
+/** Reverse a split exactly. 409 `stale` once a moved item has changed product since. */
+export async function undoReassignment(id: string): Promise<ReassignmentUndoResponse> {
+  return apiClient.post<ReassignmentUndoResponse>(`/products/reassignments/${id}/undo`, {})
+}
+
 const productsAPI = {
   list,
   get,
@@ -142,5 +168,8 @@ const productsAPI = {
   confirmEmoji,
   rejectEmoji,
   languages,
+  sources,
+  split,
+  undoReassignment,
 }
 export default productsAPI

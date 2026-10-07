@@ -158,6 +158,9 @@ export const en = {
       deleteError: 'Could not delete {name}',
       markedGoneToast: 'Marked as gone · {name}',
       backInKitchenToast: 'Back in the kitchen · {name}',
+      // CL8 L3: the way into the split sheet (`split` below)
+      notThis: 'This is not {name}…',
+      loadingSources: 'Looking up where {name} came from…',
     },
     quickAdd: {
       title: 'Add to stock',
@@ -631,6 +634,67 @@ export const en = {
       removeArmed: 'Remove?',
       removed: '"{word}" no longer finds this product',
       removeError: 'Could not remove "{word}"',
+    },
+  },
+  // CL8 L3 (round 2026-10-06-3): "This is not X" - move wrongly joined items off a product
+  // onto an existing or a new one, and undo it. Appended at the end, after `productSheet`.
+  split: {
+    title: 'Move off {name}',
+    intro: {
+      one: '{count} item is moving off {name}.',
+      other: '{count} items are moving off {name}.',
+    },
+    targetLabel: 'Move to',
+    newProduct: 'New product',
+    existingProduct: 'Existing product',
+    nameLabel: 'New product name',
+    namePlaceholder: 'What it really is, e.g. Karelian stew',
+    category: 'Category',
+    pickedTarget: 'Moving to {name}',
+    changeTarget: 'Change',
+    sameProduct: 'That is {name} itself — pick another product.',
+    alsoMoveGroup: {
+      one: 'Also move the {count} other item that came via {label} ({chain})',
+      other: 'Also move the {count} other items that came via {label} ({chain})',
+    },
+    alsoMoveGroupNoChain: {
+      one: 'Also move the {count} other item that came via {label}',
+      other: 'Also move the {count} other items that came via {label}',
+    },
+    alsoMoveManual: {
+      one: 'Also move the {count} other item added by hand',
+      other: 'Also move the {count} other items added by hand',
+    },
+    keysNoteNew: 'Next receipts with {label} go to the new product',
+    keysNoteExisting: 'Next receipts with {label} go to {name}',
+    move: 'Move',
+    cancel: 'Cancel',
+    nameExists: '{name} already exists. Move to it instead?',
+    moveToExisting: 'Move to {name}',
+    error: 'Could not move the items',
+    movedToast: {
+      one: 'Moved {count} item to {name}',
+      other: 'Moved {count} items to {name}',
+    },
+    undo: 'Undo',
+    undoneToast: {
+      one: 'Moved {count} item back to {name}',
+      other: 'Moved {count} items back to {name}',
+    },
+    undoStale: 'Could not undo: the items have changed since',
+    undoError: 'Could not undo the move',
+    shelfLifeNote: {
+      one: '{name} still keeps {count} day — check it on the product',
+      other: '{name} still keeps {count} days — check it on the product',
+    },
+    sources: {
+      heading: 'Sources',
+      hint: "Where this product's items came from. Move a group that is really something else.",
+      manual: 'Added by hand',
+      counts: '{active} in stock · {total} total',
+      dates: '{first} – {last}',
+      moveThese: 'Move these…',
+      moveTheseLabel: 'Move these: {label}',
     },
   },
 }
