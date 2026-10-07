@@ -12,11 +12,13 @@ import { server, API_URL } from '@/test/msw/server'
 import {
   productKeys,
   useClearProductIcon,
+  iconPollInterval,
   useConfirmProductEmoji,
   useEmojiReference,
   useRedrawProductIcon,
   useRejectProductEmoji,
   useSetProductEmoji,
+  useUpdateProduct,
 } from '../useProducts'
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
@@ -156,4 +158,62 @@ it('useRejectProductEmoji rejects and invalidates products and inventory', async
 
   expect(called).toBe(true)
   expect(keys()).toEqual(expect.arrayContaining([productKeys.all, ['inventory']]))
+})
+
+describe('useUpdateProduct (operator, 2026-10-07: an edit must show at once)', () => {
+  const SAVED = {
+    id: 'p-1',
+    canonical_name: 'Minced beef',
+    default_shelf_life_days: 9,
+    updated_at: '2026-10-07T10:00:00Z',
+  }
+
+  it('writes the answer into the product and every list that holds it, before any refetch', async () => {
+    server.use(http.patch(`${API_URL}/products/p-1`, () => HttpResponse.json(SAVED)))
+    const queryClient = new QueryClient()
+    const old = { id: 'p-1', canonical_name: 'Ground beef', default_shelf_life_days: 5 }
+    const other = { id: 'p-2', canonical_name: 'Pasta', default_shelf_life_days: 700 }
+    queryClient.setQueryData(productKeys.detail('p-1'), old)
+    queryClient.setQueryData(productKeys.list(undefined), [old, other])
+    queryClient.setQueryData(productKeys.list({ search: 'beef' }), [old])
+    // Nothing observes these queries, so no refetch can be what changed them
+    const { result } = renderHook(() => useUpdateProduct(), { wrapper: wrapper(queryClient) })
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: 'p-1', data: { canonical_name: 'Minced beef' } })
+    })
+
+    expect(queryClient.getQueryData(productKeys.detail('p-1'))).toEqual(SAVED)
+    expect(queryClient.getQueryData(productKeys.list(undefined))).toEqual([SAVED, other])
+    expect(queryClient.getQueryData(productKeys.list({ search: 'beef' }))).toEqual([SAVED])
+  })
+
+  it('still invalidates products and the stock', async () => {
+    server.use(http.patch(`${API_URL}/products/p-1`, () => HttpResponse.json(SAVED)))
+    const queryClient = new QueryClient()
+    const keys = invalidated(queryClient)
+    const { result } = renderHook(() => useUpdateProduct(), { wrapper: wrapper(queryClient) })
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: 'p-1', data: { canonical_name: 'Minced beef' } })
+    })
+
+    expect(keys()).toEqual(expect.arrayContaining([productKeys.all, ['inventory']]))
+  })
+})
+
+describe('iconPollInterval', () => {
+  it('polls while an icon is rendering', () => {
+    expect(iconPollInterval({ icon_status: 'pending', generation_enabled: true })).toBe(5_000)
+  })
+
+  it('stops once nothing is pending', () => {
+    expect(iconPollInterval({ icon_status: 'ready', generation_enabled: true })).toBe(false)
+    expect(iconPollInterval(undefined)).toBe(false)
+  })
+
+  it('does not poll for a render this server cannot make', () => {
+    // A pending status left over from before generation was switched off never lands
+    expect(iconPollInterval({ icon_status: 'pending', generation_enabled: false })).toBe(false)
+  })
 })

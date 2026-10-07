@@ -396,6 +396,12 @@ function ProductsPageContent() {
     [products, categories]
   )
 
+  // The sheet gets the row as the list has it now, not the copy it was opened with, so a
+  // refetch or a save shows in it (the snapshot is only the fallback once a search drops it)
+  const editingProduct = editing
+    ? products?.find((product) => product.id === editing.id) ?? editing
+    : null
+
   const guesses = (products ?? []).filter(
     (product: ProductMaster) => product.shelf_life_source === 'category'
   ).length
@@ -538,8 +544,8 @@ function ProductsPageContent() {
         </div>
       </main>
 
-      {editing && (
-        <ProductEditSheet product={editing} onClose={() => setEditing(null)} />
+      {editingProduct && (
+        <ProductEditSheet product={editingProduct} onClose={() => setEditing(null)} />
       )}
     </div>
   )

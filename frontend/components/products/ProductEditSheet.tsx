@@ -43,7 +43,7 @@
  * instead.
  */
 
-import { useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 
 import BottomSheet from '@/components/ui/BottomSheet'
 import Button from '@/components/ui/Button'
@@ -83,7 +83,13 @@ import { storeName } from '@/lib/receipts'
 import type { Unit } from '@/types/inventory'
 import { useFieldEdit } from '@/hooks/useFieldEdit'
 import { FieldMoved } from '@/components/ui/FieldMoved'
-import type { ProductMaster, ProductMasterUpdate, ProductSource } from '@/types/product'
+import type {
+  EmojiMatch,
+  EmojiReferenceEntry,
+  ProductMaster,
+  ProductMasterUpdate,
+  ProductSource,
+} from '@/types/product'
 
 /** An empty input is how "not known" is written in this sheet. */
 function blankIfNull(value: number | null): string {
@@ -91,6 +97,78 @@ function blankIfNull(value: number | null): string {
 }
 
 const UNITS: Unit[] = ['pcs', 'g', 'dl', 'tsp', 'tbsp']
+
+interface EmojiGridProps {
+  entries: EmojiReferenceEntry[]
+  emoji: string | null
+  emojiMatch: EmojiMatch | null
+  disabled: boolean
+  noneLabel: string
+  onPick: (chosen: string | null) => void
+}
+
+/**
+ * The emoji picker's buttons (166 of them). Memoized so typing in a field of this sheet does
+ * not re-render every one of them on each keystroke - on the iPad that was the bulk of this
+ * sheet's per-keystroke work (operator, 2026-10-07: "the UI responsiveness in product edit
+ * view is horrible"). Re-renders only when the choice, the list or the busy state changes.
+ */
+const EmojiGrid = memo(function EmojiGrid({
+  entries,
+  emoji,
+  emojiMatch,
+  disabled,
+  noneLabel,
+  onPick,
+}: EmojiGridProps) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <button
+        type="button"
+        title={noneLabel}
+        aria-label={noneLabel}
+        aria-pressed={emojiMatch === 'cleared'}
+        disabled={disabled}
+        onClick={() => onPick(null)}
+        className={`flex h-9 w-9 items-center justify-center rounded-ui border text-base ${
+          emojiMatch === 'cleared'
+            ? 'border-ui-text bg-ui-text text-white dark:border-ui-dark-text dark:bg-ui-dark-text dark:text-ui-dark-bg'
+            : 'border-ui-border text-ui-text dark:border-ui-dark-border dark:text-ui-dark-text'
+        }`}
+      >
+        ∅
+      </button>
+      {entries.map((entry) => {
+        // The picker's own selection mark: a table-set exact match or the cook's own pick
+        // both show as "this one is chosen" - only a pending proposal does not, since it is
+        // not shown anywhere until confirmed.
+        const selected =
+          emoji === entry.emoji && (emojiMatch === 'exact' || emojiMatch === 'cook')
+        return (
+          <button
+            key={entry.emoji}
+            type="button"
+            title={entry.name}
+            aria-label={entry.name}
+            aria-pressed={selected}
+            disabled={disabled}
+            onClick={() => onPick(entry.emoji)}
+            className={`flex h-9 w-9 items-center justify-center rounded-ui border text-xl ${
+              selected
+                ? 'border-ui-text bg-ui-text dark:border-ui-dark-text dark:bg-ui-dark-text'
+                : 'border-ui-border dark:border-ui-dark-border'
+            }`}
+          >
+            {entry.emoji}
+          </button>
+        )
+      })}
+    </div>
+  )
+})
+
+/** Stable empty list, so a missing reference does not defeat the grid's memo. */
+const NO_EMOJI: EmojiReferenceEntry[] = []
 
 export interface ProductEditSheetProps {
   product: ProductMaster
@@ -185,18 +263,21 @@ export function ProductEditSheet({
 
   // Each field follows the product until the cook touches it, and says so if what they are
   // editing moves underneath them (H25) - two cooks on two screens is the case this is for.
-  const nameField = useFieldEdit(product.canonical_name)
-  const shelfLifeField = useFieldEdit(String(product.default_shelf_life_days))
-  const openedField = useFieldEdit(blankIfNull(product.opened_shelf_life_days))
-  const pieceField = useFieldEdit(blankIfNull(product.avg_piece_grams))
-  const packField = useFieldEdit(blankIfNull(product.pack_grams))
-  const unitField = useFieldEdit(product.default_unit)
-  const categoryField = useFieldEdit(product.category)
-  const frozenField = useFieldEdit(blankIfNull(product.frozen_shelf_life_days))
-  // Follows `liveProduct`, not the prop: a background proposal (Post-MVP frontier item 13)
-  // may land while this sheet is open, the same as the icon and the emoji do.
+  // They follow `liveProduct`, not the prop: the prop is whatever copy the opener held (the
+  // catalog hands over its list row, which can be minutes old), while this sheet's own read
+  // of the product is current. Following the prop is how a saved edit came back looking
+  // unsaved until a reload (operator, 2026-10-07). A background proposal (Post-MVP frontier
+  // item 13) lands the same way, as the icon and the emoji do.
+  const nameField = useFieldEdit(liveProduct.canonical_name)
+  const shelfLifeField = useFieldEdit(String(liveProduct.default_shelf_life_days))
+  const openedField = useFieldEdit(blankIfNull(liveProduct.opened_shelf_life_days))
+  const pieceField = useFieldEdit(blankIfNull(liveProduct.avg_piece_grams))
+  const packField = useFieldEdit(blankIfNull(liveProduct.pack_grams))
+  const unitField = useFieldEdit(liveProduct.default_unit)
+  const categoryField = useFieldEdit(liveProduct.category)
+  const frozenField = useFieldEdit(blankIfNull(liveProduct.frozen_shelf_life_days))
   const displayNameField = useFieldEdit(liveProduct.display_names?.fi ?? '')
-  const minStockField = useFieldEdit(blankIfNull(product.min_stock_quantity))
+  const minStockField = useFieldEdit(blankIfNull(liveProduct.min_stock_quantity))
   const name = nameField.value
   const shelfLife = shelfLifeField.value
   const openedShelfLife = openedField.value
@@ -228,7 +309,7 @@ export function ProductEditSheet({
   // Send only what changed, so two cooks editing different fields do not fight - and only
   // what *this* cook changed, so a field that moved underneath is left where the server has it.
   const changes: ProductMasterUpdate = {}
-  if (nameField.changed && name.trim() !== product.canonical_name) {
+  if (nameField.changed && name.trim() !== liveProduct.canonical_name) {
     changes.canonical_name = name.trim()
   }
   if (shelfLifeField.changed && valid) {
@@ -238,7 +319,7 @@ export function ProductEditSheet({
   if (pieceField.changed) changes.avg_piece_grams = pieceValue ?? null
   if (packField.changed) changes.pack_grams = packValue ?? null
   if (unitField.changed) changes.default_unit = unit
-  if (categoryField.changed && category !== product.category) changes.category = category
+  if (categoryField.changed && category !== liveProduct.category) changes.category = category
   if (frozenField.changed) changes.frozen_shelf_life_days = frozenValue ?? null
   // Blank means "nothing typed yet" (Post-MVP frontier item 13 has no "clear" affordance,
   // unlike the emoji's `cleared` state) - only a non-empty edit is sent.
@@ -254,7 +335,7 @@ export function ProductEditSheet({
   )
   const categoryFrozen = sortedCategories.find((c) => c.id === category)
     ?.frozen_shelf_life_days
-  const categoryEmoji = sortedCategories.find((c) => c.id === product.category)?.icon ?? ''
+  const categoryEmoji = sortedCategories.find((c) => c.id === liveProduct.category)?.icon ?? ''
 
   const actionError = (error: unknown, fallback: string) => {
     const readable = isAPIError(error) && error.status < 500 && error.message
@@ -315,6 +396,13 @@ export function ProductEditSheet({
       }
     )
   }
+  // One identity for the life of the sheet, calling the latest `pickEmoji`, so the memoized
+  // grid is not re-rendered just because this component was.
+  const pickEmojiRef = useRef(pickEmoji)
+  useEffect(() => {
+    pickEmojiRef.current = pickEmoji
+  })
+  const onPickEmoji = useCallback((chosen: string | null) => pickEmojiRef.current(chosen), [])
   const onConfirmEmoji = () => {
     confirmEmoji.mutate(product.id, {
       onSuccess: (updated) => setLiveAnswer(updated),
@@ -353,14 +441,18 @@ export function ProductEditSheet({
     )
   }
 
-  const productName = displayName(product.display_names, product.canonical_name, language)
+  const productName = displayName(
+    liveProduct.display_names,
+    liveProduct.canonical_name,
+    language
+  )
 
   if (moving) {
     return (
       <SplitSheet
         productId={product.id}
         productName={productName}
-        productCategory={product.category}
+        productCategory={liveProduct.category}
         itemIds={moving.item_ids}
         sourceGroup={moving}
         onClose={() => setMoving(null)}
@@ -514,48 +606,14 @@ export function ProductEditSheet({
           aria-label={t('productSheet.emoji.pickLabel')}
           className="mt-2 max-h-40 overflow-y-auto rounded-ui border border-ui-border p-2 dark:border-ui-dark-border"
         >
-          <div className="flex flex-wrap gap-1">
-            <button
-              type="button"
-              title={t('productSheet.emoji.none')}
-              aria-label={t('productSheet.emoji.none')}
-              aria-pressed={emojiMatch === 'cleared'}
-              disabled={setEmoji.isPending}
-              onClick={() => pickEmoji(null)}
-              className={`flex h-9 w-9 items-center justify-center rounded-ui border text-base ${
-                emojiMatch === 'cleared'
-                  ? 'border-ui-text bg-ui-text text-white dark:border-ui-dark-text dark:bg-ui-dark-text dark:text-ui-dark-bg'
-                  : 'border-ui-border text-ui-text dark:border-ui-dark-border dark:text-ui-dark-text'
-              }`}
-            >
-              ∅
-            </button>
-            {(emojiReference.data ?? []).map((entry) => {
-              // The picker's own selection mark: a table-set exact match or the cook's
-              // own pick both show as "this one is chosen" - only a pending proposal does
-              // not, since it is not shown anywhere until confirmed.
-              const selected =
-                emoji === entry.emoji && (emojiMatch === 'exact' || emojiMatch === 'cook')
-              return (
-                <button
-                  key={entry.emoji}
-                  type="button"
-                  title={entry.name}
-                  aria-label={entry.name}
-                  aria-pressed={selected}
-                  disabled={setEmoji.isPending}
-                  onClick={() => pickEmoji(entry.emoji)}
-                  className={`flex h-9 w-9 items-center justify-center rounded-ui border text-xl ${
-                    selected
-                      ? 'border-ui-text bg-ui-text dark:border-ui-dark-text dark:bg-ui-dark-text'
-                      : 'border-ui-border dark:border-ui-dark-border'
-                  }`}
-                >
-                  {entry.emoji}
-                </button>
-              )
-            })}
-          </div>
+          <EmojiGrid
+            entries={emojiReference.data ?? NO_EMOJI}
+            emoji={emoji}
+            emojiMatch={emojiMatch}
+            disabled={setEmoji.isPending}
+            noneLabel={t('productSheet.emoji.none')}
+            onPick={onPickEmoji}
+          />
         </div>
       </fieldset>
 
@@ -609,7 +667,7 @@ export function ProductEditSheet({
             className={`${fieldInputClass} mt-1`}
           />
           <p className={fieldHintClass}>
-            {product.shelf_life_source === 'category'
+            {liveProduct.shelf_life_source === 'category'
               ? t('productSheet.fields.keepsForHintCategory')
               : t('productSheet.fields.keepsForHint')}
           </p>
@@ -706,7 +764,7 @@ export function ProductEditSheet({
           />
           <p className={fieldHintClass}>
             {t('productSheet.fields.minStockHint', {
-              unit: unitLabel(product.default_unit),
+              unit: unitLabel(liveProduct.default_unit),
             })}
           </p>
           <FieldMoved label={t('productSheet.fields.minStock')} field={minStockField} />
