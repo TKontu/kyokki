@@ -10,7 +10,7 @@
  * it: both "Change…" and "Change product details…" open the product's sheet (Q25).
  */
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import BottomSheet from '@/components/ui/BottomSheet'
 import Button from '@/components/ui/Button'
@@ -40,6 +40,8 @@ import type {
 export interface ItemEditSheetProps {
   item: InventoryItem | null
   open: boolean
+  /** The item has left the list the sheet was opened from (used up or deleted elsewhere). */
+  gone?: boolean
   onClose: () => void
 }
 
@@ -48,7 +50,15 @@ function errorText(error: unknown, fallback: string): string {
   return isAPIError(error) && error.status < 500 && error.message ? error.message : fallback
 }
 
-function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => void }) {
+function ItemEditForm({
+  item,
+  gone,
+  onClose,
+}: {
+  item: InventoryItem
+  gone: boolean
+  onClose: () => void
+}) {
   const toast = useToast()
   const update = useUpdateInventoryItem()
   const remove = useDeleteInventoryItem()
@@ -126,6 +136,18 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
     ? t('inventory.itemEdit.addedOn', { date: formatDate(item.purchase_date, language) })
     : ''
   const editProduct = () => setEditingProduct(true)
+
+  // An item that is no longer there cannot be edited: say so and get out of the way, rather
+  // than leave a sheet whose every button now fails. Not while this sheet's own write is in
+  // flight or done (a delete or "gone" closes with its own toast), and not from under the
+  // product's or the split sheet - the cook is mid-edit there, and comes back here after.
+  const elsewhere = gone && !busy && !update.isSuccess && !remove.isSuccess
+  const showingItem = !editingProduct && !splitting
+  useEffect(() => {
+    if (!elsewhere || !showingItem) return
+    toast.success(t('inventory.itemEdit.goneElsewhereToast', { name }))
+    onClose()
+  }, [elsewhere, showingItem, toast, t, name, onClose])
 
   if (confirmingDelete) {
     return (
@@ -359,11 +381,13 @@ function ItemEditForm({ item, onClose }: { item: InventoryItem; onClose: () => v
   )
 }
 
-export function ItemEditSheet({ item, open, onClose }: ItemEditSheetProps) {
+export function ItemEditSheet({ item, open, gone, onClose }: ItemEditSheetProps) {
   // Mount the form only while open, so it starts from the item's current values each time.
   // Keyed by item: the form's fields follow the item they were opened on, and a sheet that
   // ever swapped items in place would start clean rather than inherit the last one's edits.
-  return open && item ? <ItemEditForm key={item.id} item={item} onClose={onClose} /> : null
+  return open && item ? (
+    <ItemEditForm key={item.id} item={item} gone={gone ?? false} onClose={onClose} />
+  ) : null
 }
 
 export default ItemEditSheet

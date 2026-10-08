@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n';
 
@@ -82,17 +82,40 @@ function unlockBody(): void {
   savedBody = null;
 }
 
-const BottomSheet: React.FC<BottomSheetProps> = ({
-  open,
+/*
+ * Whether this page has hydrated. The first sheet waits one render before it portals into
+ * `document.body` (there is none on the server). Every sheet after that renders its panel - and
+ * takes the scroll lock - in the very render it mounts, which is what lets one sheet hand over
+ * to another without the page coming unpinned in between (see `SheetPanel`).
+ */
+let hydrated = false;
+
+const BottomSheet: React.FC<BottomSheetProps> = (props) => {
+  const [mounted, setMounted] = useState(hydrated);
+
+  useEffect(() => {
+    hydrated = true;
+    setMounted(true);
+  }, []);
+
+  if (!props.open || !mounted) return null;
+  return <SheetPanel {...props} />;
+};
+
+/**
+ * An open sheet. Mounted on open and unmounted on close (or with its parent), so everything it
+ * holds - the lock, the focus trap - starts and ends with the sheet itself.
+ */
+function SheetPanel({
   onClose,
   title,
   children,
   footer,
   closeOnBackdrop = true,
   className = '',
-}) => {
-  const [mounted, setMounted] = useState(false);
+}: BottomSheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const { t } = useT();
 
@@ -102,17 +125,34 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
     onCloseRef.current = onClose;
   }, [onClose]);
 
-  useEffect(() => {
-    setMounted(true);
+  // Taken in the layout phase and given back in the passive one, so when one sheet replaces
+  // another in a render (the item sheet and the product's sheet hand over that way, both ways)
+  // the new lock is held before the old one is released: the count never reaches zero and the
+  // page is never unpinned, scrolled back and pinned again. On the iPad that round trip ran
+  // while the keyboard was still going down, and pinned the page at the offset iOS had scrolled
+  // it to for the keyboard (operator, 2026-10-08: "the below window gets stuck").
+  useLayoutEffect(() => {
+    lockBody();
+  }, []);
+  useEffect(() => unlockBody, []);
+
+  // A field still focused when the sheet goes (a tap on Save does not take focus off the field
+  // on iOS) is let go of while it is still in the page, so the keyboard closes the normal way
+  // instead of with its field torn out from under it. A layout cleanup runs on unmount before
+  // React removes the sheet's nodes; a passive one would run after, too late to blur anything.
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    return () => {
+      const active = document.activeElement;
+      if (panel && active instanceof HTMLElement && panel.contains(active)) active.blur();
+    };
   }, []);
 
   useEffect(() => {
-    if (!open || !mounted) return;
     const panel = panelRef.current;
     if (!panel) return;
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    lockBody();
 
     // The action the sheet is named after, when it says which it is: focus used to land on the
     // ✕, and the primary sits past every field in the form (H45). A destructive sheet marks its
@@ -153,19 +193,16 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
 
     return () => {
       document.removeEventListener('keydown', onKeyDown);
-      unlockBody();
       if (previouslyFocused && document.contains(previouslyFocused)) {
         previouslyFocused.focus();
       }
     };
-  }, [open, mounted]);
+  }, []);
 
   // A drag that starts on the dim backdrop itself has nothing to scroll: cancel it, so iOS does
   // not hand it to the page. Not passive, or preventDefault is ignored. A drag inside the panel
   // is left alone; its scroll area contains its own overscroll.
-  const backdropRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!open || !mounted) return;
     const backdrop = backdropRef.current;
     if (!backdrop) return;
     const onTouchMove = (event: TouchEvent) => {
@@ -173,9 +210,7 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
     };
     backdrop.addEventListener('touchmove', onTouchMove, { passive: false });
     return () => backdrop.removeEventListener('touchmove', onTouchMove);
-  }, [open, mounted]);
-
-  if (!open || !mounted) return null;
+  }, []);
 
   const panelClassName = `
     flex w-full max-w-2xl max-h-[85vh] flex-col
@@ -237,6 +272,6 @@ const BottomSheet: React.FC<BottomSheetProps> = ({
     </div>,
     document.body
   );
-};
+}
 
 export default BottomSheet;

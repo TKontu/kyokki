@@ -345,6 +345,31 @@ describe('BottomSheet', () => {
         expect(document.body.getAttribute('style') ?? '').toBe('');
         expect(scrollTo).toHaveBeenCalledWith(0, 320);
       });
+
+      // The item sheet hands over to the product's sheet and back by *remounting*: a different
+      // component in the same place, not one BottomSheet whose `open` flips (operator,
+      // 2026-10-08: after saving the product "the below window gets stuck" on the iPad). The
+      // page must stay pinned through the handover - unpinning it for a frame, then pinning it
+      // again where iOS had scrolled it for the keyboard, is how the sheet came back offset.
+      it('a sheet remounted in place of another keeps the page pinned', async () => {
+        function Swap({ which }: { which: 'a' | 'b' }) {
+          return which === 'a' ? <Sheet key="a" title="A" /> : <Sheet key="b" title="B" />;
+        }
+        const { rerender } = render(<Swap which="a" />);
+        await screen.findByRole('dialog', { name: 'A' });
+        scrollTo.mockClear();
+
+        rerender(<Swap which="b" />);
+        await screen.findByRole('dialog', { name: 'B' });
+
+        // Never unpinned in between: unpinning is what puts the page back (`scrollTo`)
+        expect(scrollTo).not.toHaveBeenCalled();
+        expect(document.body.style.top).toBe('-320px');
+
+        rerender(<></>);
+        expect(document.body.getAttribute('style') ?? '').toBe('');
+        expect(scrollTo).toHaveBeenCalledWith(0, 320);
+      });
     });
 
     describe('touch', () => {
@@ -375,6 +400,48 @@ describe('BottomSheet', () => {
         screen.getByText('content').dispatchEvent(inside);
         expect(inside.defaultPrevented).toBe(false);
       });
+    });
+  });
+
+  // On the iPad a tap on Save does not take focus off the field being typed in, so the field is
+  // still focused - and the keyboard still up - when the sheet goes. Removing a focused field
+  // leaves iOS to tear the keyboard down on its own, which can leave the viewport shifted under
+  // the sheet that comes back; blurring it first closes the keyboard the normal way.
+  describe('Focus on the way out', () => {
+    function Editing({ open }: { open: boolean }) {
+      return (
+        <BottomSheet open={open} title="Edit" onClose={() => {}}>
+          <input aria-label="Finnish name" />
+        </BottomSheet>
+      );
+    }
+
+    function watchBlur(field: HTMLElement) {
+      const blurred: boolean[] = [];
+      field.addEventListener('focusout', () => blurred.push(field.isConnected));
+      return blurred;
+    }
+
+    it('blurs a focused field before the sheet is removed', () => {
+      const { unmount } = render(<Editing open />);
+      const field = screen.getByLabelText('Finnish name');
+      field.focus();
+      const blurred = watchBlur(field);
+
+      unmount();
+
+      expect(blurred).toEqual([true]);
+    });
+
+    it('blurs a focused field before the sheet closes', () => {
+      const { rerender } = render(<Editing open />);
+      const field = screen.getByLabelText('Finnish name');
+      field.focus();
+      const blurred = watchBlur(field);
+
+      rerender(<Editing open={false} />);
+
+      expect(blurred).toEqual([true]);
     });
   });
 });
