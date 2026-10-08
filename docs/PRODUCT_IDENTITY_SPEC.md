@@ -1,6 +1,6 @@
 # Product identity: exact keys only, and every join undoable (CL8)
 
-Status: **design, operator decisions pending** (2026-10-06). Extends `PRODUCT_RESOLUTION_SPEC.md`.
+Status: **design; decisions 1, 2, 3, 6 ruled 2026-10-07; 4, 5 built at the recommended defaults (#198)**. Extends `PRODUCT_RESOLUTION_SPEC.md`.
 Base read: `d30cfa3`.
 
 ## Why
@@ -128,3 +128,11 @@ un-merge round trip; the next receipt resolves the printed name to the split tar
 5. Split: copy min/reorder stock to the new product? Recommended no.
 6. Drop the catalog block from the extraction prompt (the source of P1), or keep it for category
    hints now that the generic name can never be a key?
+
+## Rulings (operator, 2026-10-07)
+
+1. Suggestions are **unticked**, with "Accept all" on the review screen.
+2. A verified alias from **another chain only suggests**.
+3. Rename **asks** whether to keep the old name as a synonym.
+6. The extraction catalog block **stays as a hint**; the generic name it yields never decides the product.
+4, 5 (split): as built in #198 - report `observations_left`, no automatic reset; no min-stock copy.
