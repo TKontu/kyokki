@@ -155,6 +155,7 @@ export const en = {
       savedItemOnlyNoPurchaseToast: 'Date saved for this item only · {name} has no purchase date',
       saveError: 'Could not save {name}',
       deletedToast: 'Deleted · {name}',
+      goneElsewhereToast: 'No longer here · {name}',
       deleteError: 'Could not delete {name}',
       markedGoneToast: 'Marked as gone · {name}',
       backInKitchenToast: 'Back in the kitchen · {name}',

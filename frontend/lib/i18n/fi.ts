@@ -164,6 +164,7 @@ export const fi: Messages = {
       savedItemOnlyNoPurchaseToast: 'Päiväys tallennettu vain tälle · tuotteella {name} ei ole ostopäivää',
       saveError: 'Kohteen {name} tallennus epäonnistui',
       deletedToast: 'Poistettu · {name}',
+      goneElsewhereToast: 'Ei enää täällä · {name}',
       deleteError: 'Kohteen {name} poisto epäonnistui',
       markedGoneToast: 'Heitetty pois · {name}',
       backInKitchenToast: 'Takaisin keittiössä · {name}',

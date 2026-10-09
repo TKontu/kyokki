@@ -7,7 +7,7 @@
  */
 
 import React from 'react'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
@@ -156,6 +156,7 @@ function renderStock() {
       </ToastProvider>
     </QueryClientProvider>
   )
+  return client
 }
 
 const stock = () => screen.getByRole('list', { name: 'Stock' })
@@ -226,5 +227,73 @@ describe('an edit shows at once', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(await within(stock()).findByText('Rice drink until 2026-09-30')).toBeInTheDocument()
+  })
+})
+
+describe('an item that leaves the list while its sheet is open', () => {
+  /** The list answers with the item until `gone` says it was used up elsewhere. */
+  function goneLater() {
+    const state = { gone: false }
+    server.use(
+      http.get(`${API_URL}/inventory`, () => HttpResponse.json(state.gone ? [] : [ITEM]))
+    )
+    return state
+  }
+
+  it('closes its sheet and says so, rather than editing an item that is not there', async () => {
+    mockServer()
+    const state = goneLater()
+    const client = renderStock()
+    await openItemSheet()
+
+    // Used up on another device; the live update refetches the list
+    state.gone = true
+    await act(() => client.invalidateQueries({ queryKey: ['inventory'] }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByText('No longer here · Oat drink')).toBeInTheDocument()
+    expect(document.body.getAttribute('style') ?? '').toBe('')
+  })
+
+  it('keeps its own toast when the cook deletes it from the sheet', async () => {
+    mockServer()
+    const state = goneLater()
+    server.use(
+      http.delete(`${API_URL}/inventory/item-oat`, () => {
+        state.gone = true
+        return new HttpResponse(null, { status: 204 })
+      })
+    )
+    renderStock()
+    await openItemSheet()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, delete' }))
+
+    expect(await screen.findByText('Deleted · Oat drink')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByText('No longer here · Oat drink')).not.toBeInTheDocument()
+  })
+
+  it('does not pull the product sheet out from under the cook', async () => {
+    mockServer()
+    const state = goneLater()
+    const client = renderStock()
+    await openItemSheet()
+    fireEvent.click(screen.getByRole('button', { name: 'Change product details…' }))
+    await screen.findByLabelText('Keeps for')
+
+    state.gone = true
+    await act(() => client.invalidateQueries({ queryKey: ['inventory'] }))
+    await waitFor(() =>
+      expect(within(stock()).queryByText(/Oat drink until/)).not.toBeInTheDocument()
+    )
+
+    // Still editing the product; the item's sheet goes once the cook is done with it
+    expect(screen.getByLabelText('Keeps for')).toBeInTheDocument()
+    expect(screen.queryByText('No longer here · Oat drink')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByText('No longer here · Oat drink')).toBeInTheDocument()
   })
 })

@@ -36,7 +36,11 @@ export function useStockActions(params?: InventoryListParams) {
 
   // Read the live cached item so the sheets reflect optimistic and refetched values.
   const moreItem = items?.find((item) => item.id === moreId) ?? null
-  const editingItem = editing ? items?.find((item) => item.id === editing.id) ?? editing : null
+  const liveEditing = editing ? items?.find((item) => item.id === editing.id) : undefined
+  const editingItem = editing ? liveEditing ?? editing : null
+  // Gone from a loaded list without this sheet's say - used up or deleted on another device.
+  // The sheet decides what that means for itself: its own delete or "gone" is already closing.
+  const editingGone = editing !== null && items !== undefined && liveEditing === undefined
 
   /** `mutateAsync` so every failed tap reports, not only the last of a quick run. */
   const finishItem = (id: string) => {
@@ -78,6 +82,7 @@ export function useStockActions(params?: InventoryListParams) {
       <ItemEditSheet
         item={editingItem}
         open={editingItem !== null}
+        gone={editingGone}
         onClose={() => setEditing(null)}
       />
     </>
