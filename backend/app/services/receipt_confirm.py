@@ -1,9 +1,11 @@
 """Confirm a reviewed receipt: generic products, inventory items and learned aliases (MVP-R2).
 
 Products are generic (operator ruling 2026-09-14): SNELLMAN and ATRIA NAUDAN JAUHELIHA are
-both "Ground beef". A confirmed item names an existing product, or a generic name that is reused
-case-insensitively or created (rules in ``services/generic_products.py``). Each printed receipt name is learned as a store alias, so the next
-receipt from that store arrives pre-matched.
+both "Ground beef". A confirmed item names an existing product (``product_id``), or a **new**
+product by name. A name that already belongs to a product (a canonical or cook name) is never
+joined silently: the whole confirm answers ``NameExists`` (409 ``name_exists``) listing every
+such item, and the cook chooses (CL8, `docs/PRODUCT_IDENTITY_SPEC.md`). Each printed receipt
+name is learned as a store alias, so the next receipt from that store arrives pre-matched.
 
 Everything is written in one transaction; any invalid item rolls the whole confirm back.
 """
@@ -20,16 +22,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.logging import get_logger
-from app.crud.product_name import (
-    learn_product_name,
-    product_for_name,
-)
+from app.crud.product_name import learn_product_name
 from app.domain.product_names import normalize_product_name
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
 from app.models.receipt import Receipt
 from app.models.store_product_alias import StoreProductAlias
-from app.schemas.receipt import ConfirmedItemCreate, ReceiptStatus
+from app.schemas.receipt import (
+    ConfirmedItemCreate,
+    ReceiptStatus,
+    ServedIdentity,
+    served_identity,
+)
 from app.services.broadcast_helpers import (
     broadcast_inventory_update,
     broadcast_receipt_status,
@@ -41,6 +45,7 @@ from app.services.generic_products import (
 )
 from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import forget_non_food, remember_non_food
+from app.services.product_identity import JoinSource, decide_name
 from app.services.store_chain import normalize_store_chain
 
 logger = get_logger(__name__)
@@ -62,6 +67,44 @@ class ReceiptNotConfirmable(Exception):
 
 class InvalidConfirmItem(ValueError):
     """An item cannot be resolved to a product; nothing was written."""
+
+
+@dataclass(frozen=True)
+class NameClash:
+    """An item whose new-product name already belongs to a product (CL8)."""
+
+    position: int
+    line_id: str | None
+    index: int | None
+    name: str
+    product_id: UUID
+    product_name: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "position": self.position,
+            "line_id": self.line_id,
+            "index": self.index,
+            "name": self.name,
+            "product_id": str(self.product_id),
+            "product_name": self.product_name,
+        }
+
+
+class NameExists(Exception):
+    """One or more items name a product that already exists; nothing was written.
+
+    The endpoint answers 409 ``name_exists`` with every clash, so the client can ask the
+    cook, for each, "use the existing product, or name this one differently?".
+    """
+
+    def __init__(self, clashes: Sequence[NameClash]):
+        self.clashes = list(clashes)
+        count = len(self.clashes)
+        super().__init__(
+            f"{count} line{'s' if count != 1 else ''} "
+            f"name{'s' if count == 1 else ''} a product that already exists"
+        )
 
 
 @dataclass
@@ -132,57 +175,43 @@ class _Confirmation:
             )
         return item.index, line
 
-    async def _name_without_the_rejected_snap(
-        self, position: int, line: dict[str, Any], name: str | None
-    ) -> str | None:
-        """Refuse a name that would quietly re-attach a snap selection rejected (Q37b).
-
-        Confirm defaults an item with no ``product_id`` to the line's generic name, and
-        a plain product name lookup has no source guard - so a line whose snap was
-        rejected but whose `generic_name` was never corrected (the model gave no better
-        one, or this is a line stored before Q37b existed) would resolve right back to
-        the product the cook never confirmed. Falls back to the line's own (corrected)
-        generic name instead; if even that still names the rejected product, there is no
-        name left to create one under, and the cook has to type one.
-        """
-        resolution = self._resolution(line)
-        rejected_id = resolution.get("rejected_product_id")
-        if rejected_id is None:
-            return name
-        existing = await product_for_name(self.db, name, trust_model=False)
-        if existing is None or str(existing.id) != str(rejected_id):
-            return name
-        corrected = line.get("generic_name") or line.get("name")
-        still_rejected = await product_for_name(self.db, corrected, trust_model=False)
-        if still_rejected is not None and str(still_rejected.id) == str(rejected_id):
-            raise InvalidConfirmItem(
-                f"Item {position}: the only name for this line still names the "
-                "product its snap was rejected for - type a name for this item"
-            )
-        return corrected
-
     @staticmethod
-    def _is_the_served_name(item: ConfirmedItemCreate, line: dict[str, Any]) -> bool:
-        """Whether `item.name` is absent, or merely echoes back the name the server
-        served this line with (F1, planner ruling): only then may the rejected-snap
-        guard override it. A cook who typed something else - even the exact product a
-        snap selection rejected, as happened live with green olives corrected to "Olive
-        paste" - has given their own word, and it is honoured even onto that product.
+    def _name_for(item: ConfirmedItemCreate, line: dict[str, Any]) -> str | None:
+        """The new product's name: typed, else the line's generic name, else printed."""
+        return item.name or line.get("generic_name") or line.get("name")
+
+    async def clashes(self, items: Sequence[ConfirmedItemCreate]) -> list[NameClash]:
+        """Every item whose new-product name is already a product's key (CL8).
+
+        Checked for all items before anything is written. A name the model taught is not
+        a key (`decide_name`), so it never blocks.
         """
-        if item.name is None:
-            return True
-        return normalize_product_name(item.name) == normalize_product_name(
-            line.get("generic_name")
-        )
+        found: list[NameClash] = []
+        for position, item in enumerate(items):
+            if item.product_id is not None:
+                continue
+            line_index, line = self.line(position, item)
+            name = self._name_for(item, line)
+            joined = await decide_name(self.db, name)
+            if joined is None:
+                continue
+            line_id = line.get("line_id") if line else None
+            found.append(
+                NameClash(
+                    position=position,
+                    line_id=str(line_id or item.line_id or "") or None,
+                    index=line_index if line_index is not None else item.index,
+                    name=str(name),
+                    product_id=cast(UUID, joined.product.id),
+                    product_name=str(joined.product.canonical_name),
+                )
+            )
+        return found
 
     async def product(
         self, position: int, item: ConfirmedItemCreate, line: dict[str, Any]
     ) -> ProductMaster:
-        name = item.name or line.get("generic_name") or line.get("name")
-        if item.product_id is None and self._is_the_served_name(item, line):
-            # The cook's own explicit pick always wins, including the rejected product
-            # itself (Q37b) - only the no-product-id, served-name path needs the guard.
-            name = await self._name_without_the_rejected_snap(position, line, name)
+        name = self._name_for(item, line)
         try:
             product, created = await self.resolver.resolve(
                 product_id=item.product_id,
@@ -195,11 +224,6 @@ class _Confirmation:
                 pack_grams=line.get("pack_grams"),
                 shelf_life_days=line.get("shelf_life_days"),
                 opened_shelf_life_days=line.get("opened_shelf_life_days"),
-                # A name without a product id is the cook's own word ("New product:
-                # Ketchup"), and it must not resolve to the product a model once
-                # guessed for that word (H51). With a product id the name is the
-                # model's generic and its synonyms are welcome.
-                trust_model_names=item.product_id is not None,
             )
         except InvalidProductRequest as exc:
             raise InvalidConfirmItem(f"Item {position}: {exc}") from exc
@@ -209,65 +233,62 @@ class _Confirmation:
         return product
 
     @staticmethod
-    def _resolution(line: dict[str, Any]) -> dict[str, Any]:
-        resolution = line.get("resolution")
-        return resolution if isinstance(resolution, dict) else {}
+    def _served(line: dict[str, Any]) -> ServedIdentity:
+        return served_identity(line)
 
     @classmethod
     def _kept(cls, line: dict[str, Any], product: ProductMaster) -> bool:
-        """Whether the cook ended up with the product the line proposed."""
-        proposed = cls._resolution(line).get("product_id")
+        """Whether the cook kept the exact key the line was served with."""
+        proposed = cls._served(line).product_id
         return proposed is not None and str(proposed) == str(product.id)
 
     @classmethod
-    def _is_the_accepted_correction(
+    def _accepted(
         cls, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
     ) -> bool:
-        """Whether this item is a rejected-snap line left exactly as served (F3, PR
-        #153 review): no product id, no retyped name, and the product it resolved to
-        is the server's own `corrected_generic` - a selection call's correction the
-        cook did not so much as glance past, not their word. One flaky selection
-        answer must not permanently teach the chain's alias table as if it had been.
-        """
-        if item.product_id is not None:
+        """Whether this item is the line's served suggestion, accepted by the cook."""
+        if not item.accepted_suggestion or item.product_id is None:
             return False
-        resolution = cls._resolution(line)
-        corrected = resolution.get("corrected_generic")
-        if not corrected or not cls._is_the_served_name(item, line):
-            return False
-        return normalize_product_name(
-            str(product.canonical_name)
-        ) == normalize_product_name(corrected)
+        suggestion = cls._served(line).suggestion or {}
+        return str(suggestion.get("product_id") or "") == str(product.id)
 
     @classmethod
     def _provenance(
         cls, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
     ) -> tuple[str, bool]:
-        """How the cook's choice relates to what was proposed (spec §3.4).
+        """How the cook's choice relates to what was served (spec §3.4, CL8).
 
-        Returns the alias `source` and whether it is verified memory. The whole point
-        of H14: before it, confirm wrote `manually_verified=True` for every included
-        line, so a guess the cook merely did not notice became a key that won outright
-        for every later receipt from that chain.
+        Returns the alias `source` and whether it is verified memory. A kept key is
+        reinforced with its own provenance; an accepted suggestion is `cook_accepted`;
+        anything else - a search pick, a new product - is the cook's own word.
         """
-        if cls._is_the_accepted_correction(line, product, item):
-            return "model", False
-        if not cls._kept(line, product):
-            # Changed, attached or detached: the cook's own word either way.
-            return "cook", True
+        if cls._kept(line, product):
+            served = cls._served(line)
+            if served.match_source == "alias":
+                return served.alias_source or "cook", served.verified
+            return "name", served.verified
+        if cls._accepted(line, product, item):
+            return "cook_accepted", True
+        return "cook", True
 
-        resolution = cls._resolution(line)
-        source = str(resolution.get("source") or "")
-        if source == "name":
-            # A catalog name matched. A key, not a judgement - but only as reliable as
-            # the name: a synonym the model taught resolved unverified (H51).
-            return "name", bool(resolution.get("verified"))
-        if source == "alias":
-            return str(resolution.get("alias_source") or "cook"), bool(
-                resolution.get("verified")
-            )
-        # `selected`: the model chose from candidates and the cook did not contradict it.
-        return "model", False
+    @classmethod
+    def _join(
+        cls, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
+    ) -> tuple[JoinSource, str | None]:
+        """`inventory_item.join_source` / `join_key` for this item (CL8 provenance)."""
+        printed = normalize_receipt_name(str(line["name"])) if line.get("name") else ""
+        if item.product_id is None:
+            return "created", normalize_product_name(cls._name_for(item, line)) or None
+        if cls._kept(line, product):
+            served = cls._served(line)
+            if served.match_source == "alias":
+                return "alias", served.join_key or printed or None
+            return "name", served.join_key or normalize_product_name(
+                str(line.get("name") or "")
+            ) or None
+        if cls._accepted(line, product, item):
+            return "accepted_suggestion", printed or None
+        return "cook_pick", printed or None
 
     async def learn_names(
         self, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
@@ -277,17 +298,14 @@ class _Confirmation:
         It is what makes "Minced beef" hit "Ground beef" next week without the
         extraction prompt carrying the catalog.
 
-        The name is the cook's word only when the cook acted on this line: changed the
-        product, or typed the name. Keeping what was proposed - an alias, a name hit, a
-        selection - says nothing about the model's generic name for the line, so that is
-        learned as the model's (H51). A cook-verified alias for TUMMA RYPÄLE says the
-        line is Grape; it does not make "Raisin" the cook's word for it. The same holds
-        for a rejected snap's own corrected name left unchanged (F3) - still the
-        model's word, not the cook's.
+        The name is the cook's word only when the cook acted on this line: picked or
+        named the product, or typed the name. Keeping a served key or accepting a
+        suggestion says nothing about the model's generic name for the line, so that is
+        learned as the model's (H51, CL8): a model name is never learned as the cook's
+        from an untouched suggestion.
         """
-        cook_acted = not self._is_the_accepted_correction(line, product, item) and (
-            not self._kept(line, product) or item.name is not None
-        )
+        untouched = self._kept(line, product) or self._accepted(line, product, item)
+        cook_acted = item.name is not None or not untouched
         learned = item.name or line.get("generic_name")
         if learned:
             await learn_product_name(
@@ -353,6 +371,7 @@ class _Confirmation:
     async def add(self, position: int, item: ConfirmedItemCreate) -> None:
         line_index, line = self.line(position, item)
         product = await self.product(position, item, line)
+        join_source, join_key = self._join(line, product, item)
         inventory_item = build_inventory_item(
             product,
             quantity=item.quantity,
@@ -361,6 +380,8 @@ class _Confirmation:
             expiry_date=item.expiry_date,
             location=item.location,
             receipt_id=cast(UUID, self.receipt.id),
+            join_source=join_source,
+            join_key=join_key,
         )
         # Where this item came from on the receipt (Q26); NULL for an item added
         # without a line (a free line, or a product-id-only item with no `index`).
@@ -482,6 +503,7 @@ async def confirm_receipt(
         ReceiptNotFound: no such receipt.
         ReceiptNotConfirmable: already confirmed, or not ``completed``.
         InvalidConfirmItem: an item cannot be resolved; the transaction is rolled back.
+        NameExists: items name existing products by a new-product name; nothing written.
     """
     try:
         # Row lock: two confirms of one receipt cannot both pass the status check
@@ -500,6 +522,10 @@ async def confirm_receipt(
             )
 
         confirmation = _Confirmation(db, receipt)
+        # Before anything is written: a name never joins an existing product (CL8)
+        clashes = await confirmation.clashes(items)
+        if clashes:
+            raise NameExists(clashes)
         included_indexes: set[int] = set()
         for position, item in enumerate(items):
             await confirmation.add(position, item)

@@ -99,6 +99,14 @@ class ProductMasterUpdate(BaseModel):
             "update of the map, not a replacement of it."
         ),
     )
+    keep_old_name: bool | None = Field(
+        None,
+        description=(
+            "Read only when `canonical_name` changes (CL8 ruling 3). True or omitted: the "
+            "old name stays a cook synonym and still finds this product. False: the old "
+            "name is forgotten. Not a column"
+        ),
+    )
 
     @model_validator(mode="after")
     def known_languages(self) -> "ProductMasterUpdate":

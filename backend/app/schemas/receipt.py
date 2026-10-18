@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
@@ -51,6 +52,117 @@ def normalise_match_source(raw: object) -> MatchSource | None:
     return LEGACY_MATCH_SOURCES.get(value)
 
 
+SuggestionReason = Literal[
+    "selected", "unverified_alias", "other_chain_alias", "model_name", "generic_name"
+]
+
+
+class SuggestionOut(BaseModel):
+    """A product offered for a line that has no exact key (CL8); the cook accepts it."""
+
+    product_id: UUID
+    product_name: str
+    reason: SuggestionReason = Field(
+        ...,
+        description=(
+            "`selected` (the model picked it from the shortlist), `unverified_alias` (an "
+            "alias at this chain the cook never verified), `other_chain_alias` (learned "
+            "at another chain), `model_name` (the printed name equals a name the model "
+            "taught), `generic_name` (the generic name equals a catalog name)"
+        ),
+    )
+    store_chain: str | None = Field(
+        None, description="The chain the alias was learned at; `other_chain_alias` only"
+    )
+
+
+@dataclass(frozen=True)
+class ServedIdentity:
+    """What the review screen was served for a line: a key, a suggestion, or neither."""
+
+    product_id: str | None = None
+    product_name: str | None = None
+    match_source: MatchSource | None = None
+    verified: bool = False
+    join_key: str | None = None
+    alias_source: str | None = None
+    suggestion: dict[str, Any] | None = None
+
+
+# A pre-CL8 source that was not a key, and the suggestion reason it reads as now.
+_LEGACY_SUGGESTIONS: dict[tuple[str, bool], str] = {
+    ("selected", False): "selected",
+    ("selected", True): "selected",
+    ("alias", False): "unverified_alias",
+    ("name", False): "model_name",
+}
+
+
+def served_identity(line: dict[str, Any]) -> ServedIdentity:
+    """The line's key or suggestion, from a blob written before CL8 or after it.
+
+    A blob with a ``suggestion`` field (even ``null``) was written under the exact-keys
+    rule and is read as stored. An older one is mapped (CONTRACT §1): ``selected`` becomes
+    a ``selected`` suggestion, an unverified ``alias`` an ``unverified_alias`` one, an
+    unverified ``name`` a ``model_name`` one; a verified alias or name stays a key.
+    """
+    resolution = line.get("resolution")
+    resolution = resolution if isinstance(resolution, dict) else {}
+    source = normalise_match_source(resolution.get("source", line.get("match_source")))
+    verified = bool(resolution.get("verified", False))
+    alias_source = resolution.get("alias_source")
+    alias_source = str(alias_source) if alias_source else None
+    join_key = resolution.get("join_key")
+    join_key = str(join_key) if join_key else None
+    product_id = line.get("product_id")
+    product_name = line.get("product_name")
+
+    if "suggestion" in resolution:
+        suggestion = resolution.get("suggestion")
+        suggestion = suggestion if isinstance(suggestion, dict) else None
+        if product_id:
+            return ServedIdentity(
+                product_id=str(product_id),
+                product_name=product_name,
+                match_source=source,
+                verified=verified,
+                join_key=join_key,
+                alias_source=alias_source,
+            )
+        return ServedIdentity(
+            match_source=source,
+            suggestion=suggestion,
+        )
+
+    reason = _LEGACY_SUGGESTIONS.get((source or "", verified))
+    if product_id and reason is not None:
+        return ServedIdentity(
+            match_source="none",
+            suggestion={
+                "product_id": str(product_id),
+                "product_name": product_name,
+                "reason": reason,
+            },
+        )
+    return ServedIdentity(
+        product_id=str(product_id) if product_id else None,
+        product_name=product_name,
+        match_source=source,
+        verified=verified,
+        join_key=join_key,
+        alias_source=alias_source,
+    )
+
+
+def _suggestion_out(raw: dict[str, Any] | None) -> SuggestionOut | None:
+    if not raw:
+        return None
+    try:
+        return SuggestionOut.model_validate(raw)
+    except ValueError:
+        return None
+
+
 class ExtractedItem(BaseModel):
     """One receipt line as the review screen and confirm step see it."""
 
@@ -77,17 +189,27 @@ class ExtractedItem(BaseModel):
     unit: Literal["dl", "tsp", "tbsp", "g", "pcs"] = Field(
         ..., description="Canonical unit"
     )
-    product_id: UUID | None = Field(None, description="Matched product")
+    product_id: UUID | None = Field(
+        None, description="Matched product; set only for an exact key (CL8)"
+    )
     product_name: str | None = Field(
         None, description="Matched product's canonical name"
+    )
+    suggestion: SuggestionOut | None = Field(
+        None,
+        description=(
+            "A product offered for the cook to accept, when the line has no exact key "
+            "(CL8). Never set together with `product_id`"
+        ),
     )
     match_score: float | None = Field(None, description="0-100")
     match_confidence: Literal["exact", "high", "medium", "low"] | None = None
     match_source: MatchSource | None = Field(
         None,
         description=(
-            "How this product was arrived at: `alias` (a learned printed name), `name` "
-            "(a known catalog name), `selected` (proposed, not from a key), `none`"
+            "How this product was arrived at: `alias` (a cook-verified printed name at "
+            "this chain), `name` (a catalog name), `none`. `selected` is read only from "
+            "receipts stored before CL8"
         ),
     )
     verified: bool = Field(
@@ -219,8 +341,7 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
     for index, line in enumerate(lines):
         if not isinstance(line, dict) or not line.get("name"):
             continue
-        resolution = line.get("resolution")
-        resolution = resolution if isinstance(resolution, dict) else {}
+        served = served_identity(line)
         quantity, unit = receipt_line_quantity(
             line.get("quantity"), line.get("weight_kg")
         )
@@ -243,9 +364,9 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
                 printed_quantity, printed_unit = quantity, unit
                 quantity, unit = grams, "g"
         category = line.get("category")
-        storage = line.get("product_storage_type") or storage_type_for_category(
-            category
-        )
+        # A suggestion's storage is not this line's until the cook accepts it (CL8).
+        keyed_storage = line.get("product_storage_type") if served.product_id else None
+        storage = keyed_storage or storage_type_for_category(category)
         if storage not in ("refrigerator", "freezer", "pantry"):
             storage = storage_type_for_category(category)
         price = line.get("price")
@@ -257,15 +378,14 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
                 generic_name=line.get("generic_name"),
                 quantity=quantity,
                 unit=unit,
-                product_id=line.get("product_id"),
-                product_name=line.get("product_name"),
+                product_id=served.product_id,
+                product_name=served.product_name if served.product_id else None,
+                suggestion=_suggestion_out(served.suggestion),
                 match_score=line.get("match_score"),
                 match_confidence=line.get("match_confidence"),
                 line_id=line.get("line_id"),
-                match_source=normalise_match_source(
-                    resolution.get("source", line.get("match_source"))
-                ),
-                verified=bool(resolution.get("verified", False)),
+                match_source=served.match_source,
+                verified=served.verified,
                 suggested_category=category,
                 piece_grams=piece_grams,
                 pack_grams=pack_grams,
@@ -408,9 +528,10 @@ class ReceiptSummary(BaseModel):
 class ConfirmedItemCreate(BaseModel):
     """One reviewed receipt item to add to inventory.
 
-    Give ``product_id`` for an existing product. Otherwise a generic product is reused by name
-    or created: ``name`` and ``category`` default to the receipt line's generic name and
-    category. ``index`` names the receipt line, so its printed name is learned as an alias.
+    Give ``product_id`` for an existing product. Otherwise a **new** product is created:
+    ``name`` and ``category`` default to the receipt line's generic name and category, and a
+    name that already belongs to a product answers 409 ``name_exists`` instead of joining it
+    (CL8). ``index`` names the receipt line, so its printed name is learned as an alias.
     """
 
     index: int | None = Field(
@@ -426,8 +547,14 @@ class ConfirmedItemCreate(BaseModel):
         description="Receipt line by identity; wins over `index` when both are given",
     )
     product_id: UUID | None = Field(None, description="Existing product")
+    accepted_suggestion: bool = Field(
+        False,
+        description=(
+            "The product is the line's served suggestion, which the cook accepted (CL8)"
+        ),
+    )
     name: str | None = Field(
-        None, description="Generic product name when product_id is not given"
+        None, description="Name for a new product when product_id is not given"
     )
     category: str | None = Field(None, description="Category id for a new product")
     quantity: float = Field(..., gt=0, description="Quantity to add")
