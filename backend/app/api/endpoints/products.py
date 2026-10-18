@@ -244,16 +244,15 @@ async def update_product(
 
     Correcting a shelf life moves the stock that was dated by the old one (Q12): a date
     the cook typed is left alone, and so is anything already gone from the kitchen.
-    A new name regenerates the icon (Q18-G2), unless the cook chose the category emoji or
-    generation is not configured, and re-proposes the Finnish display name (Post-MVP
-    frontier item 13) unless the cook set that themselves.
+    A manual edit never schedules icon or model work, no matter what changed, including
+    a rename (operator ruling 2026-10-09: that is bad design): icons and Finnish display
+    names are proposed only for new products (Q18-G2, Post-MVP frontier item 13) or via
+    an explicit UI action (Regenerate).
 
     Returns:
         - 400: a `display_names` entry (Post-MVP frontier item 13) is over 100
           characters (F2 review).
     """
-    before = await crud_product.get_product(db, product_id)
-    old_name = None if before is None else str(before.canonical_name)
     try:
         async with handle_integrity_errors():
             product = await crud_product.update_product(db, product_id, product_update)
@@ -272,17 +271,6 @@ async def update_product(
         moved = await recompute_expiry_for_product(db, product)
         await db.commit()
         await _announce(moved, str(product.canonical_name))
-
-    # A rename goes through the automatic queue, not Regenerate's explicit path: it must
-    # still skip `cleared`, an exact/cook emoji, and non-food exactly as any other
-    # automatic scheduling does (F2 review) - unlike Regenerate, nobody asked for this one.
-    renamed = str(product.canonical_name) != old_name
-    if renamed:
-        product_icons.schedule_icons(background_tasks, [product_id])
-        # The model proposed the old Finnish name from the old English name, so a
-        # rename can leave it stale or wrong (2026-10-03 production backfill finding).
-        # `schedule_display_name_rename` skips a cook's own name itself.
-        display_names.schedule_display_name_rename(background_tasks, product_id)
 
     await broadcast_product_update(
         product_id, action="updated", product_name=str(product.canonical_name)

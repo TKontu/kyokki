@@ -28,13 +28,10 @@ later proposal: the background job checks the cook has not set this language - b
 writes, and again right before it writes, since the cook may have gotten there while the model
 was asked.
 
-A rename re-proposes too (2026-10-03 production backfill finding): the model proposed from the
-old English name, so a rename could leave a stale or wrong Finnish name in place
-(`schedule_display_name_rename`, called from `PATCH /products/{id}`'s rename hook). It skips a
-cook's own name exactly the same way; a missing or model-sourced name is re-asked, and the old
-value (if any) stays shown until the new proposal lands - no flash of English.
+A rename never re-proposes (operator ruling 2026-10-09): manual edits, including a rename, never
+schedule model work; only a new product's creation or an explicit UI action (Regenerate) does.
 
-Both the on-create and the rename proposal, plus the backfill script
+Both the on-create proposal, plus the backfill script
 (`scripts/backfill_display_names.py`), give the model up to three distinct printed receipt
 names for the product (`printed_aliases`, from `store_product_alias`, newest first): the
 printed text is the best evidence of the product's real Finnish wording, which the English
@@ -395,9 +392,7 @@ async def _store_one_proposal(product_id: UUID, name: str, fi_name: str) -> None
     """Write one product's proposed name, if it is still wanted. Never raises - this
     product's own failure must not stop the rest of the batch (F3 review).
 
-    Only a cook's own name (`source="cook"`) blocks this: a rename re-proposal is meant
-    to overwrite an existing `model` row, not merely fill a gap (`schedule_display_name_
-    rename`).
+    Only a cook's own name (`source="cook"`) blocks this.
     """
     try:
         async with open_session() as db:
@@ -421,50 +416,6 @@ async def _store_one_proposal(product_id: UUID, name: str, fi_name: str) -> None
 async def _propose_one_on_create(product_id: UUID) -> None:
     """One product on its own - the batched path (above) with a single-element batch."""
     await propose_display_names_for_new_products([product_id])
-
-
-# --- scheduling a rename's re-proposal (2026-10-03 production backfill finding) -------------
-
-
-def schedule_display_name_rename(
-    background_tasks: BackgroundTasks, product_id: UUID
-) -> None:
-    """A rename re-proposes the product's Finnish name, once the response has gone.
-
-    The model proposed from the old English name, so a rename can leave a stale or
-    outright wrong Finnish name behind. Scheduled unconditionally from the rename hook,
-    exactly as the icon redraw already is (F2 review) - `_propose_one_on_rename` is
-    where the cook's-own-name check happens, not here.
-    """
-    background_tasks.add_task(_propose_one_on_rename, product_id)
-
-
-async def _propose_one_on_rename(product_id: UUID) -> None:
-    """Re-propose this product's Finnish name after a rename, unless the cook set it.
-
-    A missing name is proposed too (the product may have had none to begin with, or an
-    earlier proposal failed) - this is "the same as create" for whichever language rows
-    are not the cook's own. The stale value, if any, is left in place until the new
-    proposal lands: nothing here ever clears a name it cannot yet replace.
-    """
-    try:
-        async with open_session() as db:
-            product = await crud_product.get_display_name_subject(db, product_id)
-            if product is None or product.display_name_sources.get("fi") == "cook":
-                return
-            name = str(product.canonical_name)
-            aliases = await printed_aliases(db, product_id)
-    except Exception as exc:  # noqa: BLE001 - a background job has nobody to raise to
-        logger.warning(
-            "Could not read a product for a rename's display-name re-proposal",
-            extra={"product_id": str(product_id), "error": repr(exc)},
-        )
-        return
-
-    proposed = await propose_finnish_names([name], aliases=[aliases])
-    if not proposed or not proposed[0]:
-        return
-    await _store_one_proposal(product_id, name, proposed[0])
 
 
 async def _announce(product_id: UUID, name: str) -> None:

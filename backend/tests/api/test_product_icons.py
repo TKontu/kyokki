@@ -3,8 +3,9 @@
 `GET /products/{id}/icon.png` serves the stored image to an `<img src>`; `POST
 /products/{id}/icon` is Regenerate (a new seed every time, optionally with the cook's hint;
 409 when generation is not configured); `DELETE /products/{id}/icon` drops it for the
-category emoji; renaming a product regenerates it, but only when generation is configured.
-Responses carry `icon_status`, `icon_version` and `generation_enabled`.
+category emoji; renaming a product never regenerates it (operator ruling 2026-10-09: no
+generation after manual edits). Responses carry `icon_status`, `icon_version` and
+`generation_enabled`.
 """
 
 from datetime import date
@@ -374,10 +375,15 @@ class TestServeThePng:
         assert response.json()["id"] == str(product.id)
 
 
-class TestRenameRegenerates:
-    async def test_a_new_name_queues_a_regenerate(
+class TestRenameNeverRegenerates:
+    """operator ruling 2026-10-09: no generation after manual edits - a rename, like any
+    other manual edit, never queues an icon render; only a new product's creation or an
+    explicit Regenerate does."""
+
+    async def test_a_new_name_does_not_queue_a_regenerate(
         self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
     ) -> None:
+        # operator ruling 2026-10-09: no generation after manual edits
         product = await _product(seeded_db, "Rye bred")
 
         response = await client.patch(
@@ -385,10 +391,8 @@ class TestRenameRegenerates:
         )
 
         assert response.status_code == 200
-        model.assert_awaited_once()
-        (workflow,), _ = model.await_args
-        assert "Rye bread" in workflow["3"]["inputs"]["text"]
-        assert (await _reload(seeded_db, product.id)).icon_status == "ready"
+        model.assert_not_awaited()
+        assert (await _reload(seeded_db, product.id)).icon_status is None
 
     async def test_the_same_name_does_not(
         self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
@@ -429,9 +433,9 @@ class TestRenameRegenerates:
     async def test_renaming_an_exact_emoji_product_queues_nothing(
         self, client: AsyncClient, seeded_db: AsyncSession, model, broadcast
     ) -> None:
-        """F2 review: a rename goes through the automatic gate, same as any other
-        automatic scheduling - not Regenerate's explicit path (which would have bypassed
-        it, since `request_redraw` used to pre-mark the row pending)."""
+        # operator ruling 2026-10-09: no generation after manual edits
+        """A rename queues nothing at all now - only Regenerate's explicit path can
+        touch an exact/cook emoji product's icon."""
         product = await _product(seeded_db, "Rye bred", emoji_match=EmojiMatch.EXACT)
 
         response = await client.patch(
