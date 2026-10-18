@@ -1,5 +1,9 @@
 # Mealie Integration Module — Development TODO
 
+> **Superseded (operator, 2026-10-18).** Recipes are a native Kyokki feature: `docs/recipes_TODO.md`.
+> No Mealie. Kept for reference only; do not plan from this file. Its fuzzy and LLM food matching
+> (§1.4) is ruled out by CL8 (exact keys only).
+
 > **Superseded in part (2026-09-14).** Recipe search, "cookable", suggestions and cook-deducts-stock
 > are now planned in `docs/agent_TODO.md` (AG0 recipe-service spike: Mealie vs Tandoor against
 > HowToCook granularity; AG5 recipes behind a swappable `RecipeSource`). Meal plans and the

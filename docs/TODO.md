@@ -875,8 +875,8 @@ F1 = `pipeline-foundations.md`, F2 = `pipeline-foundations-2.md`, F3 = `pipeline
 **Agent interface track, started early on 2026-09-25** (`docs/agent_TODO.md`, AG0–AG7, planned
 2026-09-14). A Hermes Agent or OpenClaw agent adds and consumes stock, creates generic products
 and aliases, explores and cooks recipes, and builds shopping lists through the HTTP API, a
-`kyokki` CLI with `-h` help and a SKILL.md. No MCP server. Recipes come from Mealie or an
-alternative chosen in the AG0 spike against HowToCook granularity. It absorbs parts of items 5,
+`kyokki` CLI with `-h` help and a SKILL.md. No MCP server. Recipes are their own native feature
+(`docs/recipes_TODO.md`, operator 2026-10-18); the agent uses their endpoints. It absorbs parts of items 5,
 6 and 8 below: name-based consume is shared with Home Assistant, and shopping-list generation.
 
 Ordered by expected value once MVP is live.
@@ -893,8 +893,8 @@ Ordered by expected value once MVP is live.
 6. ~~Home Assistant REST endpoints~~ — done (#154, `docs/HOME_ASSISTANT.md`).
 7. Barcode scanning in the PWA camera; Raspberry Pi scanner station.
 8. Multi-receipt batch (several files per upload on `/scan`: #184; no batch id or consolidated review),
-   consumption learning, analytics. (Mealie recipes moved to the agent
-   track's AG0/AG5; meal plans stay here.) H46 gives this a history to learn from. It dropped
+   consumption learning, analytics. (Recipes: `docs/recipes_TODO.md`, native,
+   2026-10-18; meal plans stay here.) H46 gives this a history to learn from. It dropped
    `consumption_context` and `category.meal_contexts` because nothing wrote or read them
    (operator, 2026-09-22): a meal or recipe context on consume comes back with whatever records
    it - most likely the agent track cooking a recipe, or an optional field on the consume API.
@@ -914,8 +914,9 @@ Ordered by expected value once MVP is live.
 14. Meal sections (breakfast, lunch, dinner, snack) in the fridge view (asked 2026-09-24,
     deferred from wave V). Needs a per-product meal tag (model and migration) and an operator
     call on tags versus rules; the meal context of item 8 is the same data.
-15. A recipes view inside the fridge view (asked 2026-09-24, deferred from wave V). Belongs to
-    the agent track (AG0/AG5, Mealie or its alternative).
+15. Recipes (asked 2026-09-24 as a recipes view inside the fridge view): a native backend and iPad
+    feature with agent endpoints, `docs/recipes_TODO.md` RC1-RC7 (operator, 2026-10-18). Cooking from
+    stock, gaps to the shopping list, substitutions. Needs CL8 L1 first.
 16. Ingredient images beyond the category emoji: a product image field, from the OFF
     `image_url` in `off_data` or an upload (asked 2026-09-24; V1 starts with the emoji).
     Superseded by Q18 (per-product icons, 2026-09-26).
@@ -2740,6 +2741,33 @@ the freshest product, and a save writes into the cached lists.
     value shows).
 - **Ratio:** 2 forward : 1 maintenance (audit).
 
+#### Operator visual notes — the fridge scene (2026-10-18)
+
+One increment, one frontend lane (`feat/q40-q42-fridge-scene`). All three touch only the Cielo
+drawing, `components/fridge/CieloFridge.tsx` (with `parts.tsx`) and the `--fridge-*` tokens in
+`app/globals.css`, so they go together. The `AreaSpot` boxes must not move. Acceptance is the
+operator looking at it on the iPad in light and dark themes (the measurement rule). Unit tests cover
+which parts exist, not colours.
+- [ ] **Q40 (S) The fridge is bluer.** Operator: "too grey". `--fridge-frame` `191 224 241` and
+  `--fridge-frame-edge` `150 196 219` (light), `94 127 147` / `70 101 121` (both dark blocks) read
+  as grey-blue. Raise the saturation and keep the lightness so the white "Kyokki" mark and the gloss
+  still read. Change the light and both dark blocks together. Check that the freezer `ICE` tint
+  (`#e1f0f8`) still sits right against the new frame.
+- [ ] **Q41 (S-M) The larder becomes a wooden shelf.** Operator: the shelf on the right "needs
+  wooden vertical beams/segments so that it looks like a wooden shelf". Today it is a painted
+  cupboard (`LARDER` fill, x 618-770, y 356-774) with three wood shelf boards. Add wood uprights
+  (`fill-fridge-wood stroke-fridge-wood-edge`): the two sides as posts, and segment dividers if they
+  do not cut through the pantry, sauces or spices spots or Other's crate. The top board (y 342) and
+  the shelf boards join the posts.
+- [ ] **Q42 (S-M) A monstera instead of the window (supersedes Q30).** Operator: no window above the
+  shelf; a *Monstera deliciosa* stands on top of it. Remove `LivingWindow` and its tests. Delete
+  `lib/sky.ts` (and its tests) if nothing else imports it (today only `CieloFridge.tsx` does). Draw the
+  plant as SVG in the scene's style (not an emoji or a generated icon): a pot on the larder top,
+  split, fenestrated leaves rising into the space where the window was (y ~24-342), with tints for
+  the dark theme. The bread basket stays on top (Q23): put the pot beside it or behind it, and keep
+  the bread readable. `data-part="plant"`, decoration only (`aria-hidden`, like the rest of the
+  drawing).
+
 ---
 
 ## Phase 1: MVP
@@ -2890,7 +2918,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [x] H47 (#166)
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Deployed 2026-10-03. Round 2026-10-03-2: [x] icon library (#171). Round 2026-10-03-3: [x] icon curation (#175)  [x] run-out list (#172)  [x] Finnish names on rename (#173)  [x] Finnish receipt screens (#174), merged 2026-10-03, deployed 2026-10-04. Round 2026-10-04-1: [x] Finnish products screen (#179)  [x] run-out in-stock days (#178)  [x] crud imports no services (#180), merged and deployed 2026-10-04. Round 2026-10-04-2: [x] share target (#185)  [x] several receipts per upload (#184)  [x] shims removed (#183)  [x] flaky display-name test (#186), merged 2026-10-05, not deployed. Round 2026-10-06-1: [x] CL2 restock clears shopping (#190)  [x] CL5 durable bot results (#188)  [x] CL7 learning feedback (#189), merged and deployed 2026-10-06. Round 2026-10-06-2: [x] CL3 bot shopping/consume (#192)  [x] CL6 run-out to shopping (#193)  [x] Q18-S2 spike, no winner (#194), merged and deployed 2026-10-06 (3f27f98). Round 2026-10-06-3: [x] CL8 split API (#198)  [x] split UI (#197)  [x] join audit (#196), merged and deployed 2026-10-07. Fix #200 (iPad sheets, stale edits) merged 2026-10-07. Next: CL8-L1 identity rule (ruled 2026-10-07); CL8 split follow-ups; Q18-S3 if approved
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Deployed 2026-10-03. Round 2026-10-03-2: [x] icon library (#171). Round 2026-10-03-3: [x] icon curation (#175)  [x] run-out list (#172)  [x] Finnish names on rename (#173)  [x] Finnish receipt screens (#174), merged 2026-10-03, deployed 2026-10-04. Round 2026-10-04-1: [x] Finnish products screen (#179)  [x] run-out in-stock days (#178)  [x] crud imports no services (#180), merged and deployed 2026-10-04. Round 2026-10-04-2: [x] share target (#185)  [x] several receipts per upload (#184)  [x] shims removed (#183)  [x] flaky display-name test (#186), merged 2026-10-05, not deployed. Round 2026-10-06-1: [x] CL2 restock clears shopping (#190)  [x] CL5 durable bot results (#188)  [x] CL7 learning feedback (#189), merged and deployed 2026-10-06. Round 2026-10-06-2: [x] CL3 bot shopping/consume (#192)  [x] CL6 run-out to shopping (#193)  [x] Q18-S2 spike, no winner (#194), merged and deployed 2026-10-06 (3f27f98). Round 2026-10-06-3: [x] CL8 split API (#198)  [x] split UI (#197)  [x] join audit (#196), merged and deployed 2026-10-07. Fix #200 (iPad sheets, stale edits) merged 2026-10-07. Next: CL8-L1 identity rule (ruled 2026-10-07); Q40-Q42 fridge scene (one increment, 2026-10-18); CL8 split follow-ups; Q18-S3 if approved
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
@@ -2967,3 +2995,5 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 **Hardware scanner in Phase 2** — Receipt scanning is primary. Barcode scanner is enhancement.
 
 **Price tracking deferred** — Not core to food waste problem. Parsers extract product names and quantities only. Price/cost analytics added in future version.
+
+**Recipes are native, not Mealie, and not the agent track (2026-10-18)** — Own tables and iPad screens (`docs/recipes_TODO.md`); the agent calls the same endpoints. Ingredients link to products by exact key only; substitutions are confirmed per recipe ingredient and never join products.
