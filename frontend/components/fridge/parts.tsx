@@ -310,12 +310,6 @@ const LEAF_SPLITS = [
   [0.3, -0.9, 1.2, -0.98],
   [0.22, -1.3, 0.85, -1.7],
 ] as const
-/** The side veins, between the splits. */
-const LEAF_VEINS = [
-  [0.04, -0.3, 0.85, -0.12],
-  [0.04, -0.7, 0.95, -0.62],
-  [0.04, -1.1, 0.75, -1.3],
-] as const
 const LEAF_TINTS = [
   'fill-emerald-600 dark:fill-emerald-800',
   'fill-green-600 dark:fill-green-800',
@@ -359,7 +353,7 @@ function LeafMask({ id }: { id: string }) {
 /**
  * A *Monstera deliciosa* in a terracotta pot (Q42): the pot stands on `base`, centred on `potX`,
  * and large split, heart-shaped leaves on long stems rise above it. Flat greens with a lighter
- * midrib and veins, a shade deeper in the dark theme. `maskId` must be unique per drawing.
+ * midrib, a shade deeper in the dark theme. `maskId` must be unique per drawing.
  */
 export function Monstera({ potX, base, maskId }: { potX: number; base: number; maskId: string }) {
   const rimY = base - 124
@@ -385,21 +379,12 @@ export function Monstera({ potX, base, maskId }: { potX: number; base: number; m
         >
           <g mask={`url(#${maskId})`}>
             <path d={LEAF_PATH} className={LEAF_TINTS[index % LEAF_TINTS.length]} />
-            <g className="fill-none stroke-lime-200/80 dark:stroke-lime-300/40" strokeLinecap="round">
-              <path d="M0,0 Q0.06,-0.9 0.04,-1.7" strokeWidth={0.05} />
-              {LEAF_VEINS.flatMap(([x1, y1, x2, y2]) =>
-                [1, -1].map((side) => (
-                  <line
-                    key={`${side}${y1}`}
-                    x1={side * x1}
-                    y1={y1}
-                    x2={side * x2}
-                    y2={y2}
-                    strokeWidth={0.025}
-                  />
-                ))
-              )}
-            </g>
+            <path
+              d="M0,0 Q0.06,-0.9 0.04,-1.7"
+              className="fill-none stroke-lime-200/80 dark:stroke-lime-300/40"
+              strokeWidth={0.05}
+              strokeLinecap="round"
+            />
           </g>
         </g>
       ))}

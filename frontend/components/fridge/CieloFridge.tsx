@@ -194,7 +194,7 @@ function FridgeDrawing({ hasOther }: { hasOther: boolean }) {
       {[456, 546, 632, 762].map((y) => (
         <rect key={y} x={628} y={y} width={132} height={y === 762 ? 10 : 6} className={WOOD} strokeWidth={1} />
       ))}
-      <WoodPost part="larder-divider" box={{ x: 684, y: 366, w: 6, h: 90 }} />
+      <WoodPost part="larder-divider" box={{ x: 684, y: 356, w: 6, h: 100 }} />
       <rect x={612} y={342} width={164} height={16} rx={6} className={WOOD} strokeWidth={1} />
       {/* Pantry: a tin and a jar */}
       <rect x={696} y={426} width={20} height={30} rx={3} className="fill-slate-300 dark:fill-slate-500" />
