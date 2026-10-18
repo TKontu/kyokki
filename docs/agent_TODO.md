@@ -2,6 +2,11 @@
 
 Planned 2026-09-14. ~~Starts after MVP-P3~~ **Started 2026-09-25** (operator ruling, below).
 
+## Ruling (operator, 2026-10-18): recipes leave this track
+Recipes are their own backend and iPad feature, stored natively in Kyokki: `docs/recipes_TODO.md`
+(RC1-RC7). AG0 (Mealie vs Tandoor) is dropped and AG5 is replaced by RC1-RC6. The agent uses the
+recipe endpoints like any other client; only the CLI commands and skill text stay here (AG8).
+
 ## Rulings (2026-09-25)
 - **The track starts now**, ahead of MVP-P3. A Hermes Agent is deployed on the LAN
   (`192.168.0.94`) and should drive Kyokki through the HTTP API and the `kyokki` CLI. No MCP.
@@ -45,8 +50,8 @@ Planned 2026-09-14. ~~Starts after MVP-P3~~ **Started 2026-09-25** (operator rul
     `Idempotency-Key` both insert, so duplicate open items appear. There is no lock or unique
     constraint.
   - [x] AG6 (#102, fixed in #112: every bad shape is 400 `invalid`; `sources` is a list of
-    source names, published as required; `recipe` / `meal_plan` shapes wait for AG5): `sources: list[str]` answers 422 to a bare string or to the
-    `{"recipe": {...}}` object form, not 400 `invalid`. Settle the source shape before AG5 and
+    source names, published as required; `recipe` / `meal_plan` shapes wait for RC5): `sources: list[str]` answers 422 to a bare string or to the
+    `{"recipe": {...}}` object form, not 400 `invalid`. Settle the source shape before RC5 and
     the `kyokki shopping` commands.
   - [x] AG6 (#102, fixed and tested in #112): a skipped line in an incompatible unit carries `need`/`on_hand`, contrary
     to the schema docstrings, and has no test. The unit-conversion test uses `l`, which
@@ -73,7 +78,7 @@ Planned 2026-09-14. ~~Starts after MVP-P3~~ **Started 2026-09-25** (operator rul
 A Hermes Agent or OpenClaw agent runs the kitchen through Kyokki the way a person would:
 - adds and consumes stock;
 - creates generic products and teaches store names;
-- explores and cooks recipes;
+- explores and cooks recipes (through the recipe API of `docs/recipes_TODO.md`);
 - builds the shopping list.
 
 ## Rulings (2026-09-14)
@@ -87,9 +92,8 @@ A Hermes Agent or OpenClaw agent runs the kitchen through Kyokki the way a perso
 - **The agent runs on the local network** (operator, 2026-09-14). It reaches the API at
   `http://<homelab>:17300/api` directly, with no HTTPS, tunnel or public exposure needed.
   AG1 tokens still apply, so only the agent (and the iPad proxy) can write.
-- **Recipes live in an existing recipe service if one fits.** The operator leans towards Mealie
-  or an alternative, and would rather not maintain a native recipe model. The requirement is
-  HowToCook-level granularity. AG0 decides.
+- ~~**Recipes live in an existing recipe service if one fits.**~~ Superseded 2026-10-18: recipes
+  are native in Kyokki (`docs/recipes_TODO.md`).
 
 ## Where we are today
 The API is usable by an agent already, but it was built for the iPad screens.
@@ -102,7 +106,7 @@ The API is usable by an agent already, but it was built for the iPad screens.
 | Products | `GET/POST /api/products` | No "resolve this name" with candidates and confidence, so agents create duplicates; no alias API (aliases are learned only on receipt confirm) |
 | Receipts | upload, queue, confirm | Usable, but confirm needs line indexes from a GET first |
 | Shopping list | CRUD + purchase (`/api/shopping`) | No generation from low stock or recipes; no link from purchase to stock |
-| Recipes | none (`mealie_integration_TODO.md` is unbuilt) | Everything |
+| Recipes | none | Its own feature now: `docs/recipes_TODO.md` (2026-10-18) |
 | Auth | none; the API is open on the LAN | The agent runs on the LAN too: a token keeps writes to known clients; the iPad must keep working |
 | Discoverability | OpenAPI at `/docs` | Errors are free text, with no stable codes, candidates or next steps |
 
@@ -125,38 +129,9 @@ The API is usable by an agent already, but it was built for the iPad screens.
 
 ## Increments
 
-### AG0 — Recipe backend decision (spike, operator-gated)
-Import 3 translated HowToCook recipes into **Mealie** and **Tandoor**, then compare them with the
-criteria below. The recipes are a stir-fry, a soup and something with a sub-recipe or sauce, from
-the operator's translation project.
-- **Granularity:**
-  - HowToCook's "Calculations" section gives exact grams or millilitres per serving.
-  - "Operations" gives steps with exact amounts and completion criteria, and timings as ranges.
-  - The service must store per-ingredient amount, unit and food, ingredients per step,
-    servings scaling, step timers, sections, tools, and a difficulty rating (a tag or custom
-    field is fine).
-  - Mealie links ingredients to steps and stores quantity/unit/food/note per ingredient.
-  - Tandoor models ingredients inside steps (`steps[].ingredients[]`) and supports sub-recipes.
-  - Verify both hands-on; don't trust the docs alone.
-- **Import:** bulk import of the translated Markdown or JSON through the REST API, without
-  losing amounts.
-- **Food mapping:** the service's food names can be mapped to Kyokki generic products (English
-  names), and the mapping survives re-imports.
-- **API:** token auth, search by name and by ingredient, and read recipes with structured
-  ingredients.
-- **Ops:** runs on the homelab stack (its own Postgres database or SQLite), plus the backup story.
-- **Licence** (checked 2026-09-14): both allow free self-hosting and integration over their HTTP
-  APIs. Kyokki runs them unmodified as separate services and never copies their code, so neither
-  licence reaches Kyokki's own code.
-  - **Mealie:** AGPL-3.0. Modifying Mealie and offering it over a network requires publishing
-    those changes.
-  - **Tandoor:** AGPL-3.0 with a Commons Clause selling restriction. Selling the software, or a
-    paid hosting or support service whose value comes substantially from it, is not allowed. It
-    is therefore not OSI open source, although personal self-hosting is explicitly free.
-  - Only matters if Kyokki were ever sold as a hosted product bundling Tandoor.
-- **Fallback:** a thin native model in Kyokki (recipe, step, ingredient) only if neither service
-  holds the granularity. The operator prefers to avoid this.
-- **Output:** a filled comparison table in this file, and the operator's pick. AG5 follows it.
+### AG0 — Recipe backend decision — dropped (operator, 2026-10-18)
+Recipes are stored natively in Kyokki (`docs/recipes_TODO.md`). The Mealie/Tandoor comparison is
+not run.
 
 ### AG1 — Agent access tokens
 - `KYOKKI_API_TOKENS`: named tokens with scopes (`read`, `write`), e.g.
@@ -261,8 +236,8 @@ httpx plus argparse or Typer, with no backend imports.
   kyokki receipt upload FILE ; kyokki receipt status ID ; kyokki receipt confirm ID --all-matched
   kyokki shopping list [--all] [--priority P] | add NAME [AMOUNT UNIT] [--priority P] [--product-id ID]
                   | done ID [--undo] | remove ID | generate [--from low-stock] [--dry-run]
-                  | export [--format text|markdown]         (shipped #111; --from recipe waits for AG5)
-  kyokki recipe search QUERY | show SLUG | can-cook [--expiring] | cook SLUG [--servings N] [--dry-run]
+                  | export [--format text|markdown]         (shipped #111; --from recipe waits for RC5/AG8)
+  kyokki recipe ...                                     (AG8, after RC4/RC5 in docs/recipes_TODO.md)
   ```
 - **Tests:**
   - Golden `-h` snapshots.
@@ -290,29 +265,13 @@ httpx plus argparse or Typer, with no backend imports.
 - **Acceptance:** a scripted run with Hermes Agent against a staging stack completes 10 tasks
   (list below) without human correction. Record the transcript in this file.
 
-### AG5 — Recipes (after AG0)
-Adapter module `app/integrations/recipes/` behind a `RecipeSource` interface (Mealie or Tandoor
-client), so the choice stays swappable.
-- **Food mapping:** the recipe service's food is mapped to a Kyokki generic product.
-  - The mapping is stored in Kyokki (`recipe_food_map`: source food id → `product_master_id`,
-    verified flag).
-  - It is auto-proposed with `MatchingService`, and unmapped foods are listed for the agent or
-    user to map.
-- **Endpoints:**
-  - `GET /api/recipes?q=&ingredient=` and `GET /api/recipes/{slug}` (normalised ingredients in
-    canonical units, steps).
-  - `GET /api/recipes/cookable` gives the availability percentage per recipe, with missing
-    ingredients.
-  - `GET /api/recipes/suggestions?strategy=expiring` ranks recipes that use soon-expiring stock.
-  - `POST /api/recipes/{slug}/cook {servings, dry_run}` consumes through AG2's consume for each
-    ingredient in one transaction:
-    - a dry run shows deductions and shortages;
-    - a real cook needs no shortages or `allow_partial`;
-    - it writes a `cooking_session` record.
-- **HowToCook import** happens in the operator's translation project, through the recipe
-  service's API. Kyokki only reads.
-- This supersedes the recipe parts of `mealie_integration_TODO.md`; its meal-plan parts stay
-  post-MVP backlog.
+### AG5 — Recipes — replaced by `docs/recipes_TODO.md` (operator, 2026-10-18)
+RC1-RC6 there (model, import, availability, cook, gaps to shopping, substitutions), RC7 the iPad.
+
+### AG8 — Recipe commands for the agent (after RC4 and RC5)
+- CLI: `kyokki recipe search | show | can-cook [--expiring] | cook SLUG [--servings N] [--dry-run]`
+  and `kyokki shopping generate --from recipe`, on the RC endpoints. No logic in the CLI.
+- Skill: the cook-with-dry-run and recipe-shopping workflows; swaps only when the user asks.
 
 ### AG6 — Shopping list extraction
 - **`POST /api/shopping/generate {sources: [low_stock | recipe:{slug, servings} | meal_plan:{from,to}], dry_run}`:**
@@ -344,10 +303,10 @@ Record the pass/fail and any friction here, and fix it before calling the track 
 ```
 AG1 tokens ─┬─> AG2 stock/product endpoints ─> AG3 CLI ─> AG4 skill ─┐
             │                                                        ├─> AG7 acceptance
-AG0 recipe decision ─> AG5 recipes ─> AG6 shopping generation ───────┘
+recipes RC1-RC5 (docs/recipes_TODO.md) ─> AG8 recipe CLI + skill ──┘
 ```
-AG0 can run in parallel with AG1–AG4. AG6's `low_stock` source does not need recipes and can
-ship before AG5.
+AG0 is dropped and AG5 moved to `docs/recipes_TODO.md` (2026-10-18). AG6's `low_stock` and
+`runout` sources shipped without recipes; its `recipe` source is RC5.
 
 ### Dependencies from the 2026-09-17 reviews
 The hardening track in `docs/TODO.md` (H0-H4) runs before this track, and four of its items
@@ -365,7 +324,5 @@ AG2's open question on consume marking items `opened` is answered: Q5 (PR #49) a
 that through `apply_quantity_status` and the opened clock.
 
 ## Open questions (decide in the named increment)
-- AG0: recipe service choice, and whether difficulty or calories need custom fields.
 - AG2: whether consume should also mark items `opened` (post-MVP "Opened tracking").
-- AG5: how cooking handles `pcs` ingredients against weight stock (e.g. "2 tomatoes" vs 500 g).
-  Options are a per-product average piece weight, or asking.
+- (Moved to `docs/recipes_TODO.md`, RC1: `pcs` ingredients against weight stock.)
