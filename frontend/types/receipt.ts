@@ -31,6 +31,30 @@ export type MatchConfidence = 'exact' | 'high' | 'medium' | 'low'
 export type MatchSource = 'alias' | 'name' | 'selected' | 'none'
 
 /**
+ * Why a product is only suggested for a line, not joined to it (CL8 L1). A line joins a
+ * product only on an exact key; anything weaker arrives as a suggestion the cook accepts.
+ * selected: the model picked it from the shortlist.
+ * unverified_alias: an alias at this receipt's chain that the cook never verified.
+ * other_chain_alias: an alias learned at another chain (`store_chain` says which).
+ * model_name: the printed name equals a name the model taught.
+ * generic_name: the generic name equals a catalog name that is not the cook's word.
+ */
+export type SuggestionReason =
+  | 'selected'
+  | 'unverified_alias'
+  | 'other_chain_alias'
+  | 'model_name'
+  | 'generic_name'
+
+/** A product proposed for a line; never used until the cook accepts it (CL8 L1). */
+export interface ReceiptSuggestion {
+  product_id: string
+  product_name: string
+  reason: SuggestionReason
+  store_chain?: string | null // Set for other_chain_alias only
+}
+
+/**
  * How a line the model's first answer left out was put back (Q27).
  * model_retry: the model read it on a second, targeted pass.
  * raw_line: the receipt line's raw text, kept as the name - no generic name and no category,
@@ -63,7 +87,7 @@ export interface ExtractedItem {
   generic_name: string | null // Brand-free generic name suggested for a new product
   quantity: number
   unit: ReceiptUnit
-  product_id: string | null // Matched product UUID
+  product_id: string | null // Product joined on an exact key (CL8 L1); null otherwise
   product_name: string | null
   match_score: number | null // 0-100
   match_confidence: MatchConfidence | null
@@ -80,6 +104,8 @@ export interface ExtractedItem {
   storage_type: StorageType
   location: 'main_fridge' | 'freezer' | 'pantry'
   recovered?: RecoveredBy | null // Put back after the model missed it; absent on older receipts
+  // A product proposed but not joined; null when keyed or when nothing was proposed (CL8 L1)
+  suggestion: ReceiptSuggestion | null
 }
 
 export interface Receipt {
@@ -144,6 +170,8 @@ export interface ConfirmedItemCreate {
   index?: number | null // Receipt line by position
   line_id?: string | null // Receipt line by identity; wins over index
   product_id?: string | null
+  // product_id is the line's suggestion, accepted by the cook (CL8 L1); default false
+  accepted_suggestion?: boolean
   name?: string | null
   category?: string | null
   quantity: number
@@ -156,6 +184,26 @@ export interface ConfirmedItemCreate {
 export interface ReceiptConfirmRequest {
   items: ConfirmedItemCreate[] // Lines not sent are skipped
   non_food_indexes?: number[] // Lines the cook says are not food; remembered (Q1)
+}
+
+/** One confirm item whose new-product name already names a product (CL8 L1). */
+export interface NameExistsItem {
+  position: number // Place in the request's items array
+  line_id: string | null
+  index: number | null
+  name: string
+  product_id: string
+  product_name: string
+}
+
+/**
+ * The 409 `name_exists` body of `POST /api/receipts/{id}/confirm` (`detail`): nothing was
+ * written; every clashing item is listed. Send each again with `product_id` or a new name.
+ */
+export interface ConfirmNameExistsDetail {
+  code: 'name_exists'
+  message: string
+  items: NameExistsItem[]
 }
 
 export interface ReceiptConfirmResponse {

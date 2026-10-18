@@ -372,6 +372,7 @@ export const fi: Messages = {
       other: '{count} kotitaloustuotetta · ',
     },
     dismiss: 'Hylkää kuitti',
+    acceptAll: 'Hyväksy kaikki ehdotukset ({count})',
     addCount: { one: 'Lisää {count} tuote', other: 'Lisää {count} tuotetta' },
     toast: {
       dismissed: 'Hylätty · {store}',
@@ -380,6 +381,7 @@ export const fi: Messages = {
         other: 'Lisätty {count} tuotetta · {store}',
       },
       addError: 'Tuotteiden lisäys epäonnistui',
+      nameExists: 'Osa riveistä nimeää tuotteen, joka on jo olemassa. Valitse jokaiselle.',
     },
     itemRow: {
       include: 'Sisällytä {name}',
@@ -398,6 +400,25 @@ export const fi: Messages = {
         'Tätä riviä on muokattu käsin. Korvataanko se uudelleenanalyysin tuloksella?',
       needName: 'Anna tälle tuotteelle nimi sisällyttääksesi sen',
       needCategory: 'Valitse kategoria sisällyttääksesi sen',
+      newRow: 'Uusi: {name}',
+      suggested: 'Ehdotus: {name}',
+      accept: 'Hyväksy',
+      acceptAriaLabel: 'Hyväksy {name}',
+      search: 'Hae',
+      searchAriaLabel: 'Hae tuote: {name}',
+      undoAccept: 'Kumoa',
+      undoAcceptAriaLabel: 'Kumoa hyväksyntä: {name}',
+      reason: {
+        selected: 'mallin valitsema',
+        unverifiedAlias: 'opittu nimi ({chain})',
+        otherChainAlias: 'toisessa kaupassa opittu nimi',
+        otherChainAliasAt: 'toisessa kaupassa opittu nimi ({chain})',
+        modelName: 'mallin opettama nimi',
+        genericName: 'luenta antoi tämän nimen',
+      },
+      nameExists: '{name} on jo olemassa —',
+      useProduct: 'Käytä tuotetta {name}',
+      orRename: 'tai anna toinen nimi',
     },
     provenance: {
       known: 'tiedossa',
@@ -566,6 +587,11 @@ export const fi: Messages = {
     title: 'Muokkaa: {name}',
     saved: 'Tallennettu · {name}',
     saveError: 'Tuotteen tallennus epäonnistui',
+    keepOldName: {
+      question: "Säilytetäänkö vanha nimi '{name}' tämän tuotteen toisena nimenä?",
+      keep: 'Säilytä',
+      forget: 'Unohda',
+    },
     units: { pcs: 'kpl', g: 'g', dl: 'dl', tsp: 'tl', tbsp: 'rkl' },
     icon: {
       legend: 'Kuvake',
