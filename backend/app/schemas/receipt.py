@@ -114,7 +114,7 @@ def served_identity(line: dict[str, Any]) -> ServedIdentity:
     alias_source = str(alias_source) if alias_source else None
     join_key = resolution.get("join_key")
     join_key = str(join_key) if join_key else None
-    product_id = line.get("product_id")
+    product_id = line.get("product_id") or resolution.get("product_id")
     product_name = line.get("product_name")
 
     if "suggestion" in resolution:

@@ -616,6 +616,8 @@ class TestReceiptItems:
             "unit": "pcs",
             "product_id": str(product.id),
             "product_name": "BARISTA KAURAJUOMA",
+            # An exact key, so nothing is suggested (CL8)
+            "suggestion": None,
             # Scores no longer decide anything (H13), so they are no longer stored.
             "match_score": None,
             "match_confidence": None,
