@@ -356,7 +356,7 @@ function LeafMask({ id }: { id: string }) {
  * midrib, a shade deeper in the dark theme. `maskId` must be unique per drawing.
  */
 export function Monstera({ potX, base, maskId }: { potX: number; base: number; maskId: string }) {
-  const rimY = base - 124
+  const rimY = base - 112
   const stemY = rimY + 4
   return (
     <g>
@@ -388,23 +388,23 @@ export function Monstera({ potX, base, maskId }: { potX: number; base: number; m
           </g>
         </g>
       ))}
-      {/* The pot: a tapering body, a rim, a little soil */}
+      {/* The pot, standing on `base`: a tapering body, a rim, a little soil */}
       <path
-        d={`M${potX - 30},${rimY + 10} L${potX + 30},${rimY + 10} L${potX + 24},${base} L${potX - 24},${base} Z`}
+        d={`M${potX - 26},${rimY + 10} L${potX + 26},${rimY + 10} L${potX + 20},${base} L${potX - 20},${base} Z`}
         className="fill-[#e0a07a] stroke-[#b8754f] dark:fill-[#8a5a42] dark:stroke-[#5f3c2b]"
         strokeWidth={2}
         strokeLinejoin="round"
       />
       <rect
-        x={potX - 36}
+        x={potX - 30}
         y={rimY}
-        width={72}
+        width={60}
         height={14}
         rx={4}
         className="fill-[#e8b08c] stroke-[#b8754f] dark:fill-[#9a6650] dark:stroke-[#5f3c2b]"
         strokeWidth={2}
       />
-      <ellipse cx={potX} cy={rimY + 2} rx={30} ry={3} className="fill-[#6b4a32] dark:fill-[#3a2a1e]" />
+      <ellipse cx={potX} cy={rimY + 2} rx={25} ry={3} className="fill-[#6b4a32] dark:fill-[#3a2a1e]" />
     </g>
   )
 }

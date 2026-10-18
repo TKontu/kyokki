@@ -183,7 +183,7 @@ function FridgeDrawing({ hasOther }: { hasOther: boolean }) {
           Other's crate stands */}
       <rect x={622} y={356} width={144} height={416} className={LARDER_INSIDE} />
       <g data-part="plant">
-        <Monstera potX={696} base={342} maskId={ids.leaf} />
+        <Monstera potX={748} base={342} maskId={ids.leaf} />
       </g>
       <g data-part="bread-basket">
         <Basket box={{ x: 634, y: 262, w: 124, h: 80 }} loaves />
