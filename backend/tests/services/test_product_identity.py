@@ -440,6 +440,57 @@ class TestConfirmRefusesASilentNameJoin:
         assert [(c.position, c.index) for c in caught.value.clashes] == [(0, 0), (2, 2)]
         assert str(caught.value) == "2 lines name a product that already exists"
 
+    async def test_a_free_item_typed_as_an_existing_name_joins_it(
+        self, db_session: AsyncSession, pie, categories
+    ) -> None:
+        """CONTRACT §2 amendment (2026-10-18): an item with no receipt line - the
+        review screen's hand-added "missed" item - is a typed name, like quick add."""
+        milk = await _product(db_session, "Milk")
+        receipt = await _receipt(db_session, [_stew_line(pie)])
+
+        result = await confirm_receipt(db_session, receipt.id, [_item(name="milk")])
+
+        assert result.products_created == 0
+        item = (await db_session.execute(select(InventoryItem))).scalar_one()
+        assert (item.product_master_id, item.join_source, item.join_key) == (
+            milk.id,
+            "name",
+            "milk",
+        )
+
+    async def test_a_line_item_named_as_an_existing_name_is_name_exists(
+        self, db_session: AsyncSession, pie, categories
+    ) -> None:
+        milk = await _product(db_session, "Milk")
+        milk_id = milk.id
+        receipt = await _receipt(
+            db_session,
+            [{"name": "VALIO MAITO", "generic_name": "Milk", "category": "dairy"}],
+        )
+
+        with pytest.raises(NameExists) as caught:
+            await confirm_receipt(db_session, receipt.id, [_item(index=0)])
+
+        assert [c.product_id for c in caught.value.clashes] == [milk_id]
+
+    async def test_a_free_item_never_joins_a_model_name(
+        self, db_session: AsyncSession, pie
+    ) -> None:
+        await learn_product_name(db_session, pie, "Karelian stew", "model")
+        await db_session.commit()
+        receipt = await _receipt(db_session, [_stew_line(pie)])
+
+        result = await confirm_receipt(
+            db_session,
+            receipt.id,
+            [_item(name="Karelian stew", category="ready_meals")],
+        )
+
+        assert result.products_created == 1
+        item = (await db_session.execute(select(InventoryItem))).scalar_one()
+        assert item.product_master_id != pie.id
+        assert item.join_source == "created"
+
     async def test_a_model_name_neither_blocks_nor_joins(
         self, db_session: AsyncSession, pie
     ) -> None:

@@ -275,15 +275,31 @@ class TestLocationsAndOverrides:
 
 
 class TestProductReuse:
-    async def test_a_new_name_equal_to_an_existing_product_is_name_exists(
+    async def test_new_name_reuses_an_existing_product_ignoring_case(
         self, db_session, receipt, milk
     ):
-        """CL8: a name never joins an existing product silently, whatever its case;
-        the cook is asked to use it (send its id) or name this one differently."""
+        """An item with no receipt line is a typed name, like quick add: it joins its
+        key (CONTRACT §2 amendment, 2026-10-18). A line item would answer 409."""
+        result = await confirm_receipt(
+            db_session, receipt.id, [_item(name="  mILK ", category="dairy")]
+        )
+
+        assert result.products_created == 0
+        (item,) = await _inventory(db_session)
+        assert item.product_master_id == milk.id
+        assert (item.join_source, item.join_key) == ("name", "milk")
+
+    async def test_a_line_named_as_an_existing_product_is_name_exists(
+        self, db_session, receipt, milk
+    ):
+        """CL8: a line's name never joins an existing product silently, whatever its
+        case; the cook is asked to use it (send its id) or name this one differently."""
         milk_id = milk.id
         with pytest.raises(NameExists) as caught:
             await confirm_receipt(
-                db_session, receipt.id, [_item(name="  mILK ", category="dairy")]
+                db_session,
+                receipt.id,
+                [_item(index=3, name="  mILK ", category="dairy")],
             )
 
         (clash,) = caught.value.clashes

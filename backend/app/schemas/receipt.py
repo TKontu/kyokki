@@ -531,7 +531,9 @@ class ConfirmedItemCreate(BaseModel):
     Give ``product_id`` for an existing product. Otherwise a **new** product is created:
     ``name`` and ``category`` default to the receipt line's generic name and category, and a
     name that already belongs to a product answers 409 ``name_exists`` instead of joining it
-    (CL8). ``index`` names the receipt line, so its printed name is learned as an alias.
+    (CL8). An item with no receipt line (a hand-added item) is a typed name, like quick
+    add, and joins the product that name belongs to. ``index`` names the receipt line,
+    so its printed name is learned as an alias.
     """
 
     index: int | None = Field(

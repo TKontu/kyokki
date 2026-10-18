@@ -184,11 +184,15 @@ class _Confirmation:
         """Every item whose new-product name is already a product's key (CL8).
 
         Checked for all items before anything is written. A name the model taught is not
-        a key (`decide_name`), so it never blocks.
+        a key (`decide_name`), so it never blocks. An item with no receipt line (neither
+        `line_id` nor `index`: a hand-added "missed" item the cook typed) is a typed name
+        like quick add and joins its key instead (CONTRACT §2 amendment, 2026-10-18).
         """
         found: list[NameClash] = []
         for position, item in enumerate(items):
             if item.product_id is not None:
+                continue
+            if item.line_id is None and item.index is None:
                 continue
             line_index, line = self.line(position, item)
             name = self._name_for(item, line)
@@ -271,14 +275,18 @@ class _Confirmation:
             return "cook_accepted", True
         return "cook", True
 
-    @classmethod
     def _join(
-        cls, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
+        self, line: dict[str, Any], product: ProductMaster, item: ConfirmedItemCreate
     ) -> tuple[JoinSource, str | None]:
         """`inventory_item.join_source` / `join_key` for this item (CL8 provenance)."""
         printed = normalize_receipt_name(str(line["name"])) if line.get("name") else ""
         if item.product_id is None:
-            return "created", normalize_product_name(cls._name_for(item, line)) or None
+            key = normalize_product_name(self._name_for(item, line)) or None
+            if product.id in self.result.created_product_ids:
+                return "created", key
+            # Only a line-less item gets here: its typed name joined a key.
+            return "name", key
+        cls = type(self)
         if cls._kept(line, product):
             served = cls._served(line)
             if served.match_source == "alias":
