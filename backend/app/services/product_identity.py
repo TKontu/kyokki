@@ -23,7 +23,6 @@ writes a join.
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -115,7 +114,7 @@ class ReceiptIdentity:
         self,
         chain: str | None,
         aliases: dict[str, list[StoreProductAlias]],
-        products: dict[UUID, ProductMaster],
+        products: dict[Any, ProductMaster],
         names: dict[str, KnownName],
     ):
         self.chain = _chain_key(chain)
@@ -135,7 +134,7 @@ class ReceiptIdentity:
         keys = {normalize_receipt_name(printed) for printed, _ in pairs}
         keys.discard("")
         aliases: dict[str, list[StoreProductAlias]] = {}
-        products: dict[UUID, ProductMaster] = {}
+        products: dict[Any, ProductMaster] = {}
         if keys:
             rows = (
                 (
@@ -195,7 +194,7 @@ class ReceiptIdentity:
         # K1
         if here is not None and here.manually_verified:
             return KeyJoin(
-                product=self._products[here.product_master_id],  # type: ignore[index]
+                product=self._products[here.product_master_id],
                 source="alias",
                 key=printed_key,
                 alias_source=str(here.source or "cook"),
@@ -219,12 +218,12 @@ class ReceiptIdentity:
 
         if here is not None:
             return Suggestion(
-                product=self._products[here.product_master_id],  # type: ignore[index]
+                product=self._products[here.product_master_id],
                 reason="unverified_alias",
             )
         if elsewhere is not None:
             return Suggestion(
-                product=self._products[elsewhere.product_master_id],  # type: ignore[index]
+                product=self._products[elsewhere.product_master_id],
                 reason="other_chain_alias",
                 store_chain=str(elsewhere.store_chain),
             )

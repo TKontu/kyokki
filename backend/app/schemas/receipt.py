@@ -378,7 +378,7 @@ def items_from_structured(structured: dict[str, Any] | None) -> list[ExtractedIt
                 generic_name=line.get("generic_name"),
                 quantity=quantity,
                 unit=unit,
-                product_id=served.product_id,
+                product_id=UUID(served.product_id) if served.product_id else None,
                 product_name=served.product_name if served.product_id else None,
                 suggestion=_suggestion_out(served.suggestion),
                 match_score=line.get("match_score"),

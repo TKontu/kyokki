@@ -291,6 +291,9 @@ class TestPersistence:
                 "source": "name",
                 "verified": True,
                 "candidates": [],
+                # CL8: a key, so nothing suggested; the key it joined on is recorded
+                "suggestion": None,
+                "join_key": "valio whole milk 1l",
             },
         }
         assert UUID(milk["line_id"])
@@ -419,8 +422,8 @@ class TestPersistence:
         """Old contract (H12/H13): a catalog name hit through the generic name alone
         was a deterministic key (`match_source == "name"`), the same as a printed-name
         hit. Q37 contract: a hit reached *only* through the generic name is a proposal,
-        not a key - it is offered to one selection call (stubbed here to confirm it),
-        and resolves as `selected`/unverified rather than `name`/verified."""
+        not a key - it is offered to one selection call (stubbed here to confirm it).
+        CL8: that pick is stored as a `selected` suggestion, never as the product."""
         beef = ProductMaster(
             id=uuid4(),
             canonical_name="Ground beef",
@@ -454,9 +457,14 @@ class TestPersistence:
         await db_session.refresh(pdf_receipt)
         (line,) = pdf_receipt.ocr_structured["lines"]
         assert line["generic_name"] == "Ground beef"
-        assert line["product_id"] == str(beef.id)
-        assert line["match_source"] == "selected"
+        assert line["product_id"] is None
+        assert line["match_source"] is None
         assert line["resolution"]["verified"] is False
+        assert line["resolution"]["suggestion"] == {
+            "product_id": str(beef.id),
+            "product_name": "Ground beef",
+            "reason": "selected",
+        }
 
     async def test_a_rejected_generic_name_snap_leaves_the_line_unmatched(
         self, service, pdf_receipt, sample_category, db_session
@@ -2914,7 +2922,8 @@ class TestPrintedPackSizeWins:
         as 250 g. Q37: the match here is reached only through the generic name, so it
         now takes one selection call (stubbed here to confirm it) rather than resolving
         as a deterministic key outright; the printed size still wins over the
-        catalog's own regardless of how the match was reached."""
+        catalog's own regardless of how the match was reached. CL8: the pick is only
+        a suggestion now, so the catalog's size is not even consulted."""
         tomato = ProductMaster(
             id=uuid4(),
             canonical_name="Cherry tomato",
@@ -2944,7 +2953,8 @@ class TestPrintedPackSizeWins:
             await service.process_receipt(pdf_receipt)
 
         (line,) = pdf_receipt.ocr_structured["lines"]
-        assert line["product_id"] == str(tomato.id)
+        assert line["product_id"] is None
+        assert line["resolution"]["suggestion"]["product_id"] == str(tomato.id)
         assert line["pack_grams"] == 200.0
 
 

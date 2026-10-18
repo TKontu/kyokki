@@ -294,7 +294,7 @@ class TestDeterministicTiers:
     async def test_an_unverified_alias_is_only_a_suggestion(
         self, db_session: AsyncSession, catalog
     ) -> None:
-        """It still pre-fills the row; the row shows it as "auto" rather than known."""
+        """It no longer pre-fills the row (CL8): the cook accepts it or not."""
         db_session.add(
             StoreProductAlias(
                 product_master_id=catalog["butter"].id,
@@ -321,7 +321,8 @@ class TestDeterministicTiers:
     ) -> None:
         """Precedence is verified, then occurrence count, then recency. Since H14 one
         printed name has at most one alias per chain, so this is decided between
-        chains - here the receipt is from a third chain, so neither wins on chain."""
+        chains - here the receipt is from a third chain, so neither wins on chain.
+        CL8: either way it is only a suggestion."""
         now = datetime.now(UTC)
         db_session.add_all(
             [

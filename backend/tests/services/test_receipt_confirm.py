@@ -794,7 +794,8 @@ def _selected(product: ProductMaster) -> dict:
 
 class TestModelGuessesDoNotBecomeKeys:
     """Q13 (H51): a model selection the cook did not contradict is remembered, but it is
-    never the cook's word. It resolves as "auto", and the cook's next correction moves it.
+    never the cook's word. It is only ever a suggestion (CL8), and the cook's next
+    correction moves it.
 
     Before this, `learn_names` wrote the generic name as a synonym of whatever product was
     kept, tier 4 called every synonym verified, and the first claim won for ever: once
