@@ -554,6 +554,8 @@ class TestPersistence:
         assert line["resolution"]["rejected_product_id"] == str(dip.id)
         assert line["resolution"]["corrected_generic"] == "Pesto"
         assert line["resolution"]["generic_from_extraction"] == "Dip"
+        # Selection said no, so the snap is not offered either (CL8 review)
+        assert line["resolution"]["suggestion"] is None
 
     async def test_alias_match_is_stored_per_line(
         self, service, pdf_receipt, sample_product, db_session

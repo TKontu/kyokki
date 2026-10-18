@@ -357,12 +357,15 @@ class ProductResolution:
             results[line_id].suggestion = selected(product)
 
         # A rejection exists only for the g-only proposal (Q37b): a line whose snap was
-        # offered but whose answer did not land on it (it stays a `generic_name`
-        # suggestion) - a trigram-only line that stayed
+        # offered but whose answer did not land on it - a trigram-only line that stayed
         # unmatched never proposed anything, so there is nothing to have rejected.
+        # Selection judged the snap against the printed text and said no, so it is not
+        # offered either (KARJALANPAISTI: "Accept all" would stock the stew on the pie).
+        # Only when selection could not run does the `generic_name` suggestion stay.
         for line_id, snap in proposed.items():
             if line_id in chosen:
                 continue
+            results[line_id].suggestion = None
             results[line_id].rejected_product_id = cast(UUID, snap.id)
             name = corrected.get(line_id)
             if name:

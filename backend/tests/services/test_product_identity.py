@@ -40,6 +40,7 @@ from app.services.product_identity import (
     decide_name,
 )
 from app.services.product_resolution import ProductResolution, ResolvableLine
+from app.services.product_selection import SelectionResult
 from app.services.quick_add import quick_add
 from app.services.receipt_confirm import NameExists, confirm_receipt
 from app.services.stock import add_stock
@@ -156,24 +157,12 @@ class TestKarjalanpaistiNeverResolvesToKarelianPie:
         assert blob["product_id"] is None
         assert blob["suggestion"]["reason"] == "selected"
 
-    async def test_a_selection_that_fails_leaves_no_product(
+    async def test_a_selection_that_fails_keeps_the_generic_name_suggestion(
         self, db_session: AsyncSession, pie, _no_model_selection
     ) -> None:
+        """Selection could not judge the line, so the Q37 hit stays on offer,
+        unticked - never the product."""
         _no_model_selection.side_effect = LLMExtractionError("gateway down")
-
-        resolved = await ProductResolution(db_session).resolve(
-            [_line("KARJALANPAISTI", "Karelian pie")], chain="s-group"
-        )
-
-        result = resolved["KARJALANPAISTI"]
-        assert result.product is None
-        # The Q37 hit stays on offer, unticked: never the product.
-        assert result.suggestion is None or result.suggestion.reason == "generic_name"
-
-    async def test_a_selection_that_answers_null_keeps_the_generic_name_suggestion(
-        self, db_session: AsyncSession, pie, _no_model_selection
-    ) -> None:
-        _no_model_selection.side_effect = lambda lines: {}
 
         resolved = await ProductResolution(db_session).resolve(
             [_line("KARJALANPAISTI", "Karelian pie")], chain="s-group"
@@ -186,6 +175,53 @@ class TestKarjalanpaistiNeverResolvesToKarelianPie:
             "generic_name",
             pie.id,
         )
+
+    async def test_without_the_model_the_generic_name_suggestion_stays(
+        self, db_session: AsyncSession, pie, _no_model_selection
+    ) -> None:
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("KARJALANPAISTI", "Karelian pie")],
+            chain="s-group",
+            allow_model=False,
+        )
+
+        result = resolved["KARJALANPAISTI"]
+        assert result.product is None
+        assert result.suggestion is not None
+        assert result.suggestion.reason == "generic_name"
+        _no_model_selection.assert_not_awaited()
+
+    async def test_a_selection_that_answers_null_offers_nothing(
+        self, db_session: AsyncSession, pie, _no_model_selection
+    ) -> None:
+        """Selection judged the pie against the printed text and said no: offering it
+        anyway would let "Accept all" stock the stew on the pie."""
+        _no_model_selection.side_effect = lambda lines: {}
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("KARJALANPAISTI", "Karelian pie")], chain="s-group"
+        )
+
+        result = resolved["KARJALANPAISTI"]
+        assert (result.product, result.suggestion) == (None, None)
+        assert result.rejected_product_id == pie.id
+        assert result.as_dict()["suggestion"] is None
+
+    async def test_a_selection_that_corrects_the_name_offers_nothing(
+        self, db_session: AsyncSession, pie, _no_model_selection
+    ) -> None:
+        _no_model_selection.side_effect = lambda lines: SelectionResult(
+            {}, {lines[0].line_id: "Karelian stew"}
+        )
+
+        resolved = await ProductResolution(db_session).resolve(
+            [_line("KARJALANPAISTI", "Karelian pie")], chain="s-group"
+        )
+
+        result = resolved["KARJALANPAISTI"]
+        assert (result.product, result.suggestion) == (None, None)
+        assert result.rejected_product_id == pie.id
+        assert result.corrected_generic == "Karelian stew"
 
 
 class TestKeysAndSuggestions:
