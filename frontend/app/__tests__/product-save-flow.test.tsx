@@ -178,6 +178,7 @@ it('leaves the item sheet usable after a rename, Finnish name, shelf life and ca
   const blurred: boolean[] = []
   finnish.addEventListener('focusout', () => blurred.push(finnish.isConnected))
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
 
   // Back on the item's own sheet, which follows the saved product
   const sheet = await screen.findByRole('dialog', { name: 'Green peas' })
@@ -187,6 +188,7 @@ it('leaves the item sheet usable after a rename, Finnish name, shelf life and ca
       default_shelf_life_days: 200,
       category: 'frozen',
       display_names: { fi: 'Herneet' },
+      keep_old_name: true,
     },
   ])
   // The field was let go of (the keyboard closes) before its sheet went, and the page stayed

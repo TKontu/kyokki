@@ -160,6 +160,7 @@ describe('TypeScript Types', () => {
             printed_unit: null,
             storage_type: 'refrigerator',
             location: 'main_fridge',
+            suggestion: null,
           },
         ],
         created_at: '2024-01-01T00:00:00Z',
@@ -192,6 +193,12 @@ describe('TypeScript Types', () => {
         storage_type: 'refrigerator',
         location: 'main_fridge',
         recovered: 'raw_line',
+        suggestion: {
+          product_id: '123e4567-e89b-12d3-a456-426614174001',
+          product_name: 'Banana',
+          reason: 'other_chain_alias',
+          store_chain: 'lidl',
+        },
       }
       const completeness: Receipt['completeness'] = {
         text_lines: 15,
@@ -209,6 +216,7 @@ describe('TypeScript Types', () => {
       // Older receipts carry neither field
       const older: ExtractedItem['recovered'] = null
       expect(item.recovered).toBe('raw_line')
+      expect(item.suggestion?.reason).toBe('other_chain_alias')
       expect(completeness?.text_lines).toBe(15)
       expect(photo?.text_lines).toBeNull()
       expect([retried, older]).toEqual(['model_retry', null])

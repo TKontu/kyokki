@@ -238,6 +238,7 @@ describe('ProductsPage', () => {
     fireEvent.change(await screen.findByLabelText('Keeps for'), { target: { value: '9' } })
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Minced beef' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     const row = await screen.findByRole('button', { name: /Minced beef/ })
