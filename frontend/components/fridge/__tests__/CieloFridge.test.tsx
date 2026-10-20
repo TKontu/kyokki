@@ -6,7 +6,7 @@
  */
 
 import React from 'react'
-import { act, render, screen, within } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { AREAS } from '@/lib/fridge'
 import { fixtureItems } from '@/components/fridge-mocks/fixtures'
 import {
@@ -93,31 +93,29 @@ describe('CieloFridge', () => {
     expect(bottom).toBeGreaterThanOrEqual(drinks.y + drinks.h)
   })
 
-  it('draws a window with the sky of the hour and the moon in its phase (Q30)', () => {
-    jest.setSystemTime(new Date(2026, 8, 26, 23, 0))
+  it('stands a monstera on the larder top instead of the window, beside the bread (Q42)', () => {
     const { container } = render(<CieloFridge items={[item()]} />)
 
-    const sky = container.querySelector('[data-part="window-sky"]')
-    expect(sky?.getAttribute('data-sky')).toBe('night')
-    const moon = container.querySelector('[data-part="moon"]')
-    expect(moon).not.toBeNull()
-    expect(Number(moon!.getAttribute('opacity'))).toBe(1)
-    expect(sky!.closest('[aria-hidden="true"]')).not.toBeNull()
+    const plant = container.querySelector('[data-part="plant"]')
+    expect(plant).not.toBeNull()
+    expect(plant!.closest('[aria-hidden="true"]')).not.toBeNull()
+    // The window it replaces is gone, sky, moon and all (Q30 superseded)
+    for (const part of ['window', 'window-sky', 'moon', 'sun']) {
+      expect(container.querySelector(`[data-part="${part}"]`)).toBeNull()
+    }
+    // The bread basket stays on the larder top (Q23)
+    expect(container.querySelector('[data-part="bread-basket"]')).not.toBeNull()
   })
 
-  it('turns the window to day as the clock moves on, without a reload', () => {
-    jest.setSystemTime(new Date(2026, 8, 27, 4, 55))
+  it('builds the larder as a wooden shelf, with wood uprights on both sides (Q41)', () => {
     const { container } = render(<CieloFridge items={[item()]} />)
-    expect(container.querySelector('[data-part="window-sky"]')?.getAttribute('data-sky')).toBe(
-      'night'
-    )
 
-    act(() => {
-      jest.advanceTimersByTime(10 * 60 * 1000)
-    })
-    expect(container.querySelector('[data-part="window-sky"]')?.getAttribute('data-sky')).toBe(
-      'morning'
-    )
+    const posts = container.querySelectorAll('[data-part="larder-post"]')
+    expect(posts.length).toBeGreaterThanOrEqual(2)
+    for (const post of Array.from(posts)) {
+      expect(post.getAttribute('class')).toMatch(/\bfill-fridge-wood\b/)
+      expect(post.closest('[aria-hidden="true"]')).not.toBeNull()
+    }
   })
 
   it('always draws the bread basket, and the crate only for Other', () => {

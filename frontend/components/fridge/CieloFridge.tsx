@@ -7,10 +7,11 @@
  * light beige wall (Q29) with its door swung open to the left, reaching down beside the
  * freezer drawer (Q34) - dairy and drinks in the door bins - and inside, top to bottom: ready
  * meals on the glass shelf, the meat and fish drawer, the veggie and fruit crispers side by
- * side, and the freezer drawer pulled out at the bottom. On the right, under a window that
- * shows the sky of the hour and the moon (Q30), a painted larder: the bread basket on its top
- * (Q23: bread is not kept in the fridge), the pantry, sauces (Q35) and spices (Q36) on its
- * light wood shelves, and at its foot a crate for Other when something has no area.
+ * side, and the freezer drawer pulled out at the bottom. On the right an open wooden larder
+ * with uprights to the floor (Q41): on its top a potted monstera (Q42, where a window was) with
+ * the bread basket in front of it (Q23: bread is not kept in the fridge), the pantry, sauces
+ * (Q35) and spices (Q36) on its shelves, and at its foot a crate for Other when something has
+ * no area.
  *
  * The drawing is decoration (hidden from screen readers); each area is an `AreaSpot` laid over
  * its part of it at the same coordinates, which carries FridgeView's contract.
@@ -18,11 +19,24 @@
 
 import React from 'react'
 import { buildFridgeView, type Area, type AreaId } from '@/lib/fridge'
-import { moonLitPath, moonOpacity, moonPhase, skyAt } from '@/lib/sky'
 import type { InventoryItem } from '@/types/inventory'
 import { AreaSpot } from './AreaSpot'
 import { Canvas, Drawing, roundedPath, useSvgIds, type Box } from './drawing'
-import { Basket, Bottle, Crate, Defs, DoorBin, Drawer, Eggs, GlassShelf, Handle, Hinge, Jar } from './parts'
+import {
+  Basket,
+  Bottle,
+  Crate,
+  Defs,
+  DoorBin,
+  Drawer,
+  Eggs,
+  GlassShelf,
+  Handle,
+  Hinge,
+  Jar,
+  Monstera,
+  WoodPost,
+} from './parts'
 import { StaleStrip } from './StaleStrip'
 
 export interface CieloFridgeProps {
@@ -76,125 +90,20 @@ const BLUE = 'fill-fridge-frame stroke-fridge-frame-edge'
 const LINER = 'fill-fridge-liner'
 const INSIDE = 'fill-fridge-inside'
 const ICE = 'fill-[#e1f0f8] dark:fill-[#1b2d38]'
-const LARDER = 'fill-fridge-larder stroke-fridge-larder-edge'
 const LARDER_INSIDE = 'fill-fridge-larder-inside'
 const WOOD = 'fill-fridge-wood stroke-fridge-wood-edge'
+
+/** The larder's uprights (Q41): from under the top board to the floor. */
+const LARDER_POSTS = [616, 760]
+const POST_W = 12
 
 /** The door's bottom edge: level with the freezer drawer's front (Q34). */
 const DOOR_BOTTOM = 760
 
-/** How often the window looks at the clock again. */
-const SKY_EVERY_MS = 10 * 60 * 1000
-
-/**
- * The time once mounted, then again every `every` ms; `null` before mounting, so the server's
- * clock - and time zone - never reach the page and hydration always matches.
- */
-function useNow(every: number): Date | null {
-  const [now, setNow] = React.useState<Date | null>(null)
-  React.useEffect(() => {
-    setNow(new Date())
-    const timer = window.setInterval(() => setNow(new Date()), every)
-    return () => window.clearInterval(timer)
-  }, [every])
-  return now
-}
-
-/** The window's pane, and where the stars and the moon sit in it. */
-const PANE: Box = { x: 638, y: 36, w: 112, h: 126 }
-const MOON = { cx: 724, cy: 60, r: 12 }
-const STARS = [
-  [652, 48, 1.4],
-  [668, 80, 1],
-  [684, 54, 1.2],
-  [706, 118, 1],
-  [742, 104, 1.3],
-  [660, 130, 1.1],
-  [736, 142, 0.9],
-] as const
-
-/**
- * The window on the wall (Q30): the sky of the hour - morning, day, dusk or night - with the
- * sun on its way across, stars at night, and the moon in tonight's phase: bright at night,
- * faint by day. Recomputed every ten minutes from the device's clock; no network.
- */
-function LivingWindow({ ids }: { ids: { sky: string; pane: string } }) {
-  const now = useNow(SKY_EVERY_MS)
-  const sky = now ? skyAt(now) : null
-  const lit = now ? moonLitPath(moonPhase(now), MOON.cx, MOON.cy, MOON.r) : null
-  const sun = sky?.sun
-    ? {
-        cx: PANE.x + 12 + sky.sun.x * (PANE.w - 24),
-        cy: PANE.y + PANE.h - 8 - sky.sun.height * (PANE.h - 34),
-      }
-    : null
-  return (
-    <g data-part="window">
-      <rect x={626} y={24} width={136} height={150} rx={10} className={LARDER} strokeWidth={3} />
-      <clipPath id={ids.pane}>
-        <rect x={PANE.x} y={PANE.y} width={PANE.w} height={PANE.h} rx={4} />
-      </clipPath>
-      {sky ? (
-        <g data-part="window-sky" data-sky={sky.state} clipPath={`url(#${ids.pane})`}>
-          <linearGradient id={ids.sky} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0" stopColor={sky.top} />
-            <stop offset="1" stopColor={sky.bottom} />
-          </linearGradient>
-          <rect x={PANE.x} y={PANE.y} width={PANE.w} height={PANE.h} fill={`url(#${ids.sky})`} />
-          {sky.stars &&
-            STARS.map(([x, y, r]) => (
-              <circle key={`${x}-${y}`} cx={x} cy={y} r={r} fill="#fdf8e1" opacity={0.85} />
-            ))}
-          {sun && (
-            <g data-part="sun">
-              <circle cx={sun.cx} cy={sun.cy} r={16} fill="#fff4c2" opacity={0.45} />
-              <circle cx={sun.cx} cy={sun.cy} r={9} fill={sky.state === 'day' ? '#ffe27a' : '#ffc27a'} />
-            </g>
-          )}
-          <g data-part="moon" opacity={moonOpacity(sky.state)}>
-            <circle cx={MOON.cx} cy={MOON.cy} r={MOON.r} fill="#1c2547" opacity={0.35} />
-            <circle
-              cx={MOON.cx}
-              cy={MOON.cy}
-              r={MOON.r}
-              fill="none"
-              stroke="#f5f1dc"
-              strokeOpacity={0.35}
-              strokeWidth={1}
-            />
-            {lit && <path d={lit} fill="#f5f1dc" />}
-          </g>
-          {/* A shade lower in the dark theme, so the window does not glare in a dark room */}
-          <rect
-            x={PANE.x}
-            y={PANE.y}
-            width={PANE.w}
-            height={PANE.h}
-            className="fill-transparent dark:fill-black/25"
-          />
-        </g>
-      ) : (
-        <rect
-          x={PANE.x}
-          y={PANE.y}
-          width={PANE.w}
-          height={PANE.h}
-          rx={4}
-          className="fill-sky-100 dark:fill-slate-800"
-        />
-      )}
-      <rect x={691} y={36} width={6} height={126} className="fill-fridge-larder" />
-      <rect x={638} y={96} width={112} height={6} className="fill-fridge-larder" />
-      {/* The sill, light wood */}
-      <rect x={620} y={172} width={148} height={10} rx={4} className={WOOD} strokeWidth={1} />
-    </g>
-  )
-}
-
 const SPICE_TINTS = ['fill-orange-700/60', 'fill-lime-700/60', 'fill-red-800/60', 'fill-stone-400']
 
 function FridgeDrawing({ hasOther }: { hasOther: boolean }) {
-  const ids = useSvgIds('chromeX', 'chromeY', 'gloss', 'glass', 'sky', 'pane')
+  const ids = useSvgIds('chromeX', 'chromeY', 'gloss', 'glass', 'leaf')
   return (
     <Drawing width={W} height={H}>
       <Defs ids={ids} />
@@ -267,21 +176,26 @@ function FridgeDrawing({ hasOther }: { hasOther: boolean }) {
         Kyokki
       </text>
 
-      {/* A window on the wall, showing the sky of the hour and the moon (Q30) */}
-      <LivingWindow ids={ids} />
-
-      {/* Larder: a painted cupboard to the floor. Bread in its basket on top (Q23); open
-          shelves of light wood for the pantry, sauces (Q35) and spices (Q36); and an open
-          bottom where Other's crate stands */}
+      {/* Larder: an open shelf unit of light wood to the floor (Q41) - uprights at both sides,
+          shelf boards between them, a divider in the pantry where nothing stands. A monstera in
+          its pot on top where the window was (Q42), with the bread basket in front of it (Q23);
+          the pantry, sauces (Q35) and spices (Q36) on the shelves, and an open foot where
+          Other's crate stands */}
+      <rect x={622} y={356} width={144} height={416} className={LARDER_INSIDE} />
+      <g data-part="plant">
+        <Monstera potX={748} base={342} maskId={ids.leaf} />
+      </g>
       <g data-part="bread-basket">
         <Basket box={{ x: 634, y: 262, w: 124, h: 80 }} loaves />
       </g>
-      <rect x={612} y={342} width={164} height={16} rx={6} className={WOOD} strokeWidth={1} />
-      <rect x={618} y={356} width={152} height={418} rx={10} className={LARDER} strokeWidth={2} />
-      <rect x={628} y={366} width={132} height={398} rx={6} className={LARDER_INSIDE} />
-      {[456, 546, 632].map((y) => (
-        <rect key={y} x={628} y={y} width={132} height={6} className={WOOD} strokeWidth={1} />
+      {LARDER_POSTS.map((x) => (
+        <WoodPost key={x} part="larder-post" box={{ x, y: 354, w: POST_W, h: 420 }} />
       ))}
+      {[456, 546, 632, 762].map((y) => (
+        <rect key={y} x={628} y={y} width={132} height={y === 762 ? 10 : 6} className={WOOD} strokeWidth={1} />
+      ))}
+      <WoodPost part="larder-divider" box={{ x: 684, y: 356, w: 6, h: 100 }} />
+      <rect x={612} y={342} width={164} height={16} rx={6} className={WOOD} strokeWidth={1} />
       {/* Pantry: a tin and a jar */}
       <rect x={696} y={426} width={20} height={30} rx={3} className="fill-slate-300 dark:fill-slate-500" />
       <Jar x={722} base={456} w={26} h={36} className="fill-amber-300/80 dark:fill-amber-500/50" lidClassName="fill-sky-500 dark:fill-sky-700" />

@@ -264,3 +264,147 @@ export function Crate({ box }: { box: Box }) {
     </g>
   )
 }
+
+/**
+ * A wooden upright (Q41): a light wood post with a few faint grain lines. `part` names the
+ * post itself (`data-part`).
+ */
+export function WoodPost({ box, part }: { box: Box; part?: string }) {
+  const { x, y, w, h } = box
+  const grain = w >= 10 ? [0.3, 0.68] : [0.5]
+  return (
+    <g>
+      <rect
+        data-part={part}
+        x={x}
+        y={y}
+        width={w}
+        height={h}
+        rx={2}
+        className="fill-fridge-wood stroke-fridge-wood-edge"
+        strokeWidth={1}
+      />
+      {grain.map((t, index) => (
+        <path
+          key={t}
+          d={`M${x + w * t},${y + 6} Q${x + w * t + (index % 2 ? -1.5 : 1.5)},${y + h / 2} ${x + w * t},${y + h - 6}`}
+          className="fill-none stroke-fridge-wood-edge/50"
+          strokeWidth={0.8}
+        />
+      ))}
+    </g>
+  )
+}
+
+/**
+ * One monstera leaf in its own units: its stem meets it at the origin (the heart's notch) and
+ * the tip points up, about 1.75 units away.
+ */
+const LEAF_PATH =
+  'M0,0 C-0.3,0.35 -1.05,0.2 -1.05,-0.5 C-1.05,-1.15 -0.45,-1.55 0.04,-1.75 ' +
+  'C0.5,-1.5 1.05,-1.15 1.05,-0.5 C1.05,0.2 0.3,0.35 0,0 Z'
+/** The splits, from near the midrib out past the edge, on the right; the left mirrors them. */
+const LEAF_SPLITS = [
+  [0.3, -0.12, 1.2, 0.3],
+  [0.32, -0.48, 1.25, -0.3],
+  [0.3, -0.9, 1.2, -0.98],
+  [0.22, -1.3, 0.85, -1.7],
+] as const
+const LEAF_TINTS = [
+  'fill-emerald-600 dark:fill-emerald-800',
+  'fill-green-600 dark:fill-green-800',
+  'fill-emerald-500 dark:fill-emerald-700',
+]
+
+/** Where each leaf meets its stem, its size, and its turn from upright: back to front. */
+const LEAVES = [
+  { x: 690, y: 100, size: 44, turn: -8 },
+  { x: 650, y: 150, size: 38, turn: -42 },
+  { x: 728, y: 140, size: 36, turn: 36 },
+  { x: 706, y: 186, size: 30, turn: 70 },
+  { x: 668, y: 196, size: 28, turn: -74 },
+] as const
+
+/** Cuts a leaf's splits and two holes, in the leaf's own units. */
+function LeafMask({ id }: { id: string }) {
+  return (
+    <mask id={id} maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" x={-2} y={-3} width={4} height={4}>
+      <rect x={-2} y={-3} width={4} height={4} fill="white" />
+      {LEAF_SPLITS.flatMap(([x1, y1, x2, y2]) =>
+        [1, -1].map((side) => (
+          <line
+            key={`${side}${y1}`}
+            x1={side * x1}
+            y1={y1}
+            x2={side * x2}
+            y2={y2}
+            stroke="black"
+            strokeWidth={0.11}
+            strokeLinecap="round"
+          />
+        ))
+      )}
+      <ellipse cx={0.62} cy={-0.7} rx={0.07} ry={0.1} fill="black" />
+      <ellipse cx={-0.62} cy={-0.7} rx={0.07} ry={0.1} fill="black" />
+    </mask>
+  )
+}
+
+/**
+ * A *Monstera deliciosa* in a terracotta pot (Q42): the pot stands on `base`, centred on `potX`,
+ * and large split, heart-shaped leaves on long stems rise above it. Flat greens with a lighter
+ * midrib, a shade deeper in the dark theme. `maskId` must be unique per drawing.
+ */
+export function Monstera({ potX, base, maskId }: { potX: number; base: number; maskId: string }) {
+  const rimY = base - 112
+  const stemY = rimY + 4
+  return (
+    <g>
+      <defs>
+        <LeafMask id={maskId} />
+      </defs>
+      {LEAVES.map((leaf) => (
+        <path
+          key={`stem-${leaf.x}-${leaf.y}`}
+          d={`M${potX + (leaf.x - potX) * 0.15},${stemY} Q${(potX + leaf.x) / 2},${(stemY + leaf.y) / 2 + 12} ${leaf.x},${leaf.y}`}
+          className="fill-none stroke-green-700 dark:stroke-green-900"
+          strokeWidth={3}
+          strokeLinecap="round"
+        />
+      ))}
+      {LEAVES.map((leaf, index) => (
+        <g
+          key={`leaf-${leaf.x}-${leaf.y}`}
+          transform={`translate(${leaf.x} ${leaf.y}) rotate(${leaf.turn}) scale(${leaf.size})`}
+        >
+          <g mask={`url(#${maskId})`}>
+            <path d={LEAF_PATH} className={LEAF_TINTS[index % LEAF_TINTS.length]} />
+            <path
+              d="M0,0 Q0.06,-0.9 0.04,-1.7"
+              className="fill-none stroke-lime-200/80 dark:stroke-lime-300/40"
+              strokeWidth={0.05}
+              strokeLinecap="round"
+            />
+          </g>
+        </g>
+      ))}
+      {/* The pot, standing on `base`: a tapering body, a rim, a little soil */}
+      <path
+        d={`M${potX - 26},${rimY + 10} L${potX + 26},${rimY + 10} L${potX + 20},${base} L${potX - 20},${base} Z`}
+        className="fill-[#e0a07a] stroke-[#b8754f] dark:fill-[#8a5a42] dark:stroke-[#5f3c2b]"
+        strokeWidth={2}
+        strokeLinejoin="round"
+      />
+      <rect
+        x={potX - 30}
+        y={rimY}
+        width={60}
+        height={14}
+        rx={4}
+        className="fill-[#e8b08c] stroke-[#b8754f] dark:fill-[#9a6650] dark:stroke-[#5f3c2b]"
+        strokeWidth={2}
+      />
+      <ellipse cx={potX} cy={rimY + 2} rx={25} ry={3} className="fill-[#6b4a32] dark:fill-[#3a2a1e]" />
+    </g>
+  )
+}
