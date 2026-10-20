@@ -120,7 +120,7 @@ class TestTheSpecTable:
         assert result.product is None
         assert result.source == "none"
 
-    async def test_a_synonym_resolves_where_similarity_could_not(
+    async def test_a_synonym_is_offered_where_similarity_could_not(
         self, db_session: AsyncSession, catalog, _no_model_selection
     ) -> None:
         """ "Minced beef" scores 64 against "Ground beef" - unreachable for any
@@ -143,9 +143,13 @@ class TestTheSpecTable:
         )
 
         result = resolved["ATRIA JAUHELIHA"]
-        assert result.product is not None
-        assert result.product.id == catalog["beef"].id
-        assert (result.source, result.verified) == ("selected", False)
+        # CL8: offered for the cook to accept, never the product outright.
+        assert (result.product, result.source) == (None, "none")
+        assert result.suggestion is not None
+        assert (result.suggestion.reason, result.suggestion.product.id) == (
+            "selected",
+            catalog["beef"].id,
+        )
 
     async def test_a_synonym_the_cook_taught_is_verified(
         self, db_session: AsyncSession, catalog
@@ -177,7 +181,7 @@ class TestTheSpecTable:
 
 
 class TestDeterministicTiers:
-    async def test_a_known_catalog_name_resolves_only_through_selection(
+    async def test_a_known_catalog_name_is_only_offered_through_selection(
         self, db_session: AsyncSession, catalog, _no_model_selection
     ) -> None:
         """Q37: a catalog-name hit reached only through the model's generic name is a
@@ -192,8 +196,13 @@ class TestDeterministicTiers:
         )
 
         result = resolved["VALIO MAITO"]
-        assert result.product is not None and result.product.id == catalog["milk"].id
-        assert (result.source, result.verified) == ("selected", False)
+        # CL8: the model's pick is a suggestion the cook accepts, not the product.
+        assert (result.product, result.source) == (None, "none")
+        assert result.suggestion is not None
+        assert (result.suggestion.reason, result.suggestion.product.id) == (
+            "selected",
+            catalog["milk"].id,
+        )
         _no_model_selection.assert_awaited_once()
 
     async def test_a_product_with_no_name_row_still_needs_selection_via_generic(
@@ -220,8 +229,13 @@ class TestDeterministicTiers:
         )
 
         result = resolved["COOP FETA PDO"]
-        assert result.product is not None and result.product.id == feta.id
-        assert (result.source, result.verified) == ("selected", False)
+        # CL8: the model's pick is a suggestion the cook accepts, not the product.
+        assert (result.product, result.source) == (None, "none")
+        assert result.suggestion is not None
+        assert (result.suggestion.reason, result.suggestion.product.id) == (
+            "selected",
+            feta.id,
+        )
 
     async def test_printed_name_hit_on_a_catalog_name_still_stays_deterministic(
         self, db_session: AsyncSession, catalog, _no_model_selection
@@ -277,10 +291,10 @@ class TestDeterministicTiers:
         assert result.product is not None and result.product.id == catalog["cream"].id
         assert (result.source, result.verified) == ("alias", True)
 
-    async def test_an_unverified_alias_resolves_but_is_not_verified(
+    async def test_an_unverified_alias_is_only_a_suggestion(
         self, db_session: AsyncSession, catalog
     ) -> None:
-        """It still pre-fills the row; the row shows it as "auto" rather than known."""
+        """It no longer pre-fills the row (CL8): the cook accepts it or not."""
         db_session.add(
             StoreProductAlias(
                 product_master_id=catalog["butter"].id,
@@ -297,15 +311,18 @@ class TestDeterministicTiers:
             [_line("VOI")], chain="s-group"
         )
 
-        assert resolved["VOI"].source == "alias"
-        assert resolved["VOI"].verified is False
+        # CL8: an alias the cook never verified only suggests.
+        assert (resolved["VOI"].product, resolved["VOI"].source) == (None, "none")
+        assert resolved["VOI"].suggestion.reason == "unverified_alias"
+        assert resolved["VOI"].suggestion.product.id == catalog["butter"].id
 
     async def test_the_cooks_own_alias_beats_a_machine_one(
         self, db_session: AsyncSession, catalog
     ) -> None:
         """Precedence is verified, then occurrence count, then recency. Since H14 one
         printed name has at most one alias per chain, so this is decided between
-        chains - here the receipt is from a third chain, so neither wins on chain."""
+        chains - here the receipt is from a third chain, so neither wins on chain.
+        CL8: either way it is only a suggestion."""
         now = datetime.now(UTC)
         db_session.add_all(
             [
@@ -335,7 +352,11 @@ class TestDeterministicTiers:
             [_line("X")], chain="s-group"
         )
 
-        assert resolved["X"].product.id == catalog["cream"].id
+        # CL8: neither alias is this chain's, so the best one is only offered.
+        assert resolved["X"].product is None
+        assert resolved["X"].suggestion.reason == "other_chain_alias"
+        assert resolved["X"].suggestion.store_chain == "lidl"
+        assert resolved["X"].suggestion.product.id == catalog["cream"].id
 
     async def test_one_printed_name_has_one_alias_per_chain(
         self, db_session: AsyncSession, catalog
@@ -401,7 +422,10 @@ class TestDeterministicTiers:
             [_line("Y")], chain="s-group"
         )
 
-        assert resolved["Y"].product.id == catalog["cream"].id
+        # CL8: this chain's alias still outranks, as an unverified suggestion.
+        assert resolved["Y"].product is None
+        assert resolved["Y"].suggestion.reason == "unverified_alias"
+        assert resolved["Y"].suggestion.product.id == catalog["cream"].id
 
     async def test_a_remembered_non_food_line_stops_there(
         self, db_session: AsyncSession, catalog
@@ -451,7 +475,7 @@ class TestGenericNameSnapping:
         assert result.product is None
         assert result.source == "none"
 
-    async def test_the_model_may_still_confirm_a_correct_snap(
+    async def test_the_model_may_still_suggest_a_correct_snap(
         self, db_session: AsyncSession, catalog, _no_model_selection
     ) -> None:
         """Mozzarella, farfalle and olive genuinely are the catalog entry their `g`
@@ -465,8 +489,13 @@ class TestGenericNameSnapping:
         )
 
         result = resolved["VALIO KEVYTMAITO"]
-        assert result.product is not None and result.product.id == catalog["milk"].id
-        assert (result.source, result.verified) == ("selected", False)
+        # CL8: the model's pick is a suggestion the cook accepts, not the product.
+        assert (result.product, result.source) == (None, "none")
+        assert result.suggestion is not None
+        assert (result.suggestion.reason, result.suggestion.product.id) == (
+            "selected",
+            catalog["milk"].id,
+        )
 
     async def test_a_model_taught_synonym_is_also_only_a_proposal(
         self, db_session: AsyncSession, catalog, _no_model_selection
@@ -631,7 +660,7 @@ class TestSnapShortlistDiscipline:
 class TestSelection:
     """The model may only choose from what it was offered."""
 
-    async def test_a_choice_from_the_shortlist_is_accepted(
+    async def test_a_choice_from_the_shortlist_is_a_suggestion(
         self, db_session: AsyncSession, catalog, _no_model_selection
     ) -> None:
         _no_model_selection.side_effect = lambda lines: {
@@ -643,8 +672,13 @@ class TestSelection:
         )
 
         result = resolved["KAURAJUOMA"]
-        assert result.product is not None and result.product.id == catalog["milk"].id
-        assert (result.source, result.verified) == ("selected", False)
+        # CL8: the model's pick is a suggestion the cook accepts, not the product.
+        assert (result.product, result.source) == (None, "none")
+        assert result.suggestion is not None
+        assert (result.suggestion.reason, result.suggestion.product.id) == (
+            "selected",
+            catalog["milk"].id,
+        )
 
     async def test_the_shortlist_is_recorded_even_when_nothing_is_chosen(
         self, db_session: AsyncSession, catalog

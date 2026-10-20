@@ -29,6 +29,7 @@ from app.crud.consumption_log import ConsumptionAction, add_consumption_log
 from app.crud.inventory_item import _amount_in_item_units, apply_consumption
 from app.crud.product_master import MovedInventoryItem
 from app.domain.item_status import ItemEvent, ItemFrozen, next_status
+from app.domain.product_names import normalize_product_name
 from app.domain.units import canonical_factor, quantise, to_canonical_decimal
 from app.models.inventory_item import InventoryItem
 from app.models.product_master import ProductMaster
@@ -212,6 +213,9 @@ async def add_stock(
             purchase_date=request.purchase_date or date.today(),
             expiry_date=request.expiry_date,
             location=request.location,
+            # CL8 provenance: joined by an exact name key or the given id, or new.
+            join_source="created" if created else "agent",
+            join_key=normalize_product_name(request.name) or None,
         )
         db.add(item)
         await db.flush()

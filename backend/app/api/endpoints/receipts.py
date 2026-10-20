@@ -360,7 +360,9 @@ async def confirm_receipt(
 
     Raises:
         HTTPException 404: Receipt not found.
-        HTTPException 409: Receipt already confirmed or not read yet.
+        HTTPException 409: Receipt already confirmed or not read yet; or `name_exists`
+            (detail `{code, message, items}`): items name a new product by a name that
+            already belongs to one, and nothing was written (CL8).
         HTTPException 400: An item names an unknown product, line or category.
     """
     try:
@@ -377,6 +379,16 @@ async def confirm_receipt(
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except receipt_confirm.InvalidConfirmItem as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except receipt_confirm.NameExists as exc:
+        # A new-product name that already belongs to a product is never joined (CL8)
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "name_exists",
+                "message": str(exc),
+                "items": [clash.as_dict() for clash in exc.clashes],
+            },
+        ) from exc
 
     # The bought things come off the shopping list (CL2) - `min_stock` decides.
     await min_stock.after_stock_increase(

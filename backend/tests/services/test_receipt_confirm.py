@@ -29,6 +29,7 @@ from app.services.product_resolution import (
 )
 from app.services.receipt_confirm import (
     InvalidConfirmItem,
+    NameExists,
     ReceiptNotConfirmable,
     ReceiptNotFound,
     confirm_receipt,
@@ -277,6 +278,8 @@ class TestProductReuse:
     async def test_new_name_reuses_an_existing_product_ignoring_case(
         self, db_session, receipt, milk
     ):
+        """An item with no receipt line is a typed name, like quick add: it joins its
+        key (CONTRACT §2 amendment, 2026-10-18). A line item would answer 409."""
         result = await confirm_receipt(
             db_session, receipt.id, [_item(name="  mILK ", category="dairy")]
         )
@@ -284,6 +287,28 @@ class TestProductReuse:
         assert result.products_created == 0
         (item,) = await _inventory(db_session)
         assert item.product_master_id == milk.id
+        assert (item.join_source, item.join_key) == ("name", "milk")
+
+    async def test_a_line_named_as_an_existing_product_is_name_exists(
+        self, db_session, receipt, milk
+    ):
+        """CL8: a line's name never joins an existing product silently, whatever its
+        case; the cook is asked to use it (send its id) or name this one differently."""
+        milk_id = milk.id
+        with pytest.raises(NameExists) as caught:
+            await confirm_receipt(
+                db_session,
+                receipt.id,
+                [_item(index=3, name="  mILK ", category="dairy")],
+            )
+
+        (clash,) = caught.value.clashes
+        assert (clash.position, clash.product_id, clash.product_name) == (
+            0,
+            milk_id,
+            "Milk",
+        )
+        assert await _inventory(db_session) == []
 
     async def test_two_brands_of_one_generic_product_create_one_product(
         self, db_session, receipt
@@ -574,20 +599,20 @@ class TestLearningProvenance:
         alias = await self._alias(db_session)
         assert (alias.source, alias.manually_verified) == ("name", True)
 
-    async def test_keeping_a_selected_result_is_not_verified(
+    async def test_accepting_a_selected_suggestion_is_cook_accepted(
         self, db_session: AsyncSession, receipt, milk
     ):
-        """The model proposed it from a shortlist and the cook did not contradict it.
-        That is worth remembering, but it is not the cook's word."""
+        """CL8: the model's pick is only a suggestion now, served unticked; the cook
+        accepting it is recorded as such - verified, but told apart from a correction."""
         await self._confirm_with(
             db_session,
             receipt,
             {"product_id": str(milk.id), "source": "selected", "verified": False},
-            _item(index=0, product_id=milk.id),
+            _item(index=0, product_id=milk.id, accepted_suggestion=True),
         )
 
         alias = await self._alias(db_session)
-        assert (alias.source, alias.manually_verified) == ("model", False)
+        assert (alias.source, alias.manually_verified) == ("cook_accepted", True)
 
     async def test_changing_the_product_is_the_cooks_word(
         self, db_session: AsyncSession, receipt, milk, categories
@@ -785,7 +810,8 @@ def _selected(product: ProductMaster) -> dict:
 
 class TestModelGuessesDoNotBecomeKeys:
     """Q13 (H51): a model selection the cook did not contradict is remembered, but it is
-    never the cook's word. It resolves as "auto", and the cook's next correction moves it.
+    never the cook's word. It is only ever a suggestion (CL8), and the cook's next
+    correction moves it.
 
     Before this, `learn_names` wrote the generic name as a synonym of whatever product was
     kept, tier 4 called every synonym verified, and the first claim won for ever: once
@@ -795,7 +821,7 @@ class TestModelGuessesDoNotBecomeKeys:
     @pytest.mark.parametrize(
         ("printed", "generic", "wrong", "right", "category"), REPORTED_PAIRS
     )
-    async def test_a_kept_selection_is_learned_but_resolves_unverified(
+    async def test_an_accepted_selection_is_learned_but_only_suggested(
         self,
         db_session: AsyncSession,
         categories,
@@ -809,16 +835,19 @@ class TestModelGuessesDoNotBecomeKeys:
         """Old contract (pre-Q37): a `model`-sourced generic name was a deterministic
         key on the next receipt (`source == "name"`), merely unverified. Q37 contract:
         a hit reached only through the generic name is a proposal regardless of its
-        source, so the next receipt routes it through one selection call (stubbed here
-        to confirm it, the same way the cook's original confirm did) and it resolves
-        as `selected`/unverified - still never "known", one layer further out."""
+        source, so the next receipt routes it through one selection call. CL8: the cook
+        accepting the suggestion does not make the generic name theirs, and on the next
+        receipt the pick (stubbed to agree) is only a `selected` suggestion again."""
         guessed = await _product(db_session, wrong, category)
         receipt = await _receipt_with(
             db_session, printed, generic, category, _selected(guessed)
         )
 
         await confirm_receipt(
-            db_session, receipt.id, [_item(index=0, product_id=guessed.id)], []
+            db_session,
+            receipt.id,
+            [_item(index=0, product_id=guessed.id, accepted_suggestion=True)],
+            [],
         )
 
         row = await _name_row(db_session, generic)
@@ -827,8 +856,12 @@ class TestModelGuessesDoNotBecomeKeys:
 
         _no_model_selection.side_effect = lambda lines: {lines[0].line_id: guessed.id}
         again = await _resolve_again(db_session, printed, generic, category)
-        assert again.product is not None and again.product.id == guessed.id
-        assert (again.source, again.verified) == ("selected", False)
+        assert (again.product, again.source) == (None, "none")
+        assert again.suggestion is not None
+        assert (again.suggestion.reason, again.suggestion.product.id) == (
+            "selected",
+            guessed.id,
+        )
 
     @pytest.mark.parametrize(
         ("printed", "generic", "wrong", "right", "category"), REPORTED_PAIRS
@@ -943,11 +976,12 @@ class TestModelGuessesDoNotBecomeKeys:
         alias = await _alias_for(db_session, "TUMMA RYPÄLE 500G")
         assert (alias.source, alias.manually_verified) == ("cook", True)
 
-    async def test_a_kept_unverified_name_hit_writes_an_unverified_alias(
+    async def test_an_accepted_model_name_suggestion_is_cook_accepted(
         self, db_session: AsyncSession, categories
     ):
         """The twin of `test_keeping_a_name_result_is_a_verified_key`: a name hit
-        through a model synonym is "auto", and keeping it does not make it "known"."""
+        through a model synonym was "auto" before CL8; it is served as a `model_name`
+        suggestion now, and the cook accepting it is recorded as `cook_accepted`."""
         guessed = await _product(db_session, "Taco sauce", "condiments")
         receipt = await _receipt_with(
             db_session,
@@ -963,11 +997,14 @@ class TestModelGuessesDoNotBecomeKeys:
         )
 
         await confirm_receipt(
-            db_session, receipt.id, [_item(index=0, product_id=guessed.id)], []
+            db_session,
+            receipt.id,
+            [_item(index=0, product_id=guessed.id, accepted_suggestion=True)],
+            [],
         )
 
         alias = await _alias_for(db_session, "HEINZ KETCHUP")
-        assert (alias.source, alias.manually_verified) == ("name", False)
+        assert (alias.source, alias.manually_verified) == ("cook_accepted", True)
 
 
 def _rejected(rejected: ProductMaster, corrected: str | None = None) -> dict:
@@ -990,8 +1027,8 @@ class TestRejectedSnapAtConfirm:
     The hole: `receipt_confirm.py` defaulted `name` to the line's `generic_name` when
     the cook sent no `product_id`, and `product_for_name`'s canonical-name fallback has
     no source guard - so an unmatched row the cook simply accepted re-attached the exact
-    product selection had just rejected, and confirm learned the printed name as its
-    alias.
+    product selection had just rejected. CL8 closed it for every line, not just rejected
+    snaps: a name equal to an existing product answers `name_exists` (409) instead.
     """
 
     async def test_confirming_without_a_product_creates_the_corrected_name(
@@ -1034,12 +1071,12 @@ class TestRejectedSnapAtConfirm:
         assert result.products_created == 0
         assert result.inventory_items[0][1].id == dip.id
 
-    async def test_a_corrected_name_that_matches_another_product_reuses_it(
+    async def test_a_corrected_name_that_matches_another_product_is_name_exists(
         self, db_session: AsyncSession, categories
     ):
         """The corrected name happens to already be a catalog product - not the
-        rejected one - so confirm reuses it rather than creating a duplicate (the
-        canonical name is unique)."""
+        rejected one. CL8: confirm neither joins it silently nor duplicates it; the
+        cook is asked."""
         dip = await _product(db_session, "Dip", "condiments")
         pesto = await _product(db_session, "Pesto", "condiments")
         receipt = await _receipt_with(
@@ -1050,25 +1087,29 @@ class TestRejectedSnapAtConfirm:
             _rejected(dip, corrected="Pesto"),
         )
 
-        result = await confirm_receipt(db_session, receipt.id, [_item(index=0)], [])
+        pesto_id = pesto.id
+        with pytest.raises(NameExists) as caught:
+            await confirm_receipt(db_session, receipt.id, [_item(index=0)], [])
 
-        assert result.products_created == 0
-        assert result.inventory_items[0][1].id == pesto.id
+        assert [c.product_id for c in caught.value.clashes] == [pesto_id]
 
-    async def test_no_corrected_name_and_the_only_name_is_the_rejected_one_is_400(
+    async def test_no_corrected_name_and_the_only_name_is_the_rejected_one_is_name_exists(
         self, db_session: AsyncSession, categories
     ):
         """The model gave no `g` (or this is an old stored line re-read before Q37b
-        without one): the line's own generic name is still the rejected snap's name, so
-        there is no name left to create a product under - confirm must ask the cook to
-        type one rather than silently re-attaching Dip."""
+        without one): the line's own generic name is still the rejected snap's name -
+        confirm must ask the cook rather than silently re-attaching Dip (409 since CL8,
+        400 before)."""
         dip = await _product(db_session, "Dip", "condiments")
+        dip_id = dip.id
         receipt = await _receipt_with(
             db_session, "PESTO ALKU", "Dip", "condiments", _rejected(dip)
         )
 
-        with pytest.raises(InvalidConfirmItem):
+        with pytest.raises(NameExists) as caught:
             await confirm_receipt(db_session, receipt.id, [_item(index=0)], [])
+
+        assert [c.product_id for c in caught.value.clashes] == [dip_id]
 
     async def test_old_lines_without_the_new_keys_behave_as_before(
         self, db_session: AsyncSession, receipt, milk
@@ -1084,18 +1125,17 @@ class TestRejectedSnapAtConfirm:
 
 
 class TestTheGuardOnlyCoversTheServedName:
-    """F1 (PR #153 review, planner ruling): the guard must not override a cook who
-    retyped a name - even one that happens to land on the rejected product. It applies
-    only when the item sends no name, or sends back exactly the name the server served
-    this line with (`generic_name`, possibly already corrected); a different typed name
-    is the cook's explicit word."""
+    """F1 (PR #153 review, planner ruling) said a typed name is the cook's explicit word
+    even onto the rejected product. CL8 made every name the same: typed or served, a
+    name equal to an existing product answers `name_exists`, and the cook confirms the
+    product by id instead."""
 
-    async def test_a_different_typed_name_is_the_cooks_word_even_onto_the_rejected_product(
+    async def test_a_typed_name_equal_to_the_rejected_product_is_name_exists(
         self, db_session: AsyncSession, categories
     ):
         """Green olives: the snap (Olive) was rejected and corrected to "Olive paste".
-        The cook disagrees with the correction and types "Olive" - the guard must not
-        override that, even though it is the exact product that was rejected."""
+        The cook types "Olive" - that names an existing product, so it is not joined
+        by the name; the client resends it with Olive's id."""
         olive = await _product(db_session, "Olive", "condiments")
         receipt = await _receipt_with(
             db_session,
@@ -1105,27 +1145,28 @@ class TestTheGuardOnlyCoversTheServedName:
             _rejected(olive, corrected="Olive paste"),
         )
 
-        result = await confirm_receipt(
-            db_session,
-            receipt.id,
-            [_item(index=0, name="Olive", category="condiments")],
-            [],
-        )
+        olive_id = olive.id
+        with pytest.raises(NameExists) as caught:
+            await confirm_receipt(
+                db_session,
+                receipt.id,
+                [_item(index=0, name="Olive", category="condiments")],
+                [],
+            )
 
-        assert result.products_created == 0
-        assert result.inventory_items[0][1].id == olive.id
+        assert [c.product_id for c in caught.value.clashes] == [olive_id]
 
     async def test_the_served_name_still_guards_an_old_line_with_no_correction(
         self, db_session: AsyncSession, categories
     ):
-        """The cook sends back exactly the served name ("Dip", never corrected) - that
-        is not a retype, so the guard still applies and still refuses Dip."""
+        """The cook sends back exactly the served name ("Dip", never corrected): still
+        refused, as `name_exists` since CL8."""
         dip = await _product(db_session, "Dip", "condiments")
         receipt = await _receipt_with(
             db_session, "PESTO ALKU", "Dip", "condiments", _rejected(dip)
         )
 
-        with pytest.raises(InvalidConfirmItem):
+        with pytest.raises(NameExists):
             await confirm_receipt(
                 db_session,
                 receipt.id,
@@ -1163,13 +1204,12 @@ class TestTheGuardOnlyCoversTheServedName:
 
 
 class TestCorrectedProposalIsNotTheCooksWord:
-    """F3 (PR #153 review): accepting a rejected-snap line exactly as served - the
-    corrected generic name the server proposed - is a model guess the cook did not
-    contradict, not their word; one flaky selection call must not permanently teach
-    the chain's alias table as if it had been. A different typed name still is the
-    cook's word, same as any other line."""
+    """F3 (PR #153 review) learned a rejected-snap line confirmed as served as the
+    model's, unverified. CL8 (CONTRACT §2): confirm without a product id always creates
+    a new product, and a new product is the cook naming it - `cook`, verified - whether
+    the name was typed or served."""
 
-    async def test_accepting_the_corrected_name_as_served_is_model_sourced_and_unverified(
+    async def test_accepting_the_corrected_name_as_served_creates_a_cook_product(
         self, db_session: AsyncSession, categories
     ):
         dip = await _product(db_session, "Dip", "condiments")
@@ -1184,7 +1224,7 @@ class TestCorrectedProposalIsNotTheCooksWord:
         await confirm_receipt(db_session, receipt.id, [_item(index=0)], [])
 
         alias = await _alias_for(db_session, "PESTO ALKU")
-        assert (alias.source, alias.manually_verified) == ("model", False)
+        assert (alias.source, alias.manually_verified) == ("cook", True)
 
     async def test_typing_a_different_name_is_still_the_cooks_word(
         self, db_session: AsyncSession, categories

@@ -1,8 +1,9 @@
 """Generic product rules shared by receipt confirm (MVP-R2) and quick add (MVP-S3).
 
 Products are generic (operator ruling 2026-09-14): one product per thing a household buys, never
-per brand, size or cut. A requested name reuses an existing product case-insensitively; a new
-product takes its shelf life and storage from its category.
+per brand, size or cut. A requested name reuses an existing product only on an exact key - a
+canonical or cook name, never one the model taught (CL8, `services/product_identity.py`); a
+new product takes its shelf life and storage from its category.
 """
 
 from datetime import date
@@ -14,10 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.category import get_category
 from app.crud.product_master import MovedInventoryItem
-from app.crud.product_name import (
-    learn_product_name,
-    product_for_name,
-)
+from app.crud.product_name import learn_product_name
 from app.domain.product_names import normalize_product_name
 from app.domain.storage import location_for_storage, storage_type_for_category
 from app.domain.units import grams_to_pieces, pieces_to_grams, unit_type_for
@@ -28,6 +26,7 @@ from app.services.expiry_recompute import (
     recompute_expiry_for_products,
     sealed_expiry,
 )
+from app.services.product_identity import JoinSource, decide_name
 
 
 class InvalidProductRequest(ValueError):
@@ -40,6 +39,10 @@ class UnknownProduct(InvalidProductRequest):
     A subclass, so every caller that refuses an ``InvalidProductRequest`` still does; the
     agents' stock add tells it apart to answer 404 ``not_found`` like stock consume.
     """
+
+
+# A sane cap for a key stored on an item; names and printed lines are far shorter.
+JOIN_KEY_MAX_LENGTH = 500
 
 
 def tidy_name(name: str | None) -> str:
@@ -131,13 +134,12 @@ class ProductResolver:
         pack_grams: float | None = None,
         shelf_life_days: int | None = None,
         opened_shelf_life_days: int | None = None,
-        trust_model_names: bool = True,
     ) -> tuple[ProductMaster, bool]:
         """Return ``(product, created)``.
 
-        ``trust_model_names=False`` makes a typed name skip synonyms the model taught
-        (H51): the cook naming a product has refused whatever was proposed for the line.
-        The per-transaction cache is keyed by name alone, so two lines typed with the
+        A name finds an existing product only through `product_identity.decide_name`: a
+        canonical or cook name. A synonym the model taught neither joins nor blocks (H51,
+        CL8). The per-transaction cache is keyed by name alone, so two lines typed with the
         same name on one receipt share the first outcome; harmless, and rare.
 
         Raises:
@@ -175,10 +177,11 @@ class ProductResolver:
                 False,
             )
 
-        # Any known name, not just the canonical one: "Minced beef" finds Ground beef
-        # once a confirm has learned the synonym (spec §3.1).
-        existing = await product_for_name(self.db, tidy, trust_model=trust_model_names)
-        if existing is not None:
+        # The cook's names, not just the canonical one: "Minced beef" finds Ground beef
+        # once the cook has taught the synonym (spec §3.1); a model's guess never does.
+        joined = await decide_name(self.db, tidy)
+        if joined is not None:
+            existing = joined.product
             self._by_name[key] = existing
             return (
                 await self._learn(
@@ -277,8 +280,13 @@ def build_inventory_item(
     expiry_date: date | None = None,
     location: str | None = None,
     receipt_id: UUID | None = None,
+    join_source: JoinSource | None = None,
+    join_key: str | None = None,
 ) -> InventoryItem:
     """A sealed item: unit, expiry and location come from the product unless overridden.
+
+    ``join_source`` / ``join_key`` record how the item came to be on this product (CL8
+    provenance): a key, the cook's pick, an accepted suggestion, a new product, ...
 
     The unit is the product's own when the caller did not name one (H25): quick add resolves a
     typed name to a product the client cannot see, so its guess would be about the wrong thing.
@@ -302,4 +310,6 @@ def build_inventory_item(
         expiry_date=expiry,
         expiry_source=source,
         location=location or location_for_storage(str(product.storage_type)),
+        join_source=join_source,
+        join_key=join_key[:JOIN_KEY_MAX_LENGTH] if join_key else None,
     )

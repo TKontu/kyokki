@@ -420,7 +420,7 @@ class TestReanalyseLine:
 class TestResolutionWithCatalog:
     """F4: the real resolver tiers, exercised for this call site with a real catalog."""
 
-    async def test_a_catalog_name_reached_through_g_is_kept_when_selection_keeps_it(
+    async def test_a_catalog_name_reached_through_g_is_suggested_when_selection_keeps_it(
         self,
         db_session: AsyncSession,
         sample_category: Category,
@@ -460,8 +460,14 @@ class TestResolutionWithCatalog:
             db_session, receipt.id, line_id, None
         )
 
-        assert item.product_id == product.id
-        assert item.match_source == "selected"
+        # CL8: the pick is served as a suggestion, never the product.
+        assert item.product_id is None
+        assert item.match_source == "none"
+        assert item.suggestion is not None
+        assert (item.suggestion.product_id, item.suggestion.reason) == (
+            product.id,
+            "selected",
+        )
 
     async def test_a_catalog_name_reached_through_g_stays_unmatched_when_selection_rejects_it(
         self,
