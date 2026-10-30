@@ -27,6 +27,7 @@ x-backend-env: &backend-env
   MINERU_LANG: ${MINERU_LANG:-latin}
   MINERU_ENABLE_TABLE: ${MINERU_ENABLE_TABLE:-true}
   MINERU_ENABLE_FORMULA: ${MINERU_ENABLE_FORMULA:-false}
+  MINERU_UPSCALE_BELOW_WIDTH: ${MINERU_UPSCALE_BELOW_WIDTH:-1000}
   LLM_BASE_URL: ${LLM_BASE_URL:-http://192.168.0.94:9292/v1}
   # Required since 2026-09-30: the llama-swap gateway returns 401 without it.
   LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY to the llama-swap key}

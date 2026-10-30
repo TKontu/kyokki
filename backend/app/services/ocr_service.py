@@ -5,11 +5,14 @@ reached, ``OCRUnavailableError`` lets the pipeline read the image with a vision 
 """
 
 import asyncio
+import math
 import mimetypes
+from io import BytesIO
 from pathlib import Path
 
 import httpx
 import pdfplumber
+from PIL import Image, UnidentifiedImageError
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -17,6 +20,13 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
+
+# A photo Telegram compressed (it caps the long side at 1280) leaves a receipt ~290 px
+# wide, and MinerU then invents words instead of reading them: the deployed Lidl photo
+# came back as "Lid1 Suont Ky Esooo-Harakallto". Enlarging that same image 3x turned it
+# back into readable product lines and prices. Beyond 3x there is no detail to recover.
+MAX_UPSCALE_FACTOR = 3
+UPSCALE_JPEG_QUALITY = 95
 
 
 class OCRUnavailableError(Exception):
@@ -84,6 +94,46 @@ def _extract_from_pdf(pdf_path: Path) -> str:
         raise
 
 
+def _prepare_upload(image_path: Path) -> tuple[bytes, str]:
+    """The bytes to send MinerU: the file as-is, or an enlarged JPEG when it is narrow.
+
+    Telegram hands the bot a compressed photo (long side 1280), which leaves a receipt
+    a few hundred pixels wide - too little for MinerU to read. A decode failure (a test
+    double, or a format Pillow does not know) sends the original bytes untouched.
+    """
+    raw = image_path.read_bytes()
+    content_type = content_type_for(image_path)
+    minimum_width = settings.MINERU_UPSCALE_BELOW_WIDTH
+    if minimum_width <= 0:
+        return raw, content_type
+
+    try:
+        with Image.open(BytesIO(raw)) as image:
+            width = image.width
+            if width >= minimum_width:
+                return raw, content_type
+            factor = min(MAX_UPSCALE_FACTOR, math.ceil(minimum_width / width))
+            if factor < 2:
+                return raw, content_type
+            enlarged = image.convert("RGB").resize(
+                (width * factor, image.height * factor), Image.Resampling.LANCZOS
+            )
+    except (UnidentifiedImageError, OSError, ValueError):
+        logger.debug(
+            "could not decode the image for enlargement",
+            extra={"file": image_path.name},
+        )
+        return raw, content_type
+
+    buffer = BytesIO()
+    enlarged.save(buffer, format="JPEG", quality=UPSCALE_JPEG_QUALITY)
+    logger.info(
+        "enlarged a small receipt image for OCR",
+        extra={"file": image_path.name, "width": width, "factor": factor},
+    )
+    return buffer.getvalue(), "image/jpeg"
+
+
 async def _extract_from_image(image_path: Path) -> str:
     """Extract text from an image with the self-hosted MinerU FastAPI endpoint.
 
@@ -111,13 +161,14 @@ async def _extract_from_image(image_path: Path) -> str:
         "end_page_id": "99999",
     }
 
+    data, upload_content_type = await asyncio.to_thread(_prepare_upload, image_path)
+
     try:
         async with httpx.AsyncClient(timeout=settings.MINERU_TIMEOUT) as client:
-            with open(image_path, "rb") as f:  # noqa: ASYNC230
-                files = {"files": (image_path.name, f, content_type_for(image_path))}
-                logger.debug(f"Sending {image_path.name} to MinerU at {url}")
-                response = await client.post(url, data=form_data, files=files)
-                response.raise_for_status()
+            files = {"files": (image_path.name, data, upload_content_type)}
+            logger.debug(f"Sending {image_path.name} to MinerU at {url}")
+            response = await client.post(url, data=form_data, files=files)
+            response.raise_for_status()
 
             json_resp = response.json()
     except (httpx.ConnectError, httpx.TimeoutException) as e:

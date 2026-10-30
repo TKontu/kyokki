@@ -1,11 +1,13 @@
 """Tests for OCR service."""
 
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import anyio
 import httpx
 import pytest
+from PIL import Image
 
 from app.services.ocr_service import (
     OCRUnavailableError,
@@ -13,6 +15,18 @@ from app.services.ocr_service import (
     _extract_from_pdf,
     extract_text_from_receipt,
 )
+
+
+def _mineru_client(text: str) -> AsyncMock:
+    """An httpx.AsyncClient stand-in whose POST answers like MinerU's /file_parse."""
+    response = Mock()
+    response.raise_for_status = Mock()
+    response.json.return_value = {"results": {"receipt": {"md_content": text}}}
+    client = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    client.post = AsyncMock(return_value=response)
+    return client
 
 
 class TestExtractTextFromReceipt:
@@ -194,6 +208,44 @@ class TestExtractFromImage:
             pytest.raises(httpx.HTTPError),
         ):
             await _extract_from_image(img_file)
+
+    @pytest.mark.asyncio
+    async def test_upscales_a_small_image_before_sending(self, tmp_path):
+        """A Telegram-compressed photo is 289 px wide; OCR needs it enlarged.
+
+        The 3x factor is the one measured on the deployed Lidl receipt: the same
+        image that OCR turned into gibberish came back readable at 867 px.
+        """
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (289, 1280), "white").save(img_file, format="JPEG")
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            assert await _extract_from_image(img_file) == "text"
+
+        _, payload, content_type = mock_client.post.call_args.kwargs["files"]["files"]
+        sent = Image.open(BytesIO(payload))
+        assert (sent.width, sent.height) == (867, 3840)
+        assert content_type == "image/jpeg"
+
+    @pytest.mark.asyncio
+    async def test_leaves_a_large_image_untouched(self, tmp_path):
+        """Re-encoding a photo that is already wide enough would only lose detail."""
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (1200, 400), "white").save(img_file, format="JPEG")
+        original = img_file.read_bytes()
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, content_type = mock_client.post.call_args.kwargs["files"]["files"]
+        assert payload == original
+        assert content_type == "image/jpeg"
 
 
 @pytest.mark.integration
