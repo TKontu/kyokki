@@ -2770,6 +2770,30 @@ which parts exist, not colours.
 
 ---
 
+#### Operator report — confirm must merge an existing name (2026-10-30)
+
+Approving a receipt whose line already matches a product name fails instead of using that product.
+Operator: *"When there is an existing name match, the system needs to gracefully just match and
+merge. Currently it gives an error upon receipt approval 'there already exist, merge manually' …
+It needs to just work."* Provenance: a Lidl receipt re-sent as a screenshot (the export quality is
+with Lidl support); reading it is not what fails here.
+
+- [ ] **Q43 (M) Confirm merges a line whose name already exists.** `POST /receipts/{id}/confirm`
+  must put the stock on the product that already owns the name — learning the printed name as its
+  alias — and answer 200, never a 409 to the cook. Reproduce first (TDD): a line whose typed generic
+  name is another product's canonical name, and a line whose name is another product's alias. Where
+  to look: `crud/product_name.learn_product_name` already leaves a name owned by another product
+  alone (and re-points a model guess), and `generic_products.resolve` reuses what `product_for_name`
+  finds — so some path creates a name or product row before consulting them.
+  `models/product_name.py` holds `uq_product_name_name` across the whole catalog, and
+  `api/exceptions.py` turns its `UNIQUE_VIOLATION` into `409 Record already exists.` Fix the shared
+  lookup/creation rather than the endpoint, and keep the alias provenance `learn_product_name`
+  already sets (`source`, `verified`). Acceptance: both confirms succeed, the second lands on the
+  alias's owner, a repeat confirm still answers the existing "already confirmed" 409, and
+  `tests/services/test_receipt_confirm.py` covers both paths.
+
+---
+
 ## Phase 1: MVP
 **Goal:** Receipt scanning → inventory tracking → consumption logging  
 **Duration:** 4-6 weeks
