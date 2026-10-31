@@ -210,12 +210,13 @@ def test_receipt_upload_wait_times_out(
     assert len(gets) == 1
 
 
-def test_receipt_upload_default_timeout_is_1800_seconds() -> None:
-    # F2: the server's per-receipt budget is ~28 min; 600s produced false timeouts.
+def test_receipt_upload_default_timeout_is_2400_seconds() -> None:
+    # The server's stale window is 35 min (budget 30 + 5); the CLI waits past it so a
+    # healthy read is never reported as a timeout.
     parser = cli.build_parser()
     args = parser.parse_args(["receipt", "upload", "somefile.jpg"])
-    assert args.timeout == 1800
-    assert commands.DEFAULT_RECEIPT_WAIT_TIMEOUT == 1800
+    assert args.timeout == 2400
+    assert commands.DEFAULT_RECEIPT_WAIT_TIMEOUT == 2400
 
 
 # --- status -----------------------------------------------------------------

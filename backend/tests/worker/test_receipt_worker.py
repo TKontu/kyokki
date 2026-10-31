@@ -156,6 +156,23 @@ async def test_stale_processing_receipt_is_failed(
     assert "did not finish" in stuck.error
 
 
+async def test_a_receipt_inside_the_window_is_left_processing(
+    db_session, session_factory, tmp_path
+):
+    """The window is a limit, not a schedule: just inside it must not be failed."""
+    working = await _queued(db_session, tmp_path)
+    working.processing_status = ReceiptStatus.PROCESSING
+    working.processing_started_at = datetime.now(UTC) - timedelta(
+        minutes=settings.receipt_stale_minutes - 1
+    )
+    await db_session.commit()
+
+    assert await receipt_worker.run_once(session_factory) is False
+
+    await db_session.refresh(working)
+    assert working.processing_status == ReceiptStatus.PROCESSING
+
+
 async def test_run_sleeps_only_when_the_queue_is_empty(session_factory):
     results = iter([True, True, False, True])
     sleeps: list[float] = []

@@ -27,7 +27,6 @@ from app.services.ocr_service import OCRUnavailableError
 from app.services.product_selection import SelectionResult
 from app.services.receipt_processing import (
     ProcessingResult,
-    ReadOutcome,
     ReceiptProcessingService,
     receipt_arithmetic,
     reconcile_text_read,
@@ -49,7 +48,6 @@ OCR = "app.services.receipt_processing.extract_text_from_receipt"
 TEXT = "app.services.receipt_processing.extract_from_text"
 VISION = "app.services.receipt_processing.extract_from_image"
 RETRY = "app.services.receipt_processing.extract_unaccounted_lines"
-RECONCILE = "app.services.receipt_processing.reconcile_text_read"
 PREPARED = "app.services.receipt_processing.prepared_image_upload"
 
 
@@ -219,7 +217,7 @@ class TestInputSelection:
             patch(
                 TEXT,
                 new_callable=AsyncMock,
-                return_value=_extraction(lines=[], total_line=3),
+                return_value=_extraction(lines=[], total_line=4),
             ),
             patch(
                 VISION, new_callable=AsyncMock, return_value=_extraction("vision")
@@ -237,19 +235,25 @@ class TestInputSelection:
     async def test_retry_fires_even_when_reconciliation_recovered_rows(
         self, service, image_receipt, sample_category
     ):
-        """Rows cut from unreadable text are not evidence that the text was readable."""
-        recovered = ReadOutcome(
-            ocr_text=OCR_TEXT,
-            extraction=_extraction(lines=[ExtractedLine(name="1,39", quantity=1)]),
-        )
+        """Rows cut from unreadable text are not evidence that the text was readable.
+
+        The real reconciliation runs here: the priced line the model left out becomes a
+        raw row, so the final list is non-empty - and the retry must still fire.
+        """
+        # The heuristic parser reads none of these lines; reconciliation cuts raw rows.
+        text = "S-MARKET\n0,936 kg x 2,29 2,14\n1,39\nYHTEENSÄ 3,53\n"
         with (
-            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(OCR, new_callable=AsyncMock, return_value=text),
             patch(
                 TEXT,
                 new_callable=AsyncMock,
-                return_value=_extraction(lines=[], total_line=4),
+                return_value=_extraction(lines=[], total_line=3),
             ),
-            patch(RECONCILE, new_callable=AsyncMock, return_value=recovered),
+            patch(
+                RETRY,
+                new_callable=AsyncMock,
+                return_value=_extraction(lines=[], total_line=1),
+            ),
             patch(
                 VISION, new_callable=AsyncMock, return_value=_extraction("vision")
             ) as vision,

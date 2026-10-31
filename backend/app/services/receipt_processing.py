@@ -1032,14 +1032,15 @@ class ReceiptProcessingService:
                     raw_completions=_raw(extraction, "raw_completion"),
                     no_model_products=True,
                 )
+        # The model's own answer, captured before reconciliation: it rewrites
+        # `extraction.lines` with the rows it cut out of the text, and those rows are the
+        # outcome this flag exists to catch, not evidence that the text was readable.
+        model_read_products = bool(extraction.lines)
         with timings.llm():
             outcome = await reconcile_text_read(
                 text, extraction, categories, receipt_id=str(receipt.id)
             )
-        # From the model's own answer, not the final list: reconciliation can cut raw
-        # rows out of the same unreadable text, which is the outcome this is here to
-        # catch, not evidence that the text was readable.
-        outcome.no_model_products = not extraction.lines
+        outcome.no_model_products = not model_read_products
         return outcome
 
     async def _claim(self, receipt_id: Any) -> datetime | None:

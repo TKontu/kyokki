@@ -82,7 +82,8 @@ class Settings(BaseSettings):
     MINERU_ENABLE_TABLE: bool = True
     MINERU_ENABLE_FORMULA: bool = False
     # Photos Telegram compressed arrive ~290 px wide and OCR invents words at that size.
-    # Narrower images are enlarged before MinerU; 0 disables the enlargement.
+    # Narrower images are enlarged before MinerU; a factor below 1.25x is skipped (the
+    # gain is not worth the re-encode), and 0 disables the enlargement.
     MINERU_UPSCALE_BELOW_WIDTH: int = 1000
 
     @field_validator("MINERU_TIMEOUT", mode="before")

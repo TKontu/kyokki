@@ -232,15 +232,8 @@ increment U1 after R1b, before R2 creates products.
 - [x] `ocr_service.py`: `OCRUnavailableError` on connect errors, timeouts and 5xx; real
   content type; configurable language; pdfplumber off the event loop.
 - [x] Pipeline: PDF → text; image → MinerU text, or the vision model when MinerU is
-  unavailable or finds nothing, or when the model finds no products in the OCR text of an
-  image (#208: the model's own answer decides, not the rows reconciliation cuts).
-  `ocr_structured` stores `method`, `store_chain`, `purchase_date`, `lines`; store and date
-  fill the receipt when the user left them empty.
-- [x] Small images (#208): an image narrower than `MINERU_UPSCALE_BELOW_WIDTH` (default
-  1000 px) is enlarged up to 3x before MinerU, and an image whose OCR text named no products
-  is read again by the vision model. Measured on the deployed Lidl photo (289x1280:
-  gibberish before, readable lines at 3x; OCR 1.4 s for the enlarged 867x3840 against ~0.9 s
-  at the original size, far inside R4's 120 s bar).
+  unavailable or finds nothing. `ocr_structured` stores `method`, `store_chain`,
+  `purchase_date`, `lines`; store and date fill the receipt when the user left them empty.
 - Measured before committing to the schema (R0 harness with `s`, `d`, `c` added): 49/49
   products, all quantities and weights, store and date correct; text 45–53 s, vision
   48–52 s; household items get no category, eggs initially did because only ids were listed.
@@ -2026,9 +2019,13 @@ not rulings.
   (1.5-3.5x faster than the first cut). #125 was merged before its verdict; the post-merge review
   (26 findings, nothing to revert) drives the follow-ups below.
   - Q27 follow-ups (post-merge verdict on #125, 2026-09-27):
-    - [ ] **(high)** `RECEIPT_STALE_MINUTES` (10) is below three 420 s model calls: derive the stale
-      window from the timeout, or bound per-receipt model time. Operator mitigation until then:
-      `RECEIPT_STALE_MINUTES=25` in the stack env.
+    - [x] **(high)** `RECEIPT_STALE_MINUTES` (10) is below the model budget: the window is derived
+      from the timeouts since #131 and follows the fourth (vision) call since #208 - 35 min with the
+      defaults; a configured value below it is raised. Still open in spirit: bound per-receipt model
+      time rather than only the window.
+    - [ ] From the #208 verdict (low): when the vision retry succeeds, the audit keeps only the
+      vision answer - the OCR text and the answer that triggered the retry are gone; and a 16-bit
+      greyscale export is flattened to white by `convert("RGB")`.
     - [ ] The `fi` profile overrides correct model reads (a deposit re-read into a junk raw row);
       the unrecorded "suspect `other` line exempt when sums agree" rule; the clock time `11.49` read as
       an amount (junk header raw row); duplicate identical lines → an extra row; a missed item absorbed
@@ -2055,9 +2052,9 @@ not rulings.
     fixed: a missed product can no longer hide behind a discount/tax either-way match or be absorbed
     as a neighbour's detail line; a structural, open amount parser (any currency symbol or code,
     thousands groups, no-cents receipts, masked card/phone digits rejected, 3 decimals only when the
-    total has 3); the stale window follows the whole per-receipt budget (35 min by default; a lower
+    total has 3); the stale window follows the whole per-receipt budget (28 min by default; a lower
     configured value is raised) and the final/failure writes check the worker's own claim under a row
-    lock; `LLM_ESTIMATE_TIMEOUT` (180) for estimates and product selection; the vision path lists
+    lock; `LLM_ESTIMATE_TIMEOUT` (300) for estimates and product selection; the vision path lists
     priced non-products; `te` for tax-exclusive totals; real ISO language/country codes; the Finnish
     fallback keeps its own rules. Live on the final code: K 15/15 and S-kaupat 49/49 with 0 raw rows,
     0 re-reads and matching totals. #131 merged after its fix pass without a second review panel.
@@ -2777,6 +2774,26 @@ which parts exist, not colours.
 
 ---
 
+#### Receipt photos: enlargement and the vision re-read (2026-10-31, #208)
+
+A Telegram photo of a Lidl receipt reached MinerU at 289x1280 (the bot takes the largest
+compressed size, long side 1280) and came back as invented words (`Lid1 Suont Ky
+Esooo-Harakallto`); the model answered with no products and the receipt completed on eight junk
+heuristic rows. Two changes, both in the worker's read path:
+
+- images narrower than `MINERU_UPSCALE_BELOW_WIDTH` (1000 px) are enlarged 1.25-3x (LANCZOS, JPEG
+  q95) before MinerU, and the vision read gets the same prepared bytes; enlargement can never fail
+  a receipt (decode, resize, bomb, OOM and encode failures send the original), a factor below
+  1.25x is skipped, the result is capped at 40 MP, and a re-encoded part is renamed `.jpg`;
+- when the model's own answer has no products, an image is read again by the vision model; PDFs
+  are not, and a failed or empty second read keeps the text read.
+
+The stale window follows the fourth call: 35 minutes (see Decisions Log). Measured on the
+deployed photo: 867x3840 from 289x1280, OCR 1.4 s against ~0.9 s at the original size. The R4 bar
+is end-to-end and is not measured here.
+
+---
+
 ## Phase 1: MVP
 **Goal:** Receipt scanning → inventory tracking → consumption logging  
 **Duration:** 4-6 weeks
@@ -2990,6 +3007,14 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 ---
 
 ## Decisions Log
+
+**Small images are enlarged before OCR** — an image narrower than `MINERU_UPSCALE_BELOW_WIDTH`
+(1000 px) is enlarged 1.25-3x before MinerU and before the vision read; the switch is on by
+default and `0` turns it off (2026-10-31, #208).
+
+**The receipt stale window moved 28 → 35 minutes** — the vision re-read is a fourth model call,
+so the derived window follows four `LLM_TIMEOUT`s; an old `RECEIPT_STALE_MINUTES=28` is raised
+to it (2026-10-31, #208).
 
 **MinerU over PaddleOCR** — You already have MinerU running. Use it.
 

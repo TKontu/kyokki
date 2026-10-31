@@ -28,12 +28,10 @@ MAX_UPSCALE_FACTOR = 3
 # Below this the enlargement is not worth a re-encode: a 1 px difference must not
 # quadruple MinerU's work the way the old ceil() did (999 px -> 1998 px).
 MIN_UPSCALE_FACTOR = 1.25
-# A capture whose long side is already this big was not compressed for transport (an iPad
-# scan is downsized to 2000 px, a phone photo is larger), so it is left alone. It also
-# keeps a long stitched screenshot (700 x 30000) from being enlarged to hundreds of MP.
-UPSCALE_LONG_SIDE_BELOW = 1600
 # Upper bound on the enlarged image; beyond this the resize costs more memory than the
-# detail it could recover is worth (no compose service sets a memory limit).
+# detail it could recover is worth (no compose service sets a memory limit). A backstop,
+# not the usual gate: with the default thresholds the result stays under ~8 MP; a long
+# stitched screenshot (700 x 30000) is what it exists for.
 MAX_UPSCALED_PIXELS = 40_000_000
 UPSCALE_JPEG_QUALITY = 95
 
@@ -107,11 +105,11 @@ def prepare_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
     """What to send MinerU: ``(name, bytes, content type)``, enlarged when it is narrow.
 
     Telegram hands the bot a compressed photo (long side 1280), which leaves a receipt
-    a few hundred pixels wide - too little for MinerU or the vision model to read. The
-    enlargement is off for a capture whose long side is already large enough, and any
-    decode failure (a test double, a format Pillow does not know, a decompression bomb,
-    an out-of-memory resize) sends the original bytes untouched: OCR quality must never
-    be able to fail a receipt.
+    a few hundred pixels wide - too little for MinerU or the vision model to read; an
+    iPad receipt is ~450-800 px wide even after its 2000 px downscale, so both channels
+    need this. Any decode, resize or encode failure (a test double, a format Pillow does
+    not know, a decompression bomb, an out-of-memory resize or JPEG encode) sends the
+    original bytes untouched: OCR quality must never be able to fail a receipt.
     """
     image_path = Path(image_path)
     raw = image_path.read_bytes()
@@ -126,10 +124,7 @@ def prepare_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
             # first also bakes the rotation into the pixels we send.
             image = ImageOps.exif_transpose(stored)
             width, height = image.size
-            if (
-                min(width, height) >= minimum_width
-                or max(width, height) >= UPSCALE_LONG_SIDE_BELOW
-            ):
+            if min(width, height) >= minimum_width:
                 return image_path.name, raw, content_type
             factor = min(MAX_UPSCALE_FACTOR, minimum_width / min(width, height))
             if factor < MIN_UPSCALE_FACTOR:
@@ -137,13 +132,24 @@ def prepare_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
             enlarged_size = (round(width * factor), round(height * factor))
             if enlarged_size[0] * enlarged_size[1] > MAX_UPSCALED_PIXELS:
                 logger.info(
-                    "skipped enlarging a receipt image that is already large enough",
+                    "skipped enlarging an oversized receipt image",
                     extra={"file": image_path.name, "size": list(image.size)},
                 )
                 return image_path.name, raw, content_type
+            if image.mode in ("RGBA", "LA", "PA") or (
+                image.mode == "P" and "transparency" in image.info
+            ):
+                # Flatten onto white: a transparent page exported with black pixels under
+                # the alpha would otherwise reach OCR as an all-black receipt.
+                rgba = image.convert("RGBA")
+                white = Image.new("RGB", rgba.size, "white")
+                white.paste(rgba, mask=rgba.getchannel("A"))
+                image = white
             enlarged = image.convert("RGB").resize(
                 enlarged_size, Image.Resampling.LANCZOS
             )
+            buffer = BytesIO()
+            enlarged.save(buffer, format="JPEG", quality=UPSCALE_JPEG_QUALITY)
     except (
         UnidentifiedImageError,
         OSError,
@@ -157,8 +163,6 @@ def prepare_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
         )
         return image_path.name, raw, content_type
 
-    buffer = BytesIO()
-    enlarged.save(buffer, format="JPEG", quality=UPSCALE_JPEG_QUALITY)
     logger.info(
         "enlarged a small receipt image for OCR",
         extra={

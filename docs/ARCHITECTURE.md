@@ -10,8 +10,7 @@
 >   deploys `docker-compose.prod.yml` straight from GitHub (Portainer), building nothing.
 >   Runbook: [DEPLOY.md](./DEPLOY.md).
 > - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images; the vision
->   model reads the image when OCR is unavailable, and again when the model finds no products
->   in the OCR text of an image - a compressed photo OCRs badly) → a first LLM extraction call
+>   model reads the image when OCR is unavailable) → a first LLM extraction call
 >   (OpenAI-compatible endpoint, vLLM or Ollama), one targeted re-read of whatever it left
 >   unaccounted, and an optional receipt profile as a second opinion that never decides alone
 >   (Q27, §4.1) → product resolution, by tiers: a learned alias or a catalog name for the
@@ -318,8 +317,9 @@ receipt from any shop, country or language, and nothing in the core knows a rece
    at INFO) are stored for diagnosis, including answers that failed.
 
 The stale window of the queue follows the per-receipt budget: OCR (`MINERU_TIMEOUT`), a
-first read and a re-read (`LLM_TIMEOUT` each) and the product selection
-(`LLM_ESTIMATE_TIMEOUT`; the catalog estimates run after confirm and are not counted). So
+first read, a targeted re-read and - for an image whose OCR text named no products - a
+vision read (`LLM_TIMEOUT` each) and the product selection (`LLM_ESTIMATE_TIMEOUT`; the
+catalog estimates run after confirm and are not counted). So
 `RECEIPT_STALE_MINUTES` is never below the budget, rounded up to minutes, plus 5. The worker's
 final write, and its failure write, lock the row and check its own claim (the
 `processing_started_at` it ran under), so a receipt failed as stale, or requeued and claimed

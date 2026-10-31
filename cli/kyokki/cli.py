@@ -881,7 +881,7 @@ def add_receipt_commands(top: "argparse._SubParsersAction[Parser]") -> None:
         description="Upload FILE (an image or PDF) for OCR and extraction, which runs\n"
         "in the background. Prints the new receipt's id and status. With --wait,\n"
         "polls kyokki receipt status every few seconds (bounded by --timeout,\n"
-        "default 1800 s: a receipt can take up to ~30 minutes when the model\n"
+        "default 2400 s: a receipt can take up to ~35 minutes when the model\n"
         "re-reads it) until the read finishes, then prints the lines. A file that\n"
         "cannot be read, or is over the server's upload limit (413), is exit 2\n"
         "before anything is sent; a duplicate (the server already has this file)\n"

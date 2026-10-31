@@ -68,6 +68,24 @@ def test_llm_defaults_target_the_llama_swap_gateway(
     assert settings.MINERU_TIMEOUT == 120.0
 
 
+def test_the_upscale_width_defaults_and_survives_an_empty_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operator writing `MINERU_UPSCALE_BELOW_WIDTH=` must not stop the api booting."""
+    monkeypatch.delenv("MINERU_UPSCALE_BELOW_WIDTH", raising=False)
+    assert _settings(monkeypatch).MINERU_UPSCALE_BELOW_WIDTH == 1000
+    assert (
+        _settings(monkeypatch, MINERU_UPSCALE_BELOW_WIDTH="").MINERU_UPSCALE_BELOW_WIDTH
+        == 1000
+    )
+    assert (
+        _settings(
+            monkeypatch, MINERU_UPSCALE_BELOW_WIDTH="0"
+        ).MINERU_UPSCALE_BELOW_WIDTH
+        == 0
+    )
+
+
 def test_receipt_worker_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (
         "RECEIPT_WORKER_POLL_SECONDS",

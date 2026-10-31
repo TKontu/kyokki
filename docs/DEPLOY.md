@@ -145,7 +145,7 @@ Two honest limits:
 >   slow but healthy receipt. A value below the budget is raised to it, and
 >   a receipt that was failed as stale or claimed again is no longer overwritten when its
 >   first read finishes late;
-> - optionally set `LLM_ESTIMATE_TIMEOUT` (default 180 s), which now limits the catalog
+> - optionally set `LLM_ESTIMATE_TIMEOUT` (default 300 s), which now limits the catalog
 >   estimate and product selection calls instead of `LLM_TIMEOUT`, so "Re-estimate all" does
 >   not wait 7 minutes a batch;
 > - **small-image enlargement and the vision re-read (#208, 2026-10-31):** an image narrower
