@@ -9,7 +9,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { server, API_URL } from '@/test/msw/server'
 import { ToastProvider } from '@/components/ui/Toast'
-import { ReceiptItemRow, type ReviewRow } from '../ReceiptItemRow'
+import {
+  ReceiptItemRow,
+  canInclude,
+  chosenProductId,
+  type ReviewRow,
+} from '../ReceiptItemRow'
 import type { Category } from '@/types/category'
 import type { ExtractedItem } from '@/types/receipt'
 
@@ -51,6 +56,7 @@ function item(overrides: Partial<ExtractedItem> = {}): ExtractedItem {
     printed_unit: null,
     storage_type: 'refrigerator',
     location: 'main_fridge',
+    suggestion: null,
     ...overrides,
   }
 }
@@ -289,5 +295,157 @@ describe('display language (Post-MVP frontier item 13, phase 3)', () => {
     renderRow({ row: row({ include: false, name: '' }) })
 
     expect(screen.getByText('Anna tälle tuotteelle nimi sisällyttääksesi sen')).toBeInTheDocument()
+  })
+})
+
+describe('suggested rows (CL8 L1)', () => {
+  const suggested = (overrides: Partial<ExtractedItem> = {}) =>
+    item({
+      generic_name: 'Karelian stew',
+      suggestion: {
+        product_id: 'p-pie',
+        product_name: 'Karelian pie',
+        reason: 'selected',
+      },
+      ...overrides,
+    })
+
+  it('starts as a new product and shows the suggestion with its reason', () => {
+    renderRow({ item: suggested(), row: row({ name: 'Karelian stew' }) })
+
+    expect(screen.getByText('New: Karelian stew')).toBeInTheDocument()
+    expect(screen.getByLabelText('Product name')).toHaveValue('Karelian stew')
+    expect(screen.getByLabelText('Category')).toBeInTheDocument()
+    expect(screen.getByText('Suggested: Karelian pie')).toBeInTheDocument()
+    expect(screen.getByText('picked by the model')).toBeInTheDocument()
+    expect(screen.queryByText('→ Karelian pie')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    [{ reason: 'unverified_alias' as const }, 'a name we learned at Lidl'],
+    [{ reason: 'other_chain_alias' as const, store_chain: 'k-group' }, 'a name we learned at another shop (K-group)'],
+    [{ reason: 'other_chain_alias' as const }, 'a name we learned at another shop'],
+    [{ reason: 'model_name' as const }, 'a name the model taught'],
+    [{ reason: 'generic_name' as const }, 'the read named it so'],
+  ])('says the reason %o in plain words', (reason, text) => {
+    renderRow({
+      item: suggested({
+        suggestion: { product_id: 'p-pie', product_name: 'Karelian pie', ...reason },
+      }),
+      storeChain: 'lidl',
+    })
+
+    expect(screen.getByText(text)).toBeInTheDocument()
+  })
+
+  it('Accept switches the row to the suggested product, marked accepted', () => {
+    const { onChange } = renderRow({ item: suggested() })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Accept Karelian pie' }))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productId: 'p-pie',
+        productName: 'Karelian pie',
+        acceptedSuggestion: true,
+      })
+    )
+  })
+
+  it('an accepted row reads like a matched row, and undo returns it to new', () => {
+    const { onChange } = renderRow({
+      item: suggested(),
+      row: row({
+        name: 'Karelian stew',
+        productId: 'p-pie',
+        productName: 'Karelian pie',
+        acceptedSuggestion: true,
+      }),
+    })
+
+    expect(screen.getByText('→ Karelian pie')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Product name')).not.toBeInTheDocument()
+    expect(screen.queryByText('Suggested: Karelian pie')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Undo accepting Karelian pie' }))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ productId: null, acceptedSuggestion: false })
+    )
+  })
+
+  it('Search opens the product search', () => {
+    renderRow({ item: suggested() })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search a product for PESTO JA CASHEW' }))
+
+    expect(document.getElementById('row-0-search')).toBeInTheDocument()
+  })
+
+  it('a suggestion alone is not a chosen product', () => {
+    const suggestedItem = suggested()
+    const plain = row({ name: '', category: '' })
+
+    expect(chosenProductId(suggestedItem, plain)).toBeNull()
+    expect(canInclude(suggestedItem, plain)).toBe(false)
+  })
+
+  it('a keyed row is unchanged: no suggestion, no Accept', () => {
+    renderRow({
+      item: item({
+        product_id: 'p1',
+        product_name: 'Cashew nuts',
+        match_source: 'alias',
+        verified: true,
+      }),
+    })
+
+    expect(screen.getByText('→ Cashew nuts')).toBeInTheDocument()
+    expect(screen.getByText('known')).toBeInTheDocument()
+    expect(screen.queryByText(/^Suggested:/)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Accept/ })).not.toBeInTheDocument()
+  })
+
+  it('shows the suggestion in Finnish', () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    renderRow({ item: suggested() })
+
+    expect(screen.getByText('Ehdotus: Karelian pie')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Hyväksy Karelian pie' })).toBeInTheDocument()
+    window.localStorage.clear()
+  })
+})
+
+describe('name already exists (CL8 L1)', () => {
+  const clashing = () =>
+    row({
+      name: 'Karelian pie',
+      nameExists: { productId: 'p-pie', productName: 'Karelian pie' },
+    })
+
+  it('marks the row and offers to use the existing product', () => {
+    const { onChange } = renderRow({ row: clashing() })
+
+    expect(screen.getByText(/Karelian pie already exists/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Use Karelian pie' }))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productId: 'p-pie',
+        productName: 'Karelian pie',
+        acceptedSuggestion: false,
+        nameExists: null,
+      })
+    )
+  })
+
+  it('editing the name clears the mark', () => {
+    const { onChange } = renderRow({ row: clashing() })
+
+    fireEvent.change(screen.getByLabelText('Product name'), {
+      target: { value: 'Karelian stew' },
+    })
+
+    expect(onChange).toHaveBeenCalledWith({ name: 'Karelian stew', nameExists: null })
   })
 })

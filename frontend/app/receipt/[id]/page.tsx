@@ -5,6 +5,10 @@
  * The last step of the receipt path: a receipt read by the worker becomes stock here. Lines
  * arrive with a generic name, amount and category suggestion; the cook fixes what is wrong,
  * skips what should not be stocked, and confirms.
+ *
+ * CL8 L1: a product only suggested for a line is not used until the cook accepts it, one row
+ * at a time or with "Accept all suggestions". A confirm refused with 409 `name_exists` marks
+ * each clashing row with a "Use it, or rename" choice instead of toasting the raw message.
  */
 
 import React, { useMemo, useState } from 'react'
@@ -16,8 +20,11 @@ import { ChoiceGroup } from '@/components/ui/ChoiceGroup'
 import { fieldInputClass, fieldLabelClass } from '@/components/ui/formStyles'
 import {
   ReceiptItemRow,
+  acceptChanges,
   canInclude,
   chosenProductId,
+  lineSuggestion,
+  suggestionAccepted,
   type ReviewRow,
 } from '@/components/receipts/ReceiptItemRow'
 import { useCategories } from '@/hooks/useCategories'
@@ -35,8 +42,10 @@ import { useT, type TranslateParams } from '@/lib/i18n'
 import { isStale, readMethod, receiptDate, storeName } from '@/lib/receipts'
 import type { Category } from '@/types/category'
 import type {
+  ConfirmNameExistsDetail,
   ConfirmedItemCreate,
   ExtractedItem,
+  NameExistsItem,
   Receipt,
   ReceiptUnit,
 } from '@/types/receipt'
@@ -48,6 +57,19 @@ interface MissedItem {
   category: string
   quantity: string
   unit: ReceiptUnit
+}
+
+/** The clashing items of a 409 `name_exists` confirm answer, or null for any other error. */
+function nameExistsItems(error: unknown): NameExistsItem[] | null {
+  if (!isAPIError(error) || error.status !== 409 || error.code !== 'name_exists') return null
+  const detail = (error.details ?? {}) as Partial<ConfirmNameExistsDetail>
+  if (!Array.isArray(detail.items)) return null
+  return detail.items.filter(
+    (entry): entry is NameExistsItem =>
+      Boolean(entry) &&
+      typeof entry.product_id === 'string' &&
+      typeof entry.product_name === 'string'
+  )
 }
 
 /** `pcs`/`g`/`dl` in the chosen language; the metric ones read the same in both. */
@@ -535,6 +557,42 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
     : missed
   const toAdd = included.length + extras.length
   const purchaseDate = receipt.purchase_date ?? toISODate(new Date())
+  // Included rows whose suggestion still waits for the cook: nothing chosen for them yet
+  const unaccepted = included.filter(
+    ({ item, row }) => lineSuggestion(item) && !chosenProductId(item, row)
+  )
+
+  const editRow = (index: number, changes: Partial<ReviewRow>) =>
+    setEdits((current) => ({ ...current, [index]: { ...current[index], ...changes } }))
+
+  const acceptAllSuggestions = () => {
+    setEdits((current) => {
+      const next = { ...current }
+      for (const { item } of unaccepted) {
+        const suggestion = lineSuggestion(item)
+        if (suggestion) next[item.index] = { ...next[item.index], ...acceptChanges(suggestion) }
+      }
+      return next
+    })
+  }
+
+  // Marks each row a 409 `name_exists` listed; matched by line, else by index.
+  const markNameExists = (clashes: NameExistsItem[]) => {
+    setEdits((current) => {
+      const next = { ...current }
+      for (const clash of clashes) {
+        const entry =
+          (clash.line_id ? rows.find(({ item }) => item.line_id === clash.line_id) : undefined) ??
+          (clash.index != null ? rows.find(({ item }) => item.index === clash.index) : undefined)
+        if (!entry) continue
+        next[entry.item.index] = {
+          ...next[entry.item.index],
+          nameExists: { productId: clash.product_id, productName: clash.product_name },
+        }
+      }
+      return next
+    })
+  }
 
   const submit = () => {
     if (draftStarted && !draftComplete) {
@@ -553,9 +611,11 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
         unit: row.unit,
         purchase_date: purchaseDate,
       }
-      return productId
-        ? { ...base, product_id: productId }
-        : { ...base, name: row.name.trim(), category: row.category }
+      if (!productId) return { ...base, name: row.name.trim(), category: row.category }
+      // Learned as the cook's acceptance of the suggestion, not as their own pick (CL8 L1)
+      return suggestionAccepted(item, row)
+        ? { ...base, product_id: productId, accepted_suggestion: true }
+        : { ...base, product_id: productId }
     })
     // A hand-added item is on no receipt line, so it names no line and teaches no alias.
     for (const extra of extras) {
@@ -591,6 +651,12 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
         },
         // Keep the review open so nothing edited is lost; 4xx messages are meant for people.
         onError: (error) => {
+          const clashes = nameExistsItems(error)
+          if (clashes) {
+            markNameExists(clashes)
+            toast.error(t('receipt.toast.nameExists'))
+            return
+          }
           const clientError = isAPIError(error) && error.status < 500 && error.message
           toast.error(clientError ? error.message : t('receipt.toast.addError'))
         },
@@ -642,6 +708,13 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
 
       <main className={`${mainClass} pb-32`}>
         <CompletenessBanner receipt={receipt} />
+        {unaccepted.length > 0 && (
+          <div className="mb-3 flex justify-end">
+            <Button variant="secondary" size="lg" onClick={acceptAllSuggestions}>
+              {t('receipt.acceptAll', { count: unaccepted.length })}
+            </Button>
+          </div>
+        )}
         <ul className="flex flex-col gap-3">
           {(foldOpen ? rows : visible).map(({ item, row }) => (
             <li key={item.index}>
@@ -655,12 +728,8 @@ export default function ReceiptReviewPage({ params }: { params: { id: string } }
                   edits[item.index] && Object.keys(edits[item.index]).length > 0
                 )}
                 onReanalysed={applyReanalysed}
-                onChange={(changes) =>
-                  setEdits((current) => ({
-                    ...current,
-                    [item.index]: { ...current[item.index], ...changes },
-                  }))
-                }
+                storeChain={receipt.store_chain}
+                onChange={(changes) => editRow(item.index, changes)}
               />
             </li>
           ))}

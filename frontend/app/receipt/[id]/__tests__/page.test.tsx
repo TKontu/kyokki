@@ -44,6 +44,7 @@ function item(index: number, overrides: Partial<ExtractedItem> = {}): ExtractedI
     printed_unit: null,
     storage_type: 'refrigerator',
     location: 'main_fridge',
+    suggestion: null,
     ...overrides,
   }
 }
@@ -580,10 +581,9 @@ describe('ReceiptReviewPage', () => {
     expect((confirms[0] as { items: unknown[] }).items).toEqual([])
   })
 
-  it('shows a confirmed mapping as known and a proposal as auto', async () => {
-    // The row used to print `match_confidence`, and because the pipeline only kept
-    // matches scoring 80 or better, every guess read "high" - including the ones that
-    // paired Pineapple with Apple (H15).
+  it('shows a keyed mapping as known, and a suggestion as a suggestion, not a product', async () => {
+    // CL8 L1: a product the model only proposed arrives as `suggestion`, never as
+    // `product_id` - the row starts as a new product until the cook accepts it.
     mockApi(
       receipt({}, [
         item(0, {
@@ -593,10 +593,8 @@ describe('ReceiptReviewPage', () => {
           verified: true,
         }),
         item(1, {
-          product_id: 'p-oat',
-          product_name: 'Oat drink',
-          match_source: 'selected',
-          verified: false,
+          match_source: 'none',
+          suggestion: { product_id: 'p-oat', product_name: 'Oat drink', reason: 'selected' },
         }),
       ])
     )
@@ -604,17 +602,18 @@ describe('ReceiptReviewPage', () => {
 
     await screen.findByText('→ Milk')
     expect(within(rows()[0]).getByText('known')).toBeInTheDocument()
-    expect(within(rows()[1]).getByText('auto')).toBeInTheDocument()
+    expect(within(rows()[1]).getByText('Suggested: Oat drink')).toBeInTheDocument()
+    expect(within(rows()[1]).queryByText('→ Oat drink')).not.toBeInTheDocument()
   })
 
-  it('lets the cook change a proposed product, and sends the one they chose', async () => {
+  it('lets the cook change a keyed product, and sends the one they chose', async () => {
     const confirms = mockApi(
       receipt({}, [
         item(0, {
           product_id: 'p-oat',
           product_name: 'Oat drink',
-          match_source: 'selected',
-          verified: false,
+          match_source: 'name',
+          verified: true,
         }),
       ])
     )
@@ -633,38 +632,40 @@ describe('ReceiptReviewPage', () => {
     expect(sent.product_id).toBe('p-milk')
   })
 
-  it('a changed row reads as the cook own word, not a proposal', async () => {
-    mockApi(
+  it('a product searched for on a suggested row is the cook own pick, not an accepted suggestion', async () => {
+    const confirms = mockApi(
       receipt({}, [
         item(0, {
-          product_id: 'p-oat',
-          product_name: 'Oat drink',
-          match_source: 'selected',
-          verified: false,
+          match_source: 'none',
+          suggestion: { product_id: 'p-oat', product_name: 'Oat drink', reason: 'selected' },
         }),
       ])
     )
     renderPage()
 
-    await screen.findByText('→ Oat drink')
-    expect(screen.getByText('auto')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Change Oat drink' }))
+    await screen.findByText('Suggested: Oat drink')
+    fireEvent.click(screen.getByRole('button', { name: 'Search a product for PRINTED 0' }))
     search('Milk', `row-0-search`)
     fireEvent.click(await screen.findByRole('button', { name: 'Milk' }))
 
     await screen.findByText('→ Milk')
     expect(screen.getByText('known')).toBeInTheDocument()
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    const [sent] = (confirms[0] as { items: Record<string, unknown>[] }).items
+    expect(sent.product_id).toBe('p-milk')
+    expect(sent.accepted_suggestion).toBeUndefined()
   })
 
-  it('lets the cook detach a proposal and name a new product instead', async () => {
+  it('lets the cook detach a keyed product and name a new product instead', async () => {
     const confirms = mockApi(
       receipt({}, [
         item(0, {
           product_id: 'p-oat',
           product_name: 'Oat drink',
-          match_source: 'selected',
-          verified: false,
+          match_source: 'name',
+          verified: true,
           suggested_category: 'dairy',
         }),
       ])
@@ -1483,5 +1484,184 @@ describe('ReceiptReviewPage: display language (Post-MVP frontier item 13, phase 
     const warning = await screen.findByRole('alert')
     expect(warning).toHaveTextContent(/viimeiset käyttöpäivät lasketaan siitä/i)
     expect(warning.textContent).toContain(finnishDaysAgo(102))
+  })
+})
+
+describe('ReceiptReviewPage suggestions (CL8 L1)', () => {
+  const suggestedItems = () => [
+    item(0, {
+      generic_name: 'Karelian stew',
+      match_source: 'none',
+      suggestion: { product_id: 'p-pie', product_name: 'Karelian pie', reason: 'selected' },
+    }),
+    item(1, {
+      match_source: 'none',
+      suggestion: {
+        product_id: 'p-oat',
+        product_name: 'Oat drink',
+        reason: 'other_chain_alias',
+        store_chain: 'lidl',
+      },
+    }),
+    item(2, { product_id: 'p-milk', product_name: 'Milk', match_source: 'alias', verified: true }),
+    item(3),
+  ]
+  const acceptAll = () => screen.queryByRole('button', { name: /^Accept all suggestions/ })
+
+  it('sends un-accepted suggested rows as new products, by name and category', async () => {
+    const confirms = mockApi(receipt({}, suggestedItems()))
+    renderPage()
+
+    await screen.findByText('Suggested: Karelian pie')
+    fireEvent.click(addButton())
+
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    const sent = (confirms[0] as { items: Record<string, unknown>[] }).items
+    expect(sent[0]).toEqual({
+      index: 0, line_id: 'line-0', name: 'Karelian stew', category: 'dairy',
+      quantity: 1, unit: 'pcs', purchase_date: isoDaysAgo(3),
+    })
+    expect(sent[1]).toMatchObject({ name: 'Generic 1', category: 'dairy' })
+    expect(sent[1].product_id).toBeUndefined()
+    expect(sent[2]).toEqual({
+      index: 2, line_id: 'line-2', product_id: 'p-milk',
+      quantity: 1, unit: 'pcs', purchase_date: isoDaysAgo(3),
+    })
+  })
+
+  it('Accept all accepts every suggested row and sends them as accepted', async () => {
+    const confirms = mockApi(receipt({}, suggestedItems()))
+    renderPage()
+
+    await screen.findByText('Suggested: Karelian pie')
+    fireEvent.click(acceptAll() as HTMLElement)
+
+    expect(screen.getByText('→ Karelian pie')).toBeInTheDocument()
+    expect(screen.getByText('→ Oat drink')).toBeInTheDocument()
+    expect(acceptAll()).not.toBeInTheDocument()
+
+    fireEvent.click(addButton())
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    const sent = (confirms[0] as { items: Record<string, unknown>[] }).items
+    expect(sent[0]).toEqual({
+      index: 0, line_id: 'line-0', product_id: 'p-pie', accepted_suggestion: true,
+      quantity: 1, unit: 'pcs', purchase_date: isoDaysAgo(3),
+    })
+    expect(sent[1]).toMatchObject({ product_id: 'p-oat', accepted_suggestion: true })
+    // A keyed row and a plain new row are not suggestions
+    expect(sent[2].accepted_suggestion).toBeUndefined()
+    expect(sent[3]).toMatchObject({ name: 'Generic 3', category: 'dairy' })
+  })
+
+  it('counts the suggestions left, and accepting one by one brings it down', async () => {
+    mockApi(receipt({}, suggestedItems()))
+    renderPage()
+
+    await screen.findByText('Suggested: Karelian pie')
+    expect(acceptAll()).toHaveAccessibleName('Accept all suggestions (2)')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Accept Karelian pie' }))
+
+    expect(acceptAll()).toHaveAccessibleName('Accept all suggestions (1)')
+  })
+
+  it('leaves a skipped suggested row alone', async () => {
+    const confirms = mockApi(receipt({}, suggestedItems()))
+    renderPage()
+
+    await screen.findByText('Suggested: Karelian pie')
+    fireEvent.click(within(rows()[1]).getByRole('checkbox'))
+    expect(acceptAll()).toHaveAccessibleName('Accept all suggestions (1)')
+    fireEvent.click(acceptAll() as HTMLElement)
+
+    expect(within(rows()[1]).queryByText('→ Oat drink')).not.toBeInTheDocument()
+    fireEvent.click(addButton())
+    await waitFor(() => expect(confirms).toHaveLength(1))
+    const sent = (confirms[0] as { items: { index: number }[] }).items
+    expect(sent.map((i) => i.index)).toEqual([0, 2, 3])
+  })
+
+  it('offers no Accept all when nothing is suggested', async () => {
+    mockApi(receipt({}, [item(0)]))
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    expect(acceptAll()).not.toBeInTheDocument()
+  })
+
+  it('turns 409 name_exists into a choice on each listed row, and Use re-submits by product', async () => {
+    let calls = 0
+    const confirms = mockApi(
+      receipt({}, [
+        item(0, { generic_name: 'Karelian pie' }),
+        item(1, { generic_name: 'Milk', line_id: null }),
+      ]),
+      () => {
+        calls += 1
+        if (calls > 1) {
+          return HttpResponse.json({
+            success: true, items_created: 2, products_created: 1, aliases_learned: 2, error: null,
+          })
+        }
+        return HttpResponse.json(
+          {
+            detail: {
+              code: 'name_exists',
+              message: '2 lines name a product that already exists',
+              items: [
+                {
+                  position: 0, line_id: 'line-0', index: 0, name: 'Karelian pie',
+                  product_id: 'p-pie', product_name: 'Karelian pie',
+                },
+                {
+                  position: 1, line_id: null, index: 1, name: 'Milk',
+                  product_id: 'p-milk', product_name: 'Milk',
+                },
+              ],
+            },
+          },
+          { status: 409 }
+        )
+      }
+    )
+    renderPage()
+
+    await screen.findByText('PRINTED 0')
+    fireEvent.click(addButton())
+
+    expect(
+      await screen.findByText('Some lines name a product that already exists. Choose for each one.')
+    ).toBeInTheDocument()
+    expect(screen.queryByText('2 lines name a product that already exists')).not.toBeInTheDocument()
+    expect(push).not.toHaveBeenCalled()
+    expect(within(rows()[0]).getByText(/Karelian pie already exists/)).toBeInTheDocument()
+    expect(within(rows()[1]).getByText(/Milk already exists/)).toBeInTheDocument()
+
+    fireEvent.click(within(rows()[0]).getByRole('button', { name: 'Use Karelian pie' }))
+    expect(within(rows()[0]).getByText('→ Karelian pie')).toBeInTheDocument()
+    fireEvent.change(within(rows()[1]).getByLabelText('Product name'), {
+      target: { value: 'Oat milk' },
+    })
+    expect(within(rows()[1]).queryByText(/already exists/)).not.toBeInTheDocument()
+
+    fireEvent.click(addButton())
+    await waitFor(() => expect(confirms).toHaveLength(2))
+    const sent = (confirms[1] as { items: Record<string, unknown>[] }).items
+    expect(sent[0]).toMatchObject({ index: 0, product_id: 'p-pie' })
+    expect(sent[0].accepted_suggestion).toBeUndefined()
+    expect(sent[0].name).toBeUndefined()
+    expect(sent[1]).toMatchObject({ index: 1, name: 'Oat milk', category: 'dairy' })
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/'))
+  })
+
+  it('reads the suggestion chrome in Finnish', async () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    mockApi(receipt({}, suggestedItems()))
+    renderPage()
+
+    expect(
+      await screen.findByRole('button', { name: 'Hyväksy kaikki ehdotukset (2)' })
+    ).toBeInTheDocument()
+    window.localStorage.clear()
   })
 })

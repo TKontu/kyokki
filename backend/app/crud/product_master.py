@@ -163,6 +163,8 @@ async def update_product(
     # below, through `set_display_name` rather than `setattr`.
     update_data = product_update.model_dump(exclude_unset=True)
     display_names_update = update_data.pop("display_names", None)
+    # Not a column either: how a rename treats the old name (CL8 ruling 3).
+    keep_old_name = update_data.pop("keep_old_name", None) is not False
     for field, value in update_data.items():
         setattr(db_product, field, value)
 
@@ -178,7 +180,7 @@ async def update_product(
     if normalize_product_name(str(db_product.canonical_name)) != (
         normalize_product_name(old_name)
     ):
-        await _rename_keys(db, db_product, old_name)
+        await _rename_keys(db, db_product, old_name, keep_old_name=keep_old_name)
 
     # The cook's own name (PATCH /products/{id}), one language at a time (Post-MVP
     # frontier item 13). Always `cook`: a human typed this request, whatever a model
@@ -292,11 +294,19 @@ async def _follow_category(
             row.default_shelf_life_days = category.default_shelf_life_days
 
 
-async def _rename_keys(db: AsyncSession, product: ProductMaster, old_name: str) -> None:
+async def _rename_keys(
+    db: AsyncSession,
+    product: ProductMaster,
+    old_name: str,
+    *,
+    keep_old_name: bool = True,
+) -> None:
     """Keep `product_name` true to a rename (H52).
 
     The old canonical row becomes the cook's word - the name still finds the product, as
-    a merged-away name does, and the cook can now remove it - and the new name is
+    a merged-away name does, and the cook can now remove it - unless the cook said not to
+    keep it (`keep_old_name=False`, CL8 ruling 3), when it is deleted and the old name no
+    longer finds this product. The new name is
     learned as canonical. If another product already holds the new name as a cook's or
     canonical key, the first claim wins and the canonical-name fallback in
     `product_for_name` still finds this one by its own name.
@@ -314,7 +324,10 @@ async def _rename_keys(db: AsyncSession, product: ProductMaster, old_name: str) 
         .scalars()
         .first()
     )
-    if old_row is not None:
+    if old_row is not None and not keep_old_name:
+        await db.delete(old_row)
+        await db.flush()
+    elif old_row is not None:
         row: Any = old_row
         row.source = "cook"
         await db.flush()

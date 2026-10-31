@@ -10,31 +10,26 @@ verified alias that won for ever. Similarity survives here in exactly one role:
 building a shortlist for the model to choose from, which the model is good at and the
 scorer never was.
 
-Tiers, in order, stopping at the first hit:
+Which product a line *is* is decided only by an exact key (CL8,
+`docs/PRODUCT_IDENTITY_SPEC.md`), and `services/product_identity.py` decides it:
 
-1. a printed name the cook has already called non-food
-2. an alias for (this chain, printed name)
-3. an alias for (any chain, printed name)
-4. a known catalog name for the printed name
-5. a known catalog name for the generic name, but only when it is the cook's own word
-   for it (`product_name.source = cook`)
-6. otherwise unresolved - and only then, a shortlist and one model call per receipt,
-   which also carries any catalog name found only through the generic name (tier 7)
+1. a printed name the cook has already called non-food stops there;
+2. an exact key (K1 a cook-verified alias at this chain, K2 a canonical or cook name for
+   the printed name, K3 a cook name for the generic name) is the line's product;
+3. otherwise the line may carry a **suggestion** the cook has to accept: an unverified
+   alias at this chain, an alias from another chain, a name the model taught;
+4. lines with none of those - and lines whose only hit is a catalog name reached through
+   the generic name (Q37) - get a shortlist and one model call per receipt. Its pick is a
+   `selected` suggestion, never the product; the Q37 hit not picked stays a
+   `generic_name` suggestion.
 
-Nothing falls back to similarity. If the model is unreachable, unresolved lines stay
+Nothing falls back to similarity. If the model is unreachable, those lines stay
 unresolved and the receipt still completes.
 
-A name is verified when the catalog stands behind it: the product's own name, or a word
-the cook used, matched on the printed line itself or taught as the cook's own synonym. A
-hit on the generic name alone is never that: it is the model's guess at what the receipt
-says, catalog-shaped or not, and Q37 is exactly this guess landing on an unrelated
-catalog entry because the extraction prompt offers listed names too loosely ("Spread"
-for butter, "Dip" for pesto and cashew nuts). So a catalog name reached only through the
-generic name - whether it is the product's own (`canonical`) name or a synonym the model
-itself taught earlier (`model`) - is carried into the shortlist as a candidate rather
-than trusted outright: the line still goes to selection, which judges it against the
-printed text with the same "same shopping-list line" rule as everything else, and a
-`null` answer leaves the line unmatched rather than wrongly confirmed.
+Q37 is why a catalog name reached only through the generic name is never a key: it is
+the model's guess at what the receipt says, and the extraction prompt offers listed names
+loosely ("Spread" for butter, "Karelian pie" for KARJALANPAISTI). It is guaranteed a
+place in the shortlist so selection judges it against the printed text.
 """
 
 from collections.abc import Iterable, Sequence
@@ -46,18 +41,23 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.crud.product_name import known_names
 from app.domain.product_names import normalize_product_name
 from app.models.product_master import ProductMaster
 from app.models.product_name import ProductName
-from app.models.store_product_alias import StoreProductAlias
 from app.services.llm_extractor import LLMExtractionError
 from app.services.matching_service import normalize_receipt_name
+from app.services.product_identity import (
+    KeyJoin,
+    ReceiptIdentity,
+    Suggestion,
+    selected,
+)
 from app.services.product_selection import SelectionLine, select_products
 
 logger = get_logger(__name__)
 
-ResolutionSource = Literal["alias", "name", "selected", "none"]
+# `selected` is no longer a source: the model's pick is a suggestion (CL8).
+ResolutionSource = Literal["alias", "name", "none"]
 
 # Five is enough for a household catalog and keeps the selection prompt small.
 CANDIDATES_PER_LINE = 5
@@ -86,7 +86,11 @@ class ResolvableLine:
 
 @dataclass
 class Resolution:
-    """How one line was resolved, and what it was offered if it was not."""
+    """How one line was resolved, and what it was offered if it was not.
+
+    `product` is set only for an exact key (`source` alias or name, always verified);
+    anything else the line could be is `suggestion`, which the cook has to accept.
+    """
 
     product: ProductMaster | None = None
     source: ResolutionSource = "none"
@@ -96,21 +100,29 @@ class Resolution:
     # Where the alias itself came from, when `source` is "alias". Confirm reads it back
     # so reinforcing a mapping keeps its provenance instead of claiming the cook's word.
     alias_source: str | None = None
+    # The key that joined (the normalised printed or generic name), for provenance.
+    join_key: str | None = None
+    suggestion: Suggestion | None = None
     # Q37b: the g-only snap selection said no to, and the better name it gave instead -
-    # recorded only for the proposed (g-only) candidate, never a key or alias rejection.
-    # Confirm reads `rejected_product_id` back so the line can never re-attach it
-    # without the cook explicitly choosing it.
+    # recorded only for the proposed (g-only) candidate, kept for the audit.
     rejected_product_id: UUID | None = None
     corrected_generic: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
-        """The blob stored on the receipt line (H12 shape)."""
+        """The blob stored on the receipt line (H12 shape, plus `suggestion` - CL8).
+
+        `suggestion` is always present, `null` or not: that is how a reader tells a blob
+        written under the exact-keys rule from one written before it.
+        """
         blob: dict[str, Any] = {
             "product_id": str(self.product.id) if self.product else None,
             "source": self.source,
             "verified": self.verified,
             "candidates": [c.as_dict() for c in self.candidates],
+            "suggestion": self.suggestion.as_dict() if self.suggestion else None,
         }
+        if self.join_key is not None:
+            blob["join_key"] = self.join_key
         if self.alias_source is not None:
             blob["alias_source"] = self.alias_source
         if self.rejected_product_id is not None:
@@ -222,10 +234,8 @@ class ProductResolution:
         remembered = set(non_food)
         results: dict[str, Resolution] = {}
 
-        aliases = await self._aliases_for(lines, chain)
-        names = await known_names(
-            self.db,
-            [part for line in lines for part in (line.generic, line.printed) if part],
+        identity = await ReceiptIdentity.load(
+            self.db, [(line.printed, line.generic) for line in lines], chain
         )
 
         unresolved: list[ResolvableLine] = []
@@ -234,94 +244,35 @@ class ProductResolution:
         # candidates, even if the shortlist would not otherwise surface it.
         proposed: dict[str, ProductMaster] = {}
         for line in lines:
-            printed_key = normalize_receipt_name(line.printed)
-            if printed_key in remembered:
+            if normalize_receipt_name(line.printed) in remembered:
                 results[line.line_id] = Resolution(non_food=True)
                 continue
 
-            alias = aliases.get(printed_key)
-            if alias is not None:
-                product = await self.db.get(ProductMaster, alias.product_master_id)
-                if product is not None:
-                    results[line.line_id] = Resolution(
-                        product=product,
-                        source="alias",
-                        verified=bool(alias.manually_verified),
-                        alias_source=str(alias.source or "cook"),
-                    )
-                    continue
-
-            # The receipt's own printed line naming a catalog product is a key: the
-            # shop's text, not the model's guess (Q37).
-            named_printed = names.get(normalize_product_name(line.printed))
-            if named_printed is not None:
+            decision = identity.decide_line(line.printed, line.generic)
+            if isinstance(decision, KeyJoin):
                 results[line.line_id] = Resolution(
-                    product=named_printed.product,
-                    source="name",
-                    verified=named_printed.source != "model",
+                    product=decision.product,
+                    source=decision.source,
+                    verified=True,
+                    alias_source=decision.alias_source,
+                    join_key=decision.key,
                 )
                 continue
-
-            named_generic = names.get(normalize_product_name(line.generic))
-            if named_generic is not None and named_generic.source == "cook":
-                # The cook's own word for this generic name - taught by typing it, not
-                # merely left unchanged - is as reliable as any other cook key.
-                results[line.line_id] = Resolution(
-                    product=named_generic.product, source="name", verified=True
-                )
+            if decision is not None and decision.reason != "generic_name":
+                # An alias or a model-taught name outranks a selection (CL8): offered
+                # as is, and the model is not asked about this line.
+                results[line.line_id] = Resolution(suggestion=decision)
                 continue
 
-            results[line.line_id] = Resolution()
-            if named_generic is not None:
-                # Reached only through `g`, whether the product's own name
-                # (`canonical`) or a synonym the model itself taught (`model`): offer
-                # it, do not hand it out (Q37).
-                proposed[line.line_id] = named_generic.product
+            results[line.line_id] = Resolution(suggestion=decision)
+            if decision is not None:
+                proposed[line.line_id] = decision.product
             unresolved.append(line)
 
         if unresolved and allow_model:
             await self._select(unresolved, results, proposed)
 
         return results
-
-    async def _aliases_for(
-        self, lines: Sequence[ResolvableLine], chain: str | None
-    ) -> dict[str, StoreProductAlias]:
-        """The best alias per printed name: this chain first, then any chain.
-
-        Only the names on this receipt are fetched. The old matcher loaded every
-        product and every alias in the database for each receipt.
-        """
-        keys = {normalize_receipt_name(line.printed) for line in lines}
-        keys.discard("")
-        if not keys:
-            return {}
-
-        rows = (
-            (
-                await self.db.execute(
-                    select(StoreProductAlias).where(
-                        StoreProductAlias.receipt_name.in_(keys)
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-        def rank(alias: StoreProductAlias) -> tuple[int, int, int, Any]:
-            """Same chain, then the cook's own word, then how often, then how recent."""
-            return (
-                1 if chain and str(alias.store_chain) == chain else 0,
-                1 if alias.manually_verified else 0,
-                int(alias.occurrence_count or 0),
-                alias.last_seen,
-            )
-
-        best: dict[str, StoreProductAlias] = {}
-        for alias in sorted(rows, key=rank):
-            best[str(alias.receipt_name)] = alias  # last write wins: highest rank
-        return best
 
     async def _select(
         self,
@@ -402,16 +353,19 @@ class ProductResolution:
             product = await self.db.get(ProductMaster, product_id)
             if product is None:
                 continue
-            results[line_id].product = product
-            results[line_id].source = "selected"
-            results[line_id].verified = False
+            # A pick, not a key: the cook accepts it or not (CL8).
+            results[line_id].suggestion = selected(product)
 
         # A rejection exists only for the g-only proposal (Q37b): a line whose snap was
         # offered but whose answer did not land on it - a trigram-only line that stayed
         # unmatched never proposed anything, so there is nothing to have rejected.
+        # Selection judged the snap against the printed text and said no, so it is not
+        # offered either (KARJALANPAISTI: "Accept all" would stock the stew on the pie).
+        # Only when selection could not run does the `generic_name` suggestion stay.
         for line_id, snap in proposed.items():
             if line_id in chosen:
                 continue
+            results[line_id].suggestion = None
             results[line_id].rejected_product_id = cast(UUID, snap.id)
             name = corrected.get(line_id)
             if name:

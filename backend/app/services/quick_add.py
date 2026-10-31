@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.crud import inventory_item as crud_inventory
 from app.crud.product_master import MovedInventoryItem
+from app.domain.product_names import normalize_product_name
 from app.models.inventory_item import InventoryItem
 from app.schemas.inventory_item import QuickAddRequest
 from app.services.broadcast_helpers import broadcast_inventory_update
@@ -61,6 +62,9 @@ async def quick_add(db: AsyncSession, request: QuickAddRequest) -> QuickAddResul
             purchase_date=request.purchase_date or date.today(),
             expiry_date=request.expiry_date,
             location=request.location,
+            # CL8 provenance: joined by an exact name key or the given id, or new.
+            join_source="created" if created else "quick_add",
+            join_key=normalize_product_name(request.name) or None,
         )
         db.add(item)
         moved: list[MovedInventoryItem] = []

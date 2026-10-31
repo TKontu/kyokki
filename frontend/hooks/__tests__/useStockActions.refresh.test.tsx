@@ -194,6 +194,7 @@ describe('an edit shows at once', () => {
     const name = await screen.findByLabelText('Name')
     fireEvent.change(name, { target: { value: 'Oat milk' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
 
     // Back on the item's own sheet, which now says the new name
     expect(await screen.findByRole('dialog', { name: 'Oat milk' })).toBeInTheDocument()

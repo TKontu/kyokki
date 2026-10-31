@@ -111,6 +111,9 @@ export interface ProductMasterUpdate {
   // written as source "cook", which a later model proposal never overwrites. Only the
   // languages included are touched - a partial update of the map, not a replacement of it.
   display_names?: Record<string, string>
+  // Read only when canonical_name changes (CL8 L1): true (the default) keeps the old name as
+  // a cook synonym; false forgets it, so it no longer finds this product.
+  keep_old_name?: boolean
 }
 
 /** Regenerate a product's icon (Q18-G2), optionally in the cook's words. */
