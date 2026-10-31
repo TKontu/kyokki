@@ -104,12 +104,13 @@ def _extract_from_pdf(pdf_path: Path) -> str:
 def prepare_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
     """What to send MinerU: ``(name, bytes, content type)``, enlarged when it is narrow.
 
-    Telegram hands the bot a compressed photo (long side 1280), which leaves a receipt
-    a few hundred pixels wide - too little for MinerU or the vision model to read; an
-    iPad receipt is ~450-800 px wide even after its 2000 px downscale, so both channels
-    need this. Any decode, resize or encode failure (a test double, a format Pillow does
-    not know, a decompression bomb, an out-of-memory resize or JPEG encode) sends the
-    original bytes untouched: OCR quality must never be able to fail a receipt.
+    A cropped or compressed receipt can arrive a few hundred pixels wide - the deployed
+    Lidl photo was 289x1280 - and MinerU then invents words instead of reading them. The
+    gate is the image's own shorter side, so a full iPad frame (1500x2000) is left alone
+    while a crop of the same receipt is enlarged. Any decode, resize or encode failure (a
+    test double, a format Pillow does not know, a decompression bomb, an out-of-memory
+    resize or JPEG encode) sends the original bytes untouched: OCR quality must never be
+    able to fail a receipt.
     """
     image_path = Path(image_path)
     raw = image_path.read_bytes()
