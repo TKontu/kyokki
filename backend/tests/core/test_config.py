@@ -68,6 +68,24 @@ def test_llm_defaults_target_the_llama_swap_gateway(
     assert settings.MINERU_TIMEOUT == 120.0
 
 
+def test_the_upscale_width_defaults_and_survives_an_empty_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An operator writing `MINERU_UPSCALE_BELOW_WIDTH=` must not stop the api booting."""
+    monkeypatch.delenv("MINERU_UPSCALE_BELOW_WIDTH", raising=False)
+    assert _settings(monkeypatch).MINERU_UPSCALE_BELOW_WIDTH == 1000
+    assert (
+        _settings(monkeypatch, MINERU_UPSCALE_BELOW_WIDTH="").MINERU_UPSCALE_BELOW_WIDTH
+        == 1000
+    )
+    assert (
+        _settings(
+            monkeypatch, MINERU_UPSCALE_BELOW_WIDTH="0"
+        ).MINERU_UPSCALE_BELOW_WIDTH
+        == 0
+    )
+
+
 def test_receipt_worker_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (
         "RECEIPT_WORKER_POLL_SECONDS",
@@ -80,9 +98,9 @@ def test_receipt_worker_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _settings(monkeypatch)
     assert settings.RECEIPT_WORKER_POLL_SECONDS == 2.0
     # Unset, the stale window follows the per-receipt budget (PR #131 F11): OCR 120 s,
-    # then max(3 x 420 s, 2 x 420 s + 180 s) = 1380 s -> ceil(23) + 5
+    # then max(4 x 420 s, 3 x 420 s + 300 s) = 1680 s -> ceil(30) + 5
     assert settings.RECEIPT_STALE_MINUTES is None
-    assert settings.receipt_stale_minutes == 28
+    assert settings.receipt_stale_minutes == 35
 
 
 @pytest.mark.parametrize("value", ["", "10"])
@@ -98,8 +116,9 @@ def test_the_stale_window_never_falls_below_the_model_budget(
         LLM_ESTIMATE_TIMEOUT="180",
         MINERU_TIMEOUT="120",
     )
-    assert settings.receipt_stale_minutes == 28
-    assert settings.receipt_stale_minutes * 60 > 3 * settings.LLM_TIMEOUT + 120
+    # max(4 x 420, 3 x 420 + 180) = 1680 s + 120 s OCR -> ceil(30) + 5
+    assert settings.receipt_stale_minutes == 35
+    assert settings.receipt_stale_minutes * 60 > 4 * settings.LLM_TIMEOUT + 120
 
 
 def test_a_longer_stale_window_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -117,8 +136,8 @@ def test_the_stale_window_follows_a_shorter_timeout(
         LLM_ESTIMATE_TIMEOUT="60",
         MINERU_TIMEOUT="60",
     )
-    # 60 s OCR + 3 x 60 s = 240 s -> 4 + 5
-    assert settings.receipt_stale_minutes == 9
+    # 60 s OCR + 4 x 60 s = 300 s -> 5 + 5
+    assert settings.receipt_stale_minutes == 10
 
 
 def test_a_long_selection_timeout_widens_the_window(
@@ -126,7 +145,7 @@ def test_a_long_selection_timeout_widens_the_window(
 ) -> None:
     """PR #131 F11: product selection runs inside receipt processing with
     LLM_ESTIMATE_TIMEOUT. With 180 s reads and a 600 s selection the worst case is
-    120 s OCR + 2 x 180 s + 600 s = 18 minutes; the old 3 x LLM_TIMEOUT gave 14."""
+    120 s OCR + 3 x 180 s + 600 s = 21 minutes; 4 x LLM_TIMEOUT alone gives 12."""
     settings = _settings(
         monkeypatch,
         RECEIPT_STALE_MINUTES="",
@@ -134,7 +153,7 @@ def test_a_long_selection_timeout_widens_the_window(
         LLM_ESTIMATE_TIMEOUT="600",
         MINERU_TIMEOUT="120",
     )
-    assert settings.receipt_stale_minutes == 23
+    assert settings.receipt_stale_minutes == 26
 
 
 def test_estimates_and_selection_have_their_own_shorter_timeout(
@@ -372,12 +391,13 @@ def test_module_level_call_warns_when_the_module_loads_with_an_empty_key(
 # --- LLM_ESTIMATE_TIMEOUT (raised from 180 to 300, 2026-09-30) ---------------------------
 
 
-def test_the_stale_window_budget_still_follows_three_llm_timeouts(
+def test_the_stale_window_budget_still_follows_four_llm_timeouts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """LLM_ESTIMATE_TIMEOUT's default rose from 180 to 300 s (the llama-swap gateway notice:
-    cold starts now take 2 to 5 minutes), but 3 x LLM_TIMEOUT (1260 s) still dominates
-    2 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT (1140 s), so the stale-window budget is unchanged."""
+    """Four receipt-path model calls (read, targeted re-read, vision retry, selection).
+
+    With the defaults 4 x LLM_TIMEOUT (1680 s) dominates 3 x LLM_TIMEOUT +
+    LLM_ESTIMATE_TIMEOUT (1560 s), so the window is 35 minutes."""
     settings = _settings(
         monkeypatch,
         RECEIPT_STALE_MINUTES="",
@@ -385,6 +405,6 @@ def test_the_stale_window_budget_still_follows_three_llm_timeouts(
         LLM_ESTIMATE_TIMEOUT="300",
         MINERU_TIMEOUT="120",
     )
-    assert 3 * settings.LLM_TIMEOUT == 1260
-    assert 2 * settings.LLM_TIMEOUT + settings.LLM_ESTIMATE_TIMEOUT == 1140
-    assert settings.receipt_stale_minutes == 28
+    assert 4 * settings.LLM_TIMEOUT == 1680
+    assert 3 * settings.LLM_TIMEOUT + settings.LLM_ESTIMATE_TIMEOUT == 1560
+    assert settings.receipt_stale_minutes == 35

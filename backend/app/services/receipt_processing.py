@@ -2,7 +2,8 @@
 
 Pipeline:
 1. Read the receipt: PDF text (pdfplumber) or image OCR (MinerU); when MinerU is unavailable or
-   finds no text, the image is read directly by the vision-capable LLM.
+   finds no text, the image is read directly by the vision-capable LLM. An image whose OCR text
+   the model found no products in gets the same image read, because compressed photos OCR badly.
 2. Extract product lines, store, date and category suggestions with the LLM.
 3. On text, check every priced line was accounted for and recover what was not (Q27);
    on text and vision, check the line totals against the printed total.
@@ -13,12 +14,11 @@ Pipeline:
 import time
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-import anyio
 from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,9 +56,9 @@ from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import known_non_food
 from app.services.ocr_service import (
     OCRUnavailableError,
-    content_type_for,
     extract_text_from_receipt,
     is_pdf,
+    prepared_image_upload,
 )
 from app.services.product_resolution import (
     ProductResolution,
@@ -536,6 +536,9 @@ class ReadOutcome:
     note: str | None = None
     completeness: dict[str, Any] | None = None
     raw_completions: dict[str, str] = field(default_factory=dict)
+    # The model answered but found nothing in the text it was given. On an image that is
+    # a reason to read the image itself, not a verdict about the receipt.
+    no_model_products: bool = False
 
 
 def _completeness(
@@ -906,22 +909,74 @@ class ReceiptProcessingService:
             text = None
 
         if text and text.strip():
-            return await self._read_text(
+            outcome = await self._read_text(
                 receipt, text, categories, known_products, timings
             )
+            if not outcome.no_model_products:
+                return outcome
+            logger.warning(
+                "model found no products in the OCR text, reading the image itself",
+                extra={"receipt_id": str(receipt.id)},
+            )
+            retried = await self._retry_with_vision(
+                receipt, path, categories, known_products, timings
+            )
+            return retried if retried is not None else outcome
 
         if text is not None:
             logger.warning(
                 "OCR returned no text, reading the image with the vision model",
                 extra={"receipt_id": str(receipt.id)},
             )
-        image = await anyio.Path(path).read_bytes()
         # No text to fall back on: a failing vision call fails the receipt
+        _, image, image_type = await prepared_image_upload(path)
         with timings.llm():
             extraction = await extract_from_image(
-                image, content_type_for(path), categories, known_products
+                image, image_type, categories, known_products
             )
         return vision_outcome(extraction)
+
+    async def _retry_with_vision(
+        self,
+        receipt: Receipt,
+        path: str,
+        categories: list[CategoryOption],
+        known_products: list[str],
+        timings: ReadTimings,
+    ) -> ReadOutcome | None:
+        """Read an image again when the model found nothing in its OCR text.
+
+        Only the "answered with no products" case comes here: a failed call would fail
+        again. Returns None to keep the text read when the second read neither succeeds
+        nor finds anything, so a bad OCR never costs the receipt its lines.
+        """
+        try:
+            # The same enlargement MinerU got: the retry exists because the stored photo
+            # is too small to read, so sending it unchanged would repeat the failure.
+            _, image, image_type = await prepared_image_upload(path)
+            with timings.llm():
+                extraction = await extract_from_image(
+                    image, image_type, categories, known_products
+                )
+        except (LLMExtractionError, OSError, MemoryError) as exc:
+            logger.warning(
+                "vision retry failed, keeping the text read",
+                extra={"receipt_id": str(receipt.id), "error": str(exc)},
+            )
+            return None
+
+        if not extraction.lines:
+            logger.warning(
+                "vision retry found no products either",
+                extra={"receipt_id": str(receipt.id)},
+            )
+            return None
+
+        outcome = vision_outcome(extraction)
+        return replace(
+            outcome,
+            note=_join_notes("OCR text unreadable; read from the image", outcome.note),
+        )
 
     async def _read_text(
         self,
@@ -975,11 +1030,18 @@ class ReceiptProcessingService:
                         invalid_entries=extraction.invalid_entries,
                     ),
                     raw_completions=_raw(extraction, "raw_completion"),
+                    no_model_products=True,
                 )
+        # The model's own answer, captured before reconciliation: it rewrites
+        # `extraction.lines` with the rows it cut out of the text, and those rows are the
+        # outcome this flag exists to catch, not evidence that the text was readable.
+        model_read_products = bool(extraction.lines)
         with timings.llm():
-            return await reconcile_text_read(
+            outcome = await reconcile_text_read(
                 text, extraction, categories, receipt_id=str(receipt.id)
             )
+        outcome.no_model_products = not model_read_products
+        return outcome
 
     async def _claim(self, receipt_id: Any) -> datetime | None:
         """This worker's claim on the receipt: the `processing_started_at` it runs under."""

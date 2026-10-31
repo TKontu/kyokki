@@ -85,7 +85,7 @@ The receipt commands call `/api/receipts`:
 - `upload`: a file that cannot be read, or is over the server's upload limit (413,
   mapped locally to usage: the caller must shrink the file, as with a bad argument), is
   exit 2 before anything is sent. `--wait` polls every few seconds, bounded by
-  `--timeout` (default 1800 s / ~30 min: the server's own per-receipt budget, for a
+  `--timeout` (default 2400 s / ~40 min: the server fails a stale read at 35 min, for a
   receipt the model has to re-read); a timeout that is never reached is exit 1.
 - `confirm` sends every food line with a matched product, in its own quantity and
   unit, with the receipt's purchase date (or `--purchase-date`, required when the

@@ -11,8 +11,9 @@
 >   Runbook: [DEPLOY.md](./DEPLOY.md).
 > - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images; the vision
 >   model reads the image when OCR is unavailable) → a first LLM extraction call
->   (OpenAI-compatible endpoint, vLLM or Ollama), one targeted re-read of whatever it left
->   unaccounted, and an optional receipt profile as a second opinion that never decides alone
+>   (OpenAI-compatible endpoint, vLLM or Ollama), repeated from the image itself when it finds no
+>   products in an image's OCR text, one targeted re-read of whatever it left unaccounted, and an
+>   optional receipt profile as a second opinion that never decides alone
 >   (Q27, §4.1) → product resolution, by tiers: a learned alias or a catalog name for the
 >   *printed* line is a key outright, and so is a generic name the cook taught directly; a
 >   catalog name reached only through the model's own generic name - its canonical name or a
@@ -248,7 +249,8 @@ category (
 Photo or PDF
   → text          pdfplumber for PDF (digital e-receipts), MinerU OCR for images
   → extraction    LLM, store-agnostic (vision model directly from the image when OCR is
-                  unavailable); generic heuristic line parser as fallback (MVP-R3b)
+                  unavailable, or when the model found no products in the OCR text);
+                  generic heuristic line parser as fallback (MVP-R3b)
   → accounting    every priced line cited or listed; one targeted re-read; raw rows;
                   optional country profiles as evidence; the receipt's arithmetic (Q27)
   → resolution    alias, a catalog name for the printed line, or a generic name the
@@ -316,8 +318,9 @@ receipt from any shop, country or language, and nothing in the core knows a rece
    at INFO) are stored for diagnosis, including answers that failed.
 
 The stale window of the queue follows the per-receipt budget: OCR (`MINERU_TIMEOUT`), a
-first read and a re-read (`LLM_TIMEOUT` each) and the product selection
-(`LLM_ESTIMATE_TIMEOUT`; the catalog estimates run after confirm and are not counted). So
+first read, a targeted re-read and - for an image whose OCR text named no products - a
+vision read (`LLM_TIMEOUT` each) and the product selection (`LLM_ESTIMATE_TIMEOUT`; the
+catalog estimates run after confirm and are not counted). So
 `RECEIPT_STALE_MINUTES` is never below the budget, rounded up to minutes, plus 5. The worker's
 final write, and its failure write, lock the row and check its own claim (the
 `processing_started_at` it ran under), so a receipt failed as stale, or requeued and claimed

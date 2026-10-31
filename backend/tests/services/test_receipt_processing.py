@@ -48,6 +48,7 @@ OCR = "app.services.receipt_processing.extract_text_from_receipt"
 TEXT = "app.services.receipt_processing.extract_from_text"
 VISION = "app.services.receipt_processing.extract_from_image"
 RETRY = "app.services.receipt_processing.extract_unaccounted_lines"
+PREPARED = "app.services.receipt_processing.prepared_image_upload"
 
 
 @pytest.fixture(autouse=True)
@@ -202,6 +203,184 @@ class TestInputSelection:
         assert result.ocr_text == OCR_TEXT
         text.assert_awaited_once()
         vision.assert_not_awaited()
+
+    async def test_image_with_no_model_products_retries_with_vision(
+        self, service, image_receipt, sample_category, db_session
+    ):
+        """Illegible OCR text is not a verdict: the image itself gets a second read.
+
+        The deployed Lidl photo came back as 289 px wide gibberish; the model answered
+        with no products and the receipt completed on junk heuristic lines.
+        """
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=UNREADABLE_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                return_value=_extraction(lines=[], total_line=4),
+            ),
+            patch(
+                VISION, new_callable=AsyncMock, return_value=_extraction("vision")
+            ) as vision,
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is True
+        assert result.ocr_text is None
+        vision.assert_awaited_once()
+        await db_session.refresh(image_receipt)
+        assert image_receipt.ocr_structured["method"] == "vision"
+        assert image_receipt.items_extracted == 2
+
+    async def test_retry_fires_even_when_reconciliation_recovered_rows(
+        self, service, image_receipt, sample_category
+    ):
+        """Rows cut from unreadable text are not evidence that the text was readable.
+
+        The real reconciliation runs here: the priced line the model left out becomes a
+        raw row, so the final list is non-empty - and the retry must still fire.
+        """
+        # The heuristic parser reads none of these lines; reconciliation cuts raw rows.
+        text = "S-MARKET\n0,936 kg x 2,29 2,14\n1,39\nYHTEENSÄ 3,53\n"
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=text),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                return_value=_extraction(lines=[], total_line=3),
+            ),
+            patch(
+                RETRY,
+                new_callable=AsyncMock,
+                return_value=_extraction(lines=[], total_line=1),
+            ),
+            patch(
+                VISION, new_callable=AsyncMock, return_value=_extraction("vision")
+            ) as vision,
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is True
+        vision.assert_awaited_once()
+
+    async def test_vision_retry_sends_the_prepared_image(
+        self, service, image_receipt, sample_category
+    ):
+        """The retry must see the same enlargement MinerU got, not the stored photo."""
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=UNREADABLE_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                return_value=_extraction(lines=[], total_line=3),
+            ),
+            patch(
+                PREPARED,
+                new_callable=AsyncMock,
+                return_value=("receipt.jpg", b"enlarged", "image/jpeg"),
+            ) as prepared,
+            patch(
+                VISION, new_callable=AsyncMock, return_value=_extraction("vision")
+            ) as vision,
+        ):
+            await service.process_receipt(image_receipt)
+
+        prepared.assert_awaited_once_with(image_receipt.image_path)
+        vision.assert_awaited_once_with(
+            b"enlarged",
+            "image/jpeg",
+            [CategoryOption(id="dairy", name="Dairy & Eggs")],
+            [],
+        )
+
+    async def test_retry_read_failure_keeps_the_text_read(
+        self, service, image_receipt, sample_category
+    ):
+        """A file that vanished between the two reads must not fail the receipt."""
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                return_value=_extraction(lines=[], total_line=4),
+            ),
+            patch(PREPARED, new_callable=AsyncMock, side_effect=OSError("gone")),
+            patch(VISION, new_callable=AsyncMock) as vision,
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is True
+        assert result.ocr_text == OCR_TEXT
+        vision.assert_not_awaited()
+
+    async def test_pdf_with_no_model_products_does_not_read_the_image(
+        self, service, pdf_receipt, sample_category
+    ):
+        """A PDF has no image to send, so the text read stands."""
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=UNREADABLE_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                return_value=_extraction(lines=[], total_line=3),
+            ),
+            patch(VISION, new_callable=AsyncMock) as vision,
+        ):
+            result = await service.process_receipt(pdf_receipt)
+
+        assert result.success is True
+        vision.assert_not_awaited()
+
+    async def test_vision_retry_failure_keeps_the_heuristic_read(
+        self, service, image_receipt, sample_category, db_session
+    ):
+        """A second failure must not lose the read the receipt already had."""
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                return_value=_extraction(lines=[], total_line=4),
+            ),
+            patch(
+                VISION,
+                new_callable=AsyncMock,
+                side_effect=LLMExtractionError("gateway down"),
+            ),
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is True
+        assert result.ocr_text == OCR_TEXT
+        await db_session.refresh(image_receipt)
+        assert image_receipt.ocr_structured["method"] == "heuristic"
+        assert image_receipt.items_extracted == 2
+
+    async def test_vision_retry_without_products_keeps_the_heuristic_read(
+        self, service, image_receipt, sample_category, db_session
+    ):
+        with (
+            patch(OCR, new_callable=AsyncMock, return_value=OCR_TEXT),
+            patch(
+                TEXT,
+                new_callable=AsyncMock,
+                return_value=_extraction(lines=[], total_line=4),
+            ),
+            patch(
+                VISION,
+                new_callable=AsyncMock,
+                return_value=_extraction("vision", lines=[]),
+            ) as vision,
+        ):
+            result = await service.process_receipt(image_receipt)
+
+        assert result.success is True
+        vision.assert_awaited_once()
+        await db_session.refresh(image_receipt)
+        assert image_receipt.ocr_structured["method"] == "heuristic"
+        assert (
+            image_receipt.ocr_structured["fallback_reason"] == "Model found no products"
+        )
 
     async def test_image_falls_back_to_vision_when_ocr_is_unavailable(
         self, service, image_receipt, sample_category

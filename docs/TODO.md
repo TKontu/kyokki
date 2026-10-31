@@ -2019,9 +2019,13 @@ not rulings.
   (1.5-3.5x faster than the first cut). #125 was merged before its verdict; the post-merge review
   (26 findings, nothing to revert) drives the follow-ups below.
   - Q27 follow-ups (post-merge verdict on #125, 2026-09-27):
-    - [ ] **(high)** `RECEIPT_STALE_MINUTES` (10) is below three 420 s model calls: derive the stale
-      window from the timeout, or bound per-receipt model time. Operator mitigation until then:
-      `RECEIPT_STALE_MINUTES=25` in the stack env.
+    - [x] **(high)** `RECEIPT_STALE_MINUTES` (10) is below the model budget: the window is derived
+      from the timeouts since #131 and follows the fourth (vision) call since #208 - 35 min with the
+      defaults; a configured value below it is raised. Still open in spirit: bound per-receipt model
+      time rather than only the window.
+    - [ ] From the #208 verdict (low), plus a gap the review found: when the vision retry succeeds, the audit keeps only the
+      vision answer - the OCR text and the answer that triggered the retry are gone; and a 16-bit
+      greyscale export is flattened to white by `convert("RGB")`.
     - [ ] The `fi` profile overrides correct model reads (a deposit re-read into a junk raw row);
       the unrecorded "suspect `other` line exempt when sums agree" rule; the clock time `11.49` read as
       an amount (junk header raw row); duplicate identical lines → an extra row; a missed item absorbed
@@ -2333,7 +2337,7 @@ fix passes verified at source by the planner). **Merged 2026-10-02 by the operat
     screen lands.
 - **AG4 + CLI receipts (#139):** `kyokki receipt upload [--wait] | status | confirm --all-matched
   [--assign N=ID] [--new N=CATEGORY] [--skip-unmatched]`, and `skills/kyokki/SKILL.md` plus examples
-  (every command in them is parse-checked). `--wait` defaults to 1800 s (the server's per-receipt budget).
+  (every command in them is parse-checked). `--wait` defaults to 2400 s (past the server's 35-minute stale window).
   - [ ] AG7 acceptance (a Hermes run against a staging stack) is still the operator's.
   - [ ] `kyokki stock discard --expired` waits on the agent endpoint (round 2026-10-02-1 A3).
 - **Q18-G2 (#142, open):** ComfyUI PNGs replace the rejected SVG drawer; Regenerate; production stays
@@ -2770,6 +2774,26 @@ which parts exist, not colours.
 
 ---
 
+#### Receipt photos: enlargement and the vision re-read (2026-10-31, #208)
+
+A Telegram photo of a Lidl receipt reached MinerU at 289x1280 (the bot takes the largest
+compressed size, long side 1280) and came back as invented words (`Lid1 Suont Ky
+Esooo-Harakallto`); the model answered with no products and the receipt completed on eight junk
+heuristic rows. Two changes, both in the worker's read path:
+
+- images narrower than `MINERU_UPSCALE_BELOW_WIDTH` (1000 px) are enlarged 1.25-3x (LANCZOS, JPEG
+  q95) before MinerU, and the vision read gets the same prepared bytes; enlargement can never fail
+  a receipt (decode, resize, bomb, OOM and encode failures send the original), a factor below
+  1.25x is skipped, the result is capped at 40 MP, and a re-encoded part is renamed `.jpg`;
+- when the model's own answer has no products, an image is read again by the vision model; PDFs
+  are not, and a failed or empty second read keeps the text read.
+
+The stale window follows the fourth call: 35 minutes (see Decisions Log). Measured on the
+deployed photo: 867x3840 from 289x1280, OCR 1.4 s against ~0.9 s at the original size. The R4 bar
+is end-to-end and is not measured here.
+
+---
+
 ## Phase 1: MVP
 **Goal:** Receipt scanning → inventory tracking → consumption logging  
 **Duration:** 4-6 weeks
@@ -2997,3 +3021,12 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 **Price tracking deferred** — Not core to food waste problem. Parsers extract product names and quantities only. Price/cost analytics added in future version.
 
 **Recipes are native, not Mealie, and not the agent track (2026-10-18)** — Own tables and iPad screens (`docs/recipes_TODO.md`); the agent calls the same endpoints. Ingredients link to products by exact key only; substitutions are confirmed per recipe ingredient and never join products.
+
+**Small images are enlarged before OCR** — an image whose shorter side is below
+`MINERU_UPSCALE_BELOW_WIDTH` (1000 px) is enlarged 1.25-3x before MinerU and before the vision
+read; it applies to every ingest channel, the switch is on by default and `0` turns it off
+(2026-10-31, #208).
+
+**The receipt stale window moved 28 → 35 minutes** — the vision re-read is one more model call, so
+the derived window follows `max(4 x LLM_TIMEOUT, 3 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT)`; an old
+`RECEIPT_STALE_MINUTES=28` is raised to it (2026-10-31, #208).

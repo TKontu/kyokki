@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.receipt import Receipt
 from app.parsers.base import ExtractedLine, ReceiptExtraction
 from app.schemas.receipt import ReceiptStatus
@@ -141,9 +142,14 @@ async def test_receipts_are_read_oldest_first(db_session, session_factory, tmp_p
 async def test_stale_processing_receipt_is_failed(
     db_session, session_factory, tmp_path
 ):
+    # Pin the value: deriving both sides of the comparison from the setting would keep
+    # passing if the window regressed (test_config pins it too).
+    assert settings.receipt_stale_minutes == 35
     stuck = await _queued(db_session, tmp_path)
     stuck.processing_status = ReceiptStatus.PROCESSING
-    stuck.processing_started_at = datetime.now(UTC) - timedelta(minutes=30)
+    stuck.processing_started_at = datetime.now(UTC) - timedelta(
+        minutes=settings.receipt_stale_minutes + 1
+    )
     await db_session.commit()
 
     assert await receipt_worker.run_once(session_factory) is False
@@ -151,6 +157,25 @@ async def test_stale_processing_receipt_is_failed(
     await db_session.refresh(stuck)
     assert stuck.processing_status == ReceiptStatus.FAILED
     assert "did not finish" in stuck.error
+
+
+async def test_a_receipt_inside_the_window_is_left_processing(
+    db_session, session_factory, tmp_path
+):
+    """The window is a limit, not a schedule: just inside it must not be failed."""
+    assert settings.receipt_stale_minutes == 35
+    working = await _queued(db_session, tmp_path)
+    working.processing_status = ReceiptStatus.PROCESSING
+    # Five minutes inside the window, so a slow CI is not what the test measures.
+    working.processing_started_at = datetime.now(UTC) - timedelta(
+        minutes=settings.receipt_stale_minutes - 5
+    )
+    await db_session.commit()
+
+    assert await receipt_worker.run_once(session_factory) is False
+
+    await db_session.refresh(working)
+    assert working.processing_status == ReceiptStatus.PROCESSING
 
 
 async def test_run_sleeps_only_when_the_queue_is_empty(session_factory):

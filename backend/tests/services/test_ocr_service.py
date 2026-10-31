@@ -1,11 +1,13 @@
 """Tests for OCR service."""
 
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import anyio
 import httpx
 import pytest
+from PIL import Image
 
 from app.services.ocr_service import (
     OCRUnavailableError,
@@ -13,6 +15,18 @@ from app.services.ocr_service import (
     _extract_from_pdf,
     extract_text_from_receipt,
 )
+
+
+def _mineru_client(text: str) -> AsyncMock:
+    """An httpx.AsyncClient stand-in whose POST answers like MinerU's /file_parse."""
+    response = Mock()
+    response.raise_for_status = Mock()
+    response.json.return_value = {"results": {"receipt": {"md_content": text}}}
+    client = AsyncMock()
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+    client.post = AsyncMock(return_value=response)
+    return client
 
 
 class TestExtractTextFromReceipt:
@@ -194,6 +208,225 @@ class TestExtractFromImage:
             pytest.raises(httpx.HTTPError),
         ):
             await _extract_from_image(img_file)
+
+    @pytest.mark.asyncio
+    async def test_upscales_a_small_image_before_sending(self, tmp_path):
+        """A Telegram-compressed photo is 289 px wide; OCR needs it enlarged.
+
+        The 3x factor is the one measured on the deployed Lidl receipt: the same
+        image that OCR turned into gibberish came back readable at 867 px.
+        """
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (289, 1280), "white").save(img_file, format="JPEG")
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            assert await _extract_from_image(img_file) == "text"
+
+        _, payload, content_type = mock_client.post.call_args.kwargs["files"]["files"]
+        sent = Image.open(BytesIO(payload))
+        assert (sent.width, sent.height) == (867, 3840)
+        assert content_type == "image/jpeg"
+
+    @pytest.mark.asyncio
+    async def test_leaves_a_large_image_untouched(self, tmp_path):
+        """Re-encoding a photo that is already wide enough would only lose detail."""
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (1200, 2000), "white").save(img_file, format="JPEG")
+        original = img_file.read_bytes()
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, content_type = mock_client.post.call_args.kwargs["files"]["files"]
+        assert payload == original
+        assert content_type == "image/jpeg"
+
+    @pytest.mark.asyncio
+    async def test_reads_exif_orientation_before_measuring(self, tmp_path):
+        """A rotated long receipt is 289 px wide on screen, whatever the stored size."""
+        img_file = tmp_path / "receipt.jpg"
+        stored = Image.new("RGB", (1280, 289), "white")
+        exif = Image.Exif()
+        exif[0x0112] = 6  # rotate 90 degrees clockwise for display
+        stored.save(img_file, format="JPEG", exif=exif)
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, _ = mock_client.post.call_args.kwargs["files"]["files"]
+        sent = Image.open(BytesIO(payload))
+        assert (sent.width, sent.height) == (867, 3840)
+
+    @pytest.mark.asyncio
+    async def test_a_small_factor_is_not_worth_a_re_encode(self, tmp_path):
+        """999 px must not become 1998 px just because it is a pixel under the threshold."""
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (999, 1400), "white").save(img_file, format="JPEG")
+        original = img_file.read_bytes()
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, _ = mock_client.post.call_args.kwargs["files"]["files"]
+        assert payload == original
+
+    @pytest.mark.asyncio
+    async def test_enlarges_to_the_threshold_not_the_next_power(self, tmp_path):
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (800, 1200), "white").save(img_file, format="JPEG")
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, _ = mock_client.post.call_args.kwargs["files"]["files"]
+        sent = Image.open(BytesIO(payload))
+        assert (sent.width, sent.height) == (1000, 1500)
+
+    @pytest.mark.asyncio
+    async def test_a_decompression_bomb_is_sent_untouched(self, tmp_path, monkeypatch):
+        """A 200 MP photo used to reach MinerU; enlargement must not fail the receipt."""
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (20, 20), "white").save(img_file, format="JPEG")
+        original = img_file.read_bytes()
+        monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 100)
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, content_type = mock_client.post.call_args.kwargs["files"]["files"]
+        assert payload == original
+        assert content_type == "image/jpeg"
+
+    @pytest.mark.asyncio
+    async def test_a_resize_over_the_pixel_cap_is_skipped(self, tmp_path, monkeypatch):
+        """A long screenshot must not be enlarged to hundreds of megapixels."""
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (400, 800), "white").save(img_file, format="JPEG")
+        original = img_file.read_bytes()
+        monkeypatch.setattr("app.services.ocr_service.MAX_UPSCALED_PIXELS", 200_000)
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, _ = mock_client.post.call_args.kwargs["files"]["files"]
+        assert payload == original
+
+    @pytest.mark.asyncio
+    async def test_zero_disables_the_enlargement(self, tmp_path, monkeypatch):
+        from app.core.config import settings
+
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (289, 1280), "white").save(img_file, format="JPEG")
+        original = img_file.read_bytes()
+        monkeypatch.setattr(settings, "MINERU_UPSCALE_BELOW_WIDTH", 0)
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, _ = mock_client.post.call_args.kwargs["files"]["files"]
+        assert payload == original
+
+    @pytest.mark.asyncio
+    async def test_a_transparent_export_is_flattened_onto_white(self, tmp_path):
+        """Transparent pixels stored as black must not turn the page black."""
+        img_file = tmp_path / "receipt.png"
+        image = Image.new("RGBA", (400, 800), (0, 0, 0, 0))
+        image.paste((0, 0, 0, 255), (0, 0, 400, 20))  # a line of black text
+        image.save(img_file, format="PNG")
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, _ = mock_client.post.call_args.kwargs["files"]["files"]
+        sent = Image.open(BytesIO(payload))
+        assert sent.getpixel((0, 400)) == (255, 255, 255)
+        assert sent.getpixel((0, 10))[0] < 60
+
+    @pytest.mark.asyncio
+    async def test_an_encode_failure_is_sent_untouched(self, tmp_path, monkeypatch):
+        """A JPEG encoder failure must not fail the receipt either."""
+        img_file = tmp_path / "receipt.jpg"
+        Image.new("RGB", (400, 800), "white").save(img_file, format="JPEG")
+        original = img_file.read_bytes()
+
+        def boom(self, *args, **kwargs):
+            raise OSError("encoder error -2")
+
+        monkeypatch.setattr(Image.Image, "save", boom)
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, _ = mock_client.post.call_args.kwargs["files"]["files"]
+        assert payload == original
+
+    @pytest.mark.asyncio
+    async def test_a_16_bit_scan_is_scaled_not_clipped(self, tmp_path):
+        """convert("RGB") clips 16-bit samples to white; the scan must stay legible."""
+        img_file = tmp_path / "scan.png"
+        scan = Image.new("I;16", (400, 800), 60000)
+        for x in range(400):
+            for y in range(20):
+                scan.putpixel((x, y), 4000)
+        scan.save(img_file)
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, _ = mock_client.post.call_args.kwargs["files"]["files"]
+        sent = Image.open(BytesIO(payload))
+        assert sent.getpixel((0, 400))[0] > 200  # paper
+        assert sent.getpixel((10, 10))[0] < 60  # ink
+
+    @pytest.mark.asyncio
+    async def test_a_narrow_png_is_uploaded_as_jpeg_under_a_jpeg_name(self, tmp_path):
+        """The part must not say .png while carrying JPEG bytes."""
+        img_file = tmp_path / "receipt.png"
+        Image.new("RGB", (400, 800), "white").save(img_file, format="PNG")
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        name, payload, content_type = mock_client.post.call_args.kwargs["files"][
+            "files"
+        ]
+        assert (name, content_type) == ("receipt.jpg", "image/jpeg")
+        assert payload[:3] == b"\xff\xd8\xff"
 
 
 @pytest.mark.integration

@@ -6,10 +6,12 @@ reached, ``OCRUnavailableError`` lets the pipeline read the image with a vision 
 
 import asyncio
 import mimetypes
+from io import BytesIO
 from pathlib import Path
 
 import httpx
 import pdfplumber
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -17,6 +19,21 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
+
+# A photo Telegram compressed (it caps the long side at 1280) leaves a receipt ~290 px
+# wide, and MinerU then invents words instead of reading them: the deployed Lidl photo
+# came back as "Lid1 Suont Ky Esooo-Harakallto". Enlarging that same image 3x turned it
+# back into readable product lines and prices. Beyond 3x there is no detail to recover.
+MAX_UPSCALE_FACTOR = 3
+# Below this the enlargement is not worth a re-encode: a 1 px difference must not
+# quadruple MinerU's work the way the old ceil() did (999 px -> 1998 px).
+MIN_UPSCALE_FACTOR = 1.25
+# Upper bound on the enlarged image; beyond this the resize costs more memory than the
+# detail it could recover is worth (no compose service sets a memory limit). A backstop,
+# not the usual gate: with the default thresholds the result stays under ~8 MP; a long
+# stitched screenshot (700 x 30000) is what it exists for.
+MAX_UPSCALED_PIXELS = 40_000_000
+UPSCALE_JPEG_QUALITY = 95
 
 
 class OCRUnavailableError(Exception):
@@ -84,6 +101,95 @@ def _extract_from_pdf(pdf_path: Path) -> str:
         raise
 
 
+def prepare_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
+    """What to send MinerU: ``(name, bytes, content type)``, enlarged when it is narrow.
+
+    A cropped or compressed receipt can arrive a few hundred pixels wide - the deployed
+    Lidl photo was 289x1280 - and MinerU then invents words instead of reading them. The
+    gate is the image's own shorter side, so a full iPad frame (1500x2000) is left alone
+    while a crop of the same receipt is enlarged. Any decode, resize or encode failure (a
+    test double, a format Pillow does not know, a decompression bomb, an out-of-memory
+    resize or JPEG encode) sends the original bytes untouched: OCR quality must never be
+    able to fail a receipt.
+    """
+    image_path = Path(image_path)
+    raw = image_path.read_bytes()
+    content_type = content_type_for(image_path)
+    minimum_width = settings.MINERU_UPSCALE_BELOW_WIDTH
+    if minimum_width <= 0:
+        return image_path.name, raw, content_type
+
+    try:
+        with Image.open(BytesIO(raw)) as stored:
+            # Size first, transpose after: the short and long sides do not change under a
+            # rotation, and `exif_transpose` decodes the whole image - a 90 MP photo that
+            # is not going to be enlarged must not be decoded at all.
+            width, height = stored.size
+            shortest = min(width, height)
+            if shortest >= minimum_width:
+                return image_path.name, raw, content_type
+            factor = min(MAX_UPSCALE_FACTOR, minimum_width / shortest)
+            if factor < MIN_UPSCALE_FACTOR:
+                return image_path.name, raw, content_type
+            if width * height * factor * factor > MAX_UPSCALED_PIXELS:
+                logger.info(
+                    "skipped enlarging an oversized receipt image",
+                    extra={"file": image_path.name, "size": [width, height]},
+                )
+                return image_path.name, raw, content_type
+            # Only now decode, and bake the EXIF rotation into the pixels we send.
+            image = ImageOps.exif_transpose(stored)
+            width, height = image.size
+            if image.mode.startswith("I") or image.mode == "F":
+                # convert("RGB") clips 16-bit samples rather than scaling them, turning a
+                # 16-bit scan into a blank white page. Keep it grey instead.
+                image = image.convert("I").point(lambda value: value / 256).convert("L")
+            if image.mode in ("RGBA", "LA", "PA") or (
+                image.mode == "P" and "transparency" in image.info
+            ):
+                # Flatten onto white: a transparent page exported with black pixels under
+                # the alpha would otherwise reach OCR as an all-black receipt.
+                rgba = image.convert("RGBA")
+                white = Image.new("RGB", rgba.size, "white")
+                white.paste(rgba, mask=rgba.getchannel("A"))
+                image = white
+            enlarged = image.convert("RGB").resize(
+                (round(width * factor), round(height * factor)),
+                Image.Resampling.LANCZOS,
+            )
+            buffer = BytesIO()
+            enlarged.save(buffer, format="JPEG", quality=UPSCALE_JPEG_QUALITY)
+    except (
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+        Image.DecompressionBombError,
+        MemoryError,
+    ):
+        logger.debug(
+            "could not decode the image for enlargement",
+            extra={"file": image_path.name},
+        )
+        return image_path.name, raw, content_type
+
+    logger.info(
+        "enlarged a small receipt image for OCR",
+        extra={
+            "file": image_path.name,
+            "was": [width, height],
+            "now": [round(width * factor), round(height * factor)],
+        },
+    )
+    # The bytes are JPEG now, so the part's name must say so: MinerU (and anything else
+    # dispatching on the suffix) must not be handed a .png that is a JPEG.
+    return image_path.with_suffix(".jpg").name, buffer.getvalue(), "image/jpeg"
+
+
+async def prepared_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
+    """`prepare_image_upload` off the event loop; the decode/resize/encode blocks."""
+    return await asyncio.to_thread(prepare_image_upload, image_path)
+
+
 async def _extract_from_image(image_path: Path) -> str:
     """Extract text from an image with the self-hosted MinerU FastAPI endpoint.
 
@@ -111,13 +217,14 @@ async def _extract_from_image(image_path: Path) -> str:
         "end_page_id": "99999",
     }
 
+    name, data, upload_content_type = await prepared_image_upload(image_path)
+
     try:
         async with httpx.AsyncClient(timeout=settings.MINERU_TIMEOUT) as client:
-            with open(image_path, "rb") as f:  # noqa: ASYNC230
-                files = {"files": (image_path.name, f, content_type_for(image_path))}
-                logger.debug(f"Sending {image_path.name} to MinerU at {url}")
-                response = await client.post(url, data=form_data, files=files)
-                response.raise_for_status()
+            files = {"files": (name, data, upload_content_type)}
+            logger.debug(f"Sending {image_path.name} to MinerU at {url}")
+            response = await client.post(url, data=form_data, files=files)
+            response.raise_for_status()
 
             json_resp = response.json()
     except (httpx.ConnectError, httpx.TimeoutException) as e:
