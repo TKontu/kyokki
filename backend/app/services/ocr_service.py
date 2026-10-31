@@ -120,22 +120,29 @@ def prepare_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
 
     try:
         with Image.open(BytesIO(raw)) as stored:
-            # EXIF orientation decides which side is the receipt's width; transposing
-            # first also bakes the rotation into the pixels we send.
-            image = ImageOps.exif_transpose(stored)
-            width, height = image.size
-            if min(width, height) >= minimum_width:
+            # Size first, transpose after: the short and long sides do not change under a
+            # rotation, and `exif_transpose` decodes the whole image - a 90 MP photo that
+            # is not going to be enlarged must not be decoded at all.
+            width, height = stored.size
+            shortest = min(width, height)
+            if shortest >= minimum_width:
                 return image_path.name, raw, content_type
-            factor = min(MAX_UPSCALE_FACTOR, minimum_width / min(width, height))
+            factor = min(MAX_UPSCALE_FACTOR, minimum_width / shortest)
             if factor < MIN_UPSCALE_FACTOR:
                 return image_path.name, raw, content_type
-            enlarged_size = (round(width * factor), round(height * factor))
-            if enlarged_size[0] * enlarged_size[1] > MAX_UPSCALED_PIXELS:
+            if width * height * factor * factor > MAX_UPSCALED_PIXELS:
                 logger.info(
                     "skipped enlarging an oversized receipt image",
-                    extra={"file": image_path.name, "size": list(image.size)},
+                    extra={"file": image_path.name, "size": [width, height]},
                 )
                 return image_path.name, raw, content_type
+            # Only now decode, and bake the EXIF rotation into the pixels we send.
+            image = ImageOps.exif_transpose(stored)
+            width, height = image.size
+            if image.mode.startswith("I") or image.mode == "F":
+                # convert("RGB") clips 16-bit samples rather than scaling them, turning a
+                # 16-bit scan into a blank white page. Keep it grey instead.
+                image = image.convert("I").point(lambda value: value / 256).convert("L")
             if image.mode in ("RGBA", "LA", "PA") or (
                 image.mode == "P" and "transparency" in image.info
             ):
@@ -146,7 +153,8 @@ def prepare_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
                 white.paste(rgba, mask=rgba.getchannel("A"))
                 image = white
             enlarged = image.convert("RGB").resize(
-                enlarged_size, Image.Resampling.LANCZOS
+                (round(width * factor), round(height * factor)),
+                Image.Resampling.LANCZOS,
             )
             buffer = BytesIO()
             enlarged.save(buffer, format="JPEG", quality=UPSCALE_JPEG_QUALITY)
@@ -168,7 +176,7 @@ def prepare_image_upload(image_path: str | Path) -> tuple[str, bytes, str]:
         extra={
             "file": image_path.name,
             "was": [width, height],
-            "now": list(enlarged_size),
+            "now": [round(width * factor), round(height * factor)],
         },
     )
     # The bytes are JPEG now, so the part's name must say so: MinerU (and anything else

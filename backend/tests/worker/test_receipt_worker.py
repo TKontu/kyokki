@@ -142,6 +142,9 @@ async def test_receipts_are_read_oldest_first(db_session, session_factory, tmp_p
 async def test_stale_processing_receipt_is_failed(
     db_session, session_factory, tmp_path
 ):
+    # Pin the value: deriving both sides of the comparison from the setting would keep
+    # passing if the window regressed (test_config pins it too).
+    assert settings.receipt_stale_minutes == 35
     stuck = await _queued(db_session, tmp_path)
     stuck.processing_status = ReceiptStatus.PROCESSING
     stuck.processing_started_at = datetime.now(UTC) - timedelta(
@@ -160,10 +163,12 @@ async def test_a_receipt_inside_the_window_is_left_processing(
     db_session, session_factory, tmp_path
 ):
     """The window is a limit, not a schedule: just inside it must not be failed."""
+    assert settings.receipt_stale_minutes == 35
     working = await _queued(db_session, tmp_path)
     working.processing_status = ReceiptStatus.PROCESSING
+    # Five minutes inside the window, so a slow CI is not what the test measures.
     working.processing_started_at = datetime.now(UTC) - timedelta(
-        minutes=settings.receipt_stale_minutes - 1
+        minutes=settings.receipt_stale_minutes - 5
     )
     await db_session.commit()
 

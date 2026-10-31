@@ -11,8 +11,9 @@
 >   Runbook: [DEPLOY.md](./DEPLOY.md).
 > - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images; the vision
 >   model reads the image when OCR is unavailable) → a first LLM extraction call
->   (OpenAI-compatible endpoint, vLLM or Ollama), one targeted re-read of whatever it left
->   unaccounted, and an optional receipt profile as a second opinion that never decides alone
+>   (OpenAI-compatible endpoint, vLLM or Ollama), repeated from the image itself when it finds no
+>   products in an image's OCR text, one targeted re-read of whatever it left unaccounted, and an
+>   optional receipt profile as a second opinion that never decides alone
 >   (Q27, §4.1) → product resolution, by tiers: a learned alias or a catalog name for the
 >   *printed* line is a key outright, and so is a generic name the cook taught directly; a
 >   catalog name reached only through the model's own generic name - its canonical name or a

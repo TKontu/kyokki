@@ -117,7 +117,7 @@ kyokki receipt upload receipt.jpg --wait
 kyokki receipt status 0b6f7a3e-8d4c-4a53-9d1e-2f6c1b7e9a01
 ```
 
-`--wait` polls until the model has read it — a receipt can take up to ~30 minutes
+`--wait` polls until the model has read it — a receipt can take up to ~35 minutes
 when the model re-reads it, so the default `--timeout` is generous; do not shorten it.
 `status` lists each line, its printed and generic name, and the matched product (or
 `(unmatched)`).

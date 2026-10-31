@@ -169,7 +169,7 @@ class TestStale:
         slow = await _receipt(
             db_session,
             ReceiptStatus.PROCESSING,
-            processing_started_at=NOW - timedelta(seconds=3 * 420),
+            processing_started_at=NOW - timedelta(seconds=120 + 3 * 420 + 300),
         )
 
         assert await receipt_queue.fail_stale(db_session, now=NOW) == 0

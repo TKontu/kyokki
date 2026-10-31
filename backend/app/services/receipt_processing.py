@@ -958,7 +958,7 @@ class ReceiptProcessingService:
                 extraction = await extract_from_image(
                     image, image_type, categories, known_products
                 )
-        except (LLMExtractionError, OSError) as exc:
+        except (LLMExtractionError, OSError, MemoryError) as exc:
             logger.warning(
                 "vision retry failed, keeping the text read",
                 extra={"receipt_id": str(receipt.id), "error": str(exc)},

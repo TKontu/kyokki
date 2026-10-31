@@ -390,6 +390,27 @@ class TestExtractFromImage:
         assert payload == original
 
     @pytest.mark.asyncio
+    async def test_a_16_bit_scan_is_scaled_not_clipped(self, tmp_path):
+        """convert("RGB") clips 16-bit samples to white; the scan must stay legible."""
+        img_file = tmp_path / "scan.png"
+        scan = Image.new("I;16", (400, 800), 60000)
+        for x in range(400):
+            for y in range(20):
+                scan.putpixel((x, y), 4000)
+        scan.save(img_file)
+
+        mock_client = _mineru_client("text")
+        with patch(
+            "app.services.ocr_service.httpx.AsyncClient", return_value=mock_client
+        ):
+            await _extract_from_image(img_file)
+
+        _, payload, _ = mock_client.post.call_args.kwargs["files"]["files"]
+        sent = Image.open(BytesIO(payload))
+        assert sent.getpixel((0, 400))[0] > 200  # paper
+        assert sent.getpixel((10, 10))[0] < 60  # ink
+
+    @pytest.mark.asyncio
     async def test_a_narrow_png_is_uploaded_as_jpeg_under_a_jpeg_name(self, tmp_path):
         """The part must not say .png while carrying JPEG bytes."""
         img_file = tmp_path / "receipt.png"

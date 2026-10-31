@@ -2023,7 +2023,7 @@ not rulings.
       from the timeouts since #131 and follows the fourth (vision) call since #208 - 35 min with the
       defaults; a configured value below it is raised. Still open in spirit: bound per-receipt model
       time rather than only the window.
-    - [ ] From the #208 verdict (low): when the vision retry succeeds, the audit keeps only the
+    - [ ] From the #208 verdict (low), plus a gap the review found: when the vision retry succeeds, the audit keeps only the
       vision answer - the OCR text and the answer that triggered the retry are gone; and a 16-bit
       greyscale export is flattened to white by `convert("RGB")`.
     - [ ] The `fi` profile overrides correct model reads (a deposit re-read into a junk raw row);
@@ -2054,7 +2054,7 @@ not rulings.
     thousands groups, no-cents receipts, masked card/phone digits rejected, 3 decimals only when the
     total has 3); the stale window follows the whole per-receipt budget (28 min by default; a lower
     configured value is raised) and the final/failure writes check the worker's own claim under a row
-    lock; `LLM_ESTIMATE_TIMEOUT` (300) for estimates and product selection; the vision path lists
+    lock; `LLM_ESTIMATE_TIMEOUT` (180) for estimates and product selection; the vision path lists
     priced non-products; `te` for tax-exclusive totals; real ISO language/country codes; the Finnish
     fallback keeps its own rules. Live on the final code: K 15/15 and S-kaupat 49/49 with 0 raw rows,
     0 re-reads and matching totals. #131 merged after its fix pass without a second review panel.
@@ -2337,7 +2337,7 @@ fix passes verified at source by the planner). **Merged 2026-10-02 by the operat
     screen lands.
 - **AG4 + CLI receipts (#139):** `kyokki receipt upload [--wait] | status | confirm --all-matched
   [--assign N=ID] [--new N=CATEGORY] [--skip-unmatched]`, and `skills/kyokki/SKILL.md` plus examples
-  (every command in them is parse-checked). `--wait` defaults to 1800 s (the server's per-receipt budget).
+  (every command in them is parse-checked). `--wait` defaults to 2400 s (past the server's 35-minute stale window).
   - [ ] AG7 acceptance (a Hermes run against a staging stack) is still the operator's.
   - [ ] `kyokki stock discard --expired` waits on the agent endpoint (round 2026-10-02-1 A3).
 - **Q18-G2 (#142, open):** ComfyUI PNGs replace the rejected SVG drawer; Regenerate; production stays
@@ -3008,14 +3008,6 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 
 ## Decisions Log
 
-**Small images are enlarged before OCR** — an image narrower than `MINERU_UPSCALE_BELOW_WIDTH`
-(1000 px) is enlarged 1.25-3x before MinerU and before the vision read; the switch is on by
-default and `0` turns it off (2026-10-31, #208).
-
-**The receipt stale window moved 28 → 35 minutes** — the vision re-read is a fourth model call,
-so the derived window follows four `LLM_TIMEOUT`s; an old `RECEIPT_STALE_MINUTES=28` is raised
-to it (2026-10-31, #208).
-
 **MinerU over PaddleOCR** — You already have MinerU running. Use it.
 
 **Approximate quantities** — Users won't weigh things. [1/4] [1/2] [3/4] is good enough.
@@ -3029,3 +3021,12 @@ to it (2026-10-31, #208).
 **Price tracking deferred** — Not core to food waste problem. Parsers extract product names and quantities only. Price/cost analytics added in future version.
 
 **Recipes are native, not Mealie, and not the agent track (2026-10-18)** — Own tables and iPad screens (`docs/recipes_TODO.md`); the agent calls the same endpoints. Ingredients link to products by exact key only; substitutions are confirmed per recipe ingredient and never join products.
+
+**Small images are enlarged before OCR** — an image whose shorter side is below
+`MINERU_UPSCALE_BELOW_WIDTH` (1000 px) is enlarged 1.25-3x before MinerU and before the vision
+read; it applies to every ingest channel, the switch is on by default and `0` turns it off
+(2026-10-31, #208).
+
+**The receipt stale window moved 28 → 35 minutes** — the vision re-read is one more model call, so
+the derived window follows `max(4 x LLM_TIMEOUT, 3 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT)`; an old
+`RECEIPT_STALE_MINUTES=28` is raised to it (2026-10-31, #208).

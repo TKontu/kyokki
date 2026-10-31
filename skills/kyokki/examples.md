@@ -111,7 +111,7 @@ real, then confirm what actually changed.
 kyokki receipt upload /path/to/receipt.jpg --wait
 ```
 
-`--wait` can take up to ~30 minutes if the model has to re-read it; that is normal, not
+`--wait` can take up to ~35 minutes if the model has to re-read it; that is normal, not
 a hang. Once it has read (completed), look at the lines, matched and not:
 
 ```

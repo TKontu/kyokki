@@ -148,10 +148,12 @@ Two honest limits:
 > - optionally set `LLM_ESTIMATE_TIMEOUT` (default 300 s), which now limits the catalog
 >   estimate and product selection calls instead of `LLM_TIMEOUT`, so "Re-estimate all" does
 >   not wait 7 minutes a batch;
-> - **small-image enlargement and the vision re-read (#208, 2026-10-31):** an image narrower
->   than `MINERU_UPSCALE_BELOW_WIDTH` (default 1000 px) is enlarged up to 3x before MinerU,
->   and an image whose OCR text named no products is read again by the vision model. Neither
->   needs a `stack.env` change; the window above already includes the extra read (35 min).
+> - **small-image enlargement and the vision re-read (#208, 2026-10-31):** an image whose
+>   shorter side is below `MINERU_UPSCALE_BELOW_WIDTH` (default 1000 px) is enlarged 1.25-3x
+>   before MinerU, and an image whose OCR text named no products is read again by the vision
+>   model. It applies to every ingest channel; set `0` to turn the enlargement off (the rollback
+>   lever). Neither needs a `stack.env` change; the window above already includes the extra read
+>   (35 min).
 >
 > Then **Pull and redeploy**. No migration is involved.
 

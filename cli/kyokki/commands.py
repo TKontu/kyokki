@@ -623,12 +623,11 @@ RECEIPT_PATH = "/api/receipts/"
 # Not yet read: status/confirm both treat these as "not ready yet".
 IN_PROGRESS_STATUSES = {"uploaded", "queued", "processing"}
 RECEIPT_POLL_SECONDS = 5
-# The server's per-receipt budget is 30 min: MinerU OCR (120s) plus up to three 420s
-# model reads and a 300s selection, and its stale window is 35 min
-# (`receipt_stale_minutes` in backend/app/core/config.py). Wait past the window, or the
-# CLI reports a false timeout on a receipt the worker still owns. 600s produced one when
-# only re-reads existed. cli.py's `--timeout` default reads this constant, so there is
-# one number.
+# The server's derived budget is 30 min - OCR (120s) plus max(4 x 420s, 3 x 420s + 300s),
+# `receipt_stale_minutes` in backend/app/core/config.py - and its stale window 35 min.
+# Wait past the window, or the CLI reports a false timeout on a receipt the worker still
+# owns. 600s produced one when only re-reads existed. cli.py's `--timeout` default reads
+# this constant, so there is one number.
 DEFAULT_RECEIPT_WAIT_TIMEOUT = 2400
 # The router's plain-string 404 for an unknown receipt id.
 RECEIPT_NOT_FOUND = re.compile(r"^Receipt '\S+' not found$")
