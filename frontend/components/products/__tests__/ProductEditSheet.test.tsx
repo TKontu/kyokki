@@ -391,6 +391,7 @@ describe('ProductEditSheet', () => {
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Minced beef' } })
     fireEvent.click(save())
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
 
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
@@ -403,6 +404,7 @@ describe('ProductEditSheet', () => {
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Milk' } })
     fireEvent.click(save())
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
 
     expect(await screen.findByText('Record already exists.')).toBeInTheDocument()
     expect(onClose).not.toHaveBeenCalled()
@@ -434,9 +436,11 @@ describe('while the product moves underneath the sheet (H25)', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Minced beef' } })
     moved({ default_shelf_life_days: 9 })
     fireEvent.click(save())
+    // A rename asks whether the old name stays (CL8 L1)
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
 
     await waitFor(() => expect(patches).toHaveLength(1))
-    expect(patches[0]).toEqual({ canonical_name: 'Minced beef' })
+    expect(patches[0]).toEqual({ canonical_name: 'Minced beef', keep_old_name: true })
   })
 
   it('says so when a field the cook is editing moved as well', () => {
@@ -1035,6 +1039,7 @@ describe('ProductEditSheet chrome in Finnish (Post-MVP frontier item 13, phase 4
 
     fireEvent.change(screen.getByLabelText('Nimi'), { target: { value: 'Mince' } })
     fireEvent.click(screen.getByRole('button', { name: 'Tallenna' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Säilytä' }))
 
     expect(await screen.findByText('Tallennettu · Mince')).toBeInTheDocument()
   })
@@ -1146,5 +1151,79 @@ describe('ProductEditSheet: Sources (CL8 L3)', () => {
     expect(
       within(section).getByRole('button', { name: 'Siirrä nämä: NAUDAN JAUHELIHA 400G' })
     ).toBeInTheDocument()
+  })
+})
+
+describe('ProductEditSheet rename asks (CL8 L1)', () => {
+  beforeEach(() => window.localStorage.clear())
+
+  const rename = () => {
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Minced beef' } })
+    fireEvent.click(save())
+  }
+
+  it('asks whether to keep the old name before saving a rename', () => {
+    const patches = mockApi()
+    renderSheet()
+
+    rename()
+
+    expect(
+      screen.getByText("Keep 'Ground beef' as another name for this product?")
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Keep' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Forget it' })).toBeInTheDocument()
+    expect(patches).toHaveLength(0)
+  })
+
+  it('Keep sends keep_old_name true', async () => {
+    const patches = mockApi()
+    const onClose = renderSheet()
+
+    rename()
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toEqual({ canonical_name: 'Minced beef', keep_old_name: true })
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+  })
+
+  it('Forget it sends keep_old_name false', async () => {
+    const patches = mockApi()
+    renderSheet()
+
+    rename()
+    fireEvent.click(screen.getByRole('button', { name: 'Forget it' }))
+
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toEqual({ canonical_name: 'Minced beef', keep_old_name: false })
+  })
+
+  it('a non-name edit saves without asking', async () => {
+    const patches = mockApi()
+    renderSheet()
+
+    fireEvent.change(screen.getByLabelText('Keeps for'), { target: { value: '3' } })
+    fireEvent.click(save())
+
+    expect(screen.queryByText(/as another name for this product/)).not.toBeInTheDocument()
+    await waitFor(() => expect(patches).toHaveLength(1))
+    expect(patches[0]).toEqual({ default_shelf_life_days: 3 })
+  })
+
+  it('asks in Finnish', () => {
+    window.localStorage.setItem('kyokki.language', 'fi')
+    mockApi()
+    renderSheet()
+
+    fireEvent.change(screen.getByLabelText('Nimi'), { target: { value: 'Minced beef' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Tallenna' }))
+
+    expect(
+      screen.getByText("Säilytetäänkö vanha nimi 'Ground beef' tämän tuotteen toisena nimenä?")
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Säilytä' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Unohda' })).toBeInTheDocument()
+    window.localStorage.clear()
   })
 })

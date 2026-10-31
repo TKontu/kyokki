@@ -252,13 +252,17 @@ class TestReceiptConfirm:
     async def test_a_receipt_of_known_products_asks_nothing(
         self, client: AsyncClient, seeded_db: AsyncSession, estimator
     ) -> None:
-        await client.post("/api/inventory/quick-add", json=QUICK_ADD)
+        added = await client.post("/api/inventory/quick-add", json=QUICK_ADD)
         estimator.reset_mock()
         receipt = await self._receipt(seeded_db)
 
+        # CL8: a known product is confirmed by its id; its name alone answers 409.
+        known = {
+            **self._item("Tomato", "produce"),
+            "product_id": added.json()["product_master_id"],
+        }
         response = await client.post(
-            f"/api/receipts/{receipt.id}/confirm",
-            json={"items": [self._item("Tomato", "produce")]},
+            f"/api/receipts/{receipt.id}/confirm", json={"items": [known]}
         )
 
         assert response.json()["products_created"] == 0

@@ -106,3 +106,37 @@ def test_inventory_item_crud_reports_instead_of_calling_the_service() -> None:
     service to find out."""
     source = (CRUD_DIR / "inventory_item.py").read_text()
     assert "min_stock" not in source
+
+
+# CL8 (`docs/PRODUCT_IDENTITY_SPEC.md`, bypass-proofing): a name becomes a product id for
+# writing only in `product_identity`. The read-only lookups and split's own "does this
+# name exist" check are the only other users; crud owns the functions.
+NAME_LOOKUPS = (
+    "app.crud.product_name.product_for_name",
+    "app.crud.product_name.known_names",
+)
+NAME_LOOKUP_ALLOWED = {
+    "app/services/product_identity.py",
+    "app/services/product_lookup.py",
+    "app/services/product_split.py",
+}
+
+
+def test_only_product_identity_turns_a_name_into_a_product() -> None:
+    """`product_for_name` and `known_names` are imported only by `product_identity`,
+    the read-only `product_lookup`, `product_split`'s `name_exists` check and `app/crud`.
+    """
+    offenders = {
+        path: hits
+        for path, hits in _offenders(BACKEND_ROOT / "app", NAME_LOOKUPS).items()
+        if path not in NAME_LOOKUP_ALLOWED and not path.startswith("app/crud/")
+    }
+    assert offenders == {}, (
+        f"decide a name through app.services.product_identity instead: {offenders}"
+    )
+
+
+def test_the_name_lookup_guard_is_not_vacuous() -> None:
+    """The allowed importers really are found by the walk, so a bypass would be too."""
+    found = _offenders(BACKEND_ROOT / "app" / "services", NAME_LOOKUPS)
+    assert "app/services/product_identity.py" in found

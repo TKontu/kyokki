@@ -41,6 +41,10 @@
  * are now hidden whenever an exact or cook emoji wins the tile - asking for one used to reach
  * the API and fail with 409, since that image could never show; a short line explains why
  * instead.
+ *
+ * CL8 L1 (operator ruling, 2026-10-07): a rename asks before it saves whether the old name stays
+ * as another name for the product (**Keep**, the default, `keep_old_name: true`) or is
+ * forgotten so it no longer finds this product (**Forget it**). Other edits save as before.
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
@@ -222,6 +226,8 @@ export function ProductEditSheet({
   // CL8 L3: where the items came from, and the group the cook is moving off (if any)
   const sources = useProductSources(product.id)
   const [moving, setMoving] = useState<ProductSource | null>(null)
+  // Save was tapped on a rename: the footer asks whether the old name stays (CL8 L1)
+  const [askKeepName, setAskKeepName] = useState(false)
   // What the last icon or emoji action answered, until the product itself catches up (both
   // act at once, outside Save, so this sheet's own prop is briefly behind the server).
   const [liveAnswer, setLiveAnswer] = useState<ProductMaster | null>(null)
@@ -424,9 +430,14 @@ export function ProductEditSheet({
           ? t('productSheet.emoji.exact')
           : null
 
-  const submit = () => {
+  const renaming = changes.canonical_name !== undefined
+  const askingKeepName = askKeepName && renaming
+
+  const submit = (keepOldName?: boolean) => {
+    const data: ProductMasterUpdate =
+      keepOldName === undefined ? changes : { ...changes, keep_old_name: keepOldName }
     save.mutate(
-      { id: product.id, data: changes },
+      { id: product.id, data },
       {
         onSuccess: (updated) => {
           toast.success(t('productSheet.saved', { name: updated.canonical_name }))
@@ -434,6 +445,7 @@ export function ProductEditSheet({
           onClose()
         },
         onError: (error) => {
+          setAskKeepName(false)
           const readable = isAPIError(error) && error.status < 500 && error.message
           toast.error(readable ? error.message : t('productSheet.saveError'))
         },
@@ -468,20 +480,47 @@ export function ProductEditSheet({
       onClose={onClose}
       title={t('productSheet.title', { name: productName })}
       footer={
-        <div className="flex gap-2">
-          <Button variant="secondary" fullWidth onClick={onClose}>
-            {t('common.cancel')}
-          </Button>
-          <Button
-            data-primary
-            fullWidth
-            disabled={!dirty || !valid || save.isPending}
-            loading={save.isPending}
-            onClick={submit}
-          >
-            {t('common.save')}
-          </Button>
-        </div>
+        askingKeepName ? (
+          <div>
+            <p className="mb-2 text-sm text-ui-text dark:text-ui-dark-text">
+              {t('productSheet.keepOldName.question', { name: liveProduct.canonical_name })}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                fullWidth
+                disabled={save.isPending}
+                onClick={() => submit(false)}
+              >
+                {t('productSheet.keepOldName.forget')}
+              </Button>
+              <Button
+                data-primary
+                fullWidth
+                disabled={!valid || save.isPending}
+                loading={save.isPending}
+                onClick={() => submit(true)}
+              >
+                {t('productSheet.keepOldName.keep')}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Button variant="secondary" fullWidth onClick={onClose}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              data-primary
+              fullWidth
+              disabled={!dirty || !valid || save.isPending}
+              loading={save.isPending}
+              onClick={() => (renaming ? setAskKeepName(true) : submit())}
+            >
+              {t('common.save')}
+            </Button>
+          </div>
+        )
       }
     >
       <fieldset className="mb-4">

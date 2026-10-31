@@ -41,9 +41,14 @@ class TestTheRevision:
     def test_it_follows_the_telegram_receipt_message(self) -> None:
         assert _load_migration().down_revision == "d8f3a61c2b57"
 
-    def test_it_is_the_only_head(self) -> None:
-        (head,) = _script().get_heads()
-        assert head == _load_migration().revision
+    # Was "the only head" until CL8 L1's b7d4e2a91c58 followed it (round 2026-10-18-1,
+    # `test_join_source_check_migration.py`); that test owns the head now.
+
+    def test_history_stays_one_line_through_it(self) -> None:
+        script = _script()
+        (head,) = script.get_heads()
+        ancestors = {rev.revision for rev in script.walk_revisions("base", head)}
+        assert _load_migration().revision in ancestors
 
 
 async def _item(

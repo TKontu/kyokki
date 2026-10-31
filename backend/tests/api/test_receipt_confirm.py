@@ -463,7 +463,7 @@ class TestConfirmNewProducts:
 
         assert response.status_code == 422
 
-    async def test_a_rejected_snap_with_no_name_left_is_a_400(
+    async def test_a_rejected_snap_with_no_name_left_is_name_exists(
         self,
         client: AsyncClient,
         test_db: AsyncSession,
@@ -471,8 +471,8 @@ class TestConfirmNewProducts:
         sample_category: Category,
     ):
         """Q37b: a line whose g-only snap was rejected, and whose generic name was never
-        corrected, has no name left to create a product under once that snap is
-        refused - confirm answers 400 instead of silently re-attaching it."""
+        corrected, must not silently re-attach it. CL8: like any name equal to an
+        existing product, it answers 409 `name_exists` (it was a 400 before)."""
         dip = ProductMaster(
             id=uuid4(),
             canonical_name="Dip",
@@ -483,6 +483,7 @@ class TestConfirmNewProducts:
             default_unit="g",
         )
         test_db.add(dip)
+        dip_id = str(dip.id)
         await test_db.commit()
 
         receipt = await test_db.get(Receipt, UUID(processed_receipt["id"]))
@@ -519,8 +520,10 @@ class TestConfirmNewProducts:
             },
         )
 
-        assert response.status_code == 400, response.text
-        assert "rejected" in response.json()["detail"]
+        assert response.status_code == 409, response.text
+        detail = response.json()["detail"]
+        assert detail["code"] == "name_exists"
+        assert [item["product_id"] for item in detail["items"]] == [dip_id]
 
 
 class TestConfirmMovesStock:
