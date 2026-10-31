@@ -10,7 +10,8 @@
 >   deploys `docker-compose.prod.yml` straight from GitHub (Portainer), building nothing.
 >   Runbook: [DEPLOY.md](./DEPLOY.md).
 > - **Receipt pipeline:** upload → text (pdfplumber for PDF, MinerU for images; the vision
->   model reads the image when OCR is unavailable) → a first LLM extraction call
+>   model reads the image when OCR is unavailable, and again when the model finds no products
+>   in the OCR text of an image - a compressed photo OCRs badly) → a first LLM extraction call
 >   (OpenAI-compatible endpoint, vLLM or Ollama), one targeted re-read of whatever it left
 >   unaccounted, and an optional receipt profile as a second opinion that never decides alone
 >   (Q27, §4.1) → product resolution, by tiers: a learned alias or a catalog name for the
@@ -248,7 +249,8 @@ category (
 Photo or PDF
   → text          pdfplumber for PDF (digital e-receipts), MinerU OCR for images
   → extraction    LLM, store-agnostic (vision model directly from the image when OCR is
-                  unavailable); generic heuristic line parser as fallback (MVP-R3b)
+                  unavailable, or when the model found no products in the OCR text);
+                  generic heuristic line parser as fallback (MVP-R3b)
   → accounting    every priced line cited or listed; one targeted re-read; raw rows;
                   optional country profiles as evidence; the receipt's arithmetic (Q27)
   → resolution    alias, a catalog name for the printed line, or a generic name the

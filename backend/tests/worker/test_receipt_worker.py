@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.models.receipt import Receipt
 from app.parsers.base import ExtractedLine, ReceiptExtraction
 from app.schemas.receipt import ReceiptStatus
@@ -143,7 +144,9 @@ async def test_stale_processing_receipt_is_failed(
 ):
     stuck = await _queued(db_session, tmp_path)
     stuck.processing_status = ReceiptStatus.PROCESSING
-    stuck.processing_started_at = datetime.now(UTC) - timedelta(minutes=30)
+    stuck.processing_started_at = datetime.now(UTC) - timedelta(
+        minutes=settings.receipt_stale_minutes + 1
+    )
     await db_session.commit()
 
     assert await receipt_worker.run_once(session_factory) is False

@@ -232,8 +232,15 @@ increment U1 after R1b, before R2 creates products.
 - [x] `ocr_service.py`: `OCRUnavailableError` on connect errors, timeouts and 5xx; real
   content type; configurable language; pdfplumber off the event loop.
 - [x] Pipeline: PDF → text; image → MinerU text, or the vision model when MinerU is
-  unavailable or finds nothing. `ocr_structured` stores `method`, `store_chain`,
-  `purchase_date`, `lines`; store and date fill the receipt when the user left them empty.
+  unavailable or finds nothing, or when the model finds no products in the OCR text of an
+  image (#208: the model's own answer decides, not the rows reconciliation cuts).
+  `ocr_structured` stores `method`, `store_chain`, `purchase_date`, `lines`; store and date
+  fill the receipt when the user left them empty.
+- [x] Small images (#208): an image narrower than `MINERU_UPSCALE_BELOW_WIDTH` (default
+  1000 px) is enlarged up to 3x before MinerU, and an image whose OCR text named no products
+  is read again by the vision model. Measured on the deployed Lidl photo (289x1280:
+  gibberish before, readable lines at 3x; OCR 1.4 s for the enlarged 867x3840 against ~0.9 s
+  at the original size, far inside R4's 120 s bar).
 - Measured before committing to the schema (R0 harness with `s`, `d`, `c` added): 49/49
   products, all quantities and weights, store and date correct; text 45–53 s, vision
   48–52 s; household items get no category, eggs initially did because only ids were listed.
@@ -2048,7 +2055,7 @@ not rulings.
     fixed: a missed product can no longer hide behind a discount/tax either-way match or be absorbed
     as a neighbour's detail line; a structural, open amount parser (any currency symbol or code,
     thousands groups, no-cents receipts, masked card/phone digits rejected, 3 decimals only when the
-    total has 3); the stale window follows the whole per-receipt budget (28 min by default; a lower
+    total has 3); the stale window follows the whole per-receipt budget (35 min by default; a lower
     configured value is raised) and the final/failure writes check the worker's own claim under a row
     lock; `LLM_ESTIMATE_TIMEOUT` (180) for estimates and product selection; the vision path lists
     priced non-products; `te` for tax-exclusive totals; real ISO language/country codes; the Finnish

@@ -91,6 +91,12 @@ class Settings(BaseSettings):
         # The example env files ship `MINERU_TIMEOUT=` with no value
         return 120.0 if v == "" else v
 
+    @field_validator("MINERU_UPSCALE_BELOW_WIDTH", mode="before")
+    @classmethod
+    def empty_upscale_width_means_default(cls, v: object) -> object:
+        # An operator writing the key with no value must not stop the api booting
+        return 1000 if v == "" else v
+
     # LLM Service (OpenAI-compatible chat completions; llama-swap gateway on the homelab)
     LLM_BASE_URL: str = "http://192.168.0.94:9292/v1"
     LLM_API_KEY: str = ""  # the llama-swap key (required since 2026-09-30)
@@ -105,8 +111,8 @@ class Settings(BaseSettings):
     # seconds; the catalog estimate and product selection calls answer a short list, and
     # "Re-estimate all" waits for them synchronously, so they do not get the receipt budget.
     # Raised from 180 (2026-09-30): the llama-swap gateway notice says a cold start now takes
-    # 2 to 5 minutes. 3 x LLM_TIMEOUT still dominates the stale-window budget at 1260 s, so
-    # this change does not move receipt_stale_minutes.
+    # 2 to 5 minutes. 4 x LLM_TIMEOUT dominates the stale-window budget at 1680 s, so this
+    # change does not move receipt_stale_minutes.
     LLM_ESTIMATE_TIMEOUT: float = 300.0
     # Sent as chat_template_kwargs.reasoning_strength (Muse Glimmer accepts only these values).
     # Set to an empty value for models whose template has no such argument.
@@ -162,16 +168,17 @@ class Settings(BaseSettings):
         """Minutes a receipt may stay `processing` before `fail_stale` fails it.
 
         The per-receipt budget (PR #131 F11): OCR of an image (MINERU_TIMEOUT), then up to
-        three sequential model calls - the first read and one targeted re-read, each allowed
-        LLM_TIMEOUT, and the product selection, which runs inside receipt processing and is
-        allowed LLM_ESTIMATE_TIMEOUT. The budget takes the larger of 3 x LLM_TIMEOUT and
-        2 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT, so it also covers a stack where selection
-        still took LLM_TIMEOUT. The catalog estimates run after confirm, outside receipt
+        four sequential model calls - the first read, one targeted re-read of priced lines,
+        and, when the model found no products in the OCR text, one vision read of the image
+        itself, each allowed LLM_TIMEOUT, and the product selection, which runs inside receipt
+        processing and is allowed LLM_ESTIMATE_TIMEOUT. The budget takes the larger of
+        4 x LLM_TIMEOUT and 3 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT, so it also covers a stack
+        where selection still took LLM_TIMEOUT. The catalog estimates run after confirm, outside receipt
         processing, and are not counted. The window is never below the budget plus 5
         minutes of slack for the database, whatever an older stack.env says (verdict #1).
         """
         models = max(
-            3 * self.LLM_TIMEOUT, 2 * self.LLM_TIMEOUT + self.LLM_ESTIMATE_TIMEOUT
+            4 * self.LLM_TIMEOUT, 3 * self.LLM_TIMEOUT + self.LLM_ESTIMATE_TIMEOUT
         )
         budget = math.ceil((self.MINERU_TIMEOUT + models) / 60) + 5
         return max(self.RECEIPT_STALE_MINUTES or 0, budget)

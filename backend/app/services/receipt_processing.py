@@ -19,8 +19,6 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-import anyio
-import httpx
 from rapidfuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,9 +56,9 @@ from app.services.matching_service import normalize_receipt_name
 from app.services.non_food import known_non_food
 from app.services.ocr_service import (
     OCRUnavailableError,
-    content_type_for,
     extract_text_from_receipt,
     is_pdf,
+    prepared_image_upload,
 )
 from app.services.product_resolution import (
     ProductResolution,
@@ -930,11 +928,11 @@ class ReceiptProcessingService:
                 "OCR returned no text, reading the image with the vision model",
                 extra={"receipt_id": str(receipt.id)},
             )
-        image = await anyio.Path(path).read_bytes()
         # No text to fall back on: a failing vision call fails the receipt
+        _, image, image_type = await prepared_image_upload(path)
         with timings.llm():
             extraction = await extract_from_image(
-                image, content_type_for(path), categories, known_products
+                image, image_type, categories, known_products
             )
         return vision_outcome(extraction)
 
@@ -953,12 +951,14 @@ class ReceiptProcessingService:
         nor finds anything, so a bad OCR never costs the receipt its lines.
         """
         try:
-            image = await anyio.Path(path).read_bytes()
+            # The same enlargement MinerU got: the retry exists because the stored photo
+            # is too small to read, so sending it unchanged would repeat the failure.
+            _, image, image_type = await prepared_image_upload(path)
             with timings.llm():
                 extraction = await extract_from_image(
-                    image, content_type_for(path), categories, known_products
+                    image, image_type, categories, known_products
                 )
-        except (LLMExtractionError, httpx.HTTPError) as exc:
+        except (LLMExtractionError, OSError) as exc:
             logger.warning(
                 "vision retry failed, keeping the text read",
                 extra={"receipt_id": str(receipt.id), "error": str(exc)},
@@ -1036,8 +1036,10 @@ class ReceiptProcessingService:
             outcome = await reconcile_text_read(
                 text, extraction, categories, receipt_id=str(receipt.id)
             )
-        if not outcome.extraction.lines:
-            outcome.no_model_products = True
+        # From the model's own answer, not the final list: reconciliation can cut raw
+        # rows out of the same unreadable text, which is the outcome this is here to
+        # catch, not evidence that the text was readable.
+        outcome.no_model_products = not extraction.lines
         return outcome
 
     async def _claim(self, receipt_id: Any) -> datetime | None:

@@ -138,15 +138,20 @@ Two honest limits:
 > - set `LLM_TIMEOUT=420`;
 > - clear `RECEIPT_STALE_MINUTES` (leave it empty) or delete it. Empty, the stale window
 >   follows the per-receipt budget: OCR (`MINERU_TIMEOUT`) plus the larger of
->   `3 x LLM_TIMEOUT` and `2 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT`, rounded up to minutes,
->   plus 5 (28 minutes with the defaults). A first read and a re-read may each take
->   `LLM_TIMEOUT` and the product selection `LLM_ESTIMATE_TIMEOUT`; the old window of 10
->   minutes failed a slow but healthy receipt. A value below the budget is raised to it, and
+>   `4 x LLM_TIMEOUT` and `3 x LLM_TIMEOUT + LLM_ESTIMATE_TIMEOUT`, rounded up to minutes,
+>   plus 5 (35 minutes with the defaults). A first read, a targeted re-read and, for an
+>   image whose OCR text named no products, a vision read may each take `LLM_TIMEOUT`; the
+>   product selection takes `LLM_ESTIMATE_TIMEOUT`; the old window of 10 minutes failed a
+>   slow but healthy receipt. A value below the budget is raised to it, and
 >   a receipt that was failed as stale or claimed again is no longer overwritten when its
 >   first read finishes late;
 > - optionally set `LLM_ESTIMATE_TIMEOUT` (default 180 s), which now limits the catalog
 >   estimate and product selection calls instead of `LLM_TIMEOUT`, so "Re-estimate all" does
->   not wait 7 minutes a batch.
+>   not wait 7 minutes a batch;
+> - **small-image enlargement and the vision re-read (#208, 2026-10-31):** an image narrower
+>   than `MINERU_UPSCALE_BELOW_WIDTH` (default 1000 px) is enlarged up to 3x before MinerU,
+>   and an image whose OCR text named no products is read again by the vision model. Neither
+>   needs a `stack.env` change; the window above already includes the extra read (35 min).
 >
 > Then **Pull and redeploy**. No migration is involved.
 
