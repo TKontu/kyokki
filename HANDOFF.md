@@ -18,9 +18,12 @@ Base-SHA: abf930880c75807530a99b37d77ae6e670b71f8b
 - **Android workstream ON HOLD** until the operator re-initiates it.
 - CL8 L1 touches confirm, resolution, quick add, stock add and the bot lookup, plus the review row
   and the rename sheet: give one lane the backend, one the frontend (it owns `lib/i18n`), and fix
-  the confirm/suggestion API contract first. `inventory_item.join_source`/`join_key` exist, unused.
+  the confirm/suggestion API contract first. `inventory_item.join_source`/`join_key` are written on
+  every join but never read.
 - A migration lane owns the `tests/db/` only-head and table-count tests.
-- Still open rulings: CL1 bot confirm, CL4 catalog scope, bought-adds-stock, pieces-open, Q18-S3.
+- Still open rulings: Q43 (an existing receipt name: merge onto the owner or keep the 409),
+  CL1 bot confirm, CL4 catalog scope, bought-adds-stock, pieces-open, Q18-S3.
 
 ## Next action
-`/plan-round` for CL8 L1 from `docs/PRODUCT_IDENTITY_SPEC.md` (sections "The rule" and "Rulings").
+Rule Q43 in `docs/PRODUCT_IDENTITY_SPEC.md` (the 409 confirm contract), then `/plan-round`
+from the CL8 split follow-ups.

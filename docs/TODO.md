@@ -2768,52 +2768,51 @@ which parts exist, not colours.
   the bread readable. `data-part="plant"`, decoration only (`aria-hidden`, like the rest of the
   drawing).
 
----
-
 #### Operator report — a new name that already exists (2026-10-30)
 
 Approving a receipt whose `new` line name already belongs to a product answers `409 name_exists`
-and stops the approval. Operator: *"When there is an existing name match, the system needs to
+and stops the approval. Operator: "When there is an existing name match, the system needs to
 gracefully just match and merge. Currently it gives an error upon receipt approval 'there already
-exist, merge manually' … It needs to just work."* The quoted error is the operator's paraphrase;
-the API's own strings are `409 name_exists` (the review screen then asks "Use X, or name this one
-differently?") and the generic `409 Record already exists.` for a unique violation.
+exist, merge manually' … It needs to just work." The quoted error is the operator's paraphrase;
+the shipped row renders `{name} already exists —` with `Use {name}` / `or rename`.
 
-That 409 is the confirm contract `docs/PRODUCT_IDENTITY_SPEC.md` records ("A `new` name equal to
-an existing key answers 409 …"), implemented with CL8 L1 (#207) to stop the silent joins behind
-the stew/rice-pie incident; the 2026-10-07 Rulings list does not carry it. **The operator asks to
-amend that contract, and the choice is theirs.** This row is operator-gated: do not implement
-either side before the ruling is written into the spec. Provenance: the trigger was a Lidl receipt
-re-sent as a screenshot (Lidl's export quality is with their support); reading it is not what
-fails here.
+That 409 is the confirm contract `docs/PRODUCT_IDENTITY_SPEC.md` records ("A `new` name equal to an
+existing key answers 409 …"), implemented with CL8 L1 (#207). It closes the confirm's
+served-generic-name join (P4/P9), not the model-pick and rename path behind the stew/rice-pie
+incident. The 2026-10-07 Rulings list does not carry the 409 text, but decision 6 (exact keys) is
+the rule it enforces. **The operator asks to amend that contract, and the choice is theirs.** This
+row is operator-gated: no code before the ruling is written into the spec. Provenance: a Lidl
+receipt re-sent as a screenshot (Lidl's export quality is with their support); reading it is not
+what fails here.
 
 - [ ] **Q43 (M) A `new` name that already exists: merge onto that product, or keep the 409?**
-  The choice to record: **(A)** join the product that owns the name - the stock lands there and the
-  printed name is learned as its alias - answering 200; or **(B)** keep the 409 and the "use it, or
-  name this one differently" prompt. Rule it in `PRODUCT_IDENTITY_SPEC.md` (Rulings and the
-  confirm-contract paragraph) before any code.
+  The choice to record: **(A)** join the product that owns the name - the stock lands there,
+  answering 200; or **(B)** keep the 409 and the "use it, or rename" prompt. Rule it in
+  `PRODUCT_IDENTITY_SPEC.md` (Rulings and the confirm-contract paragraph) before any code.
   If (A) is ruled, the change belongs in `services/receipt_confirm.py` (the `clashes()` check) and
-  the lookup it already uses (`product_identity.decide_name` → `crud/product_name.product_for_name`,
-  typed names with `trust_model=False`, H51/Q13), not in the endpoint. It must also write the
-  per-join provenance the spec defines (`inventory_item.join_source` / `join_key`), unused today,
-  and leave `product_name.source` and `store_product_alias.manually_verified` as they are (there is
-  no `verified` column on `ProductName`).
-  Reproduce first, with the review screen's flat `{name, category}` payload:
-  - a `new` name equal to another product's **canonical** name → 409 today
+  the lookup it already uses (`product_identity.decide_name` → `crud/product_name.product_for_name`
+  with `trust_model=False`, H51/Q13), not in the endpoint. The ruling must also settle provenance:
+  a join nobody tapped must not be stored as a cook-verified alias
+  (`store_product_alias.manually_verified`, the P5 defect), and `inventory_item.join_source` has no
+  value for an automatic join - it is written on every confirm (`receipt_confirm._join`) but never
+  read.
+  Reproduce first with a **receipt-line** item - one carrying `index` or `line_id`, which is what
+  the review screen sends for a line; a hand-added item with neither joins the product (200) and
+  cannot show the 409:
+  - a line whose `new` name equals another product's **canonical** name → 409 today
     (`tests/services/test_receipt_confirm.py` already has the case);
-  - a `new` name equal to another product's **cook** `product_name` → 409 today;
-  - a `new` name equal to a **verified alias** does **not** 409: `product_for_name` never reads
-    `store_product_alias`, so it silently creates a duplicate product. That is a separate defect;
-    file it, and let the ruling say whether (A) covers it.
-  A hand-added item with no receipt line already reuses the product
-  (`test_new_name_reuses_an_existing_product_ignoring_case`), and that must keep working. While
-  reproducing, rule out the other 409 sources: `uq_product_name_name`,
-  `uq_product_master_canonical_name_lower`, and the split sheet's own `name_exists` (the low item
-  above, where the same code is filed as a defect).
+  - a line whose `new` name equals another product's **cook** `product_name` → 409 today;
+  - a **verified alias** is not an existing key under the written contract (K1 is scoped to a
+    printed name for one chain) and `product_for_name` never reads `store_product_alias`, so such
+    a line silently creates a duplicate - a gap, not a breach; the ruling should say whether (A)
+    covers it.
+  Rule out the other sources of a 409 while reproducing: `uq_product_name_name` and
+  `uq_product_master_canonical_name_lower` both map to `Record already exists.`; the split sheet's
+  `name_exists` (the low item above) is a different endpoint and not reachable from confirm.
   Acceptance: the ruled behaviour is covered in `tests/services/test_receipt_confirm.py` and
   `tests/api/test_receipt_confirm.py`; a repeat confirm still answers `409 Receipt already
-  confirmed`; and the CL8 rule holds - "Karjalan paisti" never resolves to "Karelian pie"
-  (`docs/PRODUCT_IDENTITY_SPEC.md`).
+  confirmed`; the hand-added join above still works; and CL8's no-near-miss rule holds -
+  "Karjalan paisti" never resolves to "Karelian pie" (`docs/PRODUCT_IDENTITY_SPEC.md`).
 
 ---
 
@@ -2965,7 +2964,7 @@ Scope = the MVP increment plan above, waves 1–6. Nothing from "Post-MVP fronti
 - Hardening H4: [x] H46 consumption history  [x] H45 status surface  [ ] H41 (DEC-7)  [ ] H42  [ ] H43  [ ] H44  [x] H47 (#166)
 - Hardening H3-H4: after P3, before the agent track
 - Agent track started early (operator, 2026-09-25; `docs/agent_TODO.md`). Round 2026-09-25-3: [x] AG1 tokens (#97)  [x] AG2 agent endpoints (#98)  [x] H54 glossary + H53 live run (#99), merged and deployed 2026-09-26. Next: AG3 CLI
-- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Deployed 2026-10-03. Round 2026-10-03-2: [x] icon library (#171). Round 2026-10-03-3: [x] icon curation (#175)  [x] run-out list (#172)  [x] Finnish names on rename (#173)  [x] Finnish receipt screens (#174), merged 2026-10-03, deployed 2026-10-04. Round 2026-10-04-1: [x] Finnish products screen (#179)  [x] run-out in-stock days (#178)  [x] crud imports no services (#180), merged and deployed 2026-10-04. Round 2026-10-04-2: [x] share target (#185)  [x] several receipts per upload (#184)  [x] shims removed (#183)  [x] flaky display-name test (#186), merged 2026-10-05, not deployed. Round 2026-10-06-1: [x] CL2 restock clears shopping (#190)  [x] CL5 durable bot results (#188)  [x] CL7 learning feedback (#189), merged and deployed 2026-10-06. Round 2026-10-06-2: [x] CL3 bot shopping/consume (#192)  [x] CL6 run-out to shopping (#193)  [x] Q18-S2 spike, no winner (#194), merged and deployed 2026-10-06 (3f27f98). Round 2026-10-06-3: [x] CL8 split API (#198)  [x] split UI (#197)  [x] join audit (#196), merged and deployed 2026-10-07. Fix #200 (iPad sheets, stale edits) merged 2026-10-07. Next: CL8-L1 identity rule (ruled 2026-10-07); Q40-Q42 fridge scene (one increment, 2026-10-18); Q43 the existing-name choice (operator report 2026-10-30, awaits a ruling: merge onto the owner, or keep the 409); CL8 split follow-ups; Q18-S3 if approved
+- Friction Q17-Q19 (first look at the fridge on the iPad, 2026-09-26). Round 2026-09-26-6: [ ] Q19 kitchen shelf lives (`feat/q19-kitchen-shelf-lives`)  [ ] Q17-M fridge mocks (`feat/q17-fridge-mocks`)  [ ] Q18-S icon spike (`spike/q18-product-icons`). H56 is superseded: after Q19 lands, run "Re-estimate all (keeps yours)". Round 2026-09-26-6 merged (#100-#106; review fix-ups #107, #108). Round 2026-09-26-3: [x] Q17-B Cielo portrait (#113)  [x] AG3 `kyokki shopping` (#111)  [x] agent API follow-ups (#112), merged and deployed 2026-09-26. Round 2026-09-26-9: [x] Q24 learn from dates (#119)  [x] Q18 icons step 1 (#121)  [x] Q20/Q23/Q22/Q25 layout pass (#120), merged 2026-09-27, not yet deployed. Round 2026-09-27-2: [x] Q27 extraction completeness (#125, #127)  [x] Q27 review screen (#124), merged 2026-09-27. Round 2026-09-27-3: [x] Q27 hardening (#131)  [x] exact-emoji trial (#129)  [x] Q29-Q36 fridge look and shell (#130), merged and deployed 2026-09-27. Round 2026-09-30-1: [x] Q18-B emoji build (#137)  [x] Q18-G1 ComfyUI client + style trial (#135)  [x] Q26 + Q28 receipt audit (#136)  [x] #130 follow-ups + import cycle (#134)  [x] GW-1 gateway key + drain backoff (#133), merged and deployed 2026-10-01. Round 2026-10-01-1: [x] Q37 snapping (#143)  [x] Q38+Q39 review line (#141)  [x] Q18-G2 generated icons (#142)  [x] AG4 skill + CLI receipts (#139)  [x] live updates (#140), merged 2026-10-02, not deployed. Round 2026-10-02-1: [x] shopping screen (#148)  [x] waste rate + trend (#150)  [x] agent discard-expired + Q24 (#147)  [x] undo direction (#149)  [x] store chain OCR (#144), merged 2026-10-02. Round 2026-10-02-2: [x] Q37b (#153)  [x] Home Assistant REST (#154)  [x] CLI discard + shopping codes (#155)  [x] H27 parser (#151)  [x] shopping live (#152); [x] Q18-G2 (#142). Round 2026-10-02-3: [x] min-stock auto-add (#161)  [x] watched-folder receipts (#158)  [x] icon subjects 9/12 (#160)  [x] display language phase 1 (#162)  [x] iPad API contract (#159)  [x] stack.env fix (#157), merged 2026-10-03. Round 2026-10-03-1: [x] e-mail receipts (#164)  [x] run-out forecast (#165)  [x] H47 Telegram (#166)  [x] min-stock follow-ups (#167)  [x] Finnish UI (#168), merged 2026-10-03. Deployed 2026-10-03. Round 2026-10-03-2: [x] icon library (#171). Round 2026-10-03-3: [x] icon curation (#175)  [x] run-out list (#172)  [x] Finnish names on rename (#173)  [x] Finnish receipt screens (#174), merged 2026-10-03, deployed 2026-10-04. Round 2026-10-04-1: [x] Finnish products screen (#179)  [x] run-out in-stock days (#178)  [x] crud imports no services (#180), merged and deployed 2026-10-04. Round 2026-10-04-2: [x] share target (#185)  [x] several receipts per upload (#184)  [x] shims removed (#183)  [x] flaky display-name test (#186), merged 2026-10-05, not deployed. Round 2026-10-06-1: [x] CL2 restock clears shopping (#190)  [x] CL5 durable bot results (#188)  [x] CL7 learning feedback (#189), merged and deployed 2026-10-06. Round 2026-10-06-2: [x] CL3 bot shopping/consume (#192)  [x] CL6 run-out to shopping (#193)  [x] Q18-S2 spike, no winner (#194), merged and deployed 2026-10-06 (3f27f98). Round 2026-10-06-3: [x] CL8 split API (#198)  [x] split UI (#197)  [x] join audit (#196), merged and deployed 2026-10-07. Fix #200 (iPad sheets, stale edits) merged 2026-10-07. Next: CL8-L1 identity rule (merged #207); Q40-Q42 fridge scene (one increment, 2026-10-18); Q43 the existing-name choice (operator report 2026-10-30, awaits a ruling: merge onto the owner, or keep the 409); CL8 split follow-ups; Q18-S3 if approved
 
 ### ✅ Sprint 1: Infrastructure + Database (COMPLETE)
 1. [x] Docker Compose with all services — ✅ Backend, Postgres, Redis, Celery
